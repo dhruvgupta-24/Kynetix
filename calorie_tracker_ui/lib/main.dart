@@ -25,11 +25,11 @@ Future<void> main() async {
     debugPrint('[main] ✅ OPENROUTER_API_KEY detected ($preview) — AI enabled');
   }
 
-  runApp(const CalorieTrackerApp());
+  runApp(const KynetixApp());
 }
 
-class CalorieTrackerApp extends StatelessWidget {
-  const CalorieTrackerApp({super.key});
+class KynetixApp extends StatelessWidget {
+  const KynetixApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +39,7 @@ class CalorieTrackerApp extends StatelessWidget {
         : const OnboardingScreen();
 
     return MaterialApp(
-      title: 'Calorie Tracker',
+      title: 'Kynetix',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

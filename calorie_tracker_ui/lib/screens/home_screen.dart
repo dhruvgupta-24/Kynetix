@@ -86,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(width: 12),
                         const Text(
-                          'Calorie Tracker',
+                          'Kynetix',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,

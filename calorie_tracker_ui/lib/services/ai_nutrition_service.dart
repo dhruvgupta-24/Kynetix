@@ -51,8 +51,8 @@ class AiNutritionService {
       headers: {
         'Authorization': 'Bearer $_apiKey',
         'Content-Type':  'application/json',
-        'HTTP-Referer':  'https://calorie-tracker.local',
-        'X-Title':       'Calorie Tracker',
+        'HTTP-Referer':  'https://kynetix.local',
+        'X-Title':       'Kynetix',
       },
       body: requestBody,
     ).timeout(const Duration(seconds: 20));

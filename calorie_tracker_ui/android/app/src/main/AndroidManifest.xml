@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY"/>
 
     <application
-        android:label="calorie_tracker_ui"
+        android:label="Kynetix"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
