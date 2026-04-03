@@ -274,16 +274,18 @@ class CoachService {
     final weight = profile?.weight ?? (target.protein / 1.8);
     final goal = profile?.goal ?? '';
     final baseMinPerKg = switch (goal) {
-      kMuscleGain => 1.65,
-      kBodyRecomposition => 1.55,
-      kFatLoss => 1.45,
-      _ => 1.30,
+      kBulk          => 1.65,
+      kLeanBulk      => 1.60,
+      kRecomposition => 1.55,
+      kFatLoss       => 1.45,
+      _              => 1.30,
     };
     final idealPerKg = switch (goal) {
-      kMuscleGain => 2.0,
-      kBodyRecomposition => 1.85,
-      kFatLoss => 1.75,
-      _ => 1.55,
+      kBulk          => 2.0,
+      kLeanBulk      => 1.9,
+      kRecomposition => 1.85,
+      kFatLoss       => 1.75,
+      _              => 1.55,
     };
     final minimum = (weight * baseMinPerKg).clamp(target.protein * 0.72, target.protein * 0.92).toDouble();
     final ideal = (weight * idealPerKg).clamp(minimum + 8, target.protein * 1.02).toDouble();

@@ -6,10 +6,11 @@ import '../services/persistence_service.dart';
 // ─── User profile model ───────────────────────────────────────────────────────
 
 typedef Goal = String;
-const kFatLoss           = 'Fat Loss';
-const kMaintenance       = 'Maintenance';
-const kMuscleGain        = 'Muscle Gain';
-const kBodyRecomposition = 'Body Recomposition';
+const kFatLoss       = 'Fat Loss / Cut';
+const kMaintenance   = 'Maintenance';
+const kLeanBulk      = 'Lean Bulk';
+const kBulk          = 'Bulk / Gain';
+const kRecomposition = 'Recomposition';
 
 class UserProfile {
   final String   name;
@@ -59,15 +60,24 @@ class UserProfile {
   );
 
   /// Returns a copy with any overridden fields.
-  UserProfile copyWith({double? weight}) => UserProfile(
-    name:              name,
-    age:               age,
-    gender:            gender,
-    height:            height,
+  UserProfile copyWith({
+    String? name,
+    int? age,
+    String? gender,
+    double? height,
+    double? weight,
+    int? workoutDaysMin,
+    int? workoutDaysMax,
+    Goal? goal,
+  }) => UserProfile(
+    name:              name ?? this.name,
+    age:               age ?? this.age,
+    gender:            gender ?? this.gender,
+    height:            height ?? this.height,
     weight:            weight ?? this.weight,
-    workoutDaysMin:    workoutDaysMin,
-    workoutDaysMax:    workoutDaysMax,
-    goal:              goal,
+    workoutDaysMin:    workoutDaysMin ?? this.workoutDaysMin,
+    workoutDaysMax:    workoutDaysMax ?? this.workoutDaysMax,
+    goal:              goal ?? this.goal,
     averageDailySteps: averageDailySteps,
     healthSyncEnabled: healthSyncEnabled,
     lastHealthSyncAt:  lastHealthSyncAt,
@@ -137,10 +147,11 @@ class _GoalOption {
 }
 
 const _goalOptions = [
-  _GoalOption(kFatLoss,           'Calorie deficit (−500 kcal)',   Icons.trending_down_rounded),
-  _GoalOption(kMaintenance,       'Stay at current weight',         Icons.balance_rounded),
-  _GoalOption(kMuscleGain,        'Calorie surplus (+300 kcal)',    Icons.trending_up_rounded),
-  _GoalOption(kBodyRecomposition, 'Slight deficit (−200 kcal)',     Icons.autorenew_rounded),
+  _GoalOption(kFatLoss,       'Calorie deficit (−500 kcal)',  Icons.trending_down_rounded),
+  _GoalOption(kMaintenance,   'Stay at current weight',       Icons.balance_rounded),
+  _GoalOption(kLeanBulk,      'Slight surplus (+200 kcal)',   Icons.fitness_center_rounded),
+  _GoalOption(kBulk,          'Larger surplus (+400 kcal)',   Icons.trending_up_rounded),
+  _GoalOption(kRecomposition, 'Slight deficit (−200 kcal)',   Icons.autorenew_rounded),
 ];
 
 // ─── Screen ───────────────────────────────────────────────────────────────────

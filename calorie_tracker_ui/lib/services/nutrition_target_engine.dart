@@ -60,11 +60,11 @@ class WeeklyTargetPlan {
 //
 // Validation (65 kg, 180 cm, 20 yr, male, 5–6 gym days, fat loss):
 //   BMR   = 1 680 kcal
-//   TDEE  = 1 680 × 1.41 = 2 369 kcal  (target: 2 325–2 400) ✅
-//   Avg   = 2 369 − 500  = 1 869 kcal  (target: 1 800–1 900) ✅
-//   Train = 1 869 + 120  = 1 989 kcal  (target: 1 900–2 000) ✅
-//   Rest  = 1 869 − 120  = 1 749 kcal  (target: 1 700–1 800) ✅
-//   Prot avg = 65 × 1.85 = 120 g       (target: ~120 g)       ✅
+//   TDEE  = 1 680 × 1.41 = 2 369 kcal  (target: 2 325–2 400)
+//   Avg   = 2 369 − 500  = 1 869 kcal  (target: 1 800–1 900)
+//   Train = 1 869 + 120  = 1 989 kcal  (target: 1 900–2 000)
+//   Rest  = 1 869 − 120  = 1 749 kcal  (target: 1 700–1 800)
+//   Prot avg = 65 × 1.85 = 120 g       (target: ~120 g)       
 
 class NutritionTargetEngine {
   const NutritionTargetEngine._();
@@ -160,9 +160,10 @@ class NutritionTargetEngine {
   /// Uses bounded percentage-based logic so targets generalize across body sizes.
   double _goalAdjustment(String goal, double tdee) => switch (goal) {
     kFatLoss           => -_bounded(tdee * 0.22, 350, 550),
-    kMuscleGain        =>  _bounded(tdee * 0.11, 180, 320),
-    kBodyRecomposition => -_bounded(tdee * 0.09, 120, 250),
-    _                  => 0,
+    kLeanBulk          =>  _bounded(tdee * 0.08, 150, 250),
+    kBulk              =>  _bounded(tdee * 0.15, 250, 450),
+    kRecomposition     => -_bounded(tdee * 0.09, 120, 250),
+    _                  => 0, // Maintenance
   };
 
   double _calorieCycle(UserProfile p) {
@@ -179,22 +180,25 @@ class NutritionTargetEngine {
 
   double _baseProtein(UserProfile p) => switch (p.goal) {
     kFatLoss           => _r(p.weight * 1.85),
-    kMuscleGain        => _r(p.weight * 1.90),
-    kBodyRecomposition => _r(p.weight * 1.85),
+    kLeanBulk          => _r(p.weight * 1.70),
+    kBulk              => _r(p.weight * 1.85),
+    kRecomposition     => _r(p.weight * 1.95),
     _                  => _r(p.weight * 1.55),
   };
 
   double _trainingProtein(UserProfile p) => switch (p.goal) {
     kFatLoss           => _r(p.weight * 1.95),
-    kMuscleGain        => _r(p.weight * 2.00),
-    kBodyRecomposition => _r(p.weight * 1.95),
+    kLeanBulk          => _r(p.weight * 1.80),
+    kBulk              => _r(p.weight * 2.05),
+    kRecomposition     => _r(p.weight * 2.10),
     _                  => _r(p.weight * 1.65),
   };
 
   double _restProtein(UserProfile p) => switch (p.goal) {
     kFatLoss           => _r(p.weight * 1.75),
-    kMuscleGain        => _r(p.weight * 1.80),
-    kBodyRecomposition => _r(p.weight * 1.80),
+    kLeanBulk          => _r(p.weight * 1.55),
+    kBulk              => _r(p.weight * 1.70),
+    kRecomposition     => _r(p.weight * 1.80),
     _                  => _r(p.weight * 1.45),
   };
 
