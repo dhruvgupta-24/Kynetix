@@ -198,6 +198,38 @@ class NutritionGuardrails {
       calMax = _r(140); calMin = _r(130);
     }
 
+    // ── 4b. Wraps and Rolls ───────────────────────────────────────────────────
+    final isWrap = _containsAny(lc, ['wrap', 'roll', 'kathi', 'frankie', 'fajita', 'burrito']);
+    if (isWrap) {
+      final isLight = _containsAny(lc, ['mini', 'very light', 'low calorie', 'diet', 'homemade light']);
+      final isHeavySauce = _containsAny(lc, ['makhani', 'butter', 'creamy', 'cheesy', 'mayo', 'malai', 'loaded', 'tandoori mayo', 'spicy mayo', 'garlic mayo']);
+      
+      final wrapCount = _parseWrapCount(lc);
+      if (wrapCount > 0) {
+        final baseFloor = isLight ? 220.0 : 350.0;
+        var anchor = wrapCount * baseFloor;
+        if (isHeavySauce) anchor *= 1.35;
+
+        if (calMax < anchor) {
+          calMin = _r(calMin + (anchor - calMax) * 0.85);
+          calMax = _r(anchor);
+          warns.add('Applied wrap/roll dynamic floor ($wrapCount wrap${wrapCount == 1.0 ? "" : "s"}).');
+        }
+
+        var perWrapPro = 8.0;
+        if (_containsAny(lc, ['chicken', 'murgh', 'meat', 'egg'])) {
+          perWrapPro = 20.0;
+        } else if (_containsAny(lc, ['paneer', 'cottage cheese', 'soya'])) {
+          perWrapPro = 16.0;
+        }
+        final proAnchor = wrapCount * perWrapPro;
+        if (proMax < proAnchor) {
+          proMin = _r(proMin.clamp(proAnchor * 0.8, double.infinity));
+          proMax = _r(proAnchor);
+        }
+      }
+    }
+
     // ── 5. Restaurant uplift ──────────────────────────────────────────────────
     if (_isOutside(lc) && result.items.isNotEmpty) {
       final uplift = _containsAny(lc, ['thali', 'biryani', 'burger', 'pizza', 'roll'])
@@ -316,6 +348,27 @@ class NutritionGuardrails {
   static int _tbsp(String lc) {
     final m = RegExp(r'(\d+)\s*(?:tbsp|tablespoon|spoon)').firstMatch(lc);
     return m != null ? (int.tryParse(m.group(1)!) ?? 1) : 1;
+  }
+
+  static double _parseWrapCount(String lc) {
+    double total = 0.0;
+    final pat = RegExp(r'(\d+(?:\.\d+)?)\s*(?:wrap|roll|kathi|frankie|fajita|burrito)s?');
+    for (final m in pat.allMatches(lc)) {
+      total += double.tryParse(m.group(1)!) ?? 0;
+    }
+    final halfPat = RegExp(r'half\s*(?:a\s*)?(?:wrap|roll|kathi|frankie|fajita|burrito)s?');
+    for (final m in halfPat.allMatches(lc)) {
+      total += 0.5;
+    }
+    if (total == 0) {
+      // If no explicit numbers, but half is mentioned outside of the explicit wrap string
+      if (_containsAny(lc, ['half'])) {
+        total = 0.5;
+      } else {
+        total = 1.0;
+      }
+    }
+    return total;
   }
 
   static bool _isOutside(String lc) => const [

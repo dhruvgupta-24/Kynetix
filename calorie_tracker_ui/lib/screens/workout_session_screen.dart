@@ -30,6 +30,7 @@ class WorkoutSessionScreen extends StatefulWidget {
   /// Previous session for this split day — used for reference display.
   final WorkoutSession? previousSession;
   final bool wasManuallySelected;
+  final WorkoutSession? draftSession;
 
   const WorkoutSessionScreen({
     super.key,
@@ -37,6 +38,7 @@ class WorkoutSessionScreen extends StatefulWidget {
     required this.date,
     this.previousSession,
     this.wasManuallySelected = false,
+    this.draftSession,
   });
 
   @override
@@ -47,6 +49,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   int _selectedIndex = 0;
   bool _showRpe = false;
   bool _isSaving = false;
+  bool _isDiscarding = false;
   SetType _selectedSetType = SetType.normal;
 
   // Controller pool keyed by exercise id
@@ -63,12 +66,22 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   @override
   void initState() {
     super.initState();
-    _sessionExercises = List.of(widget.splitDay.exercises);
+    final draft = widget.draftSession;
+    _sessionExercises = draft != null 
+        ? draft.entries.map((e) => e.exercise).toList()
+        : List.of(widget.splitDay.exercises);
+        
     for (final ex in _sessionExercises) {
       _weightCtrl[ex.id] = TextEditingController();
       _repsCtrl[ex.id] = TextEditingController();
       _rpeCtrl[ex.id] = TextEditingController();
-      _sets[ex.id] = [];
+      
+      if (draft != null) {
+        final matchingEntry = draft.entries.where((e) => e.exercise.id == ex.id).firstOrNull;
+        _sets[ex.id] = matchingEntry?.sets.toList() ?? [];
+      } else {
+        _sets[ex.id] = [];
+      }
 
       // Pre-fill weight from last session
       final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
@@ -353,8 +366,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
   Widget build(BuildContext context) {
     final exercises = _sessionExercises;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) _saveDraftState();
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF13131F),
       appBar: AppBar(
         backgroundColor: const Color(0xFF13131F),
         surfaceTintColor: Colors.transparent,
@@ -427,6 +445,25 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         ],
       ),
     );
+  }
+
+  void _saveDraftState() {
+    if (_isSaving || _isDiscarding || _totalSets == 0) return;
+    final entries = _sessionExercises
+        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty)
+        .map((ex) => ExerciseEntry(exercise: ex, sets: _sets[ex.id]!))
+        .toList();
+    if (entries.isEmpty) return;
+
+    final draft = WorkoutSession(
+      id: widget.draftSession?.id ?? 'ws_draft_${DateTime.now().millisecondsSinceEpoch}',
+      date: widget.date,
+      splitDayName: widget.splitDay.name,
+      splitDayWeekday: widget.splitDay.weekday == 0 ? null : widget.splitDay.weekday,
+      wasManuallySelected: widget.wasManuallySelected,
+      entries: entries,
+    );
+    _service.saveDraftSession(draft);
   }
 
   Widget _buildExerciseBody() {
@@ -693,38 +730,38 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
       Navigator.of(context).pop();
       return;
     }
-    final confirm = await showDialog<bool>(
+    final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2C),
-        title: const Text(
-          'Discard workout?',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          '$_totalSets set${_totalSets == 1 ? "" : "s"} will be lost.',
-          style: const TextStyle(color: Color(0xFF9CA3AF)),
+        title: const Text('Pause Workout?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Do you want to save this as a draft and resume later, or discard it entirely?',
+          style: TextStyle(color: Color(0xFF9CA3AF)),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(
-              'Keep going',
-              style: TextStyle(color: Color(0xFF52B788)),
-            ),
+            onPressed: () => Navigator.of(context).pop('cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              'Discard',
-              style: TextStyle(color: Color(0xFFF87171)),
-            ),
+            onPressed: () => Navigator.of(context).pop('discard'),
+            child: const Text('Discard', style: TextStyle(color: Color(0xFFF87171))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('save'),
+            child: const Text('Save & Leave', style: TextStyle(color: Color(0xFF52B788))),
           ),
         ],
       ),
     );
-    if (!mounted) return;
-    if (confirm == true) {
+    if (!mounted || result == null || result == 'cancel') return;
+
+    if (result == 'discard') {
+      _isDiscarding = true;
+      await _service.clearDraftSession();
+      if (mounted) Navigator.of(context).pop();
+    } else if (result == 'save') {
       Navigator.of(context).pop();
     }
   }

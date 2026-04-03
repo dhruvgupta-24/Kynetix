@@ -29,6 +29,7 @@ class WorkoutService extends ChangeNotifier {
   WorkoutSplit? _split;
   List<WorkoutSession> _sessions = [];
   List<Exercise> _customExercises = [];
+  WorkoutSession? _draftSession;
   bool _setupDone = false;
   bool _ready = false;
 
@@ -37,6 +38,8 @@ class WorkoutService extends ChangeNotifier {
   WorkoutSplit get split => _split ?? defaultWorkoutSplit;
 
   List<WorkoutSession> get sessions => List.unmodifiable(_sessions);
+
+  WorkoutSession? get draftSession => _draftSession;
 
   bool get isReady => _ready;
   bool get isSetupDone => _setupDone;
@@ -630,6 +633,25 @@ class WorkoutService extends ChangeNotifier {
           .reversed
           .toList();
     }
+    
+    // Once explicitly saved to active history, dispose of any matching draft.
+    if (_draftSession?.splitDayName == session.splitDayName) {
+      _draftSession = null;
+    }
+
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> saveDraftSession(WorkoutSession session) async {
+    _draftSession = session;
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> clearDraftSession() async {
+    if (_draftSession == null) return;
+    _draftSession = null;
     await _persist();
     notifyListeners();
   }
@@ -660,12 +682,16 @@ class WorkoutService extends ChangeNotifier {
         _customExercises = (data['customExercises'] as List<dynamic>? ?? [])
             .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
             .toList();
+        if (data['draftSession'] != null) {
+          _draftSession = WorkoutSession.fromJson(data['draftSession'] as Map<String, dynamic>);
+        }
       }
     } catch (e) {
       debugPrint('[WorkoutService] load error: $e — starting fresh');
       _split = null;
       _sessions = [];
       _customExercises = [];
+      _draftSession = null;
       _setupDone = false;
     }
     _ready = true;
@@ -684,6 +710,7 @@ class WorkoutService extends ChangeNotifier {
           'split': split.toJson(),
           'sessions': _sessions.map((s) => s.toJson()).toList(),
           'customExercises': _customExercises.map((e) => e.toJson()).toList(),
+          if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
         }),
       );
     } catch (e) {

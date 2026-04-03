@@ -71,6 +71,32 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (result == true && mounted) setState(() {});
   }
 
+  Future<void> _resumeWorkout(WorkoutSession draft) async {
+    final splitDay = _svc.split.days.firstWhere(
+      (d) => d.name == draft.splitDayName,
+      orElse: () => SplitDay(
+        name: draft.splitDayName,
+        weekday: draft.splitDayWeekday ?? 0,
+        exercises: draft.entries.map((e) => e.exercise).toList(),
+      ),
+    );
+
+    final prev = _svc.lastSessionFor(splitDay.name);
+    final result = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => WorkoutSessionScreen(
+          splitDay: splitDay,
+          date: draft.date,
+          previousSession: prev,
+          wasManuallySelected: draft.wasManuallySelected,
+          draftSession: draft,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+    if (result == true && mounted) setState(() {});
+  }
+
   Future<_WorkoutStartSelection?> _pickWorkoutDay() async {
     return showModalBottomSheet<_WorkoutStartSelection>(
       context: context,
@@ -199,7 +225,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         children: [
           _WeeklyProgressCard(service: _svc),
           const SizedBox(height: 16),
-          _WorkoutLaunchCard(service: _svc, onStart: _startWorkout),
+          if (_svc.draftSession != null)
+            _DraftSessionCard(
+              session: _svc.draftSession!,
+              onResume: () => _resumeWorkout(_svc.draftSession!),
+              onDiscard: () => _svc.clearDraftSession(),
+            )
+          else
+            _WorkoutLaunchCard(service: _svc, onStart: _startWorkout),
           const SizedBox(height: 16),
           // Today's split info
           _TodaySplitCard(
@@ -747,6 +780,107 @@ class _WorkoutLaunchCard extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DraftSessionCard extends StatelessWidget {
+  final WorkoutSession session;
+  final VoidCallback onResume;
+  final VoidCallback onDiscard;
+
+  const _DraftSessionCard({
+    required this.session,
+    required this.onResume,
+    required this.onDiscard,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.pause_circle_filled_rounded,
+                color: Color(0xFFFFB347),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Workout in progress',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${session.totalSets} set${session.totalSets == 1 ? "" : "s"}',
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'You paused ${session.splitDayName}. Resume to finish logging your sets.',
+            style: const TextStyle(
+              color: Color(0xFF9CA3AF),
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  onPressed: onResume,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Resume Workout'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFB347),
+                    foregroundColor: const Color(0xFF13131F),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: OutlinedButton(
+                  onPressed: onDiscard,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFF87171),
+                    side: const BorderSide(color: Color(0xFF2E2E3E)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Discard', style: TextStyle(fontSize: 13)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
