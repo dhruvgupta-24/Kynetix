@@ -1,4 +1,4 @@
-package com.calorietracker.calorie_tracker_ui
+package com.kynetix.app
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 
