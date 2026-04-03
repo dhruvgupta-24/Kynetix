@@ -34,23 +34,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _syncing = false;
   String? _syncMessage;
 
-  // Weight edit
-  late final TextEditingController _weightCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _weightCtrl = TextEditingController(
-      text: _profile.weight.toStringAsFixed(1),
-    );
-  }
-
-  @override
-  void dispose() {
-    _weightCtrl.dispose();
-    super.dispose();
-  }
-
   Future<void> _doSync() async {
     if (_syncing) return;
     setState(() {
@@ -85,25 +68,108 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _syncing = false);
   }
 
-  void _saveWeight() {
-    final w = double.tryParse(_weightCtrl.text.trim());
-    if (w == null || w < 20 || w > 300) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid weight between 20–300 kg')),
-      );
-      return;
-    }
-    currentUserProfile = _profile.copyWith(weight: w);
+  void _saveProfile(UserProfile newProfile) {
+    currentUserProfile = newProfile;
     PersistenceService.saveProfile(currentUserProfile!).ignore();
     widget.onProfileChanged?.call();
     setState(() {});
-    FocusScope.of(context).unfocus();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Weight updated'),
-        duration: Duration(seconds: 2),
-        backgroundColor: Color(0xFF52B788),
+  }
+
+  // ── Sheets ─────────────────────────────────────────────────────────────────
+
+  void _editGoal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text('Select Goal',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                ),
+                const SizedBox(height: 10),
+                ...[kFatLoss, kMaintenance, kLeanBulk, kBulk, kRecomposition].map((g) {
+                  final isSel = g == _profile.goal;
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                    title: Text(g, style: TextStyle(color: isSel ? const Color(0xFF52B788) : Colors.white, fontWeight: isSel ? FontWeight.w700 : FontWeight.w500)),
+                    trailing: isSel ? const Icon(Icons.check_circle_rounded, color: Color(0xFF52B788)) : null,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _saveProfile(_profile.copyWith(goal: g));
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _editNumber(String title, String currentVal, String suffix, void Function(double) onSave) {
+    final ctrl = TextEditingController(text: currentVal);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                   Text('Update $title', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                   const SizedBox(height: 16),
+                   TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    decoration: InputDecoration(
+                      suffixText: suffix,
+                      suffixStyle: const TextStyle(color: Color(0xFF6B7280)),
+                      hintText: title,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final val = double.tryParse(ctrl.text.trim());
+                        if (val != null) {
+                          onSave(val);
+                          Navigator.pop(ctx);
+                        }
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -121,7 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
-          'Profile & Settings',
+          'Settings',
           style: TextStyle(
             color: Colors.white,
             fontSize: 18,
@@ -137,8 +203,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildBodyCard(),
           const SizedBox(height: 16),
           _buildGoalCard(),
-          const SizedBox(height: 16),
-          _buildWeightEditCard(),
           const SizedBox(height: 16),
           _buildHealthCard(),
           const SizedBox(height: 16),
@@ -204,16 +268,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: Icons.cake_outlined,
             label: 'Age',
             value: '${_profile.age} years',
+            isEditable: true,
+            onTap: () => _editNumber('Age', _profile.age.toString(), 'years', (v) => _saveProfile(_profile.copyWith(age: v.toInt()))),
           ),
           _InfoRow(
             icon: Icons.height_rounded,
             label: 'Height',
             value: '${_profile.height.toStringAsFixed(1)} cm',
+            isEditable: true,
+            onTap: () => _editNumber('Height', _profile.height.toString(), 'cm', (v) => _saveProfile(_profile.copyWith(height: v))),
           ),
           _InfoRow(
             icon: Icons.monitor_weight_outlined,
             label: 'Weight',
             value: '${_profile.weight.toStringAsFixed(1)} kg',
+            isEditable: true,
+            onTap: () => _editNumber('Weight', _profile.weight.toString(), 'kg', (v) => _saveProfile(_profile.copyWith(weight: v))),
           ),
           _InfoRow(
             icon: Icons.calculate_outlined,
@@ -235,13 +305,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final plan = _plan;
 
     return _Section(
-      title: 'Goal & Activity',
+      title: 'Goal Settings',
       child: Column(
         children: [
           _InfoRow(
             icon: Icons.flag_rounded,
             label: 'Goal',
             value: _profile.goal,
+            isEditable: true,
+            onTap: _editGoal,
           ),
           _InfoRow(
             icon: Icons.fitness_center_rounded,
@@ -255,61 +327,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _InfoRow(
             icon: Icons.bolt_rounded,
-            label: 'Goal Average',
+            label: 'Base Target',
             value: '${plan.avgDailyCalories.toStringAsFixed(0)} kcal',
           ),
           _InfoRow(
             icon: Icons.egg_outlined,
-            label: 'Protein Target',
+            label: 'Base Protein',
             value: '${plan.avgDailyProtein.toStringAsFixed(0)} g',
             isLast: true,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Edit Weight ────────────────────────────────────────────────────────────
-
-  Widget _buildWeightEditCard() {
-    return _Section(
-      title: 'Update Weight',
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _weightCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-              ],
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              decoration: const InputDecoration(
-                hintText: 'Weight in kg',
-                suffixText: 'kg',
-                suffixStyle: TextStyle(color: Color(0xFF6B7280)),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: _saveWeight,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF52B788),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Text('Save',
-                  style: TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14)),
-            ),
           ),
         ],
       ),
@@ -338,7 +363,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status row
           Row(
             children: [
               Icon(
@@ -448,7 +472,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildAboutCard() {
     return _Section(
-      title: 'About',
+      title: 'About Kynetix',
       child: Column(
         children: const [
           _InfoRow(
@@ -458,8 +482,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _InfoRow(
             icon: Icons.restaurant_menu_rounded,
-            label: 'Food DB',
-            value: 'Indian Mess + Common Foods',
+            label: 'Engine',
+            value: 'Kynetix Indian Caloric Baseline',
             isLast: true,
           ),
         ],
@@ -483,9 +507,9 @@ class _Section extends StatelessWidget {
         if (title != null) ...[
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 8),
-            child: Text(title!,
+            child: Text(title!.toUpperCase(),
                 style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: Color(0xFF6B7280),
                     letterSpacing: 0.8)),
@@ -511,17 +535,21 @@ class _InfoRow extends StatelessWidget {
   final String   label;
   final String   value;
   final bool     isLast;
+  final bool     isEditable;
+  final VoidCallback? onTap;
 
   const _InfoRow({
     required this.icon,
     required this.label,
     required this.value,
     this.isLast = false,
+    this.isEditable = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    Widget content = Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 9),
@@ -538,6 +566,10 @@ class _InfoRow extends StatelessWidget {
                       fontSize: 13,
                       color: Colors.white,
                       fontWeight: FontWeight.w600)),
+              if (isEditable) ...[
+                const SizedBox(width: 4),
+                const Icon(Icons.edit_rounded, size: 12, color: Color(0xFF52B788)),
+              ],
             ],
           ),
         ),
@@ -545,6 +577,16 @@ class _InfoRow extends StatelessWidget {
           const Divider(color: Color(0xFF2E2E3E), height: 1),
       ],
     );
+
+    if (isEditable && onTap != null) {
+      content = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: content,
+      );
+    }
+
+    return content;
   }
 }
 
@@ -555,10 +597,12 @@ class _GoalChip extends StatelessWidget {
   const _GoalChip({required this.goal});
 
   Color get _color => switch (goal) {
-        kFatLoss           => const Color(0xFFFF6B35),
-        kMuscleGain        => const Color(0xFF60A5FA),
-        kBodyRecomposition => const Color(0xFFA78BFA),
-        _                  => const Color(0xFF52B788),
+        kFatLoss       => const Color(0xFFFF6B35),
+        kMaintenance   => const Color(0xFF52B788),
+        kLeanBulk      => const Color(0xFF60A5FA),
+        kBulk          => const Color(0xFF3B82F6),
+        kRecomposition => const Color(0xFFA78BFA),
+        _              => const Color(0xFF52B788),
       };
 
   @override
