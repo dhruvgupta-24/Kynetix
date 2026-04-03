@@ -1,2 +1,0 @@
-[warning] Unused import: '../services/mock_estimation_service.dart' (C:\Users\Dhruv\Desktop\Calorie-Tracker\calorie_tracker_ui\lib\screens\home_screen.dart:4:8)
-[error] The name 'MyApp' isn't a class (C:\Users\Dhruv\Desktop\Calorie-Tracker\calorie_tracker_ui\test\widget_test.dart:16:35)
