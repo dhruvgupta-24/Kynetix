@@ -142,8 +142,9 @@ class PersonalNutritionMemory {
     await _persist();
   }
 
-  List<_PersonalEntry> get allUserOverrides =>
-      _userOverrides.values.toList();
+    List<Map<String, dynamic>> get allUserOverrides => _userOverrides.values
+      .map((e) => e.toJson())
+      .toList(growable: false);
 
   // ── Milk interpolation ────────────────────────────────────────────────────
   //

@@ -7,6 +7,22 @@ import '../screens/onboarding_screen.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../config/secrets.dart';
 
+class AiEscalationContext {
+  final String localInterpretation;
+  final double localMatchConfidence;
+  final double localCoverageConfidence;
+  final double overallLocalConfidence;
+  final List<String> flags;
+
+  const AiEscalationContext({
+    required this.localInterpretation,
+    required this.localMatchConfidence,
+    required this.localCoverageConfidence,
+    required this.overallLocalConfidence,
+    this.flags = const [],
+  });
+}
+
 // ─── AI Nutrition Service (OpenRouter) ───────────────────────────────────────
 //
 // Provider-agnostic wrapper around the OpenRouter OpenAI-compatible API.
@@ -28,6 +44,13 @@ class AiNutritionService {
   static String get modelName => _model;
 
   Future<NutritionResult> estimate(String rawInput) async {
+    return estimateWithContext(rawInput);
+  }
+
+  Future<NutritionResult> estimateWithContext(
+    String rawInput, {
+    AiEscalationContext? context,
+  }) async {
     debugPrint('[AI] estimating: "$rawInput"');
 
     final url = Uri.parse(_endpoint);
@@ -38,7 +61,7 @@ class AiNutritionService {
         {'role': 'system', 'content': _systemPrompt()},
         {
           'role': 'user',
-          'content': _userPrompt(rawInput),
+          'content': _userPrompt(rawInput, context: context),
         },
       ],
       'temperature':     0.15,
@@ -312,7 +335,7 @@ OUTPUT FORMAT — RETURN ONLY VALID JSON
   "warnings":   []
 }''';
 
-  String _userPrompt(String rawInput) {
+  String _userPrompt(String rawInput, {AiEscalationContext? context}) {
     final profile = currentUserProfile;
     final profileContext = profile == null
         ? 'No user profile available. Use generalized defaults only.'
@@ -322,10 +345,28 @@ OUTPUT FORMAT — RETURN ONLY VALID JSON
 - Height: ${profile.height.toStringAsFixed(0)} cm
 - Weight: ${profile.weight.toStringAsFixed(1)} kg
 - Workout frequency: ${profile.workoutDaysMin}-${profile.workoutDaysMax} days/week
+
 - Goal: ${profile.goal}
 - Health sync enabled: ${profile.healthSyncEnabled ? 'yes' : 'no'}''';
 
+  final contextBlock = context == null
+    ? 'No local pre-interpretation was available.'
+    : '''Hybrid local context (validate and refine this, do not ignore):
+- local_interpretation: ${context.localInterpretation}
+- local_match_confidence: ${context.localMatchConfidence.toStringAsFixed(3)}
+- local_coverage_confidence: ${context.localCoverageConfidence.toStringAsFixed(3)}
+- local_overall_confidence: ${context.overallLocalConfidence.toStringAsFixed(3)}
+- complexity_flags: ${context.flags.isEmpty ? 'none' : context.flags.join(', ')}
+
+Use this context as prior evidence:
+- If local interpretation is correct, keep it and tighten ranges.
+- If local missed components, decompose and add them.
+- If local collapsed multi-item meals, reconstruct full meal items.
+- Never drop obvious components (e.g., drink in combo meals).''';
+
     return '''$profileContext
+
+$contextBlock
 
 Estimate nutrition for this meal text:
 $rawInput

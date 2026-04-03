@@ -88,6 +88,25 @@ class EstimationResult {
   );
 }
 
+class LocalEstimationAnalysis {
+  final EstimationResult estimation;
+  final int meaningfulTokenCount;
+  final int matchedTokenCount;
+  final List<String> matchedKeywords;
+
+  const LocalEstimationAnalysis({
+    required this.estimation,
+    required this.meaningfulTokenCount,
+    required this.matchedTokenCount,
+    required this.matchedKeywords,
+  });
+
+  double get coverageConfidence {
+    if (meaningfulTokenCount <= 0) return 0;
+    return (matchedTokenCount / meaningfulTokenCount).clamp(0.0, 1.0);
+  }
+}
+
 // ─── Food database ─────────────────────────────────────────────────────────────
 //
 // Design rules (per the schema spec):
@@ -564,18 +583,49 @@ double? _rawGramsForEntry(String raw, List<String> keywords) {
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 EstimationResult mockProcessMealInput(String input) {
+  return analyzeLocalEstimation(input).estimation;
+}
+
+const _coverageFillerTokens = {
+  'and',
+  'with',
+  'some',
+  'a',
+  'an',
+  'of',
+  'the',
+  'i',
+  'ate',
+  'had',
+  'for',
+  'to',
+  'plus',
+};
+
+LocalEstimationAnalysis analyzeLocalEstimation(String input) {
   final lc     = input.toLowerCase().trim();
   final tokens = lc.split(RegExp(r'[\s,+&/]+'));
 
   if (lc.isEmpty) {
-    return const EstimationResult(
-      items:      [],
-      calories:   NutrientRange(min: 0, max: 0),
-      protein:    NutrientRange(min: 0, max: 0),
-      confidence: 0,
-      warnings:   ['No input provided.'],
+    return const LocalEstimationAnalysis(
+      estimation: EstimationResult(
+        items:      [],
+        calories:   NutrientRange(min: 0, max: 0),
+        protein:    NutrientRange(min: 0, max: 0),
+        confidence: 0,
+        warnings:   ['No input provided.'],
+      ),
+      meaningfulTokenCount: 0,
+      matchedTokenCount: 0,
+      matchedKeywords: [],
     );
   }
+
+  final meaningfulTokenCount = tokens
+      .where((t) => t.isNotEmpty)
+      .where((t) => !_coverageFillerTokens.contains(t))
+      .where((t) => double.tryParse(t) == null)
+      .length;
 
   // ── Global portion signals ────────────────────────────────────────────────
   final hasThoda  = _hasWord(tokens, _thodaWords);
@@ -589,9 +639,11 @@ EstimationResult mockProcessMealInput(String input) {
         b.keywords.first.length.compareTo(a.keywords.first.length));
 
   final matched     = <FoodItem>[];
+  final matchedKeywords = <String>[];
   final seenLabels  = <String>{};
   final claimedTokens = <int>{}; // token indices already used by a prior match
   int   uncertainItems = 0;
+  final matchedEntries = <_FoodEntry>[];
 
   for (final entry in sortedDb) {
     final matchIdx = _matchedIndices(entry.keywords, tokens, claimedTokens);
@@ -599,6 +651,8 @@ EstimationResult mockProcessMealInput(String input) {
     if (seenLabels.contains(entry.label)) continue;
     seenLabels.add(entry.label);
     claimedTokens.addAll(matchIdx); // mark these token positions as consumed
+    matchedEntries.add(entry);
+    matchedKeywords.add(entry.keywords.first);
 
     // ── Quantity extraction ─────────────────────────────────────────────────
     final kwIdx = matchIdx.isNotEmpty
@@ -675,12 +729,17 @@ EstimationResult mockProcessMealInput(String input) {
 
   // ── Nothing recognised ────────────────────────────────────────────────────
   if (matched.isEmpty) {
-    return EstimationResult(
-      items:      const [],
-      calories:   const NutrientRange(min: 0, max: 0),
-      protein:    const NutrientRange(min: 0, max: 0),
-      confidence: 0,
-      warnings:   ['No recognised food items — try rephrasing.'],
+    return LocalEstimationAnalysis(
+      estimation: const EstimationResult(
+        items:      [],
+        calories:   NutrientRange(min: 0, max: 0),
+        protein:    NutrientRange(min: 0, max: 0),
+        confidence: 0,
+        warnings:   ['No recognised food items — try rephrasing.'],
+      ),
+      meaningfulTokenCount: meaningfulTokenCount,
+      matchedTokenCount: 0,
+      matchedKeywords: const [],
     );
   }
 
@@ -713,10 +772,6 @@ EstimationResult mockProcessMealInput(String input) {
   // Portion signal:   −0.04 for thoda/double.
   // We only penalise once even if multiple items have inferred qty.
 
-  final matchedEntries = matched.map((fi) {
-    return _db.where((e) => e.label == fi.name).firstOrNull;
-  }).whereType<_FoodEntry>().toList();
-
   final avgBase = matchedEntries.isEmpty
       ? 0.68
       : matchedEntries.map((e) => e.baseConfidence).reduce((a, b) => a + b)
@@ -748,11 +803,18 @@ EstimationResult mockProcessMealInput(String input) {
     warnings.add('No carbs detected — looks like a light sides-only meal.');
   }
 
-  return EstimationResult(
-    items:      matched,
-    calories:   NutrientRange(min: _rnd(totalCal.min),  max: _rnd(totalCal.max)),
-    protein:    NutrientRange(min: _rnd(totalProt.min), max: _rnd(totalProt.max)),
+  final estimation = EstimationResult(
+    items: matched,
+    calories: NutrientRange(min: _rnd(totalCal.min), max: _rnd(totalCal.max)),
+    protein: NutrientRange(min: _rnd(totalProt.min), max: _rnd(totalProt.max)),
     confidence: double.parse(conf.toStringAsFixed(2)),
-    warnings:   warnings,
+    warnings: warnings,
+  );
+
+  return LocalEstimationAnalysis(
+    estimation: estimation,
+    meaningfulTokenCount: meaningfulTokenCount,
+    matchedTokenCount: claimedTokens.length,
+    matchedKeywords: matchedKeywords,
   );
 }

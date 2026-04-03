@@ -309,23 +309,39 @@ class _MealCtx {
   }
 
   static _DishProfile? _detectProfile(String lc) {
-    if (_hasAny(lc, ['paneer', 'cottage cheese']))            return _DishProfile.paneer;
+    if (_hasAny(lc, ['paneer', 'cottage cheese'])) {
+      return _DishProfile.paneer;
+    }
     if (_hasAny(lc, ['soya chunk', 'chilli soya', 'kadai soya',
-                      'soya bhurji', 'soya sabzi']))          return _DishProfile.soya;
-    if (_hasAny(lc, ['kadhi']))                               return _DishProfile.kadhi;
+                      'soya bhurji', 'soya sabzi'])) {
+      return _DishProfile.soya;
+    }
+    if (_hasAny(lc, ['kadhi'])) {
+      return _DishProfile.kadhi;
+    }
     if (_hasAny(lc, ['dal makhani', 'makhani dal',
                       'tadka dal', 'dal tadka', 'black dal',
-                      'urad dal']))                           return _DishProfile.enrichedDal;
+                      'urad dal'])) {
+      return _DishProfile.enrichedDal;
+    }
     if (_hasAny(lc, ['rajma', 'chole', 'chana masala',
                       'chickpea', 'chhole', 'kala chana',
-                      'black chana', 'kidney bean']))         return _DishProfile.beans;
+                      'black chana', 'kidney bean'])) {
+      return _DishProfile.beans;
+    }
     if (_hasAny(lc, ['dal', 'daal', 'lentil', 'moong',
-                      'masoor', 'arhar', 'toor']))            return _DishProfile.lentilDal;
+                      'masoor', 'arhar', 'toor'])) {
+      return _DishProfile.lentilDal;
+    }
     if (_hasAny(lc, ['aloo jeera', 'bhindi', 'gobhi', 'gobi',
                       'aloo sabzi', 'dry sabzi', 'aloo matar dry',
-                      'baingan']))                            return _DishProfile.drySabzi;
+                      'baingan'])) {
+      return _DishProfile.drySabzi;
+    }
     if (_hasAny(lc, ['sabzi', 'curry', 'gravy', 'mixed veg',
-                      'methi', 'palak', 'saag']))             return _DishProfile.gravySabzi;
+                      'methi', 'palak', 'saag'])) {
+      return _DishProfile.gravySabzi;
+    }
     return null;
   }
 

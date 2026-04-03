@@ -234,11 +234,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     }
 
     setState(() => _isSaving = false);
-    final navigator = Navigator.of(context);
     if (mounted) {
       await _showSuccessDialog(session);
       if (mounted) {
-        navigator.pop(true);
+        Navigator.of(context).pop(true);
       }
     }
   }
@@ -361,7 +360,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.close_rounded, color: Colors.white),
-          onPressed: () => _confirmDiscard(context),
+          onPressed: _confirmDiscard,
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -689,7 +688,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     );
   }
 
-  Future<void> _confirmDiscard(BuildContext context) async {
+  Future<void> _confirmDiscard() async {
     if (_totalSets == 0) {
       Navigator.of(context).pop();
       return;
@@ -724,7 +723,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
         ],
       ),
     );
-    if (confirm == true && mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    if (confirm == true) {
+      Navigator.of(context).pop();
+    }
   }
 }
 
