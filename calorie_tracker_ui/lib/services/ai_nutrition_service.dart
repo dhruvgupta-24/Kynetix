@@ -5,6 +5,7 @@ import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
+import '../config/secrets.dart';
 
 // ─── AI Nutrition Service (OpenRouter) ───────────────────────────────────────
 //
@@ -15,15 +16,14 @@ class AiNutritionService {
   AiNutritionService._();
   static final AiNutritionService instance = AiNutritionService._();
 
-  static const _apiKey =
-      String.fromEnvironment('OPENROUTER_API_KEY', defaultValue: '');
+  static const _apiKey = AppSecrets.openRouterApiKey;
 
   static const _model    = 'deepseek/deepseek-chat-v3-0324';
   static const _endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  bool get isConfigured => _apiKey.isNotEmpty;
+  bool get isConfigured => _apiKey.isNotEmpty && _apiKey != 'YOUR_OPENROUTER_API_KEY_HERE';
 
   static String get modelName => _model;
 

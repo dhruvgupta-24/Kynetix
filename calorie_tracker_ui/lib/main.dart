@@ -6,6 +6,7 @@ import 'services/meal_memory.dart';
 import 'services/personal_nutrition_memory.dart';
 import 'services/persistence_service.dart';
 import 'services/workout_service.dart';
+import 'config/secrets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +16,8 @@ Future<void> main() async {
   await PersistenceService.load();   // restores profile + day logs
   await WorkoutService.instance.init(); // restores split + sessions
 
-  const apiKey = String.fromEnvironment('OPENROUTER_API_KEY', defaultValue: '');
-  if (apiKey.isEmpty) {
+  const apiKey = AppSecrets.openRouterApiKey;
+  if (apiKey.isEmpty || apiKey == 'YOUR_OPENROUTER_API_KEY_HERE') {
     debugPrint('[main] ⚠️  OPENROUTER_API_KEY is EMPTY — AI will fall back locally');
   } else {
     final preview = apiKey.length <= 8
