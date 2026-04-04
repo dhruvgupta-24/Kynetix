@@ -460,6 +460,46 @@ const List<_FoodEntry> _db = [
     tier:        _Tier.high,
     servingGrams: 100,
   ),
+
+  // ── Outside / Generic Fast Food (Fallback Anchors) ────────────────────────
+  // Crucial for when the AI is offline so the engine does not collapse to 0 items
+  _FoodEntry(
+    label:    'Pizza (1 slice)',
+    keywords: ['pizza', 'dominos', 'pizzas'],
+    calories: NutrientRange(min: 240, max: 280),   // ±8 %
+    protein:  NutrientRange(min: 8.0, max: 11.0),
+    tier:     _Tier.low,
+  ),
+  _FoodEntry(
+    label:    'Burger',
+    keywords: ['burger', 'mcdonalds', 'kfc', 'whopper'],
+    calories: NutrientRange(min: 350, max: 480),   // ±15 %
+    protein:  NutrientRange(min: 12.0, max: 18.0),
+    tier:     _Tier.low,
+  ),
+  _FoodEntry(
+    label:    'Wrap / Roll',
+    keywords: ['wrap', 'kathi roll', 'frankie', 'burrito', 'shawarma'],
+    calories: NutrientRange(min: 320, max: 450),   // ±17 %
+    protein:  NutrientRange(min: 10.0, max: 16.0),
+    tier:     _Tier.low,
+  ),
+  _FoodEntry(
+    label:      'Shake / Smoothie (1 glass)',
+    keywords:   ['shake', 'smoothie', 'milkshake', 'frappuccino', 'thickshake'],
+    calories:   NutrientRange(min: 280, max: 360),   // ±12 %
+    protein:    NutrientRange(min: 4.0, max: 8.0),
+    tier:       _Tier.low,
+    servingMl:  300,
+  ),
+  _FoodEntry(
+    label:      'Soda / Coke (1 can/glass)',
+    keywords:   ['coke', 'soda', 'pepsi', 'sprite', 'thumbs up'],
+    calories:   NutrientRange(min: 130, max: 170),   // ±13 %
+    protein:    NutrientRange(min: 0.0, max: 0.0),
+    tier:       _Tier.low,
+    servingMl:  330,
+  ),
 ];
 
 // ─── Engine constants ─────────────────────────────────────────────────────────

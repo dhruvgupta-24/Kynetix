@@ -38,7 +38,7 @@ class NutritionGuardrails {
     String rawInput, {
     MealClassification? classification,
   }) {
-    if (result.calories.max <= 0) return result;
+    // Allow 0 kcal items to pass through to be caught by floors
 
     final lc    = rawInput.toLowerCase();
     var calMin  = result.calories.min;

@@ -127,9 +127,9 @@ class UserNutritionMemory {
       }
     }
 
-    // Confidence threshold needs to be high to prevent overly generous fuzzy matches
-    // e.g. input="paneer wrap" and override="paneer makhani wrap" -> f1=0.8. We require > 0.82.
-    if (bestMatch != null && bestScore >= 0.82) {
+    // Confidence threshold must be extremely high (0.98) to prevent hijacking unrelated foods
+    // e.g. input="mango shake" vs override="mango" should fail safely.
+    if (bestMatch != null && bestScore >= 0.98) {
       debugPrint('[UserNutritionMemory] match: "${bestMatch.canonicalMeal}" score: $bestScore');
       return NutritionResult(
         canonicalMeal: bestMatch.canonicalMeal,
