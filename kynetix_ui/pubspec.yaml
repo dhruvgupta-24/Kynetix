@@ -45,6 +45,7 @@ dependencies:
   # Local persistent cache for meal memory
   shared_preferences: ^2.3.2
   supabase_flutter: ^2.12.2
+  intl_phone_field: ^3.2.0
 
 dev_dependencies:
   flutter_test:

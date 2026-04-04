@@ -1,0 +1,7 @@
+﻿Analyzing kynetix_ui...
+
+warning - lib\screens\auth_screen.dart:5:8 - Unused import: '../config/supabase_secrets.dart'. Try removing the import directive. - unused_import
+warning - lib\services\meal_suggestion_service.dart:2:8 - Unused import: '../models/workout_session.dart'. Try removing the import directive. - unused_import
+warning - lib\services\nutrition_guardrails.dart:360:16 - The value of the local variable 'm' isn't used. Try removing the variable or using it. - unused_local_variable
+
+3 issues found.

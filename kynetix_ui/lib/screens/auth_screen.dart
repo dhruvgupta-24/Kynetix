@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
 import '../services/auth_service.dart';
-import '../config/supabase_secrets.dart';
 
 enum AuthMethod { email, phone }
 
@@ -26,7 +26,8 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordCtrl = TextEditingController();
 
   // Phone Controllers
-  final _phoneCtrl = TextEditingController(); // e.g. +1234567890
+  final _phoneCtrl = TextEditingController(); 
+  String _fullPhoneNumber = '';
   final _otpCtrl = TextEditingController();
   bool _isOtpSent = false;
 
@@ -190,9 +191,9 @@ class _AuthScreenState extends State<AuthScreen> {
   /// ── PHONE LOGIC ──────────────────────────────────────────────────────────
 
   Future<void> _handlePhoneOtpSend() async {
-    final phone = _phoneCtrl.text.trim();
+    final phone = _fullPhoneNumber.trim();
     if (phone.isEmpty || !phone.startsWith('+')) {
-      setState(() => _errorMessage = 'Enter a valid phone number with country code (e.g. +1234567890).');
+      setState(() => _errorMessage = 'Please enter a valid phone number.');
       return;
     }
 
@@ -214,7 +215,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _handlePhoneOtpVerify() async {
-    final phone = _phoneCtrl.text.trim();
+    final phone = _fullPhoneNumber.trim();
     final token = _otpCtrl.text.trim();
 
     if (token.length != 6) {
@@ -436,11 +437,27 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ] else if (_authMethod == AuthMethod.phone) ...[
                   if (!_isOtpSent) ...[
-                    _StyledField(
+                    IntlPhoneField(
                       controller: _phoneCtrl,
-                      hint: 'Phone Number (e.g. +123456789)',
-                      icon: Icons.phone_enabled_outlined,
-                      keyboardType: TextInputType.phone,
+                      initialCountryCode: 'IN',
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                      dropdownTextStyle: const TextStyle(color: Colors.white, fontSize: 15),
+                      dropdownIconPosition: IconPosition.trailing,
+                      dropdownIcon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280)),
+                      showCountryFlag: true,
+                      decoration: InputDecoration(
+                        hintText: 'Mobile Number',
+                        hintStyle: const TextStyle(color: Color(0xFF6B7280)),
+                        filled: true,
+                        fillColor: const Color(0xFF1E1E2C),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF2E2E3E), width: 1)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5)),
+                      ),
+                      onChanged: (phone) {
+                        _fullPhoneNumber = phone.completeNumber;
+                      },
                     ),
                     const SizedBox(height: 32),
                     _PrimaryButton(
@@ -494,7 +511,18 @@ class _AuthScreenState extends State<AuthScreen> {
                   height: 54,
                   child: OutlinedButton.icon(
                     onPressed: _isLoading ? null : _handleGoogleSignIn,
-                    icon: Image.network('https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg', width: 24, height: 24),
+                    icon: Image.network(
+                      'https://mailmeteor.com/logos/assets/PNG/Google_Logo_512px.png',
+                      width: 24,
+                      height: 24,
+                      errorBuilder: (context, error, stackTrace) => const Text(
+                        'G',
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
+                      ),
+                    ),
                     label: const Text('Continue with Google', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Color(0xFF2E2E3E)),
