@@ -3,6 +3,7 @@ import 'package:health/health.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/auth_gate.dart';
+import 'screens/reset_password_screen.dart';
 import 'services/meal_memory.dart';
 import 'services/personal_nutrition_memory.dart';
 import 'services/persistence_service.dart';
@@ -40,12 +41,32 @@ Future<void> main() async {
   runApp(const KynetixApp());
 }
 
-class KynetixApp extends StatelessWidget {
+class KynetixApp extends StatefulWidget {
   const KynetixApp({super.key});
+
+  @override
+  State<KynetixApp> createState() => _KynetixAppState();
+}
+
+class _KynetixAppState extends State<KynetixApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => const ResetPasswordScreen()),
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Kynetix',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
