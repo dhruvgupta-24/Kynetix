@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/dhruvgupta-24/Calorie-Tracker#readme",
   "dependencies": {
+    "@supabase/supabase-js": "^2.101.1",
     "@types/node": "^25.5.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.2"
