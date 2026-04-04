@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/workout_split.dart';
 import '../models/workout_session.dart';
+import '../services/cloud_sync_service.dart';
 
 // ─── WorkoutService ───────────────────────────────────────────────────────────
 //
@@ -641,6 +642,9 @@ class WorkoutService extends ChangeNotifier {
 
     await _persist();
     notifyListeners();
+    
+    // Background cloud sync
+    CloudSyncService.instance.syncWorkoutBackground(session);
   }
 
   Future<void> saveDraftSession(WorkoutSession session) async {

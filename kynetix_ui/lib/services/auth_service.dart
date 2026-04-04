@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import '../config/supabase_secrets.dart';
 import '../config/supabase_client.dart';
 
 import '../services/persistence_service.dart';
@@ -89,17 +91,38 @@ class AuthService {
   /// ── GOOGLE AUTH ───────────────────────────────────────────────────────────
 
   Future<bool> signInWithGoogle() async {
-    debugPrint('[AuthService] Initializing Supabase OAuth Google Sign-In');
+    debugPrint('[AuthService] Initializing Native Google Sign-In');
     
     try {
-      final success = await supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'kynetix://login-callback',
+      final googleSignIn = GoogleSignIn(
+        serverClientId: SupabaseSecrets.googleWebClientId.isNotEmpty ? SupabaseSecrets.googleWebClientId : null,
       );
-      debugPrint('[AuthService] Google OAuth flow triggered: $success');
-      return success;
+
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        debugPrint('[AuthService] Google Sign-In aborted by user');
+        return false;
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final accessToken = googleAuth.accessToken;
+      final idToken = googleAuth.idToken;
+
+      if (idToken == null || accessToken == null) {
+        debugPrint('[AuthService] Missing Google tokens, dropping flow.');
+        return false;
+      }
+
+      await supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+      
+      debugPrint('[AuthService] Native Google Auth successful');
+      return true;
     } catch (e) {
-      debugPrint('[AuthService] signInWithGoogle failed: $e');
+      debugPrint('[AuthService] signInWithGoogle failed natively: $e');
       rethrow;
     }
   }

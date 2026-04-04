@@ -118,12 +118,12 @@ class NutritionPipeline {
 
     if (localGate.shouldFinalizeLocal) {
       debugPrint('[Pipeline] ✅ LOCAL FINALIZED via confidence gate');
-      return _finalizeLocal(
+      return _applyItemLevelOverrides(_finalizeLocal(
         trimmed,
         localAnalysis,
         classification: classification,
         fallbackReason: 'Hybrid local confidence gate passed',
-      );
+      ));
     }
 
     debugPrint('[Pipeline] local gate failed → escalating to AI verifier/refiner');
@@ -150,25 +150,85 @@ class NutritionPipeline {
         debugPrint('[Pipeline] ✅ AI result: "${result.canonicalMeal}" | '
                    '${result.calories.min.toInt()}–${result.calories.max.toInt()} kcal | '
                    'conf=${result.confidence}');
-        await MealMemory.instance.storeAiCandidate(trimmed, result);
-        return result;
+        final finalResult = _applyItemLevelOverrides(result);
+        await MealMemory.instance.storeAiCandidate(trimmed, finalResult);
+        return finalResult;
       } catch (e) {
         debugPrint('[Pipeline] ❌ AI failed: $e');
-        return _finalizeLocal(
+        return _applyItemLevelOverrides(_finalizeLocal(
           trimmed,
           localAnalysis,
           classification: classification,
           fallbackReason: 'AI escalation required; AI failed: $e',
-        );
+        ));
       }
     }
 
     // ── 6. Local fallback ───────────────────────────────────────────────────
-    return _finalizeLocal(
+    return _applyItemLevelOverrides(_finalizeLocal(
       trimmed,
       localAnalysis,
       classification: classification,
       fallbackReason: 'AI escalation required but OPENROUTER_API_KEY not configured',
+    ));
+  }
+
+  NutritionResult _applyItemLevelOverrides(NutritionResult result) {
+    if (result.items.isEmpty) return result;
+
+    bool hasOverride = false;
+    final updatedItems = <NutritionItem>[];
+
+    double totalCalMin = 0;
+    double totalCalMax = 0;
+    double totalProMin = 0;
+    double totalProMax = 0;
+
+    for (final item in result.items) {
+      final override = UserNutritionMemory.instance.lookup(item.name);
+      if (override != null) {
+        hasOverride = true;
+        updatedItems.add(NutritionItem(
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          estimated: item.estimated,
+          mode: item.mode,
+          calories: override.calories,
+          protein: override.protein,
+        ));
+        totalCalMin += override.calories.min;
+        totalCalMax += override.calories.max;
+        totalProMin += override.protein.min;
+        totalProMax += override.protein.max;
+      } else {
+        updatedItems.add(item);
+        totalCalMin += item.calories.min;
+        totalCalMax += item.calories.max;
+        totalProMin += item.protein.min;
+        totalProMax += item.protein.max;
+      }
+    }
+
+    if (!hasOverride) return result;
+
+    debugPrint('[Pipeline] 🔄 item-level override applied for ${result.canonicalMeal}');
+
+    return NutritionResult(
+        canonicalMeal:  result.canonicalMeal,
+        items:          updatedItems,
+        calories:       NutrientRange(min: totalCalMin, max: totalCalMax),
+        protein:        NutrientRange(min: totalProMin, max: totalProMax),
+        confidence:     0.99,
+        warnings:       [...result.warnings, 'Applied granular item memories'],
+        coachSummary:   result.coachSummary,
+        bestNextFoods:  result.bestNextFoods,
+        mealCategory:   result.mealCategory,
+        mealDensity:    result.mealDensity,
+        riskFlags:      result.riskFlags,
+        source:         'user_override',
+        createdAt:      result.createdAt,
+        fallbackReason: result.fallbackReason,
     );
   }
 

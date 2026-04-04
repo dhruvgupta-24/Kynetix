@@ -290,7 +290,7 @@ const List<_FoodEntry> _db = [
   // Whey protein (1 scoop ≈ 30 g) ≈ 120 kcal — packaged/precise
   _FoodEntry(
     label:    'Whey Protein (1 scoop)',
-    keywords: ['whey', 'protein powder', 'whey protein', 'protein shake', 'shake'],
+    keywords: ['whey', 'protein powder', 'whey protein', 'protein shake'],
     calories: NutrientRange(min: 112, max: 128),   // ±7 %
     protein:  NutrientRange(min: 22.0, max: 26.0),
     tier:     _Tier.veryHigh,

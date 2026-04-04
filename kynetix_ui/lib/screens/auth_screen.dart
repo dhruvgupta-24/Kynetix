@@ -24,11 +24,15 @@ class _AuthScreenState extends State<AuthScreen> {
   // Email Controllers
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
 
   // Phone Controllers
   final _phoneCtrl = TextEditingController(); 
   String _fullPhoneNumber = '';
   final _otpCtrl = TextEditingController();
+  final _phoneFocus = FocusNode();
+  final _otpFocus = FocusNode();
   bool _isOtpSent = false;
 
   @override
@@ -37,7 +41,19 @@ class _AuthScreenState extends State<AuthScreen> {
     _passwordCtrl.dispose();
     _phoneCtrl.dispose();
     _otpCtrl.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    _phoneFocus.dispose();
+    _otpFocus.dispose();
     super.dispose();
+  }
+
+  void _resetAuthState() {
+    FocusScope.of(context).unfocus();
+    _errorMessage = null;
+    _isLoading = false;
+    _isOtpSent = false;
+    _otpCtrl.clear();
   }
 
   void _clearError() {
@@ -332,7 +348,8 @@ class _AuthScreenState extends State<AuthScreen> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            _clearError();
+                            FocusScope.of(context).unfocus();
+                            _resetAuthState();
                             setState(() => _isSignup = false);
                           },
                           child: Container(
@@ -348,7 +365,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            _clearError();
+                            _resetAuthState();
                             setState(() => _isSignup = true);
                           },
                           child: Container(
@@ -375,10 +392,9 @@ class _AuthScreenState extends State<AuthScreen> {
                       icon: Icons.email_outlined,
                       isSelected: _authMethod == AuthMethod.email,
                       onTap: () {
-                        _clearError();
+                        _resetAuthState();
                         setState(() {
                           _authMethod = AuthMethod.email;
-                          _isOtpSent = false;
                         });
                       },
                     ),
@@ -388,7 +404,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       icon: Icons.phone_android_rounded,
                       isSelected: _authMethod == AuthMethod.phone,
                       onTap: () {
-                        _clearError();
+                        _resetAuthState();
                         setState(() {
                           _authMethod = AuthMethod.phone;
                         });
@@ -401,14 +417,18 @@ class _AuthScreenState extends State<AuthScreen> {
                 // Dynamic Form Area
                 if (_authMethod == AuthMethod.email) ...[
                   _StyledField(
+                    key: const ValueKey('email_field'),
                     controller: _emailCtrl,
+                    focusNode: _emailFocus,
                     hint: 'Email Address',
                     icon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
                   ),
                   const SizedBox(height: 16),
                   _StyledField(
+                    key: const ValueKey('password_field'),
                     controller: _passwordCtrl,
+                    focusNode: _passwordFocus,
                     hint: 'Password',
                     icon: Icons.lock_outline,
                     isPassword: true,
@@ -438,7 +458,9 @@ class _AuthScreenState extends State<AuthScreen> {
                 ] else if (_authMethod == AuthMethod.phone) ...[
                   if (!_isOtpSent) ...[
                     IntlPhoneField(
+                      key: const ValueKey('phone_field'),
                       controller: _phoneCtrl,
+                      focusNode: _phoneFocus,
                       initialCountryCode: 'IN',
                       style: const TextStyle(color: Colors.white, fontSize: 15),
                       dropdownTextStyle: const TextStyle(color: Colors.white, fontSize: 15),
@@ -467,7 +489,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ] else ...[
                     _StyledField(
+                      key: const ValueKey('otp_field'),
                       controller: _otpCtrl,
+                      focusNode: _otpFocus,
                       hint: 'Enter 6-digit OTP',
                       icon: Icons.message_rounded,
                       keyboardType: TextInputType.number,
@@ -479,14 +503,26 @@ class _AuthScreenState extends State<AuthScreen> {
                       onPressed: _handlePhoneOtpVerify,
                     ),
                     const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _isOtpSent = false;
-                          _otpCtrl.clear();
-                        });
-                      },
-                      child: const Text('Change Phone Number', style: TextStyle(color: Color(0xFF9CA3AF))),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton(
+                          onPressed: _handlePhoneOtpSend,
+                          child: const Text('Resend OTP', style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.w600)),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('•', style: TextStyle(color: Color(0xFF6B7280))),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _isOtpSent = false;
+                              _otpCtrl.clear();
+                            });
+                          },
+                          child: const Text('Change Number', style: TextStyle(color: Color(0xFF9CA3AF))),
+                        ),
+                      ],
                     ),
                   ]
                 ],
@@ -603,13 +639,16 @@ class _PrimaryButton extends StatelessWidget {
 
 class _StyledField extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String hint;
   final IconData icon;
   final bool isPassword;
   final TextInputType? keyboardType;
 
   const _StyledField({
+    super.key,
     required this.controller,
+    this.focusNode,
     required this.hint,
     required this.icon,
     this.isPassword = false,
@@ -620,6 +659,7 @@ class _StyledField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       obscureText: isPassword,
       keyboardType: keyboardType,
       style: const TextStyle(color: Colors.white, fontSize: 15),

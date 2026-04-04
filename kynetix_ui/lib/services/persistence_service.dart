@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/onboarding_screen.dart';
 import '../models/day_log.dart';
+import '../services/cloud_sync_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -78,6 +79,9 @@ class PersistenceService {
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kDayLogs, jsonEncode(pruned));
+      
+      // Fire-and-forget sync to Supabase
+      CloudSyncService.instance.syncDayLogsBackground();
     } catch (_) {}
   }
 

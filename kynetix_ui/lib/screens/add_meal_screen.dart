@@ -8,9 +8,10 @@ import '../services/user_nutrition_memory.dart';
 enum _SaveMode { once, recurring }
 
 class _FixValues {
+  final List<NutritionItem> items;
   final double cal;
   final double pro;
-  _FixValues(this.cal, this.pro);
+  _FixValues(this.items, this.cal, this.pro);
 }
 
 class AddMealScreen extends StatefulWidget {
@@ -108,6 +109,8 @@ class _AddMealScreenState extends State<AddMealScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _FixEstimateSheet(
+        items: _result!.items,
+        canonicalMeal: _result!.canonicalMeal,
         initialCal: _result!.primaryCaloriesEstimate,
         initialPro: _result!.primaryProteinEstimate,
       ),
@@ -125,17 +128,27 @@ class _AddMealScreenState extends State<AddMealScreen>
         : _result!.canonicalMeal;
 
     if (saveMode == _SaveMode.recurring) {
-      await UserNutritionMemory.instance.saveOverride(
-        mealName,
-        vals.cal,
-        vals.pro,
-      );
+      if (vals.items.length <= 1) {
+        await UserNutritionMemory.instance.saveOverride(
+          vals.items.isEmpty ? mealName : vals.items.first.name,
+          vals.cal,
+          vals.pro,
+        );
+      } else {
+        for (final item in vals.items) {
+          await UserNutritionMemory.instance.saveOverride(
+            item.name,
+            item.calories.max,
+            item.protein.max,
+          );
+        }
+      }
     }
 
     setState(() {
       _result = NutritionResult(
         canonicalMeal: mealName,
-        items: const [],
+        items: vals.items,
         calories: NutrientRange(min: vals.cal, max: vals.cal),
         protein: NutrientRange(min: vals.pro, max: vals.pro),
         confidence: 0.99,
@@ -770,10 +783,14 @@ class _ExampleChip extends StatelessWidget {
 // ─── Fix Estimate Sheet (bottom sheet for manual adjustments) ─────────────────
 
 class _FixEstimateSheet extends StatefulWidget {
+  final List<NutritionItem> items;
+  final String canonicalMeal;
   final double initialCal;
   final double initialPro;
 
   const _FixEstimateSheet({
+    required this.items,
+    required this.canonicalMeal,
     required this.initialCal,
     required this.initialPro,
   });
@@ -783,33 +800,78 @@ class _FixEstimateSheet extends StatefulWidget {
 }
 
 class _FixEstimateSheetState extends State<_FixEstimateSheet> {
-  late TextEditingController _calCtrl;
-  late TextEditingController _proCtrl;
+  late final List<NutritionItem> _displayItems;
+  final List<TextEditingController> _calCtrls = [];
+  final List<TextEditingController> _proCtrls = [];
 
   @override
   void initState() {
     super.initState();
-    _calCtrl = TextEditingController(text: widget.initialCal.toInt().toString());
-    _proCtrl = TextEditingController(text: widget.initialPro.toInt().toString());
+    if (widget.items.isEmpty) {
+      _displayItems = [
+        NutritionItem(
+          name: widget.canonicalMeal,
+          quantity: 1.0,
+          unit: 'serving',
+          estimated: true,
+          mode: EstimationMode.contextualIntake,
+          calories: NutrientRange(min: widget.initialCal, max: widget.initialCal),
+          protein: NutrientRange(min: widget.initialPro, max: widget.initialPro),
+        )
+      ];
+    } else {
+      _displayItems = List.from(widget.items);
+    }
+    
+    for (final item in _displayItems) {
+      final calMid = (item.calories.min + item.calories.max) / 2;
+      final proMid = (item.protein.min + item.protein.max) / 2;
+      _calCtrls.add(TextEditingController(text: calMid.toInt().toString()));
+      _proCtrls.add(TextEditingController(text: proMid.toInt().toString()));
+    }
   }
 
   @override
   void dispose() {
-    _calCtrl.dispose();
-    _proCtrl.dispose();
+    for (final c in _calCtrls) c.dispose();
+    for (final c in _proCtrls) c.dispose();
     super.dispose();
   }
 
   void _submit() {
-    final cal = double.tryParse(_calCtrl.text) ?? widget.initialCal;
-    final pro = double.tryParse(_proCtrl.text) ?? widget.initialPro;
-    Navigator.of(context).pop(_FixValues(cal, pro));
+    double totalCal = 0;
+    double totalPro = 0;
+    final updatedItems = <NutritionItem>[];
+    
+    for (int i = 0; i < _displayItems.length; i++) {
+      final item = _displayItems[i];
+      final calMid = (item.calories.min + item.calories.max) / 2;
+      final proMid = (item.protein.min + item.protein.max) / 2;
+      
+      final cVal = double.tryParse(_calCtrls[i].text) ?? calMid;
+      final pVal = double.tryParse(_proCtrls[i].text) ?? proMid;
+      
+      totalCal += cVal;
+      totalPro += pVal;
+      
+      updatedItems.add(NutritionItem(
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        estimated: true,
+        mode: item.mode,
+        calories: NutrientRange(min: cVal, max: cVal),
+        protein: NutrientRange(min: pVal, max: pVal),
+      ));
+    }
+    Navigator.of(context).pop(_FixValues(updatedItems, totalCal, totalPro));
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF0F0F14),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -825,65 +887,83 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
                 ),
               ),
               const SizedBox(height: 20),
-              // Calories field
-              const Text(
-                'Calories (kcal)',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF6B7280),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _calCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E2C),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
+              ...List.generate(_displayItems.length, (i) {
+                final item = _displayItems[i];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFD1D5DB),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Calories (kcal)',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
+                                ),
+                                const SizedBox(height: 6),
+                                TextField(
+                                  controller: _calCtrls[i],
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: const Color(0xFF1E1E2C),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    isDense: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Protein (g)',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
+                                ),
+                                const SizedBox(height: 6),
+                                TextField(
+                                  controller: _proCtrls[i],
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: const Color(0xFF1E1E2C),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    isDense: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              // Protein field
-              const Text(
-                'Protein (g)',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF6B7280),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _proCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E2C),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              // Submit button
+                );
+              }),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

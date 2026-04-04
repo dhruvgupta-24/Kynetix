@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
+import '../services/cloud_sync_service.dart';
 
 class UserMealOverride {
   final String canonicalMeal;
@@ -78,6 +79,8 @@ class UserNutritionMemory {
         (o) => o.canonicalMeal.toLowerCase() == mealName.toLowerCase());
     _overrides.add(override);
     await _persist();
+    
+    CloudSyncService.instance.syncMemoryBackground(override);
   }
 
   Future<void> deleteOverride(String mealName) async {

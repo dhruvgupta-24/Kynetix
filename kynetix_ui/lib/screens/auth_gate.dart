@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
+import '../services/cloud_sync_service.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
@@ -57,6 +58,9 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     try {
       // 1. ALWAYS Treat Supabase as the source of truth for identity
       final remoteProfile = await ProfileService.instance.fetchProfile();
+      
+      // Hydrate all meals, workouts, and nutrition memories from the cloud
+      await CloudSyncService.instance.hydrateFromCloud();
       
       if (remoteProfile != null) {
         debugPrint('[_LoggedInGate] Supabase Profile Found. Triggering localized AppShell hydration.');
