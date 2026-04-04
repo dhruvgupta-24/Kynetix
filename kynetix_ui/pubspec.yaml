@@ -63,7 +63,7 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/branding/kynetix_icon_fg.png" # Ensures no iOS crop
-  adaptive_icon_background: "#13131F"
+  adaptive_icon_background: "#060606"
   adaptive_icon_foreground: "assets/branding/kynetix_icon_fg.png"
 
 flutter_native_splash:
@@ -71,7 +71,7 @@ flutter_native_splash:
   image: "assets/branding/kynetix_logo_padded.png"
   android_12:
     image: "assets/branding/kynetix_icon_padded.png"
-    icon_background_color: "#13131F"
+    icon_background_color: "#060606"
     color: "#13131F"
 
 # For information on the generic Dart part of this file, see the
