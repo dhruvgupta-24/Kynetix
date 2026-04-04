@@ -73,6 +73,7 @@ class ProfileService {
       await supabase.from('profiles').upsert({
         'id': user.id,
         'email': user.email,
+        'phone': user.phone,
         'name': profile.name,
         'age': profile.age,
         'gender': profile.gender,

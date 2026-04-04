@@ -56,4 +56,51 @@ class AuthService {
       rethrow;
     }
   }
+
+  /// ── PHONE AUTH ────────────────────────────────────────────────────────────
+
+  Future<void> sendPhoneOtp(String phone) async {
+    debugPrint('[AuthService] Sending OTP to: $phone');
+    try {
+      await supabase.auth.signInWithOtp(phone: phone);
+      debugPrint('[AuthService] OTP successfully sent.');
+    } catch (e) {
+      debugPrint('[AuthService] sendPhoneOtp failed: $e');
+      rethrow;
+    }
+  }
+
+  Future<AuthResponse> verifyPhoneOtp(String phone, String token) async {
+    debugPrint('[AuthService] Verifying OTP for: $phone');
+    try {
+      final response = await supabase.auth.verifyOTP(
+        phone: phone,
+        token: token,
+        type: OtpType.sms,
+      );
+      debugPrint('[AuthService] OTP verified. User ID: ${response.user?.id}');
+      return response;
+    } catch (e) {
+      debugPrint('[AuthService] verifyPhoneOtp failed: $e');
+      rethrow;
+    }
+  }
+
+  /// ── GOOGLE AUTH ───────────────────────────────────────────────────────────
+
+  Future<bool> signInWithGoogle() async {
+    debugPrint('[AuthService] Initializing Supabase OAuth Google Sign-In');
+    
+    try {
+      final success = await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'kynetix://login-callback',
+      );
+      debugPrint('[AuthService] Google OAuth flow triggered: $success');
+      return success;
+    } catch (e) {
+      debugPrint('[AuthService] signInWithGoogle failed: $e');
+      rethrow;
+    }
+  }
 }

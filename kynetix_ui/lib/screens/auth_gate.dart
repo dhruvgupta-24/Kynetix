@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
-import 'login_screen.dart';
+import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
 
@@ -28,8 +28,8 @@ class AuthGate extends StatelessWidget {
           return const _LoggedInGate();
         }
 
-        debugPrint('[AuthGate] User is NOT authenticated. Routing to LoginScreen.');
-        return const LoginScreen();
+        debugPrint('[AuthGate] User is NOT authenticated. Routing to AuthScreen.');
+        return const AuthScreen();
       },
     );
   }
