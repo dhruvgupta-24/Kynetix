@@ -1,0 +1,22 @@
+﻿Analyzing 4 items...                                            
+
+   info - Statements in a for should be enclosed in a block - lib\screens\add_meal_screen.dart:961:32 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\screens\add_meal_screen.dart:962:32 - curly_braces_in_flow_control_structures
+
+flutter : 2 issues found. 
+(ran in 83.7s)
+At line:1 char:1
++ flutter analyze lib/servic
+es/nutrition_target_engine.d
+art lib/service ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo          
+: Not    Specified: (2 
+issues found. (    ran in 
+83.7s):String) [], Rem    
+oteException
+    + FullyQualifiedErrorId 
+: Nat    iveCommandError
+ 

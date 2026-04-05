@@ -134,17 +134,30 @@ class _AddMealScreenState extends State<AddMealScreen>
 
     if (saveMode == _SaveMode.recurring) {
       if (vals.items.length <= 1) {
+        // Single-item fix: save per-unit-1 values so the pipeline can scale
+        // correctly. If item has explicit quantity (e.g. 150g tofu = 80 kcal),
+        // we store 80/150 kcal per unit so a later 300g tofu lookup gets 160 kcal.
+        final item = vals.items.isEmpty ? null : vals.items.first;
+        final qty = (item?.quantity ?? 1.0).clamp(1.0, double.infinity);
+        final calPerUnit  = vals.cal / qty;
+        final proPerUnit  = vals.pro / qty;
         await UserNutritionMemory.instance.saveOverride(
-          vals.items.isEmpty ? mealName : vals.items.first.name,
-          vals.cal,
-          vals.pro,
+          item?.name ?? mealName,
+          calPerUnit,
+          proPerUnit,
+          referenceQuantity: qty,
+          referenceUnit: item?.unit ?? 'serving',
         );
       } else {
+        // Multi-item: save each atomic item at its own per-unit-1 rate.
         for (final item in vals.items) {
+          final qty = item.quantity.clamp(1.0, double.infinity);
           await UserNutritionMemory.instance.saveOverride(
             item.name,
-            item.calories.max,
-            item.protein.max,
+            item.calories.max / qty,
+            item.protein.max / qty,
+            referenceQuantity: qty,
+            referenceUnit: item.unit,
           );
         }
       }

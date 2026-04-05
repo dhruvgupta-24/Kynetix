@@ -1,3 +1,4 @@
+import '../models/workout_session.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 
@@ -7,8 +8,10 @@ class DayTarget {
   final double calories;
   final double protein;
   final bool   isTrainingDay;
-  final String label;   // "Training Day" | "Rest Day"
-  final String note;    // brief derivation note
+  final String label;             // "Training Day" | "Rest Day" | "Push Day" etc.
+  final String note;              // brief derivation note
+  final int?   workoutLoadScore;  // 0–100, null when no session data
+  final int?   workoutCalBonus;   // kcal bonus from actual session load
 
   const DayTarget({
     required this.calories,
@@ -16,6 +19,8 @@ class DayTarget {
     required this.isTrainingDay,
     required this.label,
     required this.note,
+    this.workoutLoadScore,
+    this.workoutCalBonus,
   });
 }
 
@@ -57,6 +62,12 @@ class WeeklyTargetPlan {
 //   • Fat loss deficit: −500 kcal/day (sustainable for young active males).
 //   • Protein: 1.85 g/kg avg for fat loss — muscle-protective, attainable.
 //   • Calorie cycling: ±120 kcal around weekly avg (realistic food diff).
+//
+// Workout load scoring (added in hardening pass):
+//   • Derived from actual WorkoutSession data (volume, sets, duration).
+//   • Produces a bounded kcal bonus on top of the base training-day target.
+//   • Capped at ±200 kcal so targets don't swing wildly.
+//   • Completely optional — if no session logged, falls back to toggle-based.
 //
 // Validation (65 kg, 180 cm, 20 yr, male, 5–6 gym days, fat loss):
 //   BMR   = 1 680 kcal
@@ -101,21 +112,151 @@ class NutritionTargetEngine {
     );
   }
 
+  /// Compute the day's calorie and protein target.
+  ///
+  /// Priority for determining training day status and calorie load:
+  ///   1. Actual [WorkoutSession] data — uses real volume/sets/duration.
+  ///   2. [GymDay.workoutType] from the DayLog toggle (split type only).
+  ///   3. Plain [isGymDay] bool fallback.
+  ///
+  /// If a [WorkoutSession] exists, its training load score adjusts the
+  /// base training-day target by ±kLoadCapKcal. This keeps targets stable
+  /// while reflecting actual session intensity.
   DayTarget dayTarget(
     UserProfile profile, {
     required bool isGymDay,
     HealthSyncResult? health,
+    WorkoutSession? session,
+    String? workoutTypeName, // e.g. "Push", "Cardio", "Rest"
   }) {
     final plan = weeklyPlan(profile, health: health);
-    final cal  = isGymDay ? plan.trainingDayCalories : plan.restDayCalories;
-    final pro  = isGymDay ? plan.trainingDayProtein  : plan.restDayProtein;
-    return DayTarget(
-      calories:      cal,
-      protein:       pro,
-      isTrainingDay: isGymDay,
-      label:         isGymDay ? 'Training Day' : 'Rest Day',
-      note:          isGymDay ? '+${plan.trainingDayCalories - plan.avgDailyCalories} kcal vs daily avg' : '${plan.restDayCalories - plan.avgDailyCalories} kcal vs daily avg',
+
+    // Determine if this is a training day — session > toggle
+    final actuallyTraining = session?.isEmpty == false || isGymDay;
+    final cal = actuallyTraining
+        ? plan.trainingDayCalories
+        : plan.restDayCalories;
+    final pro = actuallyTraining
+        ? plan.trainingDayProtein
+        : plan.restDayProtein;
+
+    // Compute workout load offset from real session data
+    int? loadScore;
+    int calBonus = 0;
+    if (session != null && !session.isEmpty) {
+      loadScore = _workoutLoadScore(session);
+      calBonus  = _loadToCalBonus(loadScore, session);
+    }
+
+    final totalCal = _r((cal + calBonus).clamp(
+        _calFloor(profile), double.infinity));
+
+    // Build a meaningful label from the actual split name / workout type
+    final label = _dayLabel(
+      session: session,
+      workoutTypeName: workoutTypeName,
+      isTraining: actuallyTraining,
     );
+
+    final noteBase = actuallyTraining
+        ? '+${plan.trainingDayCalories - plan.avgDailyCalories} kcal vs daily avg'
+        : '${plan.restDayCalories - plan.avgDailyCalories} kcal vs daily avg';
+    final noteExtra = calBonus != 0
+        ? ' | session load: ${calBonus > 0 ? '+' : ''}$calBonus kcal'
+        : '';
+
+    return DayTarget(
+      calories:         totalCal,
+      protein:          pro,
+      isTrainingDay:    actuallyTraining,
+      label:            label,
+      note:             '$noteBase$noteExtra',
+      workoutLoadScore: loadScore,
+      workoutCalBonus:  calBonus == 0 ? null : calBonus,
+    );
+  }
+
+  // ── Workout load scoring ───────────────────────────────────────────────────
+  //
+  // Produces a 0–100 score from real session data.
+  // Components:
+  //   volume score  (0–40): tonnage-based, capped at a realistic upper bound
+  //   set score     (0–30): total working sets
+  //   duration score(0–30): session duration (if logged)
+  //
+  // Score → kcal bonus (bounded ±200 kcal):
+  //   < 30  → 0  (light / warm-up only)
+  //   30–50 → +40 kcal
+  //   50–65 → +80 kcal
+  //   65–80 → +120 kcal
+  //   80–90 → +160 kcal
+  //   > 90  → +200 kcal
+  //
+  // Cardio sessions use duration as primary signal, volume as 0.
+
+  static const _kLoadCapKcal = 200;
+
+  int _workoutLoadScore(WorkoutSession session) {
+    // Volume sub-score (0–40)
+    // 5 000 kg tonnage ≈ typical moderate Push day → score 20
+    // 10 000 kg → score 40 (cap)
+    final volumeScore = (session.totalWorkingVolume / 10000.0 * 40).clamp(0.0, 40.0);
+
+    // Working-set sub-score (0–30)
+    // 15 working sets is a full training session → score 30
+    final setScore = (session.totalWorkingSets / 15.0 * 30).clamp(0.0, 30.0);
+
+    // Duration sub-score (0–30)
+    // 60 min → score 30; proportional below that
+    final dur = session.durationMinutes ?? _estimateDuration(session);
+    final durScore = (dur / 60.0 * 30).clamp(0.0, 30.0);
+
+    return (volumeScore + setScore + durScore).round().clamp(0, 100);
+  }
+
+  /// Estimates session duration from set count when not explicitly logged.
+  /// Assumes ~2.5 min per working set (set + rest).
+  int _estimateDuration(WorkoutSession session) =>
+      (session.totalWorkingSets * 2.5).round().clamp(10, 90);
+
+  int _loadToCalBonus(int score, WorkoutSession session) {
+    // Cardio sessions: pure duration-driven, resistance tonnage is 0
+    final isCardio = session.splitDayName.toLowerCase().contains('cardio') ||
+        session.totalWorkingVolume < 100;
+
+    if (isCardio) {
+      // For cardio, scale by duration directly
+      final dur = session.durationMinutes ?? _estimateDuration(session);
+      if (dur >= 60) return (_kLoadCapKcal * 0.80).round();
+      if (dur >= 45) return (_kLoadCapKcal * 0.60).round();
+      if (dur >= 30) return (_kLoadCapKcal * 0.40).round();
+      if (dur >= 15) return (_kLoadCapKcal * 0.20).round();
+      return 0;
+    }
+
+    // Resistance training: load score drives bonus
+    if (score >= 90) return _kLoadCapKcal;        // 200 kcal
+    if (score >= 80) return (_kLoadCapKcal * 0.80).round(); // 160
+    if (score >= 65) return (_kLoadCapKcal * 0.60).round(); // 120
+    if (score >= 50) return (_kLoadCapKcal * 0.40).round(); // 80
+    if (score >= 30) return (_kLoadCapKcal * 0.20).round(); // 40
+    return 0;
+  }
+
+  String _dayLabel({
+    WorkoutSession? session,
+    String? workoutTypeName,
+    required bool isTraining,
+  }) {
+    if (session != null && !session.isEmpty) {
+      final name = session.splitDayName;
+      if (name.isNotEmpty && name != 'Custom Workout') return '$name Day';
+    }
+    if (workoutTypeName != null && workoutTypeName.isNotEmpty &&
+        workoutTypeName != 'Rest' && workoutTypeName != 'Other') {
+      return '$workoutTypeName Day';
+    }
+    return isTraining ? 'Training Day' : 'Rest Day';
   }
 
   // ── Core formulas ─────────────────────────────────────────────────────────
@@ -141,7 +282,6 @@ class NutritionTargetEngine {
 
   /// Step correction: minor modifier, capped so Health Connect improves targets
   /// without dominating them.
-  /// Health Connect data influences TDEE only in the 3rd decimal place.
   int _stepCorrection(HealthSyncResult? health) {
     if (health == null || !health.hasData) return 0;
     final s = health.effectiveAverageSteps!;
@@ -157,13 +297,12 @@ class NutritionTargetEngine {
       _r(_bmr(p) * _activityMultiplier(p) + _stepCorrection(health));
 
   /// Goal-based calorie adjustment applied to TDEE.
-  /// Uses bounded percentage-based logic so targets generalize across body sizes.
   double _goalAdjustment(String goal, double tdee) => switch (goal) {
-    kFatLoss           => -_bounded(tdee * 0.22, 350, 550),
-    kLeanBulk          =>  _bounded(tdee * 0.08, 150, 250),
-    kBulk              =>  _bounded(tdee * 0.15, 250, 450),
-    kRecomposition     => -_bounded(tdee * 0.09, 120, 250),
-    _                  => 0, // Maintenance
+    kFatLoss       => -_bounded(tdee * 0.22, 350, 550),
+    kLeanBulk      =>  _bounded(tdee * 0.08, 150, 250),
+    kBulk          =>  _bounded(tdee * 0.15, 250, 450),
+    kRecomposition => -_bounded(tdee * 0.09, 120, 250),
+    _              => 0, // Maintenance
   };
 
   double _calorieCycle(UserProfile p) {
@@ -175,39 +314,35 @@ class NutritionTargetEngine {
   }
 
   // ── Protein — goal- and day-aware ─────────────────────────────────────────
-  // Practical targets: high enough to protect muscle, low enough to be
-  // achievable on real Indian hostel food diets.
 
   double _baseProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss           => _r(p.weight * 1.85),
-    kLeanBulk          => _r(p.weight * 1.70),
-    kBulk              => _r(p.weight * 1.85),
-    kRecomposition     => _r(p.weight * 1.95),
-    _                  => _r(p.weight * 1.55),
+    kFatLoss       => _r(p.weight * 1.85),
+    kLeanBulk      => _r(p.weight * 1.70),
+    kBulk          => _r(p.weight * 1.85),
+    kRecomposition => _r(p.weight * 1.95),
+    _              => _r(p.weight * 1.55),
   };
 
   double _trainingProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss           => _r(p.weight * 1.95),
-    kLeanBulk          => _r(p.weight * 1.80),
-    kBulk              => _r(p.weight * 2.05),
-    kRecomposition     => _r(p.weight * 2.10),
-    _                  => _r(p.weight * 1.65),
+    kFatLoss       => _r(p.weight * 1.95),
+    kLeanBulk      => _r(p.weight * 1.80),
+    kBulk          => _r(p.weight * 2.05),
+    kRecomposition => _r(p.weight * 2.10),
+    _              => _r(p.weight * 1.65),
   };
 
   double _restProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss           => _r(p.weight * 1.75),
-    kLeanBulk          => _r(p.weight * 1.55),
-    kBulk              => _r(p.weight * 1.70),
-    kRecomposition     => _r(p.weight * 1.80),
-    _                  => _r(p.weight * 1.45),
+    kFatLoss       => _r(p.weight * 1.75),
+    kLeanBulk      => _r(p.weight * 1.55),
+    kBulk          => _r(p.weight * 1.70),
+    kRecomposition => _r(p.weight * 1.80),
+    _              => _r(p.weight * 1.45),
   };
 
   double _bounded(double value, double min, double max) =>
       value.clamp(min, max).toDouble();
 
   /// Absolute minimum daily calorie target.
-  /// Prevents dangerous deficits for lightweight users.
-  /// Rule: never allow target below BMR + 200 kcal (a conservative safety margin).
   double _calFloor(UserProfile p) => _r(_bmr(p) + 200);
 
   double _r(double v) => (v * 10).round() / 10;

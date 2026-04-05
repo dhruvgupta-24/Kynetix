@@ -7,30 +7,55 @@ import '../services/cloud_sync_service.dart';
 
 class UserMealOverride {
   final String canonicalMeal;
-  final double calories;
-  final double protein;
+  /// Per-unit-1 calories. e.g. if 150 g tofu = 80 kcal, this stores 80/150.
+  final double caloriesPerUnit;
+  /// Per-unit-1 protein.
+  final double proteinPerUnit;
+  /// The quantity at which this value was originally recorded (for scaling hints
+  /// and proportional fallback when the input quantity differs greatly).
+  final double referenceQuantity;
+  /// The unit used when this was recorded (e.g. "g", "ml", "scoop").
+  final String referenceUnit;
   final List<String> originalTokens;
 
   UserMealOverride({
     required this.canonicalMeal,
-    required this.calories,
-    required this.protein,
+    required this.caloriesPerUnit,
+    required this.proteinPerUnit,
+    this.referenceQuantity = 1.0,
+    this.referenceUnit = 'serving',
     List<String>? originalTokens,
   }) : originalTokens = originalTokens ?? _tokenize(canonicalMeal);
 
   Map<String, dynamic> toJson() => {
-        'canonicalMeal': canonicalMeal,
-        'calories': calories,
-        'protein': protein,
-        'originalTokens': originalTokens,
+        'canonicalMeal':     canonicalMeal,
+        'caloriesPerUnit':   caloriesPerUnit,
+        'proteinPerUnit':    proteinPerUnit,
+        'referenceQuantity': referenceQuantity,
+        'referenceUnit':     referenceUnit,
+        'originalTokens':    originalTokens,
+        // Legacy field aliases so old stored data can still be read
+        'calories': caloriesPerUnit,
+        'protein':  proteinPerUnit,
       };
 
-  factory UserMealOverride.fromJson(Map<String, dynamic> json) => UserMealOverride(
-        canonicalMeal: json['canonicalMeal'] as String,
-        calories: (json['calories'] as num).toDouble(),
-        protein: (json['protein'] as num).toDouble(),
-        originalTokens: List<String>.from(json['originalTokens'] ?? []),
-      );
+  factory UserMealOverride.fromJson(Map<String, dynamic> json) {
+    // Support both new 'caloriesPerUnit' and old 'calories' key (migration).
+    final cal = (json['caloriesPerUnit'] as num?)?.toDouble()
+        ?? (json['calories'] as num?)?.toDouble()
+        ?? 0.0;
+    final pro = (json['proteinPerUnit'] as num?)?.toDouble()
+        ?? (json['protein'] as num?)?.toDouble()
+        ?? 0.0;
+    return UserMealOverride(
+      canonicalMeal:     json['canonicalMeal'] as String,
+      caloriesPerUnit:   cal,
+      proteinPerUnit:    pro,
+      referenceQuantity: (json['referenceQuantity'] as num?)?.toDouble() ?? 1.0,
+      referenceUnit:     json['referenceUnit'] as String? ?? 'serving',
+      originalTokens:    List<String>.from(json['originalTokens'] ?? []),
+    );
+  }
 
   static List<String> _tokenize(String input) {
     return input
@@ -71,16 +96,33 @@ class UserNutritionMemory {
     _ready = true;
   }
 
-  Future<void> saveOverride(String mealName, double cal, double pro) async {
+  /// Save a per-unit-1 recurring memory entry.
+  ///
+  /// [caloriesPerUnit] and [proteinPerUnit] must ALREADY be divided by
+  /// [referenceQuantity] at the call site. This class stores raw per-unit
+  /// values so [_itemFromMemory] can scale them correctly by parsed.quantity.
+  Future<void> saveOverride(
+    String mealName,
+    double caloriesPerUnit,
+    double proteinPerUnit, {
+    double referenceQuantity = 1.0,
+    String referenceUnit = 'serving',
+  }) async {
     final override = UserMealOverride(
-        canonicalMeal: mealName, calories: cal, protein: pro);
-    // Remove old exact match
+      canonicalMeal:     mealName,
+      caloriesPerUnit:   caloriesPerUnit,
+      proteinPerUnit:    proteinPerUnit,
+      referenceQuantity: referenceQuantity,
+      referenceUnit:     referenceUnit,
+    );
     _overrides.removeWhere(
         (o) => o.canonicalMeal.toLowerCase() == mealName.toLowerCase());
     _overrides.add(override);
     await _persist();
-    
-    CloudSyncService.instance.syncMemoryBackground(override);
+
+    // Sync the legacy-compatible shape to Supabase
+    final legacyOverride = _toLegacyShape(override);
+    CloudSyncService.instance.syncMemoryBackground(legacyOverride);
   }
 
   Future<void> deleteOverride(String mealName) async {
@@ -95,6 +137,8 @@ class UserNutritionMemory {
     await prefs.setStringList(_kOverrides, list);
   }
 
+  /// Returns a [NutritionResult] whose calories/protein are per-unit-1.
+  /// The pipeline's [_itemFromMemory] scales these by parsed.quantity.
   NutritionResult? lookup(String input) {
     if (!_ready || _overrides.isEmpty) return null;
 
@@ -112,7 +156,6 @@ class UserNutritionMemory {
         if (inputTokens.contains(t)) matchCount++;
       }
 
-      // directional overlap
       final recall = matchCount / override.originalTokens.length;
       final precision = matchCount / inputTokens.length;
 
@@ -127,15 +170,18 @@ class UserNutritionMemory {
       }
     }
 
-    // Confidence threshold must be extremely high (0.98) to prevent hijacking unrelated foods
-    // e.g. input="mango shake" vs override="mango" should fail safely.
+    // 0.98 threshold prevents greedy hijacking (e.g. "mango shake" vs "mango").
     if (bestMatch != null && bestScore >= 0.98) {
-      debugPrint('[UserNutritionMemory] match: "${bestMatch.canonicalMeal}" score: $bestScore');
+      debugPrint(
+          '[UserNutritionMemory] match: "${bestMatch.canonicalMeal}" '
+          'score: $bestScore | perUnit cal=${bestMatch.caloriesPerUnit.toStringAsFixed(2)} '
+          'refQty=${bestMatch.referenceQuantity} ${bestMatch.referenceUnit}');
+      // Return per-unit-1 values. The pipeline scales by parsed.quantity.
       return NutritionResult(
         canonicalMeal: bestMatch.canonicalMeal,
         items: [],
-        calories: NutrientRange(min: bestMatch.calories, max: bestMatch.calories),
-        protein: NutrientRange(min: bestMatch.protein, max: bestMatch.protein),
+        calories: NutrientRange(min: bestMatch.caloriesPerUnit, max: bestMatch.caloriesPerUnit),
+        protein: NutrientRange(min: bestMatch.proteinPerUnit,   max: bestMatch.proteinPerUnit),
         confidence: 0.99,
         warnings: [],
         source: 'user_override',
@@ -144,9 +190,21 @@ class UserNutritionMemory {
     }
 
     if (bestMatch != null) {
-      debugPrint('[UserNutritionMemory] match rejected: "${bestMatch.canonicalMeal}" score: $bestScore');
+      debugPrint('[UserNutritionMemory] match rejected: '
+          '"${bestMatch.canonicalMeal}" score: $bestScore');
     }
 
     return null;
+  }
+
+  // ── Internal helpers ────────────────────────────────────────────────────────
+
+  /// Converts to the legacy [UserMealOverride]-compatible shape that
+  /// [CloudSyncService.syncMemoryBackground] expects.
+  static dynamic _toLegacyShape(UserMealOverride o) {
+    // CloudSyncService accepts any object with a .toJson() and .canonicalMeal.
+    // UserMealOverride.toJson() already writes legacy 'calories'/'protein' keys
+    // so Supabase stays compatible.
+    return o;
   }
 }

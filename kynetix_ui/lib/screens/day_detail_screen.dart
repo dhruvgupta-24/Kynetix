@@ -168,13 +168,18 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   /// Engine-computed target for this day.
   /// Recomputes on every rebuild so gym toggle takes effect instantly.
+  /// Priority: actual logged session > gymDay workoutType > plain toggle.
   DayTarget? get _dayTarget {
     final profile = currentUserProfile;
     if (profile == null) return null;
+    final session = WorkoutService.instance.sessionFor(widget.date);
+    final gymDay  = _log.gymDay;
     return NutritionTargetEngine().dayTarget(
       profile,
-      isGymDay: _log.gymDay?.didGym ?? false,
-      health: widget.health,
+      isGymDay:        gymDay?.didGym ?? false,
+      health:          widget.health,
+      session:         session,
+      workoutTypeName: gymDay?.workoutType?.displayName,
     );
   }
 
@@ -562,7 +567,12 @@ class _DaySummaryBanner extends StatelessWidget {
               dayStatus!.outcome != DayOutcome.incomplete &&
               dayStatus!.outcome != DayOutcome.unlogged) ...[
             const SizedBox(height: 10),
-            _DayStatusChip(status: dayStatus!),
+            // Constrain width so Flexible inside the chip's Row can ellipsize
+            // long notes on small screens instead of overflowing.
+            SizedBox(
+              width: double.infinity,
+              child: _DayStatusChip(status: dayStatus!),
+            ),
           ],
         ],
       ),
@@ -588,6 +598,7 @@ class _DayStatusChip extends StatelessWidget {
           width: 1,
         ),
       ),
+      // Use an intrinsic-width row but let the note shrink to available space.
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -600,20 +611,32 @@ class _DayStatusChip extends StatelessWidget {
             child: Text(status.emoji, style: const TextStyle(fontSize: 12)),
           ),
           const SizedBox(width: 5),
-          Text(
-            status.label,
-            style: TextStyle(
-              color: status.color,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
+          // Label is fixed — always visible.
+          Flexible(
+            flex: 0,
+            child: Text(
+              status.label,
+              style: TextStyle(
+                color: status.color,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
             ),
           ),
+          // Note is secondary — shrinks / ellipses on small screens.
           if (status.note.isNotEmpty) ...[
             const SizedBox(width: 6),
-            Text(
-              '· ${status.note}',
-              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+            Flexible(
+              child: Text(
+                '· ${status.note}',
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 11,
+                ),
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
             ),
           ],
         ],
