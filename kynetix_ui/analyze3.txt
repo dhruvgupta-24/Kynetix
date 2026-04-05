@@ -1,0 +1,26 @@
+﻿Analyzing 6 items...                                            
+
+   info - Statements in a for should be enclosed in a block - lib\screens\add_meal_screen.dart:961:32 - curly_braces_in_flow_control_structures
+   info - Statements in a for should be enclosed in a block - lib\screens\add_meal_screen.dart:962:32 - curly_braces_in_flow_control_structures
+warning - Unused import: 'dart:convert' - lib\services\cloud_sync_service.dart:1:8 - unused_import
+   info - Statements in an if should be enclosed in a block - lib\services\nutrition_pipeline.dart:198:17 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\services\nutrition_pipeline.dart:199:31 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\services\unit_normalizer.dart:79:65 - curly_braces_in_flow_control_structures
+
+flutter : 6 issues found. 
+(ran in 2.1s)
+At line:1 char:1
++ flutter analyze lib/services
+/unit_normalizer.dart 
+lib/services/user_n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo          : 
+Not    Specified: (6 issues 
+found. (    ran in 
+2.1s):String) [], Remo    
+teException
+    + FullyQualifiedErrorId : 
+Nat    iveCommandError
+ 

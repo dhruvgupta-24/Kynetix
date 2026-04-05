@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/onboarding_screen.dart';
 import '../models/day_log.dart';
 import '../services/cloud_sync_service.dart';
+import '../services/user_nutrition_memory.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -43,6 +44,9 @@ class PersistenceService {
               DayLog.fromJson(e.value as Map<String, dynamic>);
         }
       }
+      // Load recurring nutrition memory from SharedPreferences.
+      // This makes memory available offline, before cloud hydration runs.
+      await UserNutritionMemory.instance.init();
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
@@ -98,6 +102,7 @@ class PersistenceService {
       await prefs.remove(_kProfile);
       await prefs.remove(_kOnboarding);
       await prefs.remove(_kDayLogs);
+      await prefs.remove('user_meal_overrides_v1'); // nutrition memory
     } catch (_) {}
   }
 }

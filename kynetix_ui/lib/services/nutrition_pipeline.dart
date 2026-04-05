@@ -12,6 +12,7 @@ import '../services/mock_estimation_service.dart'
     LocalEstimationAnalysis,
     NutrientRange;
 import '../services/item_parser.dart';
+import '../services/unit_normalizer.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -78,45 +79,60 @@ class NutritionPipeline {
 
     // ── 2. ITEM-LEVEL MEMORY LOOKUP ─────────────────────────────────────────
     for (final parsed in parsedItems) {
-      final name = parsed.normalizedName;
+      // Normalize quantity and unit to base units (g, ml, or count).
+      // This ensures 0.15 kg == 150 g when matching saved memories.
+      final normParsed = _normalizeParsed(parsed);
+      final name = normParsed.normalizedName;
       
+      // ── USER OVERRIDE (highest priority — hard blocks AI) ─────────────────
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
-        debugPrint('[Pipeline] ✅ USER OVERRIDE for "$name"');
-        finalItems.add(_itemFromMemory(parsed, userOverride, 'user_override'));
+        // Unit-category guard: reject matches across incompatible unit types.
+        // e.g. memory stored in 'g' must not be used for 'ml' input.
+        final storedUnit = UserNutritionMemory.instance.storedUnit(name);
+        if (storedUnit != null &&
+            UnitNormalizer.isMetric(storedUnit) &&
+            UnitNormalizer.isMetric(normParsed.unit) &&
+            !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
+          debugPrint('[Pipeline] ⚠️  unit mismatch: stored=$storedUnit input=${normParsed.unit} for "$name" — skipping memory');
+          needsEstimation.add(normParsed);
+          continue;
+        }
+        debugPrint('[Pipeline] ✅ USER OVERRIDE for "$name" (qty=${normParsed.quantity} ${normParsed.unit}) — AI BLOCKED');
+        finalItems.add(_itemFromMemory(normParsed, userOverride, 'user_override'));
         continue;
       }
 
       final personalExact = PersonalNutritionMemory.instance.lookupExact(name);
       if (personalExact != null) {
         debugPrint('[Pipeline] ✅ PERSONAL EXACT for "$name"');
-        finalItems.add(_itemFromMemory(parsed, personalExact, 'personal_exact'));
+        finalItems.add(_itemFromMemory(normParsed, personalExact, 'personal_exact'));
         continue;
       }
 
       final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(name);
       if (personalTemplate != null) {
         debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE for "$name"');
-        finalItems.add(_itemFromMemory(parsed, personalTemplate, 'personal_template'));
+        finalItems.add(_itemFromMemory(normParsed, personalTemplate, 'personal_template'));
         continue;
       }
 
       final exactKnown = MealMemory.instance.lookupExactKnownFood(name);
       if (exactKnown != null) {
         debugPrint('[Pipeline] ✅ EXACT KNOWN for "$name"');
-        finalItems.add(_itemFromMemory(parsed, exactKnown, 'exact_known'));
+        finalItems.add(_itemFromMemory(normParsed, exactKnown, 'exact_known'));
         continue;
       }
 
       final cached = MealMemory.instance.lookupRecurring(name);
       if (cached != null) {
         debugPrint('[Pipeline] ✅ RECURRING MEMORY for "$name"');
-        finalItems.add(_itemFromMemory(parsed, cached, 'recurring'));
+        finalItems.add(_itemFromMemory(normParsed, cached, 'recurring'));
         continue;
       }
 
-      // If missing from ALL memories, track for explicit estimation
-      needsEstimation.add(parsed);
+      // No memory match — needs AI or local estimation.
+      needsEstimation.add(normParsed);
     }
 
     // ── 3. AI / MOCK ESTIMATION PER ATOMIC ITEM ──────────────────────────────
@@ -191,6 +207,26 @@ class NutritionPipeline {
       warnings: allWarnings,
       source: source,
       createdAt: DateTime.now(),
+    );
+  }
+
+  // ── Normalization helper ───────────────────────────────────────────────────
+
+  /// Returns a copy of [parsed] with quantity and unit normalized to base
+  /// SI units (g or ml).  Non-metric units (scoop, serving, etc.) pass through
+  /// unchanged.  The normalizedName is also cleaned through FoodNameNormalizer.
+  ParsedFoodItem _normalizeParsed(ParsedFoodItem parsed) {
+    final normQty  = UnitNormalizer.normalizeQuantity(parsed.quantity, parsed.unit);
+    final normUnit = UnitNormalizer.normalizeUnit(parsed.unit);
+    final normName = FoodNameNormalizer.normalize(parsed.normalizedName);
+    if (normQty == parsed.quantity && normUnit == parsed.unit && normName == parsed.normalizedName) {
+      return parsed; // already canonical — avoid allocation
+    }
+    return ParsedFoodItem(
+      rawChunk:       parsed.rawChunk,
+      normalizedName: normName,
+      quantity:       normQty,
+      unit:           normUnit,
     );
   }
 

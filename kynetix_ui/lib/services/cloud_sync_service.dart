@@ -80,13 +80,31 @@ class CloudSyncService {
 
       // 3. Hydrate Nutrition Memory
       final memoryResp = await _supabase.from('user_nutrition_memory').select();
+      final cloudOverrides = <UserMealOverride>[];
       for (final row in memoryResp) {
-        final override = UserMealOverride(
-          canonicalMeal: row['canonical_meal'] as String,
-          calories: (row['calories'] as num).toDouble(),
-          protein: (row['protein'] as num).toDouble(),
-        );
-        UserNutritionMemory.instance.saveOverride(override.canonicalMeal, override.calories, override.protein);
+        try {
+          // Support both legacy (calories) and new (caloriesPerUnit) columns.
+          // Supabase rows written by older clients only have 'calories'/'protein';
+          // newer rows have 'calories_per_unit'/'protein_per_unit' etc.
+          final calPerUnit = (row['calories_per_unit'] as num?)?.toDouble()
+              ?? (row['calories'] as num?)?.toDouble()
+              ?? 0.0;
+          final proPerUnit = (row['protein_per_unit'] as num?)?.toDouble()
+              ?? (row['protein'] as num?)?.toDouble()
+              ?? 0.0;
+          cloudOverrides.add(UserMealOverride(
+            canonicalMeal:     row['canonical_meal'] as String,
+            caloriesPerUnit:   calPerUnit,
+            proteinPerUnit:    proPerUnit,
+            referenceQuantity: (row['reference_quantity'] as num?)?.toDouble() ?? 1.0,
+            referenceUnit:     row['reference_unit'] as String? ?? 'serving',
+          ));
+        } catch (e) {
+          debugPrint('[CloudSyncService] Failed to parse memory row: $e');
+        }
+      }
+      if (cloudOverrides.isNotEmpty) {
+        await UserNutritionMemory.instance.mergeFromCloud(cloudOverrides);
       }
 
       debugPrint('[CloudSyncService] Hydration completed.');
@@ -151,18 +169,27 @@ class CloudSyncService {
     }
   }
 
-  /// Fire-and-forget sync for a nutrition memory
+  /// Fire-and-forget sync for a nutrition memory override.
+  /// Writes both new-schema columns (calories_per_unit etc.) and legacy
+  /// aliases (calories, protein) so the Supabase row is readable by any
+  /// client version.
   Future<void> syncMemoryBackground(UserMealOverride memory) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
 
     try {
       await _supabase.from('user_nutrition_memory').upsert({
-        'user_id': userId,
-        'canonical_meal': memory.canonicalMeal,
-        'calories': memory.calories,
-        'protein': memory.protein,
-        'updated_at': DateTime.now().toIso8601String(),
+        'user_id':           userId,
+        'canonical_meal':    memory.canonicalMeal,
+        // New schema columns
+        'calories_per_unit': memory.caloriesPerUnit,
+        'protein_per_unit':  memory.proteinPerUnit,
+        'reference_quantity':memory.referenceQuantity,
+        'reference_unit':    memory.referenceUnit,
+        // Legacy aliases for backward compat with existing rows/clients
+        'calories':          memory.caloriesPerUnit,
+        'protein':           memory.proteinPerUnit,
+        'updated_at':        DateTime.now().toIso8601String(),
       }, onConflict: 'user_id, canonical_meal');
     } catch (e) {
       debugPrint('[CloudSyncService] Background memory sync failed: $e');
