@@ -143,7 +143,14 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         transitionDuration: const Duration(milliseconds: 380),
       ),
     );
-    if (updated != null) _refresh();
+    if (!mounted) return;
+    if (updated is DeleteSentinel) {
+      // User confirmed deletion inside the edit flow — remove from log and sync.
+      _log.remove(entry.section, entry);
+      _refresh();
+    } else if (updated != null) {
+      _refresh();
+    }
   }
 
   String get _dateLabel {

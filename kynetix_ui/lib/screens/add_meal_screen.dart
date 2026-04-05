@@ -7,6 +7,11 @@ import '../services/user_nutrition_memory.dart';
 
 enum _SaveMode { once, recurring }
 
+/// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
+class DeleteSentinel {
+  const DeleteSentinel();
+}
+
 class _FixValues {
   final List<NutritionItem> items;
   final double cal;
@@ -182,8 +187,50 @@ class _AddMealScreenState extends State<AddMealScreen>
     Navigator.of(context).pop(entry);
   }
 
+  /// Shows a confirmation dialog then pops with [_DeleteSentinel] so the
+  /// caller can remove the entry from the log and trigger a sync.
+  Future<void> _deleteEntry() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text(
+          'Delete Entry',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'This meal entry will be permanently removed from your log.',
+          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF6B7280)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      HapticFeedback.heavyImpact();
+      Navigator.of(context).pop(const DeleteSentinel());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.initialEntry != null;
     return Scaffold(
       backgroundColor: const Color(0xFF13131F),
       appBar: AppBar(
@@ -194,7 +241,7 @@ class _AddMealScreenState extends State<AddMealScreen>
           onPressed: () => Navigator.of(context).pop(null),
         ),
         title: Text(
-          widget.initialEntry == null
+          !isEditing
               ? 'Add to ${widget.section.displayName}'
               : 'Edit ${widget.section.displayName}',
           style: const TextStyle(
@@ -204,6 +251,17 @@ class _AddMealScreenState extends State<AddMealScreen>
           ),
         ),
         centerTitle: false,
+        actions: [
+          if (isEditing)
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: Color(0xFFEF4444),
+              ),
+              tooltip: 'Delete entry',
+              onPressed: _deleteEntry,
+            ),
+        ],
       ),
       body: SafeArea(
         child: CustomScrollView(
@@ -341,6 +399,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                       isEditing: widget.initialEntry != null,
                       onConfirm: _confirm,
                       onFix:     _fixEstimate,
+                      onDelete:  widget.initialEntry != null ? _deleteEntry : null,
                     ),
                   ),
                 ),
@@ -360,6 +419,7 @@ class _ResultPreview extends StatelessWidget {
   final bool             isEditing;
   final VoidCallback     onConfirm;
   final VoidCallback     onFix;
+  final VoidCallback?    onDelete;
 
   const _ResultPreview({
     required this.result,
@@ -367,6 +427,7 @@ class _ResultPreview extends StatelessWidget {
     required this.isEditing,
     required this.onConfirm,
     required this.onFix,
+    this.onDelete,
   });
 
   @override
@@ -471,6 +532,39 @@ class _ResultPreview extends StatelessWidget {
                 label: Text(isEditing ? 'Save Changes' : 'Add to Log'),
               ),
             ),
+            if (isEditing && onDelete != null) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onDelete,
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 18,
+                    color: Color(0xFFEF4444),
+                  ),
+                  label: const Text(
+                    'Delete Entry',
+                    style: TextStyle(
+                      color: Color(0xFFEF4444),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(
+                      color: Color(0xFFEF4444),
+                      width: 1.2,
+                    ),
+                    backgroundColor:
+                        const Color(0xFFEF4444).withValues(alpha: 0.06),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -571,6 +665,23 @@ class _ItemRow extends StatelessWidget {
   final NutritionItem item;
   const _ItemRow({required this.item});
 
+  /// Formats quantity cleanly: drops ".0" suffix for whole numbers.
+  /// Examples: 1.0 -> "1", 150.0 -> "150", 1.5 -> "1.5"
+  static String _fmtQty(double qty) {
+    if (qty == qty.truncateToDouble()) return qty.toInt().toString();
+    return qty.toString();
+  }
+
+  /// Builds the display label: "150 g tofu", "1 scoop whey", "2 roti"
+  /// Falls back to just the name when quantity is 0 or unit is empty.
+  String get _displayLabel {
+    final qty = item.quantity;
+    final unit = item.unit.trim();
+    final name = item.name.trim();
+    if (qty <= 0 || unit.isEmpty) return name;
+    return '${_fmtQty(qty)} $unit $name';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -580,9 +691,10 @@ class _ItemRow extends StatelessWidget {
           const Icon(Icons.circle, size: 5, color: Color(0xFF4B5563)),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(item.name,
-                style: const TextStyle(
-                    fontSize: 13, color: Color(0xFF9CA3AF))),
+            child: Text(
+              _displayLabel,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+            ),
           ),
           Text(
             _rangeLabel(item.calories.min, item.calories.max, 'kcal'),

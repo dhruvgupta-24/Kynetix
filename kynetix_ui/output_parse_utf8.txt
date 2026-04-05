@@ -1,0 +1,43 @@
+
+=======================================
+Testing Input: "1 scoop whey with 150g tofu"
+  - ParsedFoodItem(whey, qty: 1.0, unit: scoop)
+  - ParsedFoodItem(tofu, qty: 150.0, unit: g)
+
+=======================================
+Testing Input: "2 roti with 1 ladle rice with chana dal"
+  - ParsedFoodItem(roti, qty: 2.0, unit: serving)
+  - ParsedFoodItem(rice, qty: 1.0, unit: ladle)
+  - ParsedFoodItem(chana dal, qty: 1.0, unit: serving)
+
+=======================================
+Testing Input: "1 dominos pizza slice with 450ml mango shake"
+  - ParsedFoodItem(dominos pizza slice, qty: 1.0, unit: serving)
+  - ParsedFoodItem(mango shake, qty: 450.0, unit: ml)
+
+=======================================
+Testing Input: "paneer with rice"
+  - ParsedFoodItem(paneer, qty: 1.0, unit: serving)
+  - ParsedFoodItem(rice, qty: 1.0, unit: serving)
+
+=======================================
+Testing Input: "dal chawal"
+  - ParsedFoodItem(dal, qty: 1.0, unit: serving)
+  - ParsedFoodItem(chawal, qty: 1.0, unit: serving)
+
+=======================================
+Testing Input: "2 roti"
+  - ParsedFoodItem(roti, qty: 2.0, unit: serving)
+
+=======================================
+Testing Input: "veg fried rice"
+  - ParsedFoodItem(veg fried rice, qty: 1.0, unit: serving)
+
+=======================================
+Testing Input: "bread omelette"
+  - ParsedFoodItem(bread, qty: 1.0, unit: serving)
+  - ParsedFoodItem(omelette, qty: 1.0, unit: serving)
+
+=======================================
+Testing Input: "1/2 plate chicken biryani"
+  - ParsedFoodItem(chicken biryani, qty: 0.5, unit: plate)

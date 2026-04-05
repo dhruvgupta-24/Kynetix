@@ -1,0 +1,228 @@
+
+======================================================
+
+
+==== PIPELINE VALIDATION: "1 scoop whey with 150g tofu" ====
+
+══════════════════════════════════════
+[Pipeline] estimateMeal: "1 scoop whey with 150g tofu"
+[Pipeline] classification: light (No high-density mixed meal signals found)
+[ItemParser] Input: "1 scoop whey with 150g tofu"
+[ItemParser] Raw Chunks: [1 scoop whey, 150g tofu]
+[Pipeline] Extracted 2 items:
+  -> whey (qty: 1.0, unit: scoop)
+  -> tofu (qty: 150.0, unit: g)
+[Pipeline] Estimating unknown atomic item: "scoop whey"
+[Pipeline] 🚀 calling AI for item: "scoop whey"...
+[AI] estimating: "scoop whey"
+[Pipeline] ❌ AI failed for item "scoop whey": TimeoutException after 0:00:20.000000: Future not completed
+[Pipeline] 📦 LOCAL RESULT — reason: AI failed for item
+[Pipeline] Estimating unknown atomic item: "150 g tofu"
+[Pipeline] 🚀 calling AI for item: "150 g tofu"...
+[AI] estimating: "150 g tofu"
+[Pipeline] ❌ AI failed for item "150 g tofu": TimeoutException after 0:00:20.000000: Future not completed
+[Pipeline] 📦 LOCAL RESULT — reason: AI failed for item
+
+FINAL RESULT ITEMS:
+  - whey [qty: 1.0, unit: scoop] -> 108.0-132.0 kcal (mode: contextualIntake)
+  - tofu [qty: 150.0, unit: g] -> 201.0-232.5 kcal (mode: contextualIntake)
+OVERALL CALORIES: 309.0 - 364.5 kcal
+
+
+==== PIPELINE VALIDATION: "2 roti with 1 ladle rice with chana dal" ====
+
+══════════════════════════════════════
+[Pipeline] estimateMeal: "2 roti with 1 ladle rice with chana dal"
+[Pipeline] classification: medium (Matched dal)
+[ItemParser] Input: "2 roti with 1 ladle rice with chana dal"
+[ItemParser] Raw Chunks: [2 roti, 1 ladle rice, chana dal]
+[Pipeline] Extracted 3 items:
+  -> roti (qty: 2.0, unit: serving)
+  -> rice (qty: 1.0, unit: ladle)
+  -> chana dal (qty: 1.0, unit: serving)
+[Pipeline] Estimating unknown atomic item: "2 serving roti"
+[Pipeline] 🚀 calling AI for item: "2 serving roti"...
+[AI] estimating: "2 serving roti"
+[AI] HTTP status: 200
+[AI] raw response (first 600): {
+  "canonicalMeal": "2 roti",
+  "mealCategory": "mixed",
+  "mealDensity": "light",
+  "riskFlags": [],
+  "coachSummary": "Light carb base, needs protein",
+  "bestNextFoods": ["1 scoop whey", "150g tofu", "1 katori dal"],
+  "items": [
+    {
+      "name": "roti",
+      "quantity": 2,
+      "unit": "piece",
+      "estimated": false,
+      "estimationMode": "direct_quantity",
+      "calories": {"min": 180, "max": 220},
+      "protein": {"min": 5.4, "max": 6.6}
+    }
+  ],
+  "calories": {"min": 180, "max": 220},
+  "protein": {"min": 5.4, "max": 6.6},
+  "confidence": 0.92,
+  "warnings": []
+}
+[AI] ✅ parse success: 180–220 kcal  5–6g protein
+[Pipeline] Estimating unknown atomic item: "ladle rice"
+[Pipeline] 🚀 calling AI for item: "ladle rice"...
+[AI] estimating: "ladle rice"
+[Pipeline] ❌ AI failed for item "ladle rice": TimeoutException after 0:00:20.000000: Future not completed
+[Pipeline] 📦 LOCAL RESULT — reason: AI failed for item
+[Pipeline] Estimating unknown atomic item: "chana dal"
+[Pipeline] 🚀 calling AI for item: "chana dal"...
+[AI] estimating: "chana dal"
+[AI] HTTP status: 200
+[AI] raw response (first 600): {
+  "canonicalMeal": "chana dal",
+  "mealCategory": "lunch",
+  "mealDensity": "light",
+  "riskFlags": [],
+  "coachSummary": "Simple protein source",
+  "bestNextFoods": ["1 roti", "100g curd"],
+  "items": [
+    {
+      "name": "chana dal",
+      "quantity": 1,
+      "unit": "serving",
+      "estimated": true,
+      "estimationMode": "contextual_intake",
+      "calories": {"min": 85, "max": 104},
+      "protein": {"min": 4.5, "max": 5.5}
+    }
+  ],
+  "calories": {"min": 85, "max": 104},
+  "protein": {"min": 4.5, "max": 5.5},
+  "confidence": 0.85,
+  "warnings": []
+}
+[AI] ✅ parse success: 85–104 kcal  4–5g protein
+
+FINAL RESULT ITEMS:
+  - roti [qty: 2.0, unit: serving] -> 180.0-220.0 kcal (mode: directQuantity)
+  - rice [qty: 1.0, unit: ladle] -> 135.0-165.0 kcal (mode: contextualIntake)
+  - chana dal [qty: 1.0, unit: serving] -> 85.0-104.0 kcal (mode: contextualIntake)
+OVERALL CALORIES: 400.0 - 489.0 kcal
+
+
+==== PIPELINE VALIDATION: "1 dominos pizza slice with 450ml mango shake" ====
+
+══════════════════════════════════════
+[Pipeline] estimateMeal: "1 dominos pizza slice with 450ml mango shake"
+[Pipeline] classification: light (No high-density mixed meal signals found)
+[ItemParser] Input: "1 dominos pizza slice with 450ml mango shake"
+[ItemParser] Raw Chunks: [1 dominos pizza slice, 450ml mango shake]
+[Pipeline] Extracted 2 items:
+  -> dominos pizza (qty: 1.0, unit: slice)
+  -> mango shake (qty: 450.0, unit: ml)
+[Pipeline] Estimating unknown atomic item: "slice dominos pizza"
+[Pipeline] 🚀 calling AI for item: "slice dominos pizza"...
+[AI] estimating: "slice dominos pizza"
+[AI] HTTP status: 200
+[AI] raw response (first 600): {
+  "canonicalMeal": "Domino's pizza slice",
+  "mealCategory": "mixed",
+  "mealDensity": "dense",
+  "riskFlags": ["hidden_oil", "restaurant_portion"],
+  "coachSummary": "High oil content likely",
+  "bestNextFoods": ["150g tofu", "1 scoop whey"],
+  "items": [
+    {
+      "name": "Domino's pizza slice",
+      "quantity": 1,
+      "unit": "slice",
+      "estimated": true,
+      "estimationMode": "outside_restaurant",
+      "calories": {"min": 230, "max": 290},
+      "protein": {"min": 8, "max": 11}
+    }
+  ],
+  "calories": {"min": 230, "max": 290},
+  "protein": {"min": 8, "max": 11},
+  "confidenc
+[AI] ✅ parse success: 230–290 kcal  8–11g protein
+[Pipeline] Estimating unknown atomic item: "450 ml mango shake"
+[Pipeline] 🚀 calling AI for item: "450 ml mango shake"...
+[AI] estimating: "450 ml mango shake"
+[Pipeline] ❌ AI failed for item "450 ml mango shake": TimeoutException after 0:00:20.000000: Future not completed
+[Pipeline] 📦 LOCAL RESULT — reason: AI failed for item
+
+FINAL RESULT ITEMS:
+  - dominos pizza [qty: 1.0, unit: slice] -> 230.0-290.0 kcal (mode: outsideRestaurant)
+  - mango shake [qty: 450.0, unit: ml] -> 444.0-516.0 kcal (mode: contextualIntake)
+OVERALL CALORIES: 674.0 - 806.0 kcal
+
+
+==== PIPELINE VALIDATION: "paneer with rice" ====
+
+══════════════════════════════════════
+[Pipeline] estimateMeal: "paneer with rice"
+[Pipeline] classification: medium (Matched paneer)
+[ItemParser] Input: "paneer with rice"
+[ItemParser] Raw Chunks: [paneer, rice]
+[Pipeline] Extracted 2 items:
+  -> paneer (qty: 1.0, unit: serving)
+  -> rice (qty: 1.0, unit: serving)
+[Pipeline] Estimating unknown atomic item: "paneer"
+[Pipeline] ✅ LOCAL FINALIZED for "paneer"
+[Pipeline] 📦 LOCAL RESULT — reason: Local passed
+[Pipeline] Estimating unknown atomic item: "rice"
+[Pipeline] ✅ LOCAL FINALIZED for "rice"
+[Pipeline] 📦 LOCAL RESULT — reason: Local passed
+
+FINAL RESULT ITEMS:
+  - paneer [qty: 1.0, unit: serving] -> 216.0-264.0 kcal (mode: contextualIntake)
+  - rice [qty: 1.0, unit: serving] -> 135.0-165.0 kcal (mode: contextualIntake)
+OVERALL CALORIES: 351.0 - 429.0 kcal
+
+
+==== PIPELINE VALIDATION: "dal chawal" ====
+
+══════════════════════════════════════
+[Pipeline] estimateMeal: "dal chawal"
+[Pipeline] classification: medium (Matched dal)
+[ItemParser] Input: "dal chawal"
+[ItemParser] Raw Chunks: [dal, chawal]
+[Pipeline] Extracted 2 items:
+  -> dal (qty: 1.0, unit: serving)
+  -> chawal (qty: 1.0, unit: serving)
+[Pipeline] Estimating unknown atomic item: "dal"
+[Pipeline] 🚀 calling AI for item: "dal"...
+[AI] estimating: "dal"
+[AI] HTTP status: 200
+[AI] raw response (first 600): {
+  "canonicalMeal": "dal",
+  "mealCategory": "mixed",
+  "mealDensity": "light",
+  "riskFlags": [],
+  "coachSummary": "Light dal portion",
+  "bestNextFoods": ["1 roti", "150g tofu"],
+  "items": [
+    {
+      "name": "dal",
+      "quantity": 1,
+      "unit": "ladle",
+      "estimated": true,
+      "estimationMode": "contextual_intake",
+      "calories": {"min": 35, "max": 43},
+      "protein": {"min": 2.3, "max": 2.9}
+    }
+  ],
+  "calories": {"min": 35, "max": 43},
+  "protein": {"min": 2.3, "max": 2.9},
+  "confidence": 0.92,
+  "warnings": []
+}
+[AI] ✅ parse success: 35–43 kcal  2–2g protein
+[Pipeline] Estimating unknown atomic item: "chawal"
+[Pipeline] ✅ LOCAL FINALIZED for "chawal"
+[Pipeline] 📦 LOCAL RESULT — reason: Local passed
+
+FINAL RESULT ITEMS:
+  - dal [qty: 1.0, unit: serving] -> 35.0-43.0 kcal (mode: contextualIntake)
+  - chawal [qty: 1.0, unit: serving] -> 135.0-165.0 kcal (mode: contextualIntake)
+OVERALL CALORIES: 170.0 - 208.0 kcal

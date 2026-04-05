@@ -94,8 +94,13 @@ class AuthService {
     debugPrint('[AuthService] Initializing Native Google Sign-In');
     
     try {
+      final webClientId = SupabaseSecrets.googleWebClientId;
+      final iosClientId = SupabaseSecrets.googleIosClientId;
+      
       final googleSignIn = GoogleSignIn(
-        serverClientId: SupabaseSecrets.googleWebClientId.isNotEmpty ? SupabaseSecrets.googleWebClientId : null,
+        serverClientId: webClientId.isNotEmpty ? webClientId : null,
+        clientId: iosClientId.isNotEmpty ? iosClientId : (webClientId.isNotEmpty ? webClientId : null),
+        scopes: const ['email', 'profile'],
       );
 
       final googleUser = await googleSignIn.signIn();

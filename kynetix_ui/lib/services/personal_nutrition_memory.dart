@@ -201,10 +201,34 @@ class PersonalNutritionMemory {
     } catch (_) {}
   }
 
-  static bool _allKeywordsMatch(String lc, List<String> keywords) {
-    // ALL keywords must be present, not just one.
-    // This prevents "2 roti + rajma" matching a template that requires "dal".
-    return keywords.every(lc.contains);
+  static bool _allKeywordsMatch(String rawInput, List<String> keywords) {
+    if (keywords.isEmpty) return false;
+    
+    final lc = rawInput.toLowerCase();
+    if (!keywords.every(lc.contains)) return false;
+
+    // F1 fuzzy matching to prevent greedy hijacking
+    // (e.g. "1 scoop whey with 150g tofu" matching the "1 scoop whey" template and dropping tofu)
+    final inputTokens = _normalize(rawInput).split(' ')..removeWhere((t) => t.isEmpty);
+    if (inputTokens.isEmpty) return false;
+
+    int matchCount = 0;
+    for (final k in keywords) {
+      if (inputTokens.any((t) => t == k || t.contains(k) || k.contains(t))) {
+        matchCount++;
+      }
+    }
+
+    final recall = matchCount / keywords.length;
+    final precision = matchCount / inputTokens.length;
+
+    double f1 = 0;
+    if (precision + recall > 0) {
+      f1 = 2 * (precision * recall) / (precision + recall);
+    }
+    
+    // We require an F1 score >= 0.85
+    return f1 >= 0.85;
   }
 
   static double _r(double v) => double.parse(v.toStringAsFixed(1));

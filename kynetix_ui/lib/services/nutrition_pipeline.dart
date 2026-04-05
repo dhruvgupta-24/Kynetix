@@ -11,6 +11,7 @@ import '../services/mock_estimation_service.dart'
     analyzeLocalEstimation,
     LocalEstimationAnalysis,
     NutrientRange;
+import '../services/item_parser.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -59,176 +60,188 @@ class NutritionPipeline {
 
     if (trimmed.isEmpty) return _empty();
 
-    final localAnalysis = analyzeLocalEstimation(trimmed);
-    final complexity = _assessComplexity(trimmed, localAnalysis);
-    final localGate = _buildGate(localAnalysis, complexity);
-
-    debugPrint('[Pipeline] local gate: '
-           'match=${localGate.matchConfidence.toStringAsFixed(3)} '
-           'coverage=${localGate.coverageConfidence.toStringAsFixed(3)} '
-           'overall=${localGate.overallConfidence.toStringAsFixed(3)} '
-           'complexity=${complexity.score} flags=${complexity.flags.join(', ')}');
-
-    // ── 0. User override (highest priority) ─────────────────────────────────
-    final userOverride = UserNutritionMemory.instance.lookup(trimmed);
-    if (userOverride != null) {
-      debugPrint('[Pipeline] ✅ USER OVERRIDE — '
-                 '"${userOverride.canonicalMeal}" '
-                 '${userOverride.calories.min.toInt()} kcal / '
-                 '${userOverride.protein.min.toStringAsFixed(1)}g protein');
-      return userOverride;
+    // ── 1. SPLIT & PARSE INTO ATOMIC ITEMS ─────────────────────────────────
+    final parsedItems = ItemParser.parse(trimmed);
+    debugPrint('[Pipeline] Extracted ${parsedItems.length} items:');
+    for (final p in parsedItems) {
+      debugPrint('  -> ${p.normalizedName} (qty: ${p.quantity}, unit: ${p.unit})');
     }
 
-    // ── 1. Personal exact match ─────────────────────────────────────────────
-    final personalExact = PersonalNutritionMemory.instance.lookupExact(trimmed);
-    if (personalExact != null) {
-      debugPrint('[Pipeline] ✅ PERSONAL EXACT — '
-                 '"${personalExact.canonicalMeal}" '
-                 '${personalExact.calories.min.toInt()} kcal / '
-                 '${personalExact.protein.min.toStringAsFixed(1)}g protein');
-      return personalExact;
-    }
+    final finalItems = <NutritionItem>[];
+    double sumCalMin = 0, sumCalMax = 0;
+    double sumProMin = 0, sumProMax = 0;
+    final allWarnings = <String>[];
+    bool aiUsed = false;
+    bool localHybridUsed = false;
+    
+    final needsEstimation = <ParsedFoodItem>[];
 
-    // ── 2. Personal template match ──────────────────────────────────────────
-    final personalTemplate =
-        PersonalNutritionMemory.instance.lookupTemplate(trimmed);
-    if (personalTemplate != null) {
-      debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE — '
-                 '"${personalTemplate.canonicalMeal}" '
-                 '${personalTemplate.calories.min.toInt()} kcal / '
-                 '${personalTemplate.protein.min.toStringAsFixed(1)}g protein');
-      return personalTemplate;
-    }
-
-    // ── 3. App-wide exact known foods ───────────────────────────────────────
-    final exactKnown = MealMemory.instance.lookupExactKnownFood(trimmed);
-    if (exactKnown != null) {
-      debugPrint('[Pipeline] ✅ EXACT KNOWN FOOD — '
-                 '${exactKnown.calories.min.toInt()} kcal');
-      return exactKnown;
-    }
-
-    // ── 4. Recurring AI-confirmed memory ────────────────────────────────────
-    final cached = MealMemory.instance.lookupRecurring(trimmed);
-    if (cached != null) {
-      debugPrint('[Pipeline] ✅ RECURRING MEMORY — '
-                 '${cached.calories.min.toInt()}–${cached.calories.max.toInt()} kcal');
-      return cached;
-    }
-
-    if (localGate.shouldFinalizeLocal) {
-      debugPrint('[Pipeline] ✅ LOCAL FINALIZED via confidence gate');
-      return _applyItemLevelOverrides(_finalizeLocal(
-        trimmed,
-        localAnalysis,
-        classification: classification,
-        fallbackReason: 'Hybrid local confidence gate passed',
-      ));
-    }
-
-    debugPrint('[Pipeline] local gate failed → escalating to AI verifier/refiner');
-
-    // ── 5. AI verification / refinement ─────────────────────────────────────
-    if (AiNutritionService.instance.isConfigured) {
-      debugPrint('[Pipeline] 🚀 calling AI (${AiNutritionService.modelName})...');
-      try {
-        final raw = await AiNutritionService.instance.estimateWithContext(
-          trimmed,
-          context: AiEscalationContext(
-            localInterpretation: _localInterpretation(localAnalysis),
-            localMatchConfidence: localGate.matchConfidence,
-            localCoverageConfidence: localGate.coverageConfidence,
-            overallLocalConfidence: localGate.overallConfidence,
-            flags: complexity.flags,
-          ),
-        );
-        final result = NutritionGuardrails.apply(
-          raw,
-          trimmed,
-          classification: classification,
-        ).normalizedUncertainty();
-        debugPrint('[Pipeline] ✅ AI result: "${result.canonicalMeal}" | '
-                   '${result.calories.min.toInt()}–${result.calories.max.toInt()} kcal | '
-                   'conf=${result.confidence}');
-        final finalResult = _applyItemLevelOverrides(result);
-        await MealMemory.instance.storeAiCandidate(trimmed, finalResult);
-        return finalResult;
-      } catch (e) {
-        debugPrint('[Pipeline] ❌ AI failed: $e');
-        return _applyItemLevelOverrides(_finalizeLocal(
-          trimmed,
-          localAnalysis,
-          classification: classification,
-          fallbackReason: 'AI escalation required; AI failed: $e',
-        ));
+    // ── 2. ITEM-LEVEL MEMORY LOOKUP ─────────────────────────────────────────
+    for (final parsed in parsedItems) {
+      final name = parsed.normalizedName;
+      
+      final userOverride = UserNutritionMemory.instance.lookup(name);
+      if (userOverride != null) {
+        debugPrint('[Pipeline] ✅ USER OVERRIDE for "$name"');
+        finalItems.add(_itemFromMemory(parsed, userOverride, 'user_override'));
+        continue;
       }
+
+      final personalExact = PersonalNutritionMemory.instance.lookupExact(name);
+      if (personalExact != null) {
+        debugPrint('[Pipeline] ✅ PERSONAL EXACT for "$name"');
+        finalItems.add(_itemFromMemory(parsed, personalExact, 'personal_exact'));
+        continue;
+      }
+
+      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(name);
+      if (personalTemplate != null) {
+        debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE for "$name"');
+        finalItems.add(_itemFromMemory(parsed, personalTemplate, 'personal_template'));
+        continue;
+      }
+
+      final exactKnown = MealMemory.instance.lookupExactKnownFood(name);
+      if (exactKnown != null) {
+        debugPrint('[Pipeline] ✅ EXACT KNOWN for "$name"');
+        finalItems.add(_itemFromMemory(parsed, exactKnown, 'exact_known'));
+        continue;
+      }
+
+      final cached = MealMemory.instance.lookupRecurring(name);
+      if (cached != null) {
+        debugPrint('[Pipeline] ✅ RECURRING MEMORY for "$name"');
+        finalItems.add(_itemFromMemory(parsed, cached, 'recurring'));
+        continue;
+      }
+
+      // If missing from ALL memories, track for explicit estimation
+      needsEstimation.add(parsed);
     }
 
-    // ── 6. Local fallback ───────────────────────────────────────────────────
-    return _applyItemLevelOverrides(_finalizeLocal(
-      trimmed,
-      localAnalysis,
-      classification: classification,
-      fallbackReason: 'AI escalation required but OPENROUTER_API_KEY not configured',
-    ));
-  }
+    // ── 3. AI / MOCK ESTIMATION PER ATOMIC ITEM ──────────────────────────────
+    for (final parsed in needsEstimation) {
+      // Re-stitch item specific string for the estimator engine. 
+      // It relies on qty + unit + name context. e.g "1 scoop whey"
+      final itemStr = _constructItemString(parsed);
+      debugPrint('[Pipeline] Estimating unknown atomic item: "$itemStr"');
 
-  NutritionResult _applyItemLevelOverrides(NutritionResult result) {
-    if (result.items.isEmpty) return result;
+      final localAnalysis = analyzeLocalEstimation(itemStr);
+      final complexity = _assessComplexity(itemStr, localAnalysis);
+      final localGate = _buildGate(localAnalysis, complexity);
 
-    bool hasOverride = false;
-    final updatedItems = <NutritionItem>[];
-
-    double totalCalMin = 0;
-    double totalCalMax = 0;
-    double totalProMin = 0;
-    double totalProMax = 0;
-
-    for (final item in result.items) {
-      final override = UserNutritionMemory.instance.lookup(item.name);
-      if (override != null) {
-        hasOverride = true;
-        updatedItems.add(NutritionItem(
-          name: item.name,
-          quantity: item.quantity,
-          unit: item.unit,
-          estimated: item.estimated,
-          mode: item.mode,
-          calories: override.calories,
-          protein: override.protein,
-        ));
-        totalCalMin += override.calories.min;
-        totalCalMax += override.calories.max;
-        totalProMin += override.protein.min;
-        totalProMax += override.protein.max;
+      if (localGate.shouldFinalizeLocal) {
+        debugPrint('[Pipeline] ✅ LOCAL FINALIZED for "$itemStr"');
+        final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'Local passed');
+        final item = _pullBestItem(localResult, parsed);
+        finalItems.add(item);
+        localHybridUsed = true;
       } else {
-        updatedItems.add(item);
-        totalCalMin += item.calories.min;
-        totalCalMax += item.calories.max;
-        totalProMin += item.protein.min;
-        totalProMax += item.protein.max;
+        if (AiNutritionService.instance.isConfigured) {
+          debugPrint('[Pipeline] 🚀 calling AI for item: "$itemStr"...');
+          try {
+            final raw = await AiNutritionService.instance.estimateWithContext(
+              itemStr,
+              context: AiEscalationContext(
+                localInterpretation: _localInterpretation(localAnalysis),
+                localMatchConfidence: localGate.matchConfidence,
+                localCoverageConfidence: localGate.coverageConfidence,
+                overallLocalConfidence: localGate.overallConfidence,
+                flags: complexity.flags,
+              ),
+            );
+            final aiResult = NutritionGuardrails.apply(raw, itemStr, classification: classification).normalizedUncertainty();
+            final item = _pullBestItem(aiResult, parsed);
+            finalItems.add(item);
+            aiUsed = true;
+          } catch (e) {
+            debugPrint('[Pipeline] ❌ AI failed for item "$itemStr": $e');
+            final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI failed for item');
+            final item = _pullBestItem(localResult, parsed);
+            finalItems.add(item);
+            localHybridUsed = true;
+          }
+        } else {
+          final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'No AI key');
+          final item = _pullBestItem(localResult, parsed);
+          finalItems.add(item);
+          localHybridUsed = true;
+        }
       }
     }
 
-    if (!hasOverride) return result;
+    // ── 4. AGGREGATION ───────────────────────────────────────────────────────
+    for (final item in finalItems) {
+      sumCalMin += item.calories.min;
+      sumCalMax += item.calories.max;
+      sumProMin += item.protein.min;
+      sumProMax += item.protein.max;
+    }
 
-    debugPrint('[Pipeline] 🔄 item-level override applied for ${result.canonicalMeal}');
+    String source = 'user_override';
+    if (aiUsed) source = 'ai';
+    else if (localHybridUsed) source = 'local_hybrid';
 
     return NutritionResult(
-        canonicalMeal:  result.canonicalMeal,
-        items:          updatedItems,
-        calories:       NutrientRange(min: totalCalMin, max: totalCalMax),
-        protein:        NutrientRange(min: totalProMin, max: totalProMax),
-        confidence:     0.99,
-        warnings:       [...result.warnings, 'Applied granular item memories'],
-        coachSummary:   result.coachSummary,
-        bestNextFoods:  result.bestNextFoods,
-        mealCategory:   result.mealCategory,
-        mealDensity:    result.mealDensity,
-        riskFlags:      result.riskFlags,
-        source:         'user_override',
-        createdAt:      result.createdAt,
-        fallbackReason: result.fallbackReason,
+      canonicalMeal: trimmed,
+      items: finalItems,
+      calories: NutrientRange(min: sumCalMin, max: sumCalMax),
+      protein: NutrientRange(min: sumProMin, max: sumProMax),
+      confidence: aiUsed ? 0.95 : 0.90, // simplify for aggregate
+      warnings: allWarnings,
+      source: source,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  String _constructItemString(ParsedFoodItem parsed) {
+    if (parsed.quantity == 1.0 && parsed.unit == 'serving') return parsed.normalizedName;
+    if (parsed.quantity == 1.0) return '${parsed.unit} ${parsed.normalizedName}'.trim();
+    String formattedQty = parsed.quantity == parsed.quantity.toInt() ? '${parsed.quantity.toInt()}' : '${parsed.quantity}';
+    return '$formattedQty ${parsed.unit} ${parsed.normalizedName}'.trim();
+  }
+
+  NutritionItem _itemFromMemory(ParsedFoodItem parsed, NutritionResult mem, String sourceStr) {
+    final scale = parsed.quantity;
+    return NutritionItem(
+      name: parsed.normalizedName,
+      quantity: parsed.quantity,
+      unit: parsed.unit,
+      estimated: true,
+      mode: mem.items.isNotEmpty ? mem.items.first.mode : EstimationMode.packagedKnown,
+      calories: NutrientRange(min: mem.calories.min * scale, max: mem.calories.max * scale),
+      protein: NutrientRange(min: mem.protein.min * scale, max: mem.protein.max * scale),
+    );
+  }
+
+  NutritionItem _pullBestItem(NutritionResult result, ParsedFoodItem parsed) {
+    if (result.items.isEmpty) {
+      return NutritionItem(
+        name: parsed.normalizedName,
+        quantity: parsed.quantity,
+        unit: parsed.unit,
+        estimated: true,
+        mode: EstimationMode.directQuantity,
+        calories: result.calories,
+        protein: result.protein,
+      );
+    }
+    
+    // Bundle mock-separated logic pieces logically tracking atomic components
+    double cMin = 0, cMax = 0, pMin = 0, pMax = 0;
+    for (final i in result.items) {
+      cMin += i.calories.min; cMax += i.calories.max;
+      pMin += i.protein.min; pMax += i.protein.max;
+    }
+
+    return NutritionItem(
+      name: parsed.normalizedName,
+      quantity: parsed.quantity,
+      unit: parsed.unit,
+      estimated: true,
+      mode: result.items.first.mode,
+      calories: NutrientRange(min: cMin, max: cMax),
+      protein: NutrientRange(min: pMin, max: pMax),
     );
   }
 
