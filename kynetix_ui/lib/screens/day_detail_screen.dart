@@ -168,18 +168,59 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   /// Engine-computed target for this day.
   /// Recomputes on every rebuild so gym toggle takes effect instantly.
-  /// Priority: actual logged session > gymDay workoutType > plain toggle.
+  ///
+  /// Priority order:
+  ///   1. Actual logged WorkoutSession (highest truth — real volume/sets)
+  ///   2. log.gymDay (user manually toggled / type-selected today)
+  ///   3. WorkoutService split config for this date (auto-prefill)
+  ///   4. Rest day fallback
   DayTarget? get _dayTarget {
     final profile = currentUserProfile;
     if (profile == null) return null;
+
+    // Actual logged session — always highest priority.
     final session = WorkoutService.instance.sessionFor(widget.date);
-    final gymDay  = _log.gymDay;
+
+    // Configured split for this weekday.
+    final splitDay = WorkoutService.instance.splitDayFor(widget.date);
+    final splitIsTraining = splitDay != null && !splitDay.isRestDay;
+
+    // log.gymDay captures the user's current manual choice.
+    final gymDay = _log.gymDay;
+
+    // isGymDay: true if session logged, user toggled yes, OR split says training.
+    // If the user explicitly toggled No (gymDay.didGym == false && gymDay != null),
+    // that is a deliberate override — honour it.
+    final bool isGymDay;
+    if (gymDay != null) {
+      // User has explicitly set a state — respect it.
+      isGymDay = gymDay.didGym || (session?.isEmpty == false);
+    } else {
+      // No user choice yet — use split default.
+      isGymDay = splitIsTraining || (session?.isEmpty == false);
+    }
+
+    // Best available workout type name:
+    //   session name > user-chosen type > split day name
+    final String? workoutTypeName;
+    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+      workoutTypeName = session.splitDayName;
+    } else if (gymDay?.workoutType != null) {
+      workoutTypeName = gymDay!.workoutType!.displayName;
+    } else if (gymDay?.splitDayName != null) {
+      workoutTypeName = gymDay!.splitDayName;
+    } else if (splitDay != null && !splitDay.isRestDay) {
+      workoutTypeName = splitDay.name;
+    } else {
+      workoutTypeName = null;
+    }
+
     return NutritionTargetEngine().dayTarget(
       profile,
-      isGymDay:        gymDay?.didGym ?? false,
+      isGymDay:        isGymDay,
       health:          widget.health,
       session:         session,
-      workoutTypeName: gymDay?.workoutType?.displayName,
+      workoutTypeName: workoutTypeName,
     );
   }
 
@@ -258,7 +299,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           ],
 
           // ── Gym tracking ──────────────────────────────────────
-          _GymCard(log: _log, onChanged: _refresh),
+          _GymCard(log: _log, date: widget.date, onChanged: _refresh),
           const SizedBox(height: 4),
           ...MealSection.values.map(
             (section) => _MealSectionCard(
@@ -278,29 +319,68 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   }
 }
 
-// ─── Gym tracking card ────────────────────────────────────────────────────────
+// ─── Gym tracking card ─────────────────────────────────────────────────────────────────
 
 class _GymCard extends StatelessWidget {
-  final DayLog log;
+  final DayLog      log;
+  final DateTime    date;
   final VoidCallback onChanged;
-  const _GymCard({required this.log, required this.onChanged});
+  const _GymCard({
+    required this.log,
+    required this.date,
+    required this.onChanged,
+  });
+
+  // ── Effective gym state ──────────────────────────────────────────────────────
+
+  /// Returns the current GymDay, prefilling from the configured split when the
+  /// user has not yet explicitly set a gym state for this date.
+  ///
+  /// Auto-prefill logic:
+  ///   If log.gymDay == null AND the configured split for this weekday is a
+  ///   training day, synthesise a GymDay from the split:
+  ///     - didGym = true
+  ///     - workoutType = WorkoutType.fromSplitName(splitDay.name)
+  ///     - splitDayName = splitDay.name
+  ///     - splitOverridden = false  ← marks it as a prefill, not a manual choice
+  ///
+  /// This synthesised value is NOT persisted to log.gymDay — persistence only
+  /// happens when the user interacts (toggleGym / selectType).
+  GymDay _effectiveGymDay() {
+    if (log.gymDay != null) return log.gymDay!;
+
+    final splitDay = WorkoutService.instance.splitDayFor(date);
+    if (splitDay == null || splitDay.isRestDay) {
+      return const GymDay(didGym: false);
+    }
+
+    return GymDay(
+      didGym:          true,
+      workoutType:     WorkoutType.fromSplitName(splitDay.name),
+      splitDayName:    splitDay.name,
+      splitOverridden: false,
+    );
+  }
 
   void _toggleGym(bool didGym) {
-    log.gymDay = didGym
-        ? const GymDay(didGym: true)
-        : const GymDay(didGym: false);
+    // Preserve split context when the user explicitly toggles.
+    final existing = _effectiveGymDay();
+    log.gymDay = existing.withGym(didGym);
     onChanged();
   }
 
   void _selectType(WorkoutType t) {
-    log.gymDay = GymDay(didGym: true, workoutType: t);
+    // Preserve split context; mark as user-overridden.
+    final existing = _effectiveGymDay();
+    log.gymDay = existing.withUserType(t);
     onChanged();
   }
 
   @override
   Widget build(BuildContext context) {
-    final gym = log.gymDay;
-    final didGym = gym?.didGym ?? false;
+    final gym    = _effectiveGymDay();
+    final didGym = gym.didGym;
+    final isPrefilled = log.gymDay == null && didGym;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -320,16 +400,31 @@ class _GymCard extends StatelessWidget {
           // Header row with toggle
           Row(
             children: [
-              Text(didGym ? '🏋️' : '💤', style: const TextStyle(fontSize: 18)),
+              Text(didGym ? '🏋️' : '💤',
+                  style: const TextStyle(fontSize: 18)),
               const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  'Gym / Workout',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Gym / Workout',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (isPrefilled && gym.splitDayName != null)
+                      Text(
+                        '• ${gym.splitDayName} (from split)',
+                        style: const TextStyle(
+                          color: Color(0xFF52B788),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               // Yes / No toggle
@@ -357,8 +452,10 @@ class _GymCard extends StatelessWidget {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: WorkoutType.values.map((t) {
-                final selected = gym?.workoutType == t;
+              children: WorkoutType.values
+                  .where((t) => t != WorkoutType.rest)
+                  .map((t) {
+                final selected = gym.workoutType == t;
                 return GestureDetector(
                   onTap: () => _selectType(t),
                   child: Container(

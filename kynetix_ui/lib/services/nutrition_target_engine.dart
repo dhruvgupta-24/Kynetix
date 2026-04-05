@@ -248,16 +248,24 @@ class NutritionTargetEngine {
     String? workoutTypeName,
     required bool isTraining,
   }) {
+    // 1. Actual logged session name (highest truth)
     if (session != null && !session.isEmpty) {
       final name = session.splitDayName;
       if (name.isNotEmpty && name != 'Custom Workout') return '$name Day';
     }
-    if (workoutTypeName != null && workoutTypeName.isNotEmpty &&
-        workoutTypeName != 'Rest' && workoutTypeName != 'Other') {
+    // 2. workoutTypeName can be the full split day name (e.g. "Chest + Triceps")
+    //    or the coarse enum name ("Push", "Cardio").  Either way, show it.
+    if (workoutTypeName != null &&
+        workoutTypeName.isNotEmpty &&
+        workoutTypeName != 'Rest' &&
+        workoutTypeName != 'Other') {
+      // Avoid double "Day Day" for names already ending in "Day".
+      if (workoutTypeName.endsWith('Day')) return workoutTypeName;
       return '$workoutTypeName Day';
     }
     return isTraining ? 'Training Day' : 'Rest Day';
   }
+
 
   // ── Core formulas ─────────────────────────────────────────────────────────
 

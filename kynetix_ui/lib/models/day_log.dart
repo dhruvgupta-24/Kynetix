@@ -22,38 +22,109 @@ enum WorkoutType {
       };
 
   String get emoji => switch (this) {
-        WorkoutType.push   => '🫸',
-        WorkoutType.pull   => '🫷',
+        WorkoutType.push   => '\u{1FAB8}',
+        WorkoutType.pull   => '\u{1FAB7}',
         WorkoutType.legs   => '🦵',
         WorkoutType.upper  => '💪',
         WorkoutType.cardio => '🏃',
         WorkoutType.rest   => '😴',
         WorkoutType.other  => '🏋️',
       };
+
+  /// Map a free-text split-day name to the nearest WorkoutType for UI chips
+  /// and calorie cycle categorisation.  Non-exact matches fall through to
+  /// [other] rather than null so callers never need to guard.
+  static WorkoutType fromSplitName(String name) {
+    final lc = name.toLowerCase();
+    if (lc.contains('push') || lc.contains('chest') || lc.contains('tricep')) {
+      return WorkoutType.push;
+    }
+    if (lc.contains('pull') || lc.contains('back') || lc.contains('bicep')) {
+      return WorkoutType.pull;
+    }
+    if (lc.contains('leg') || lc.contains('quad') || lc.contains('hamstring') ||
+        lc.contains('glute')) {
+      return WorkoutType.legs;
+    }
+    if (lc.contains('upper') || lc.contains('shoulder') || lc.contains('delt')) {
+      return WorkoutType.upper;
+    }
+    if (lc.contains('cardio') || lc.contains('run') || lc.contains('cycle') ||
+        lc.contains('swim')) {
+      return WorkoutType.cardio;
+    }
+    if (lc.contains('rest')) {
+      return WorkoutType.rest;
+    }
+    return WorkoutType.other;
+  }
 }
+
 
 // ─── GymDay ───────────────────────────────────────────────────────────────────
 
 class GymDay {
   final bool         didGym;
   final WorkoutType? workoutType;
-  // TODO(WorkoutV2): add trainingIntensity ∈ {low, moderate, high} and
-  // sessionDurationMinutes for dynamic calorie adjustment per workout day.
 
-  const GymDay({required this.didGym, this.workoutType});
+  /// Raw split-day name from the configured WorkoutSplit
+  /// (e.g. "Chest + Triceps", "Back + Biceps", "Legs", "Push", "Pull").
+  /// Set automatically from the split; never null when derived from split.
+  /// Preserved across user type-overrides so the engine always has context.
+  final String? splitDayName;
+
+  /// True when the user manually changed the workout type from the split
+  /// default. Used to distinguish a deliberate override from a prefill.
+  final bool splitOverridden;
+
+  const GymDay({
+    required this.didGym,
+    this.workoutType,
+    this.splitDayName,
+    this.splitOverridden = false,
+  });
+
+  /// Returns a copy with the user's manually-chosen workout type.
+  GymDay withUserType(WorkoutType t) => GymDay(
+    didGym:          true,
+    workoutType:     t,
+    splitDayName:    splitDayName,   // preserve split context
+    splitOverridden: true,
+  );
+
+  /// Returns a copy that marks the day as gym without changing the split prefill.
+  GymDay withGym(bool did) => GymDay(
+    didGym:          did,
+    workoutType:     did ? workoutType : null,
+    splitDayName:    splitDayName,
+    splitOverridden: did ? splitOverridden : false,
+  );
 
   Map<String, dynamic> toJson() => {
-    'didGym':      didGym,
-    if (workoutType != null) 'workoutType': workoutType!.name,
+    'didGym':          didGym,
+    if (workoutType  != null) 'workoutType':     workoutType!.name,
+    if (splitDayName != null) 'splitDayName':    splitDayName,
+    if (splitOverridden)      'splitOverridden': splitOverridden,
   };
 
   factory GymDay.fromJson(Map<String, dynamic> j) => GymDay(
-    didGym:      j['didGym'] as bool? ?? false,
-    workoutType: j['workoutType'] != null
-        ? WorkoutType.values.byName(j['workoutType'] as String)
+    didGym:          j['didGym']          as bool?   ?? false,
+    workoutType:     j['workoutType'] != null
+        ? _safeWorkoutType(j['workoutType'] as String)
         : null,
+    splitDayName:    j['splitDayName']    as String?,
+    splitOverridden: j['splitOverridden'] as bool?   ?? false,
   );
+
+  static WorkoutType? _safeWorkoutType(String name) {
+    try {
+      return WorkoutType.values.byName(name);
+    } catch (_) {
+      return null;
+    }
+  }
 }
+
 
 // ─── Meal sections ────────────────────────────────────────────────────────────
 

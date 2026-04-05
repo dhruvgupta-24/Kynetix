@@ -83,55 +83,98 @@ class NutritionPipeline {
       // This ensures 0.15 kg == 150 g when matching saved memories.
       final normParsed = _normalizeParsed(parsed);
       final name = normParsed.normalizedName;
-      
-      // ── USER OVERRIDE (highest priority — hard blocks AI) ─────────────────
+
+      // ── USER OVERRIDE ───────────────────────────────────────────────────────────
+      // Source: stores PER-UNIT-1 values. MUST scale by normParsed.quantity.
+      // Hard blocks AI when matched. Unit-category guard applied.
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
-        // Unit-category guard: reject matches across incompatible unit types.
-        // e.g. memory stored in 'g' must not be used for 'ml' input.
         final storedUnit = UserNutritionMemory.instance.storedUnit(name);
         if (storedUnit != null &&
             UnitNormalizer.isMetric(storedUnit) &&
             UnitNormalizer.isMetric(normParsed.unit) &&
             !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
-          debugPrint('[Pipeline] ⚠️  unit mismatch: stored=$storedUnit input=${normParsed.unit} for "$name" — skipping memory');
+          debugPrint('[Pipeline] ⚠️  unit mismatch: stored=$storedUnit '
+              'input=${normParsed.unit} for "$name" — skipping user memory');
           needsEstimation.add(normParsed);
           continue;
         }
-        debugPrint('[Pipeline] ✅ USER OVERRIDE for "$name" (qty=${normParsed.quantity} ${normParsed.unit}) — AI BLOCKED');
-        finalItems.add(_itemFromMemory(normParsed, userOverride, 'user_override'));
-        continue;
+        final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline] ✅ USER OVERRIDE "$name" '
+              '(${normParsed.quantity} ${normParsed.unit}) — AI BLOCKED');
+          finalItems.add(candidate);
+          continue;
+        } else {
+          debugPrint('[Pipeline] 🚨 USER OVERRIDE REJECTED (insane value) '
+              '"$name" — falling through to estimation');
+        }
       }
 
-      final personalExact = PersonalNutritionMemory.instance.lookupExact(name);
+      // ── PERSONAL EXACT ─────────────────────────────────────────────────────────
+      // Source: returns TOTAL calories for the full portion already.
+      // MUST NOT scale by quantity. Use result directly.
+      final personalExact = PersonalNutritionMemory.instance.lookupExact(
+          _constructItemString(normParsed));
       if (personalExact != null) {
-        debugPrint('[Pipeline] ✅ PERSONAL EXACT for "$name"');
-        finalItems.add(_itemFromMemory(normParsed, personalExact, 'personal_exact'));
-        continue;
+        final candidate = _itemFromPortionMemory(normParsed, personalExact);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline] ✅ PERSONAL EXACT "$name"');
+          finalItems.add(candidate);
+          continue;
+        } else {
+          debugPrint('[Pipeline] 🚨 PERSONAL EXACT REJECTED (insane) "$name"');
+        }
       }
 
-      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(name);
+      // ── PERSONAL TEMPLATE ─────────────────────────────────────────────────────────
+      // Same: returns TOTAL portion values. Do NOT scale.
+      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(
+          _constructItemString(normParsed));
       if (personalTemplate != null) {
-        debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE for "$name"');
-        finalItems.add(_itemFromMemory(normParsed, personalTemplate, 'personal_template'));
-        continue;
+        final candidate = _itemFromPortionMemory(normParsed, personalTemplate);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE "$name"');
+          finalItems.add(candidate);
+          continue;
+        } else {
+          debugPrint('[Pipeline] 🚨 PERSONAL TEMPLATE REJECTED (insane) "$name"');
+        }
       }
 
-      final exactKnown = MealMemory.instance.lookupExactKnownFood(name);
+      // ── EXACT KNOWN FOOD ─────────────────────────────────────────────────────────
+      // Source: returns TOTAL portion values. Do NOT scale.
+      final exactKnown = MealMemory.instance.lookupExactKnownFood(
+          _constructItemString(normParsed));
       if (exactKnown != null) {
-        debugPrint('[Pipeline] ✅ EXACT KNOWN for "$name"');
-        finalItems.add(_itemFromMemory(normParsed, exactKnown, 'exact_known'));
-        continue;
+        final candidate = _itemFromPortionMemory(normParsed, exactKnown);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline] ✅ EXACT KNOWN "$name"');
+          finalItems.add(candidate);
+          continue;
+        } else {
+          debugPrint('[Pipeline] 🚨 EXACT KNOWN REJECTED (insane) "$name"');
+        }
       }
 
-      final cached = MealMemory.instance.lookupRecurring(name);
+      // ── RECURRING MEMORY ──────────────────────────────────────────────────────────
+      // Source: stores the FULL meal NutritionResult (promoted AI candidates).
+      // Value semantics: represents the exact rawInput, not per-unit.
+      // Do NOT scale. Use result directly.
+      final cached = MealMemory.instance.lookupRecurring(
+          _constructItemString(normParsed));
       if (cached != null) {
-        debugPrint('[Pipeline] ✅ RECURRING MEMORY for "$name"');
-        finalItems.add(_itemFromMemory(normParsed, cached, 'recurring'));
-        continue;
+        final candidate = _itemFromPortionMemory(normParsed, cached);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline] ✅ RECURRING MEMORY "$name"');
+          finalItems.add(candidate);
+          continue;
+        } else {
+          debugPrint('[Pipeline] 🚨 RECURRING MEMORY REJECTED (insane) "$name" ${candidate.calories.max.toStringAsFixed(0)} kcal');
+        }
       }
 
-      // No memory match — needs AI or local estimation.
+      // No valid memory match — needs AI or local estimation.
       needsEstimation.add(normParsed);
     }
 
@@ -237,17 +280,103 @@ class NutritionPipeline {
     return '$formattedQty ${parsed.unit} ${parsed.normalizedName}'.trim();
   }
 
-  NutritionItem _itemFromMemory(ParsedFoodItem parsed, NutritionResult mem, String sourceStr) {
-    final scale = parsed.quantity;
+  // ── Memory helpers ───────────────────────────────────────────────────
+
+  /// FOR USER OVERRIDE MEMORY ONLY.
+  /// Memory stores PER-UNIT-1 values (e.g. 2 kcal per gram).
+  /// Result is scaled by normParsed.quantity to get total for this portion.
+  /// e.g. 2 kcal/g × 150 g = 300 kcal.
+  NutritionItem _itemFromPerUnitMemory(
+      ParsedFoodItem parsed, NutritionResult mem) {
+    final scale = parsed.quantity.clamp(0.0, double.infinity);
+    if (scale == 0) {
+      // Guard: avoid zero-scale resulting in 0 kcal misleadingly.
+      return _itemFromPortionMemory(parsed, mem);
+    }
     return NutritionItem(
-      name: parsed.normalizedName,
-      quantity: parsed.quantity,
-      unit: parsed.unit,
+      name:      parsed.normalizedName,
+      quantity:  parsed.quantity,
+      unit:      parsed.unit,
       estimated: true,
-      mode: mem.items.isNotEmpty ? mem.items.first.mode : EstimationMode.packagedKnown,
-      calories: NutrientRange(min: mem.calories.min * scale, max: mem.calories.max * scale),
-      protein: NutrientRange(min: mem.protein.min * scale, max: mem.protein.max * scale),
+      mode: mem.items.isNotEmpty
+          ? mem.items.first.mode
+          : EstimationMode.packagedKnown,
+      calories: NutrientRange(
+          min: mem.calories.min * scale, max: mem.calories.max * scale),
+      protein: NutrientRange(
+          min: mem.protein.min * scale, max: mem.protein.max * scale),
     );
+  }
+
+  /// FOR PersonalNutritionMemory, MealMemory.lookupExactKnownFood,
+  /// and MealMemory.lookupRecurring.
+  /// These sources return TOTAL calories for the full queried portion
+  /// (they already include quantity in their stored value).
+  /// MUST NOT scale by quantity — use the result directly.
+  NutritionItem _itemFromPortionMemory(
+      ParsedFoodItem parsed, NutritionResult mem) {
+    // Sum items if present, otherwise use top-level totals.
+    double cMin = 0, cMax = 0, pMin = 0, pMax = 0;
+    if (mem.items.isNotEmpty) {
+      for (final i in mem.items) {
+        cMin += i.calories.min; cMax += i.calories.max;
+        pMin += i.protein.min;  pMax += i.protein.max;
+      }
+    } else {
+      cMin = mem.calories.min; cMax = mem.calories.max;
+      pMin = mem.protein.min;  pMax = mem.protein.max;
+    }
+    return NutritionItem(
+      name:      parsed.normalizedName,
+      quantity:  parsed.quantity,
+      unit:      parsed.unit,
+      estimated: true,
+      mode: mem.items.isNotEmpty
+          ? mem.items.first.mode
+          : EstimationMode.directQuantity,
+      calories: NutrientRange(min: cMin, max: cMax),
+      protein:  NutrientRange(min: pMin, max: pMax),
+    );
+  }
+
+  /// Hard sanity check on a single NutritionItem.
+  /// Rejects any result that exceeds physically impossible bounds for a
+  /// single food item in a single meal. These bounds are intentionally
+  /// very permissive — they only catch clear corruption, not edge cases.
+  ///
+  /// Max calories per item: 3 000 kcal  (realistic upper bound: large pizza slice)
+  /// Max protein per item: 300 g        (more than any real single-item portion)
+  ///
+  /// If a category hint is available (liquid item), the calorie cap is tighter:
+  /// liquids: max 1 500 kcal (e.g. highest-calorie smoothies)
+  bool _isSane(NutritionItem item, String foodName) {
+    final cal = item.calories.max;
+    final pro = item.protein.max;
+
+    // Absolute maximums (physics-level)
+    if (cal > 3000 || pro > 300) {
+      debugPrint('[Pipeline] 🚨 SANITY FAIL absolute: '
+          '"$foodName" cal=$cal pro=$pro');
+      return false;
+    }
+
+    // Liquid heuristic: if unit is ml and quantity > 100ml, cap at 1 500 kcal
+    if (item.unit == 'ml' && item.quantity > 100 && cal > 1500) {
+      debugPrint('[Pipeline] 🚨 SANITY FAIL liquid: '
+          '"$foodName" ${item.quantity}ml = $cal kcal');
+      return false;
+    }
+
+    // Weight heuristic: if unit is g and quantity < 1000g, kcal cannot exceed
+    // ~9 kcal/g × quantity (pure fat is 9 kcal/g — nothing is denser).
+    if (item.unit == 'g' && item.quantity > 0 && cal > item.quantity * 9.5) {
+      debugPrint('[Pipeline] 🚨 SANITY FAIL density: '
+          '"$foodName" ${item.quantity}g = $cal kcal '
+          '(>${(item.quantity * 9.5).toStringAsFixed(0)} max)');
+      return false;
+    }
+
+    return true;
   }
 
   NutritionItem _pullBestItem(NutritionResult result, ParsedFoodItem parsed) {

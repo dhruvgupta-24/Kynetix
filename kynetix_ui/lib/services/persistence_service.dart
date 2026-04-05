@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/onboarding_screen.dart';
 import '../models/day_log.dart';
@@ -44,6 +45,11 @@ class PersistenceService {
               DayLog.fromJson(e.value as Map<String, dynamic>);
         }
       }
+      // One-time quarantine: wipe legacy memory stores that may contain
+      // pre-normalization corrupted values (total calories stored without
+      // per-unit division, then double-scaled by _itemFromMemory).
+      await _quarantineLegacyMemory(prefs);
+
       // Load recurring nutrition memory from SharedPreferences.
       // This makes memory available offline, before cloud hydration runs.
       await UserNutritionMemory.instance.init();
@@ -51,6 +57,39 @@ class PersistenceService {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
     }
+  }
+
+  /// Quarantine legacy pre-normalization memory on first run.
+  ///
+  /// Problem: before the per-unit normalization architecture was introduced,
+  /// MealMemory._store and UserNutritionMemory stored TOTAL calories.  The
+  /// new pipeline's _itemFromPortionMemory no longer scales these, BUT old
+  /// in-flight SharedPreferences values from before the fix may still be
+  /// present.  Wiping them on first post-migration boot forces fresh
+  /// AI/local estimation which will produce correct values.
+  ///
+  /// Keys wiped:
+  ///   meal_memory_v1            – old recurring store (total calories, no unit)
+  ///   meal_memory_candidates_v1 – promoted AI candidates (same issue)
+  ///   known_food_memory_v1      – rebuilt from bootstrapDefaultKnownFoods
+  ///   user_meal_overrides_v1    – old override blobs without caloriesPerUnit
+  ///
+  /// Day logs, profile, and onboarding are NOT touched.
+  static Future<void> _quarantineLegacyMemory(SharedPreferences prefs) async {
+    const migrationFlag = 'memory_schema_v2_migrated';
+    if (prefs.getBool(migrationFlag) == true) return;
+
+    // Wipe all old memory keys
+    await prefs.remove('meal_memory_v1');
+    await prefs.remove('meal_memory_candidates_v1');
+    await prefs.remove('known_food_memory_v1');
+    await prefs.remove('user_meal_overrides_v1');
+
+    // Set migration flag so this never runs again
+    await prefs.setBool(migrationFlag, true);
+
+    debugPrint('[PersistenceService] ⚠️  Legacy memory quarantine complete '
+        '(one-time migration to per-unit schema)');
   }
 
   // ── Write helpers ─────────────────────────────────────────────────────────
