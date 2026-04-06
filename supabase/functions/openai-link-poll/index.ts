@@ -16,17 +16,24 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.error("[openai-link-poll] Missing Authorization header");
       return new Response(JSON.stringify({ error: 'Missing Authorization header' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) {
+      console.error("[openai-link-poll] Authorization header is malformed or empty");
+      return new Response(JSON.stringify({ error: 'Malformed Authorization header' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
     if (userError || !user) {
+      console.error(`[openai-link-poll] Auth failed. Error:`, userError?.message || 'No user returned');
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
