@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:app_links/app_links.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -40,12 +41,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ── AI Integration State ──
   bool _aiIsLoading = true;
   bool _aiIsConnected = false;
-  bool _aiIsPolling = false;
-  String? _aiUserCode;
-  String? _aiDeviceCode;
-  String? _aiVerificationUrl;
   String? _aiErrorMessage;
-  Timer? _aiPollTimer;
+
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
 
   @override
   void initState() {
@@ -60,6 +59,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     debugPrint('╚══════════════════════════════════════════════════');
     _checkAiStatus();
     _probeEdgeFunctionOnStartup();
+    _initDeepLinks();
   }
 
   // ── TEMPORARY STARTUP PROBE ──────────────────────────────────────────
@@ -81,8 +81,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
-    _aiPollTimer?.cancel();
+    _linkSub?.cancel();
     super.dispose();
+  }
+
+  void _initDeepLinks() {
+    _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      if (uri.scheme == 'kynetix' && uri.host == 'openai-auth' && uri.path == '/callback') {
+        _finishOpenAiAuth(uri);
+      }
+    });
   }
 
   Future<void> _checkAiStatus() async {
@@ -113,10 +121,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _connectAi() async {
-
     final session = Supabase.instance.client.auth.currentSession;
-    final user = Supabase.instance.client.auth.currentUser;
-    debugPrint('[_connectAi] session null: ${session == null} | user: ${user?.id ?? "NULL"}');
     if (session == null) {
       setState(() => _aiErrorMessage = 'Session expired. Please sign out and sign in again.');
       return;
@@ -124,64 +129,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
     try {
       final res = await Supabase.instance.client.functions.invoke('openai-link-start');
-      debugPrint('=== OPENAI START RESPONSE ===');
-      debugPrint('status: ${res.status}');
-      debugPrint('data: ${res.data}');
-      debugPrint('=============================');
       final data = res.data;
       if (!mounted) return;
-      if (data == null) {
-        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server returned empty response'; });
+      if (data == null || data['authUrl'] == null) {
+        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server returned invalid response'; });
         return;
       }
-      debugPrint('[_connectAi] interval type: ${data["interval"].runtimeType}');
-      final String? userCode = data['userCode']?.toString();
-      final String? deviceCode = data['deviceCode']?.toString();
-      final String? verificationUrl = data['verificationUrl']?.toString();
-      final int interval = data['interval'] != null ? (data['interval'] as num).toInt() : 5;
-      setState(() {
-        _aiUserCode = userCode;
-        _aiDeviceCode = deviceCode;
-        _aiVerificationUrl = verificationUrl;
-        _aiIsLoading = false;
-        _aiIsPolling = true;
-      });
-      debugPrint('[_connectAi] SUCCESS userCode: $userCode interval: $interval');
-      if (verificationUrl != null && verificationUrl.isNotEmpty) {
-        final uri = Uri.tryParse(verificationUrl);
-        if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final String authUrl = data['authUrl'].toString();
+      setState(() { _aiIsLoading = false; });
+      
+      final uri = Uri.tryParse(authUrl);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+         setState(() { _aiErrorMessage = 'Failed to parse auth URL.'; });
       }
-      _startPolling(interval);
-    } catch (e, st) {
-      debugPrint('[_connectAi] EXCEPTION ${e.runtimeType}: $e');
-      debugPrint(st.toString());
+    } catch (e) {
       if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start pairing'; });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start auth flow'; });
     }
   }
 
-  void _startPolling(int intervalSeconds) {
-    _aiPollTimer?.cancel();
-    _aiPollTimer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) async {
-      try {
-        final res = await Supabase.instance.client.functions.invoke(
-          'openai-link-poll',
-          body: {'device_code': _aiDeviceCode},
-        );
-        final status = res.data['status'];
-        if (status == 'connected') {
-          timer.cancel();
-          if (!mounted) return;
-          setState(() { _aiIsConnected = true; _aiIsPolling = false; _aiUserCode = null; _aiDeviceCode = null; _aiVerificationUrl = null; });
-        } else if (status == 'expired') {
-          timer.cancel();
-          if (!mounted) return;
-          setState(() { _aiIsPolling = false; _aiErrorMessage = 'Code expired. Please try again.'; _aiUserCode = null; _aiDeviceCode = null; _aiVerificationUrl = null; });
-        }
-      } catch (e) {
-        // ignore network drops
-      }
-    });
+  Future<void> _finishOpenAiAuth(Uri uri) async {
+    final code = uri.queryParameters['code'];
+    final state = uri.queryParameters['state'];
+    if (code == null || state == null) {
+      if (mounted) setState(() => _aiErrorMessage = 'Invalid callback from OpenAI.');
+      return;
+    }
+
+    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
+    try {
+      await Supabase.instance.client.functions.invoke(
+        'openai-link-finish',
+        body: {'code': code, 'state': state},
+      );
+      if (!mounted) return;
+      setState(() { _aiIsConnected = true; _aiIsLoading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to complete authentication'; });
+    }
   }
 
   Future<void> _disconnectAi() async {
@@ -638,7 +626,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildAiIntegrationCard() {
     Widget content;
 
-    if (_aiIsLoading && !_aiIsPolling) {
+    if (_aiIsLoading) {
       content = const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
@@ -682,7 +670,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: const Text('Disconnect', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFF6B35))),
                   ),
                 )
-              else if (!_aiIsPolling)
+              else
                 GestureDetector(
                   onTap: _connectAi,
                   child: Container(
@@ -699,55 +687,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
 
           if (_aiErrorMessage != null) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(_aiErrorMessage!, style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35))),
-          ],
-
-          if (_aiIsPolling && _aiUserCode != null) ...[
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF13131F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF2E2E3E)),
-              ),
-              child: Column(
-                children: [
-                  const Text('Enter this pairing code:', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Text(_aiUserCode!, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white)),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF52B788),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.open_in_browser_rounded, size: 18),
-                    label: const Text('Open Verification Link', style: TextStyle(fontWeight: FontWeight.w700)),
-                    onPressed: () async {
-                      if (_aiVerificationUrl != null) {
-                        final uri = Uri.parse(_aiVerificationUrl!);
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        }
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6B7280))),
-                      SizedBox(width: 8),
-                      Text('Waiting for authorization...', style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           ],
         ],
       );
