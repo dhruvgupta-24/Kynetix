@@ -42,8 +42,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _aiIsConnected = false;
   String? _aiErrorMessage;
 
-  final AppLinks _appLinks = AppLinks();
-  StreamSubscription<Uri>? _linkSub;
+  Timer? _aiPollTimer;
+  String? _aiUserCode;
+  String? _aiVerificationUrl;
+  bool _aiIsPolling = false;
 
   @override
   void initState() {
@@ -123,96 +125,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _connectAi() async {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) {
-      setState(
-        () => _aiErrorMessage =
-            'Session expired. Please sign out and sign in again.',
-      );
+      if (!mounted) return;
+      setState(() => _aiErrorMessage = 'Session expired. Please sign out. ');
       return;
     }
-    setState(() {
-      _aiIsLoading = true;
-      _aiErrorMessage = null;
-    });
+    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
     try {
-      final session = Supabase.instance.client.auth.currentSession;
-
       final res = await Supabase.instance.client.functions.invoke(
         'openai-link-start',
-        headers: {'Authorization': 'Bearer ${session?.accessToken ?? ''}'},
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+        },
       );
       final data = res.data;
       if (!mounted) return;
-      if (data == null || data['authUrl'] == null) {
-        setState(() {
-          _aiIsLoading = false;
-          _aiErrorMessage = 'Server returned invalid response';
-        });
+      if (data == null || data['user_code'] == null) {
+        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Invalid response'; });
         return;
       }
-      final String authUrl = data['authUrl'].toString();
+      
       setState(() {
         _aiIsLoading = false;
+        _aiUserCode = data['user_code'];
+        _aiVerificationUrl = data['verification_url'];
+        _aiIsPolling = true;
       });
-
-      final uri = Uri.tryParse(authUrl);
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        setState(() {
-          _aiErrorMessage = 'Failed to parse auth URL.';
-        });
-      }
+      
+      final interval = (data['interval_seconds'] as num?)?.toInt() ?? 5;
+      _startPolling(interval);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _aiIsLoading = false;
-        _aiErrorMessage = 'Failed to start auth flow';
-      });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to fetch device code'; });
     }
   }
 
-  Future<void> _finishOpenAiAuth(Uri uri) async {
-    final code = uri.queryParameters['code'];
-    final state = uri.queryParameters['state'];
-    if (code == null || state == null) {
-      if (mounted)
-        setState(() => _aiErrorMessage = 'Invalid callback from OpenAI.');
-      return;
-    }
+  void _startPolling(int intervalSeconds) {
+    _aiPollTimer?.cancel();
+    _aiPollTimer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) async {
+      try {
+        final session = Supabase.instance.client.auth.currentSession;
+        if (session == null) {
+          timer.cancel();
+          return;
+        }
 
-    setState(() {
-      _aiIsLoading = true;
-      _aiErrorMessage = null;
-    });
-    try {
-      final session = Supabase.instance.client.auth.currentSession;
+        final res = await Supabase.instance.client.functions.invoke(
+          'openai-link-poll',
+          headers: {
+            'Authorization': 'Bearer ${session.accessToken}',
+          },
+        );
 
-      final res = await Supabase.instance.client.functions.invoke(
-        'openai-link-finish',
-        headers: {'Authorization': 'Bearer ${session?.accessToken ?? ''}'},
-        body: {'code': code, 'state': state},
-      );
-      if (!mounted) return;
-      if (res.status == 200 &&
-          res.data != null &&
-          res.data['success'] == true) {
-        setState(() {
-          _aiIsConnected = true;
-          _aiIsLoading = false;
-        });
-      } else {
-        setState(() {
-          _aiIsLoading = false;
-          _aiErrorMessage = 'Server validation failed';
-        });
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+
+        final data = res.data;
+        if (data != null) {
+          final status = data['status'];
+          if (status == 'connected') {
+            timer.cancel();
+            setState(() {
+              _aiIsConnected = true;
+              _aiIsPolling = false;
+            });
+          } else if (status == 'expired') {
+            timer.cancel();
+            setState(() {
+              _aiIsPolling = false;
+              _aiErrorMessage = 'Pairing code expired. Try again.';
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('Polling exception: $e');
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _aiIsLoading = false;
-        _aiErrorMessage = 'Failed to complete authentication';
-      });
-    }
+    });
   }
 
   Future<void> _disconnectAi() async {
@@ -246,11 +235,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!hasPerm) {
       final granted = await HealthService().requestPermission();
       if (!granted) {
-        if (mounted)
+        if (mounted) {
           setState(() {
             _syncing = false;
             _syncMessage = 'Permission denied.';
           });
+        }
         return;
       }
     }
@@ -762,6 +752,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
+      );
+    } else if (_aiIsPolling && _aiUserCode != null && _aiVerificationUrl != null) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.sync_rounded, size: 16, color: Color(0xFFFFB347)),
+              const SizedBox(width: 8),
+              const Text(
+                'Waiting for pairing...',
+                style: TextStyle(
+                  color: Color(0xFFFFB347), fontSize: 13, fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              const SizedBox(
+                width: 14, height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFFB347)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF13131F),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF2E2E3E)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  '1. Copy this code:',
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _aiUserCode!,
+                        style: const TextStyle(
+                          color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, color: Color(0xFF52B788), size: 20),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: _aiUserCode!));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Code copied!'))
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '2. Open the page and log in:',
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: () async {
+                    final uri = Uri.tryParse(_aiVerificationUrl!);
+                    if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF52B788),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Open Authorization Page', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ),
+        ],
       );
     } else {
       content = Column(
