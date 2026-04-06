@@ -1,24 +1,11 @@
-Analyzing profile_screen.dart...                                
+Analyzing kynetix_ui...                                         
 
-  error - Missing concrete implementation of 'State.build' - lib\screens\profile_screen.dart:25:7 - non_abstract_class_inherits_abstract_member
-warning - The declaration '_plan' isn't referenced - lib\screens\profile_screen.dart:27:24 - unused_element
-  error - The method '_tierFromPersistedSteps' isn't defined for the type '_ProfileScreenState' - lib\screens\profile_screen.dart:35:31 - undefined_method
-   info - The private field _syncing could be 'final' - lib\screens\profile_screen.dart:40:8 - prefer_final_fields
-warning - The value of the field '_syncing' isn't used - lib\screens\profile_screen.dart:40:8 - unused_field
-warning - The value of the field '_syncMessage' isn't used - lib\screens\profile_screen.dart:41:11 - unused_field
-warning - The declaration '_buildAiIntegrationCard' isn't referenced - lib\screens\profile_screen.dart:45:10 - unused_element
-  error - Undefined name '_aiIsLoading' - lib\screens\profile_screen.dart:48:9 - undefined_identifier
-  error - Undefined name '_aiIsConnected' - lib\screens\profile_screen.dart:65:17 - undefined_identifier
-  error - Undefined name '_aiIsConnected' - lib\screens\profile_screen.dart:67:24 - undefined_identifier
-  error - Undefined name '_aiIsConnected' - lib\screens\profile_screen.dart:71:17 - undefined_identifier
-  error - Undefined name '_aiIsConnected' - lib\screens\profile_screen.dart:73:26 - undefined_identifier
-  error - Undefined name '_aiIsConnected' - lib\screens\profile_screen.dart:79:19 - undefined_identifier
-  error - Undefined name '_disconnectAi' - lib\screens\profile_screen.dart:81:26 - undefined_identifier
-  error - Undefined name '_connectAi' - lib\screens\profile_screen.dart:94:26 - undefined_identifier
-  error - Undefined name '_aiErrorMessage' - lib\screens\profile_screen.dart:108:15 - undefined_identifier
-  error - Undefined name '_aiErrorMessage' - lib\screens\profile_screen.dart:110:18 - undefined_identifier
-warning - The declaration '_buildAboutCard' isn't referenced - lib\screens\profile_screen.dart:124:10 - unused_element
-warning - A value for optional parameter 'isEditable' isn't ever given - lib\screens\profile_screen.dart:197:10 - unused_element_parameter
-warning - A value for optional parameter 'onTap' isn't ever given - lib\screens\profile_screen.dart:198:10 - unused_element_parameter
-warning - The declaration '_GoalChip' isn't referenced - lib\screens\profile_screen.dart:246:7 - unused_element
+warning - The declaration '_clearError' isn't referenced - lib\screens\auth_screen.dart:59:8 - unused_element
+warning - The value of the local variable 'm' isn't used - lib\services\nutrition_guardrails.dart:360:16 - unused_local_variable
+   info - Statements in an if should be enclosed in a block - lib\services\nutrition_pipeline.dart:243:33 - curly_braces_in_flow_control_structures
+   info - Don't invoke 'print' in production code - test\test_pipeline_e2e.dart:6:3 - avoid_print
+   info - Don't invoke 'print' in production code - test\test_pipeline_e2e.dart:13:5 - avoid_print
+   info - Don't invoke 'print' in production code - test\test_pipeline_e2e.dart:36:5 - avoid_print
+   info - Don't invoke 'print' in production code - test_parse.dart:5:55 - avoid_print
+   info - Don't invoke 'print' in production code - test_parse.dart:7:3 - avoid_print
 

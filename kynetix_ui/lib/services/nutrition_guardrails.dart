@@ -357,7 +357,7 @@ class NutritionGuardrails {
       total += double.tryParse(m.group(1)!) ?? 0;
     }
     final halfPat = RegExp(r'half\s*(?:a\s*)?(?:wrap|roll|kathi|frankie|fajita|burrito)s?');
-    for (final m in halfPat.allMatches(lc)) {
+    for (final _ in halfPat.allMatches(lc)) {
       total += 0.5;
     }
     if (total == 0) {

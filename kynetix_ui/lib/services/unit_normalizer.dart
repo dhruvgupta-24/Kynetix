@@ -76,7 +76,9 @@ class UnitNormalizer {
     if (_volumeUnits.contains(a) && _volumeUnits.contains(b)) return true;
     // Both non-metric (scoop, serving, piece…) — treat as compatible
     if (!_weightUnits.contains(a) && !_volumeUnits.contains(a) &&
-        !_weightUnits.contains(b) && !_volumeUnits.contains(b)) return true;
+        !_weightUnits.contains(b) && !_volumeUnits.contains(b)) {
+      return true;
+    }
     return false;
   }
 

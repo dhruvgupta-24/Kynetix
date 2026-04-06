@@ -1,38 +1,9 @@
-// @ts-ignore
-import { createClient } from "npm:@supabase/supabase-js@2.44.2";
-
-declare const Deno: any;
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-// Implemented natively to avoid JSR import lint errors
-function encodeBase64Url(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = new Uint8Array(buffer);
-  let binString = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binString += String.fromCharCode(bytes[i] ?? 0);
-  }
-  return btoa(binString)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-function generateRandomString(length: number): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return encodeBase64Url(bytes);
-}
-
-async function createCodeChallenge(verifier: string): Promise<string> {
-  const data = new TextEncoder().encode(verifier);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  // Extracted as Uint8Array to satisfy strict Typescript limits
-  return encodeBase64Url(new Uint8Array(hash));
-}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -42,10 +13,7 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const supabaseClient = createClient(
@@ -56,65 +24,79 @@ Deno.serve(async (req: Request) => {
 
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized', details: userError?.message }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const clientId = "app_EMoamEEZ73f0CkXaXp7hrann";
-    const redirectUri = "kynetix://openai-auth/callback";
-    
-    // Generate PKCE and state
-    const codeVerifier = generateRandomString(32);
-    const codeChallenge = await createCodeChallenge(codeVerifier);
-    const state = generateRandomString(16);
+    const clientId = "app_EMoamEEZ73f0CkXaXp7hrann"; // Kynetix app
+    const deviceAuthUrl = "https://auth.openai.com/oauth/device/code";
+
+    console.log(`[openai-link-start] Initiating device flow for user: ${user.id}`);
+
+    // Request device code
+    const openAiResponse = await fetch(deviceAuthUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        scope: "openid profile email offline_access api.connectors.read api.connectors.invoke",
+      }),
+    });
+
+    console.log(`[openai-link-start] OpenAI response status: ${openAiResponse.status}`);
+
+    if (!openAiResponse.ok) {
+      const respText = await openAiResponse.text();
+      console.error(`[openai-link-start] OpenAI rejected device code request. HTTP ${openAiResponse.status}. Body: ${respText}`);
+      return new Response(JSON.stringify({ error: 'OpenAI Device request failed' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const data = await openAiResponse.json();
+
+    // Standardize variables
+    const normalizedDeviceCode = data.device_code;
+    const normalizedUserCode = data.user_code;
+    const normalizedVerificationUrl = data.verification_uri ?? data.verification_url;
+    const normalizedInterval = data.interval ?? 5;
+    const normalizedExpiresAt = new Date(Date.now() + (data.expires_in ?? 1800) * 1000).toISOString();
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Upsert session
+    const upsertPayload = {
+      user_id: user.id,
+      device_code: normalizedDeviceCode,
+      user_code: normalizedUserCode,
+      verification_url: normalizedVerificationUrl,
+      interval_seconds: normalizedInterval,
+      expires_at: normalizedExpiresAt,
+      status: 'pending'
+    };
+
     const { error: insertError } = await supabaseAdmin
       .from('openai_device_auth_sessions')
-      .upsert({
-        user_id: user.id,
-        oauth_state: state,
-        code_verifier: codeVerifier,
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 min
-      }, { onConflict: 'user_id' });
+      .upsert(upsertPayload, { onConflict: 'user_id' });
 
     if (insertError) {
-       console.error("Failed to persist state:", insertError);
-       return new Response(JSON.stringify({ error: 'Failed to start auth flow' }), {
-         status: 500,
-         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-       });
+       console.error(`[openai-link-start] DB insert error for user ${user.id}:`, JSON.stringify(insertError));
+       return new Response(JSON.stringify({ error: 'Failed to write session state' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Construct authorization URL
-    const authUrl = new URL("https://auth.openai.com/oauth/authorize");
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", redirectUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", "openid profile email offline_access api.connectors.read api.connectors.invoke");
-    authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("code_challenge", codeChallenge);
-    authUrl.searchParams.set("code_challenge_method", "S256");
-    authUrl.searchParams.set("id_token_add_organizations", "true");
-    authUrl.searchParams.set("codex_cli_simplified_flow", "true");
+    console.log(`[openai-link-start] Success for user ${user.id}. Saved interval: ${normalizedInterval}`);
 
+    // Return the sanitized device data back to Flutter
     return new Response(
-      JSON.stringify({ authUrl: authUrl.toString() }),
+      JSON.stringify({
+        user_code: normalizedUserCode,
+        verification_url: normalizedVerificationUrl,
+        interval_seconds: normalizedInterval,
+        expires_at: normalizedExpiresAt
+      }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-
   } catch (err: any) {
-    console.error("Link Start Exception:", err);
-    return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error("[openai-link-start] Exception:", err);
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });

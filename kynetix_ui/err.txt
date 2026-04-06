@@ -1,0 +1,22 @@
+Could not format because the source could not be parsed:
+
+line 86, column 6 of lib\screens\profile_screen.dart: Expected a method, getter, setter or operator declaration.
+   â•·
+86 â”‚     });
+   â”‚      ^
+   â•µ
+line 86, column 7 of lib\screens\profile_screen.dart: Unexpected text ';'.
+   â•·
+86 â”‚     });
+   â”‚       ^
+   â•µ
+line 87, column 3 of lib\screens\profile_screen.dart: Expected a method, getter, setter or operator declaration.
+   â•·
+87 â”‚   }
+   â”‚   ^
+   â•µ
+line 734, column 1 of lib\screens\profile_screen.dart: Expected a method, getter, setter or operator declaration.
+    â•·
+734 â”‚ }
+    â”‚ ^
+    â•µ

@@ -238,8 +238,11 @@ class NutritionPipeline {
     }
 
     String source = 'user_override';
-    if (aiUsed) source = 'ai';
-    else if (localHybridUsed) source = 'local_hybrid';
+    if (aiUsed) {
+      source = 'ai';
+    } else if (localHybridUsed) {
+      source = 'local_hybrid';
+    }
 
     return NutritionResult(
       canonicalMeal: trimmed,

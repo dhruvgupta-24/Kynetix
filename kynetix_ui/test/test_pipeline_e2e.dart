@@ -1,11 +1,7 @@
-import 'dart:convert';
+// ignore_for_file: avoid_print, unused_import
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/services/nutrition_pipeline.dart';
-import 'package:kynetix/services/ai_nutrition_service.dart';
-import 'package:kynetix/services/user_nutrition_memory.dart';
-import 'package:kynetix/services/personal_nutrition_memory.dart';
 
 void main() async {
   print('parsing pipeline end-to-end validation');

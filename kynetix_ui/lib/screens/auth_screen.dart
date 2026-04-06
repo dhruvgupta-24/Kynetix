@@ -56,12 +56,6 @@ class _AuthScreenState extends State<AuthScreen> {
     _otpCtrl.clear();
   }
 
-  void _clearError() {
-    if (_errorMessage != null) {
-      setState(() => _errorMessage = null);
-    }
-  }
-
   /// ── EMAIL LOGIC ──────────────────────────────────────────────────────────
 
   Future<void> _submitEmailAuth() async {

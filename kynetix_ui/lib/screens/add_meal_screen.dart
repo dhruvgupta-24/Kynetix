@@ -958,8 +958,12 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
 
   @override
   void dispose() {
-    for (final c in _calCtrls) c.dispose();
-    for (final c in _proCtrls) c.dispose();
+    for (final c in _calCtrls) {
+      c.dispose();
+    }
+    for (final c in _proCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
 

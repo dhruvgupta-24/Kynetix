@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:app_links/app_links.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -23,17 +22,17 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   UserProfile get _profile => currentUserProfile!;
   WeeklyTargetPlan get _plan => NutritionTargetEngine().weeklyPlan(
-        _profile,
-        health: _profile.healthSyncEnabled && _profile.averageDailySteps != null
-            ? HealthSyncResult(
-                effectiveAverageSteps: _profile.averageDailySteps!.toDouble(),
-                averageDailySteps14d: _profile.averageDailySteps!.toDouble(),
-                averageDailySteps30d: _profile.averageDailySteps!.toDouble(),
-                syncedAt: _profile.lastHealthSyncAt ?? DateTime.now(),
-                activityTier: _tierFromPersistedSteps(_profile.averageDailySteps!),
-              )
-            : null,
-      );
+    _profile,
+    health: _profile.healthSyncEnabled && _profile.averageDailySteps != null
+        ? HealthSyncResult(
+            effectiveAverageSteps: _profile.averageDailySteps!.toDouble(),
+            averageDailySteps14d: _profile.averageDailySteps!.toDouble(),
+            averageDailySteps30d: _profile.averageDailySteps!.toDouble(),
+            syncedAt: _profile.lastHealthSyncAt ?? DateTime.now(),
+            activityTier: _tierFromPersistedSteps(_profile.averageDailySteps!),
+          )
+        : null,
+  );
 
   bool _syncing = false;
   String? _syncMessage;
@@ -55,11 +54,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     debugPrint('║ [ProfileScreen] initState DIAGNOSTICS');
     debugPrint('║ session null?   : ${session == null}');
     debugPrint('║ user id         : ${user?.id ?? "NULL"}');
-    debugPrint('║ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}');
+    debugPrint(
+      '║ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}',
+    );
     debugPrint('╚══════════════════════════════════════════════════');
     _checkAiStatus();
     _probeEdgeFunctionOnStartup();
-    _initDeepLinks();
   }
 
   // ── TEMPORARY STARTUP PROBE ──────────────────────────────────────────
@@ -67,7 +67,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _probeEdgeFunctionOnStartup() async {
     debugPrint('[PROBE] ▶ Starting openai-link-status probe...');
     try {
-      final res = await Supabase.instance.client.functions.invoke('openai-link-status');
+      final res = await Supabase.instance.client.functions.invoke(
+        'openai-link-status',
+      );
       debugPrint('[PROBE] ✔ Response received');
       debugPrint('[PROBE]   data        : ${res.data}');
       debugPrint('[PROBE]   status      : ${res.status}');
@@ -81,21 +83,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
-    _linkSub?.cancel();
+    _aiPollTimer?.cancel();
     super.dispose();
-  }
-
-  void _initDeepLinks() {
-    _linkSub = _appLinks.uriLinkStream.listen((uri) {
-      if (uri.scheme == 'kynetix' && uri.host == 'openai-auth' && uri.path == '/callback') {
-        _finishOpenAiAuth(uri);
-      }
-    });
   }
 
   Future<void> _checkAiStatus() async {
     final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('[_checkAiStatus] session null? ${session == null} | user: ${session?.user.id ?? "NULL"}');
+    debugPrint(
+      '[_checkAiStatus] session null? ${session == null} | user: ${session?.user.id ?? "NULL"}',
+    );
     if (session == null) {
       if (!mounted) return;
       setState(() => _aiIsLoading = false);
@@ -103,8 +99,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     try {
-      final res = await Supabase.instance.client.functions.invoke('openai-link-status');
-      debugPrint('[_checkAiStatus] ✔ data: ${res.data} | status: ${res.status}');
+      final res = await Supabase.instance.client.functions.invoke(
+        'openai-link-status',
+      );
+      debugPrint(
+        '[_checkAiStatus] ✔ data: ${res.data} | status: ${res.status}',
+      );
       if (!mounted) return;
       setState(() {
         _aiIsConnected = res.data['isConnected'] == true;
@@ -123,30 +123,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _connectAi() async {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) {
-      setState(() => _aiErrorMessage = 'Session expired. Please sign out and sign in again.');
+      setState(
+        () => _aiErrorMessage =
+            'Session expired. Please sign out and sign in again.',
+      );
       return;
     }
-    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
+    setState(() {
+      _aiIsLoading = true;
+      _aiErrorMessage = null;
+    });
     try {
-      final res = await Supabase.instance.client.functions.invoke('openai-link-start');
+      final session = Supabase.instance.client.auth.currentSession;
+
+      final res = await Supabase.instance.client.functions.invoke(
+        'openai-link-start',
+        headers: {'Authorization': 'Bearer ${session?.accessToken ?? ''}'},
+      );
       final data = res.data;
       if (!mounted) return;
       if (data == null || data['authUrl'] == null) {
-        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server returned invalid response'; });
+        setState(() {
+          _aiIsLoading = false;
+          _aiErrorMessage = 'Server returned invalid response';
+        });
         return;
       }
       final String authUrl = data['authUrl'].toString();
-      setState(() { _aiIsLoading = false; });
-      
+      setState(() {
+        _aiIsLoading = false;
+      });
+
       final uri = Uri.tryParse(authUrl);
       if (uri != null) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-         setState(() { _aiErrorMessage = 'Failed to parse auth URL.'; });
+        setState(() {
+          _aiErrorMessage = 'Failed to parse auth URL.';
+        });
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start auth flow'; });
+      setState(() {
+        _aiIsLoading = false;
+        _aiErrorMessage = 'Failed to start auth flow';
+      });
     }
   }
 
@@ -154,37 +175,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final code = uri.queryParameters['code'];
     final state = uri.queryParameters['state'];
     if (code == null || state == null) {
-      if (mounted) setState(() => _aiErrorMessage = 'Invalid callback from OpenAI.');
+      if (mounted)
+        setState(() => _aiErrorMessage = 'Invalid callback from OpenAI.');
       return;
     }
 
-    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
+    setState(() {
+      _aiIsLoading = true;
+      _aiErrorMessage = null;
+    });
     try {
+      final session = Supabase.instance.client.auth.currentSession;
+
       final res = await Supabase.instance.client.functions.invoke(
         'openai-link-finish',
+        headers: {'Authorization': 'Bearer ${session?.accessToken ?? ''}'},
         body: {'code': code, 'state': state},
       );
       if (!mounted) return;
-      if (res.status == 200 && res.data != null && res.data['success'] == true) {
-        setState(() { _aiIsConnected = true; _aiIsLoading = false; });
+      if (res.status == 200 &&
+          res.data != null &&
+          res.data['success'] == true) {
+        setState(() {
+          _aiIsConnected = true;
+          _aiIsLoading = false;
+        });
       } else {
-        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server validation failed'; });
+        setState(() {
+          _aiIsLoading = false;
+          _aiErrorMessage = 'Server validation failed';
+        });
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to complete authentication'; });
+      setState(() {
+        _aiIsLoading = false;
+        _aiErrorMessage = 'Failed to complete authentication';
+      });
     }
   }
 
   Future<void> _disconnectAi() async {
-    setState(() { _aiIsLoading = true; });
+    setState(() {
+      _aiIsLoading = true;
+    });
     try {
       await Supabase.instance.client.functions.invoke('openai-link-disconnect');
       if (!mounted) return;
-      setState(() { _aiIsConnected = false; _aiIsLoading = false; });
+      setState(() {
+        _aiIsConnected = false;
+        _aiIsLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to disconnect'; });
+      setState(() {
+        _aiIsLoading = false;
+        _aiErrorMessage = 'Failed to disconnect';
+      });
     }
   }
 
@@ -199,7 +246,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!hasPerm) {
       final granted = await HealthService().requestPermission();
       if (!granted) {
-        if (mounted) setState(() { _syncing = false; _syncMessage = 'Permission denied.'; });
+        if (mounted)
+          setState(() {
+            _syncing = false;
+            _syncMessage = 'Permission denied.';
+          });
         return;
       }
     }
@@ -210,11 +261,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!result.hasError && result.hasData) {
       currentUserProfile = currentUserProfile!.copyWithHealth(
         averageDailySteps: result.effectiveAverageSteps!.toInt(),
-        lastHealthSyncAt:  result.syncedAt,
+        lastHealthSyncAt: result.syncedAt,
       );
       PersistenceService.saveProfile(currentUserProfile!).ignore();
       widget.onProfileChanged?.call();
-      _syncMessage = 'Synced — ${result.effectiveAverageSteps!.toInt()} steps/day effective';
+      _syncMessage =
+          'Synced — ${result.effectiveAverageSteps!.toInt()} steps/day effective';
     } else {
       _syncMessage = result.error ?? 'No step data found.';
     }
@@ -247,16 +299,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Text('Select Goal',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                  child: Text(
+                    'Select Goal',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 10),
-                ...[kFatLoss, kMaintenance, kLeanBulk, kBulk, kRecomposition].map((g) {
+                ...[
+                  kFatLoss,
+                  kMaintenance,
+                  kLeanBulk,
+                  kBulk,
+                  kRecomposition,
+                ].map((g) {
                   final isSel = g == _profile.goal;
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                    title: Text(g, style: TextStyle(color: isSel ? const Color(0xFF52B788) : Colors.white, fontWeight: isSel ? FontWeight.w700 : FontWeight.w500)),
-                    trailing: isSel ? const Icon(Icons.check_circle_rounded, color: Color(0xFF52B788)) : null,
+                    title: Text(
+                      g,
+                      style: TextStyle(
+                        color: isSel ? const Color(0xFF52B788) : Colors.white,
+                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: isSel
+                        ? const Icon(
+                            Icons.check_circle_rounded,
+                            color: Color(0xFF52B788),
+                          )
+                        : null,
                     onTap: () {
                       Navigator.pop(ctx);
                       _saveProfile(_profile.copyWith(goal: g));
@@ -271,7 +346,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _editNumber(String title, String currentVal, String suffix, void Function(double) onSave) {
+  void _editNumber(
+    String title,
+    String currentVal,
+    String suffix,
+    void Function(double) onSave,
+  ) {
     final ctrl = TextEditingController(text: currentVal);
     showModalBottomSheet(
       context: context,
@@ -282,7 +362,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       builder: (ctx) {
         return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
@@ -290,13 +372,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   Text('Update $title', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
-                   const SizedBox(height: 16),
-                   TextField(
+                  Text(
+                    'Update $title',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
                     controller: ctrl,
                     autofocus: true,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                    ],
                     style: const TextStyle(color: Colors.white, fontSize: 16),
                     decoration: InputDecoration(
                       suffixText: suffix,
@@ -394,11 +487,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_profile.name,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800)),
+                Text(
+                  _profile.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 _GoalChip(goal: _profile.goal),
               ],
@@ -426,21 +522,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
             label: 'Age',
             value: '${_profile.age} years',
             isEditable: true,
-            onTap: () => _editNumber('Age', _profile.age.toString(), 'years', (v) => _saveProfile(_profile.copyWith(age: v.toInt()))),
+            onTap: () => _editNumber(
+              'Age',
+              _profile.age.toString(),
+              'years',
+              (v) => _saveProfile(_profile.copyWith(age: v.toInt())),
+            ),
           ),
           _InfoRow(
             icon: Icons.height_rounded,
             label: 'Height',
             value: '${_profile.height.toStringAsFixed(1)} cm',
             isEditable: true,
-            onTap: () => _editNumber('Height', _profile.height.toString(), 'cm', (v) => _saveProfile(_profile.copyWith(height: v))),
+            onTap: () => _editNumber(
+              'Height',
+              _profile.height.toString(),
+              'cm',
+              (v) => _saveProfile(_profile.copyWith(height: v)),
+            ),
           ),
           _InfoRow(
             icon: Icons.monitor_weight_outlined,
             label: 'Weight',
             value: '${_profile.weight.toStringAsFixed(1)} kg',
             isEditable: true,
-            onTap: () => _editNumber('Weight', _profile.weight.toString(), 'kg', (v) => _saveProfile(_profile.copyWith(weight: v))),
+            onTap: () => _editNumber(
+              'Weight',
+              _profile.weight.toString(),
+              'kg',
+              (v) => _saveProfile(_profile.copyWith(weight: v)),
+            ),
           ),
           _InfoRow(
             icon: Icons.calculate_outlined,
@@ -501,13 +612,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ── Health Connect ─────────────────────────────────────────────────────────
 
   Widget _buildHealthCard() {
-    final synced  = _profile.healthSyncEnabled;
-    final steps   = _profile.averageDailySteps;
-    final syncAt  = _profile.lastHealthSyncAt;
+    final synced = _profile.healthSyncEnabled;
+    final steps = _profile.averageDailySteps;
+    final syncAt = _profile.lastHealthSyncAt;
 
     String syncTimeLabel = 'Never synced';
     if (syncAt != null) {
-      syncTimeLabel = '${syncAt.day}/${syncAt.month} at '
+      syncTimeLabel =
+          '${syncAt.day}/${syncAt.month} at '
           '${syncAt.hour.toString().padLeft(2, '0')}:${syncAt.minute.toString().padLeft(2, '0')}';
     }
 
@@ -523,9 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             children: [
               Icon(
-                synced
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
+                synced ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                 size: 16,
                 color: synced
                     ? const Color(0xFF52B788)
@@ -535,7 +645,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(
                 synced ? 'Connected' : 'Not connected',
                 style: TextStyle(
-                  color: synced ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+                  color: synced
+                      ? const Color(0xFF52B788)
+                      : const Color(0xFF6B7280),
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
@@ -544,8 +656,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               GestureDetector(
                 onTap: _syncing ? null : _doSync,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF52B788).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
@@ -558,15 +672,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF52B788)),
+                            strokeWidth: 2,
+                            color: Color(0xFF52B788),
+                          ),
                         )
                       : Text(
                           synced ? 'Sync Now' : 'Connect',
                           style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF52B788)),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF52B788),
+                          ),
                         ),
                 ),
               ),
@@ -575,12 +691,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           if (_syncMessage != null) ...[
             const SizedBox(height: 8),
-            Text(_syncMessage!,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: _syncMessage!.contains('Synced')
-                        ? const Color(0xFF52B788)
-                        : const Color(0xFFFFB347))),
+            Text(
+              _syncMessage!,
+              style: TextStyle(
+                fontSize: 11,
+                color: _syncMessage!.contains('Synced')
+                    ? const Color(0xFF52B788)
+                    : const Color(0xFFFFB347),
+              ),
+            ),
           ],
 
           if (synced) ...[
@@ -610,9 +729,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _stepOffsetLabel(int steps) {
-    if (steps < 3000)  return '−120 kcal (Very low steps)';
-    if (steps < 5000)  return '−60 kcal (Low steps)';
-    if (steps < 7500)  return '0 kcal (Baseline confirmed)';
+    if (steps < 3000) return '−120 kcal (Very low steps)';
+    if (steps < 5000) return '−60 kcal (Low steps)';
+    if (steps < 7500) return '0 kcal (Baseline confirmed)';
     if (steps < 10000) return '+75 kcal (Moderate steps)';
     if (steps < 12000) return '+100 kcal (High steps)';
     return '+120 kcal (Very high steps)';
@@ -635,8 +754,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: SizedBox(
-            width: 24, height: 24,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF52B788)),
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFF52B788),
+            ),
           ),
         ),
       );
@@ -647,15 +770,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             children: [
               Icon(
-                _aiIsConnected ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+                _aiIsConnected
+                    ? Icons.auto_awesome_rounded
+                    : Icons.auto_awesome_outlined,
                 size: 16,
-                color: _aiIsConnected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+                color: _aiIsConnected
+                    ? const Color(0xFF52B788)
+                    : const Color(0xFF6B7280),
               ),
               const SizedBox(width: 8),
               Text(
                 _aiIsConnected ? 'Connected to OpenAI' : 'Not Connected',
                 style: TextStyle(
-                  color: _aiIsConnected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+                  color: _aiIsConnected
+                      ? const Color(0xFF52B788)
+                      : const Color(0xFF6B7280),
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
@@ -665,26 +794,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 GestureDetector(
                   onTap: _disconnectAi,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.4)),
+                      border: Border.all(
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.4),
+                      ),
                     ),
-                    child: const Text('Disconnect', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFF6B35))),
+                    child: const Text(
+                      'Disconnect',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFFF6B35),
+                      ),
+                    ),
                   ),
                 )
               else
                 GestureDetector(
                   onTap: _connectAi,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF52B788).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.4)),
+                      border: Border.all(
+                        color: const Color(0xFF52B788).withValues(alpha: 0.4),
+                      ),
                     ),
-                    child: const Text('Connect OpenAI', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF52B788))),
+                    child: const Text(
+                      'Connect OpenAI',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF52B788),
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -692,16 +845,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           if (_aiErrorMessage != null) ...[
             const SizedBox(height: 12),
-            Text(_aiErrorMessage!, style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35))),
+            Text(
+              _aiErrorMessage!,
+              style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35)),
+            ),
           ],
         ],
       );
     }
 
-    return _Section(
-      title: 'AI Integration',
-      child: content,
-    );
+    return _Section(title: 'AI Integration', child: content);
   }
 
   // ── About ──────────────────────────────────────────────────────────────────
@@ -732,7 +885,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 class _Section extends StatelessWidget {
   final String? title;
-  final Widget  child;
+  final Widget child;
   const _Section({this.title, required this.child});
 
   @override
@@ -743,12 +896,15 @@ class _Section extends StatelessWidget {
         if (title != null) ...[
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 8),
-            child: Text(title!.toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF6B7280),
-                    letterSpacing: 0.8)),
+            child: Text(
+              title!.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF6B7280),
+                letterSpacing: 0.8,
+              ),
+            ),
           ),
         ],
         Container(
@@ -768,10 +924,10 @@ class _Section extends StatelessWidget {
 
 class _InfoRow extends StatelessWidget {
   final IconData icon;
-  final String   label;
-  final String   value;
-  final bool     isLast;
-  final bool     isEditable;
+  final String label;
+  final String value;
+  final bool isLast;
+  final bool isEditable;
   final VoidCallback? onTap;
 
   const _InfoRow({
@@ -793,24 +949,31 @@ class _InfoRow extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: const Color(0xFF4B5563)),
               const SizedBox(width: 10),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 13, color: Color(0xFF9CA3AF))),
+              Text(
+                label,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+              ),
               const Spacer(),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600)),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               if (isEditable) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.edit_rounded, size: 12, color: Color(0xFF52B788)),
+                const Icon(
+                  Icons.edit_rounded,
+                  size: 12,
+                  color: Color(0xFF52B788),
+                ),
               ],
             ],
           ),
         ),
-        if (!isLast)
-          const Divider(color: Color(0xFF2E2E3E), height: 1),
+        if (!isLast) const Divider(color: Color(0xFF2E2E3E), height: 1),
       ],
     );
 
@@ -833,13 +996,13 @@ class _GoalChip extends StatelessWidget {
   const _GoalChip({required this.goal});
 
   Color get _color => switch (goal) {
-        kFatLoss       => const Color(0xFFFF6B35),
-        kMaintenance   => const Color(0xFF52B788),
-        kLeanBulk      => const Color(0xFF60A5FA),
-        kBulk          => const Color(0xFF3B82F6),
-        kRecomposition => const Color(0xFFA78BFA),
-        _              => const Color(0xFF52B788),
-      };
+    kFatLoss => const Color(0xFFFF6B35),
+    kMaintenance => const Color(0xFF52B788),
+    kLeanBulk => const Color(0xFF60A5FA),
+    kBulk => const Color(0xFF3B82F6),
+    kRecomposition => const Color(0xFFA78BFA),
+    _ => const Color(0xFF52B788),
+  };
 
   @override
   Widget build(BuildContext context) {
