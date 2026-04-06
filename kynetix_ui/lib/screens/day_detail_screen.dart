@@ -363,17 +363,85 @@ class _GymCard extends StatelessWidget {
   }
 
   void _toggleGym(bool didGym) {
-    // Preserve split context when the user explicitly toggles.
-    final existing = _effectiveGymDay();
-    log.gymDay = existing.withGym(didGym);
+    if (!didGym) {
+      // User explicitly said No → clear, persist rest-day state.
+      log.gymDay = const GymDay(didGym: false);
+      onChanged();
+      return;
+    }
+
+    // User said Yes.
+    if (log.gymDay != null) {
+      // Already had a stored state — just flip didGym on.
+      log.gymDay = log.gymDay!.withGym(true);
+    } else {
+      // No stored state yet.  Synthesise from split and immediately persist
+      // so the auto-selected workout type survives an app restart.
+      final splitDay = WorkoutService.instance.splitDayFor(date);
+      if (splitDay != null && !splitDay.isRestDay) {
+        log.gymDay = GymDay(
+          didGym:          true,
+          workoutType:     WorkoutType.fromSplitName(splitDay.name),
+          splitDayName:    splitDay.name,
+          splitOverridden: false,
+        );
+      } else {
+        log.gymDay = const GymDay(didGym: true);
+      }
+    }
     onChanged();
   }
 
-  void _selectType(WorkoutType t) {
-    // Preserve split context; mark as user-overridden.
+  void _selectSplitDay(String name) {
     final existing = _effectiveGymDay();
-    log.gymDay = existing.withUserType(t);
+    log.gymDay = existing.withUserOverride(
+      splitName: name,
+      type: WorkoutType.fromSplitName(name),
+    );
     onChanged();
+  }
+
+  void _selectCoarseType(WorkoutType t) {
+    final existing = _effectiveGymDay();
+    log.gymDay = existing.withUserOverride(
+      splitName: t.displayName, // e.g. "Cardio", "Other"
+      type: t,
+    );
+    onChanged();
+  }
+
+  Widget _buildChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF52B788).withValues(alpha: 0.18)
+              : const Color(0xFF13131F),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF52B788).withValues(alpha: 0.6)
+                : const Color(0xFF2E2E3E),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected
+                ? const Color(0xFF52B788)
+                : const Color(0xFF6B7280),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -449,44 +517,74 @@ class _GymCard extends StatelessWidget {
             const SizedBox(height: 12),
             const Divider(color: Color(0xFF2E2E3E), height: 1),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: WorkoutType.values
-                  .where((t) => t != WorkoutType.rest)
-                  .map((t) {
-                final selected = gym.workoutType == t;
-                return GestureDetector(
-                  onTap: () => _selectType(t),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF52B788).withValues(alpha: 0.18)
-                          : const Color(0xFF13131F),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF52B788).withValues(alpha: 0.6)
-                            : const Color(0xFF2E2E3E),
+            Builder(
+              builder: (context) {
+                // Get exact unique split names from user's current configuration.
+                final exactSplitDays = WorkoutService.instance.trainingDays
+                    .map((d) => d.name)
+                    .toSet()
+                    .toList();
+                
+                final hasSplitOptions = exactSplitDays.isNotEmpty;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasSplitOptions) ...[
+                      const Text(
+                        'Your Split',
+                        style: TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      '${t.emoji} ${t.displayName}',
+                      const SizedBox(height: 8),
+                      // MAIN SPLIT CHIPS
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: exactSplitDays.map((name) {
+                          // Match by name rather than generic enum to ensure fidelity
+                          final selected = gym.splitDayName == name;
+                          final inferredType = WorkoutType.fromSplitName(name);
+                          return _buildChip(
+                            label: '${inferredType.emoji} $name',
+                            selected: selected,
+                            onTap: () => _selectSplitDay(name),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // FALLBACK CHIPS
+                    const Text(
+                      'Manual Fallback',
                       style: TextStyle(
+                        color: Color(0xFF6B7280),
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: selected
-                            ? const Color(0xFF52B788)
-                            : const Color(0xFF6B7280),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [WorkoutType.cardio, WorkoutType.other].map((t) {
+                        // Mark fallback as selected if type matches but name is NOT in the main split
+                        // (e.g. they literally chose 'Cardio' or 'Other')
+                        final selected = gym.workoutType == t && !exactSplitDays.contains(gym.splitDayName);
+                        return _buildChip(
+                          label: '${t.emoji} ${t.displayName}',
+                          selected: selected,
+                          onTap: () => _selectCoarseType(t),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 );
-              }).toList(),
+              },
             ),
           ],
         ],

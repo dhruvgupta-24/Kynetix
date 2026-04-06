@@ -84,11 +84,13 @@ class GymDay {
     this.splitOverridden = false,
   });
 
-  /// Returns a copy with the user's manually-chosen workout type.
-  GymDay withUserType(WorkoutType t) => GymDay(
+  /// Returns a copy with the user's manually-chosen split day name and type.
+  /// This explicitly updates the `splitDayName` to match the chip they clicked,
+  /// preserving context for the target engine, while marking it as an override.
+  GymDay withUserOverride({required String? splitName, required WorkoutType type}) => GymDay(
     didGym:          true,
-    workoutType:     t,
-    splitDayName:    splitDayName,   // preserve split context
+    workoutType:     type,
+    splitDayName:    splitName,
     splitOverridden: true,
   );
 
