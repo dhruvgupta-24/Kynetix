@@ -51,8 +51,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('[ProfileScreen] initState — session: ${session != null ? "VALID" : "NULL"}');
+    final user = Supabase.instance.client.auth.currentUser;
+    debugPrint('╔══════════════════════════════════════════════════');
+    debugPrint('║ [ProfileScreen] initState DIAGNOSTICS');
+    debugPrint('║ session null?   : ${session == null}');
+    debugPrint('║ user id         : ${user?.id ?? "NULL"}');
+    debugPrint('║ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}');
+    debugPrint('╚══════════════════════════════════════════════════');
     _checkAiStatus();
+    _probeEdgeFunctionOnStartup();
+  }
+
+  // ── TEMPORARY STARTUP PROBE ──────────────────────────────────────────
+  // Directly invokes openai-link-status to prove any edge function works at all.
+  Future<void> _probeEdgeFunctionOnStartup() async {
+    debugPrint('[PROBE] ▶ Starting openai-link-status probe...');
+    try {
+      final res = await Supabase.instance.client.functions.invoke('openai-link-status');
+      debugPrint('[PROBE] ✔ Response received');
+      debugPrint('[PROBE]   data        : ${res.data}');
+      debugPrint('[PROBE]   status      : ${res.status}');
+    } catch (e, st) {
+      debugPrint('[PROBE] ✖ EXCEPTION: ${e.runtimeType}');
+      debugPrint('[PROBE]   message     : $e');
+      debugPrint('[PROBE]   stack trace :');
+      debugPrint(st.toString());
+    }
   }
 
   @override
@@ -62,9 +86,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _checkAiStatus() async {
-    // Session guard: skip edge function call if no live JWT
     final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('[ProfileScreen] _checkAiStatus — session: ${session != null ? "VALID" : "NULL"}');
+    debugPrint('[_checkAiStatus] session null? ${session == null} | user: ${session?.user.id ?? "NULL"}');
     if (session == null) {
       if (!mounted) return;
       setState(() => _aiIsLoading = false);
@@ -73,13 +96,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final res = await Supabase.instance.client.functions.invoke('openai-link-status');
+      debugPrint('[_checkAiStatus] ✔ data: ${res.data} | status: ${res.status}');
       if (!mounted) return;
       setState(() {
         _aiIsConnected = res.data['isConnected'] == true;
         _aiIsLoading = false;
       });
-    } catch (e) {
-      debugPrint('[ProfileScreen] _checkAiStatus error: $e');
+    } catch (e, st) {
+      debugPrint('[_checkAiStatus] ✖ ${e.runtimeType}: $e');
+      debugPrint(st.toString());
       if (!mounted) return;
       setState(() {
         _aiIsLoading = false;
@@ -88,10 +113,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _connectAi() async {
-    // ── Session guard ───────────────────────────────────────────────────
+    // ──────────────── FULL DIAGNOSTIC BLOCK ───────────────────
     final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('[ProfileScreen] _connectAi — session: ${session != null ? "VALID" : "NULL — aborting"}');
+    final user    = Supabase.instance.client.auth.currentUser;
+    debugPrint('┌──────────────────────────────────────────────────');
+    debugPrint('│ [_connectAi] DIAGNOSTIC');
+    debugPrint('│ session null?   : ${session == null}');
+    debugPrint('│ user id         : ${user?.id ?? "NULL"}');
+    debugPrint('│ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}');
+    debugPrint('│ target fn       : openai-link-start');
+    debugPrint('└──────────────────────────────────────────────────');
+
     if (session == null) {
+      debugPrint('[_connectAi] ❌ ABORT: no session');
       setState(() => _aiErrorMessage = 'Session expired. Please sign out and sign in again.');
       return;
     }
@@ -101,25 +135,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _aiErrorMessage = null;
     });
 
+    debugPrint('[_connectAi] ▶ calling functions.invoke("openai-link-start")...');
     try {
-      debugPrint('[ProfileScreen] _connectAi — invoking openai-link-start...');
       final res = await Supabase.instance.client.functions.invoke('openai-link-start');
-      debugPrint('[ProfileScreen] _connectAi — invoke returned: ${res.data}');
+
+      debugPrint('[_connectAi] ✔ invoke returned');
+      debugPrint('[_connectAi]   status      : ${res.status}');
+      debugPrint('[_connectAi]   data        : ${res.data}');
+      debugPrint('[_connectAi]   data null?  : ${res.data == null}');
+
       final data = res.data;
       if (!mounted) return;
-      
+
+      // Guard: the function returned but data is null or missing fields
+      if (data == null) {
+        debugPrint('[_connectAi] ❌ data is null — HTTP status was ${res.status}');
+        setState(() {
+          _aiIsLoading = false;
+          _aiErrorMessage = 'Server returned empty response (status ${res.status})';
+        });
+        return;
+      }
+
       setState(() {
-        _aiUserCode = data['userCode'];
-        _aiDeviceCode = data['deviceCode'];
+        _aiUserCode       = data['userCode'];
+        _aiDeviceCode     = data['deviceCode'];
         _aiVerificationUrl = data['verificationUrl'];
-        _aiIsLoading = false;
-        _aiIsPolling = true;
+        _aiIsLoading      = false;
+        _aiIsPolling      = true;
       });
 
+      debugPrint('[_connectAi] userCode: ${data["userCode"]} | deviceCode prefix: ${(data["deviceCode"] ?? "").toString().substring(0, (data["deviceCode"] ?? "").toString().length.clamp(0, 12))}...');
       _startPolling(data['interval'] ?? 5);
 
-    } catch (e) {
-      debugPrint('[ProfileScreen] _connectAi — invoke exception: $e');
+    } catch (e, st) {
+      debugPrint('[_connectAi] ❌ EXCEPTION CAUGHT');
+      debugPrint('[_connectAi]   type        : ${e.runtimeType}');
+      debugPrint('[_connectAi]   message     : $e');
+      debugPrint('[_connectAi]   stack trace :');
+      debugPrint(st.toString());
       if (!mounted) return;
       setState(() {
         _aiIsLoading = false;
