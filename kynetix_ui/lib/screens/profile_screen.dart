@@ -50,6 +50,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    final session = Supabase.instance.client.auth.currentSession;
+    debugPrint('[ProfileScreen] initState — session: ${session != null ? "VALID" : "NULL"}');
     _checkAiStatus();
   }
 
@@ -60,6 +62,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _checkAiStatus() async {
+    // Session guard: skip edge function call if no live JWT
+    final session = Supabase.instance.client.auth.currentSession;
+    debugPrint('[ProfileScreen] _checkAiStatus — session: ${session != null ? "VALID" : "NULL"}');
+    if (session == null) {
+      if (!mounted) return;
+      setState(() => _aiIsLoading = false);
+      return;
+    }
+
     try {
       final res = await Supabase.instance.client.functions.invoke('openai-link-status');
       if (!mounted) return;
@@ -68,6 +79,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _aiIsLoading = false;
       });
     } catch (e) {
+      debugPrint('[ProfileScreen] _checkAiStatus error: $e');
       if (!mounted) return;
       setState(() {
         _aiIsLoading = false;
@@ -76,13 +88,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _connectAi() async {
+    // ── Session guard ───────────────────────────────────────────────────
+    final session = Supabase.instance.client.auth.currentSession;
+    debugPrint('[ProfileScreen] _connectAi — session: ${session != null ? "VALID" : "NULL — aborting"}');
+    if (session == null) {
+      setState(() => _aiErrorMessage = 'Session expired. Please sign out and sign in again.');
+      return;
+    }
+
     setState(() {
       _aiIsLoading = true;
       _aiErrorMessage = null;
     });
 
     try {
+      debugPrint('[ProfileScreen] _connectAi — invoking openai-link-start...');
       final res = await Supabase.instance.client.functions.invoke('openai-link-start');
+      debugPrint('[ProfileScreen] _connectAi — invoke returned: ${res.data}');
       final data = res.data;
       if (!mounted) return;
       
@@ -97,6 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _startPolling(data['interval'] ?? 5);
 
     } catch (e) {
+      debugPrint('[ProfileScreen] _connectAi — invoke exception: $e');
       if (!mounted) return;
       setState(() {
         _aiIsLoading = false;

@@ -20,6 +20,10 @@ Future<void> main() async {
     anonKey: SupabaseSecrets.anonKey,
   );
 
+  // ── Session diagnostic ───────────────────────────────────────────────────
+  final startupSession = Supabase.instance.client.auth.currentSession;
+  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
+
   await Health().configure();
   await MealMemory.instance.init();
   await PersonalNutritionMemory.instance.init();

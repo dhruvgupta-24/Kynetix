@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
@@ -22,14 +24,16 @@ class AuthGate extends StatelessWidget {
           return const Scaffold(backgroundColor: Color(0xFF0F0F14));
         }
 
-        final user = _authService.currentUser;
+        // SESSION-GATED: require currentSession (live JWT), not just currentUser (stale object).
+        final session = Supabase.instance.client.auth.currentSession;
+        debugPrint('[AuthGate] currentSession: ${session != null ? "VALID (expires ${session.expiresAt})" : "NULL — routing to AuthScreen"}');
 
-        if (user != null) {
-          debugPrint('[AuthGate] User is authenticated. Routing to _LoggedInGate for profile validation.');
+        if (session != null) {
+          debugPrint('[AuthGate] Session valid. Routing to _LoggedInGate.');
           return const _LoggedInGate();
         }
 
-        debugPrint('[AuthGate] User is NOT authenticated. Routing to AuthScreen.');
+        debugPrint('[AuthGate] No session. Routing to AuthScreen.');
         return const AuthScreen();
       },
     );
@@ -54,6 +58,19 @@ class _LoggedInGateState extends State<_LoggedInGate> {
   }
 
   Future<void> _checkProfile() async {
+    // ── Session guard ──────────────────────────────────────────────────────────
+    // Verify we actually have a live JWT before doing any remote work.
+    final session = Supabase.instance.client.auth.currentSession;
+    debugPrint('[_LoggedInGate] currentSession: ${session != null ? "VALID" : "NULL"}');
+    if (session == null) {
+      // No live session — send back to auth screen immediately.
+      debugPrint('[_LoggedInGate] No session — forcing re-authentication.');
+      if (mounted) setState(() => _hasProfile = null);
+      // Sign out cleanly to reset the auth stream and trigger AuthGate to show AuthScreen.
+      await Supabase.instance.client.auth.signOut();
+      return;
+    }
+
     debugPrint('[_LoggedInGate] Validating Supabase Profile...');
     try {
       // 1. ALWAYS Treat Supabase as the source of truth for identity
@@ -75,15 +92,15 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     } catch (e) {
       debugPrint('[_LoggedInGate] Network/Fetch Exception triggering locally-cached execution failover: $e');
       // 2. Network offline fallback
-      // ONLY if there is existing clean local state
+      // ONLY if there is existing clean local state AND we verified a session above.
+      // Session was already confirmed valid above, so this is safe to allow.
       if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
-        debugPrint('[_LoggedInGate] Falling back to successful local cache state. Proceeding safely offline.');
+        debugPrint('[_LoggedInGate] Falling back to local cache. Session is live, just offline.');
         if (mounted) setState(() => _hasProfile = true);
         return;
       }
       
       // If we reach here, we have a network/internal error AND no local profile to fall back to.
-      // We MUST NOT assume they are a new user. Defaulting to onboarding could overwrite data or get stuck.
       if (mounted) {
         setState(() {
           _fatalError = 'Unable to connect to Kynetix Servers.\nPlease check your connection and try again.';
