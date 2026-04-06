@@ -113,72 +113,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _connectAi() async {
-    // ──────────────── FULL DIAGNOSTIC BLOCK ───────────────────
-    final session = Supabase.instance.client.auth.currentSession;
-    final user    = Supabase.instance.client.auth.currentUser;
-    debugPrint('┌──────────────────────────────────────────────────');
-    debugPrint('│ [_connectAi] DIAGNOSTIC');
-    debugPrint('│ session null?   : ${session == null}');
-    debugPrint('│ user id         : ${user?.id ?? "NULL"}');
-    debugPrint('│ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}');
-    debugPrint('│ target fn       : openai-link-start');
-    debugPrint('└──────────────────────────────────────────────────');
 
+    final session = Supabase.instance.client.auth.currentSession;
+    final user = Supabase.instance.client.auth.currentUser;
+    debugPrint('[_connectAi] session null: ${session == null} | user: ${user?.id ?? "NULL"}');
     if (session == null) {
-      debugPrint('[_connectAi] ❌ ABORT: no session');
       setState(() => _aiErrorMessage = 'Session expired. Please sign out and sign in again.');
       return;
     }
-
-    setState(() {
-      _aiIsLoading = true;
-      _aiErrorMessage = null;
-    });
-
-    debugPrint('[_connectAi] ▶ calling functions.invoke("openai-link-start")...');
+    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
     try {
       final res = await Supabase.instance.client.functions.invoke('openai-link-start');
-
-      debugPrint('[_connectAi] ✔ invoke returned');
-      debugPrint('[_connectAi]   status      : ${res.status}');
-      debugPrint('[_connectAi]   data        : ${res.data}');
-      debugPrint('[_connectAi]   data null?  : ${res.data == null}');
-
+      debugPrint('=== OPENAI START RESPONSE ===');
+      debugPrint('status: ${res.status}');
+      debugPrint('data: ${res.data}');
+      debugPrint('=============================');
       final data = res.data;
       if (!mounted) return;
-
-      // Guard: the function returned but data is null or missing fields
       if (data == null) {
-        debugPrint('[_connectAi] ❌ data is null — HTTP status was ${res.status}');
-        setState(() {
-          _aiIsLoading = false;
-          _aiErrorMessage = 'Server returned empty response (status ${res.status})';
-        });
+        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server returned empty response'; });
         return;
       }
-
+      debugPrint('[_connectAi] interval type: ${data["interval"].runtimeType}');
+      final String? userCode = data['userCode']?.toString();
+      final String? deviceCode = data['deviceCode']?.toString();
+      final String? verificationUrl = data['verificationUrl']?.toString();
+      final int interval = data['interval'] != null ? (data['interval'] as num).toInt() : 5;
       setState(() {
-        _aiUserCode       = data['userCode'];
-        _aiDeviceCode     = data['deviceCode'];
-        _aiVerificationUrl = data['verificationUrl'];
-        _aiIsLoading      = false;
-        _aiIsPolling      = true;
+        _aiUserCode = userCode;
+        _aiDeviceCode = deviceCode;
+        _aiVerificationUrl = verificationUrl;
+        _aiIsLoading = false;
+        _aiIsPolling = true;
       });
-
-      debugPrint('[_connectAi] userCode: ${data["userCode"]} | deviceCode prefix: ${(data["deviceCode"] ?? "").toString().substring(0, (data["deviceCode"] ?? "").toString().length.clamp(0, 12))}...');
-      _startPolling(data['interval'] ?? 5);
-
+      debugPrint('[_connectAi] SUCCESS userCode: $userCode interval: $interval');
+      if (verificationUrl != null && verificationUrl.isNotEmpty) {
+        final uri = Uri.tryParse(verificationUrl);
+        if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      _startPolling(interval);
     } catch (e, st) {
-      debugPrint('[_connectAi] ❌ EXCEPTION CAUGHT');
-      debugPrint('[_connectAi]   type        : ${e.runtimeType}');
-      debugPrint('[_connectAi]   message     : $e');
-      debugPrint('[_connectAi]   stack trace :');
+      debugPrint('[_connectAi] EXCEPTION ${e.runtimeType}: $e');
       debugPrint(st.toString());
       if (!mounted) return;
-      setState(() {
-        _aiIsLoading = false;
-        _aiErrorMessage = 'Failed to start pairing';
-      });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start pairing'; });
     }
   }
 
@@ -190,52 +168,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'openai-link-poll',
           body: {'device_code': _aiDeviceCode},
         );
-        
         final status = res.data['status'];
         if (status == 'connected') {
           timer.cancel();
           if (!mounted) return;
-          setState(() {
-            _aiIsConnected = true;
-            _aiIsPolling = false;
-            _aiUserCode = null;
-            _aiDeviceCode = null;
-            _aiVerificationUrl = null;
-          });
+          setState(() { _aiIsConnected = true; _aiIsPolling = false; _aiUserCode = null; _aiDeviceCode = null; _aiVerificationUrl = null; });
         } else if (status == 'expired') {
           timer.cancel();
           if (!mounted) return;
-          setState(() {
-            _aiIsPolling = false;
-            _aiErrorMessage = 'Code expired. Please try again.';
-            _aiUserCode = null;
-            _aiDeviceCode = null;
-            _aiVerificationUrl = null;
-          });
+          setState(() { _aiIsPolling = false; _aiErrorMessage = 'Code expired. Please try again.'; _aiUserCode = null; _aiDeviceCode = null; _aiVerificationUrl = null; });
         }
       } catch (e) {
-        // Ignore network drops while polling
+        // ignore network drops
       }
     });
   }
 
   Future<void> _disconnectAi() async {
-    setState(() {
-      _aiIsLoading = true;
-    });
+    setState(() { _aiIsLoading = true; });
     try {
       await Supabase.instance.client.functions.invoke('openai-link-disconnect');
       if (!mounted) return;
-      setState(() {
-        _aiIsConnected = false;
-        _aiIsLoading = false;
-      });
+      setState(() { _aiIsConnected = false; _aiIsLoading = false; });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _aiIsLoading = false;
-        _aiErrorMessage = 'Failed to disconnect';
-      });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to disconnect'; });
     }
   }
 
