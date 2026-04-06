@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -33,6 +36,131 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _syncing = false;
   String? _syncMessage;
+
+  // ── AI Integration State ──
+  bool _aiIsLoading = true;
+  bool _aiIsConnected = false;
+  bool _aiIsPolling = false;
+  String? _aiUserCode;
+  String? _aiDeviceCode;
+  String? _aiVerificationUrl;
+  String? _aiErrorMessage;
+  Timer? _aiPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAiStatus();
+  }
+
+  @override
+  void dispose() {
+    _aiPollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkAiStatus() async {
+    try {
+      final res = await Supabase.instance.client.functions.invoke('openai-link-status');
+      if (!mounted) return;
+      setState(() {
+        _aiIsConnected = res.data['isConnected'] == true;
+        _aiIsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _aiIsLoading = false;
+      });
+    }
+  }
+
+  Future<void> _connectAi() async {
+    setState(() {
+      _aiIsLoading = true;
+      _aiErrorMessage = null;
+    });
+
+    try {
+      final res = await Supabase.instance.client.functions.invoke('openai-link-start');
+      final data = res.data;
+      if (!mounted) return;
+      
+      setState(() {
+        _aiUserCode = data['userCode'];
+        _aiDeviceCode = data['deviceCode'];
+        _aiVerificationUrl = data['verificationUrl'];
+        _aiIsLoading = false;
+        _aiIsPolling = true;
+      });
+
+      _startPolling(data['interval'] ?? 5);
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _aiIsLoading = false;
+        _aiErrorMessage = 'Failed to start pairing';
+      });
+    }
+  }
+
+  void _startPolling(int intervalSeconds) {
+    _aiPollTimer?.cancel();
+    _aiPollTimer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) async {
+      try {
+        final res = await Supabase.instance.client.functions.invoke(
+          'openai-link-poll',
+          body: {'device_code': _aiDeviceCode},
+        );
+        
+        final status = res.data['status'];
+        if (status == 'connected') {
+          timer.cancel();
+          if (!mounted) return;
+          setState(() {
+            _aiIsConnected = true;
+            _aiIsPolling = false;
+            _aiUserCode = null;
+            _aiDeviceCode = null;
+            _aiVerificationUrl = null;
+          });
+        } else if (status == 'expired') {
+          timer.cancel();
+          if (!mounted) return;
+          setState(() {
+            _aiIsPolling = false;
+            _aiErrorMessage = 'Code expired. Please try again.';
+            _aiUserCode = null;
+            _aiDeviceCode = null;
+            _aiVerificationUrl = null;
+          });
+        }
+      } catch (e) {
+        // Ignore network drops while polling
+      }
+    });
+  }
+
+  Future<void> _disconnectAi() async {
+    setState(() {
+      _aiIsLoading = true;
+    });
+    try {
+      await Supabase.instance.client.functions.invoke('openai-link-disconnect');
+      if (!mounted) return;
+      setState(() {
+        _aiIsConnected = false;
+        _aiIsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _aiIsLoading = false;
+        _aiErrorMessage = 'Failed to disconnect';
+      });
+    }
+  }
 
   Future<void> _doSync() async {
     if (_syncing) return;
@@ -205,6 +333,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildGoalCard(),
           const SizedBox(height: 16),
           _buildHealthCard(),
+          _buildHealthCard(),
+          const SizedBox(height: 16),
+          _buildAiIntegrationCard(),
           const SizedBox(height: 16),
           _buildAboutCard(),
         ],
@@ -466,6 +597,132 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (steps < 7000) return ActivityTier.light;
     if (steps < 10000) return ActivityTier.moderate;
     return ActivityTier.high;
+  }
+
+  // ── AI Integration ──────────────────────────────────────────────────────────
+
+  Widget _buildAiIntegrationCard() {
+    Widget content;
+
+    if (_aiIsLoading && !_aiIsPolling) {
+      content = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: SizedBox(
+            width: 24, height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF52B788)),
+          ),
+        ),
+      );
+    } else {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _aiIsConnected ? Icons.auto_awesome_rounded : Icons.auto_awesome_outlined,
+                size: 16,
+                color: _aiIsConnected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _aiIsConnected ? 'Connected to OpenAI' : 'Not Connected',
+                style: TextStyle(
+                  color: _aiIsConnected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (_aiIsConnected)
+                GestureDetector(
+                  onTap: _disconnectAi,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.4)),
+                    ),
+                    child: const Text('Disconnect', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFF6B35))),
+                  ),
+                )
+              else if (!_aiIsPolling)
+                GestureDetector(
+                  onTap: _connectAi,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF52B788).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.4)),
+                    ),
+                    child: const Text('Connect OpenAI', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF52B788))),
+                  ),
+                ),
+            ],
+          ),
+
+          if (_aiErrorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(_aiErrorMessage!, style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35))),
+          ],
+
+          if (_aiIsPolling && _aiUserCode != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF13131F),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF2E2E3E)),
+              ),
+              child: Column(
+                children: [
+                  const Text('Enter this pairing code:', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Text(_aiUserCode!, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white)),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF52B788),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.open_in_browser_rounded, size: 18),
+                    label: const Text('Open Verification Link', style: TextStyle(fontWeight: FontWeight.w700)),
+                    onPressed: () async {
+                      if (_aiVerificationUrl != null) {
+                        final uri = Uri.parse(_aiVerificationUrl!);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6B7280))),
+                      SizedBox(width: 8),
+                      Text('Waiting for authorization...', style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return _Section(
+      title: 'AI Integration',
+      child: content,
+    );
   }
 
   // ── About ──────────────────────────────────────────────────────────────────

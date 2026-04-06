@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
@@ -53,38 +54,60 @@ class AiNutritionService {
   }) async {
     debugPrint('[AI] estimating: "$rawInput"');
 
-    final url = Uri.parse(_endpoint);
+    String targetEndpoint = _endpoint;
+    String targetModel    = _model;
+    String authHeader     = 'Bearer $_apiKey';
+    bool usesLinkedOpenAI = false;
 
-    final requestBody = jsonEncode({
-      'model':    _model,
-      'messages': [
-        {'role': 'system', 'content': _systemPrompt()},
-        {
-          'role': 'user',
-          'content': _userPrompt(rawInput, context: context),
-        },
-      ],
-      'temperature':     0.15,
-      'max_tokens':      1200,
-      'response_format': {'type': 'json_object'},
-    });
+    // 1. Check if user has linked their own OpenAI account
+    try {
+      final statusRes = await Supabase.instance.client.functions.invoke('openai-link-status');
+      if (statusRes.data['isConnected'] == true && statusRes.data['accessToken'] != null) {
+        targetEndpoint = 'https://api.openai.com/v1/chat/completions';
+        targetModel    = 'gpt-4o-mini'; // Use faster tier for text parsing tasks
+        authHeader     = 'Bearer ${statusRes.data['accessToken']}';
+        usesLinkedOpenAI = true;
+        debugPrint('[AI] Intercepted link: Routing via User-linked OpenAI Token');
+      }
+    } catch (e) {
+      debugPrint('[AI] Silent fail checking OpenAI link status: $e');
+    }
 
-    final response = await http.post(
-      url,
-      headers: {
-        'Authorization': 'Bearer $_apiKey',
-        'Content-Type':  'application/json',
-        'HTTP-Referer':  'https://kynetix.local',
-        'X-Title':       'Kynetix',
-      },
-      body: requestBody,
-    ).timeout(const Duration(seconds: 20));
+    http.Response response;
+    try {
+      response = await _dispatchAiHttp(
+        endpoint: targetEndpoint,
+        model: targetModel,
+        authHeader: authHeader,
+        rawInput: rawInput,
+        context: context,
+      );
+
+      // 3. Trigger fallback on explicit linked-token failure (e.g. expired, revoked)
+      if (response.statusCode != 200 && usesLinkedOpenAI) {
+        throw Exception('User Token Failure (HTTP ${response.statusCode})');
+      }
+
+    } catch (e) {
+      if (usesLinkedOpenAI) {
+        debugPrint('[AI] User token execution failed: $e');
+        debugPrint('[AI] Falling back to OpenRouter Global Network...');
+        response = await _dispatchAiHttp(
+          endpoint: _endpoint,
+          model: _model,
+          authHeader: 'Bearer $_apiKey',
+          rawInput: rawInput,
+          context: context,
+        );
+      } else {
+        rethrow;
+      }
+    }
 
     debugPrint('[AI] HTTP status: ${response.statusCode}');
 
     if (response.statusCode != 200) {
-      final snippet = response.body.substring(
-          0, response.body.length.clamp(0, 500));
+      final snippet = response.body.substring(0, response.body.length.clamp(0, 500));
       debugPrint('[AI] ❌ error body: $snippet');
       throw Exception('AI HTTP ${response.statusCode}: $snippet');
     }
@@ -179,6 +202,34 @@ class AiNutritionService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  Future<http.Response> _dispatchAiHttp({
+    required String endpoint,
+    required String model,
+    required String authHeader,
+    required String rawInput,
+    AiEscalationContext? context,
+  }) async {
+    return http.post(
+      Uri.parse(endpoint),
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type':  'application/json',
+        'HTTP-Referer':  'https://kynetix.local',
+        'X-Title':       'Kynetix',
+      },
+      body: jsonEncode({
+        'model': model,
+        'messages': [
+          {'role': 'system', 'content': _systemPrompt()},
+          {'role': 'user', 'content': _userPrompt(rawInput, context: context)},
+        ],
+        'temperature': 0.15,
+        'max_tokens': 1200,
+        'response_format': {'type': 'json_object'},
+      }),
+    ).timeout(const Duration(seconds: 20));
+  }
 
   NutrientRange _rng(Map<String, dynamic> m) => NutrientRange(
         min: (m['min'] as num?)?.toDouble() ?? 0,
