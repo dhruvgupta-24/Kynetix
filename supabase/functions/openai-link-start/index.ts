@@ -1,11 +1,25 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+// @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2.44.2";
-import { encodeBase64Url } from "jsr:@std/encoding/base64url";
+
+declare const Deno: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Implemented natively to avoid JSR import lint errors
+function encodeBase64Url(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = new Uint8Array(buffer);
+  let binString = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binString += String.fromCharCode(bytes[i] ?? 0);
+  }
+  return btoa(binString)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
 
 function generateRandomString(length: number): string {
   const bytes = new Uint8Array(length);
@@ -16,7 +30,8 @@ function generateRandomString(length: number): string {
 async function createCodeChallenge(verifier: string): Promise<string> {
   const data = new TextEncoder().encode(verifier);
   const hash = await crypto.subtle.digest("SHA-256", data);
-  return encodeBase64Url(hash);
+  // Extracted as Uint8Array to satisfy strict Typescript limits
+  return encodeBase64Url(new Uint8Array(hash));
 }
 
 Deno.serve(async (req: Request) => {
@@ -78,15 +93,17 @@ Deno.serve(async (req: Request) => {
        });
     }
 
-    // Return the URL for the client to open
-    const authUrl = new URL("https://auth.openai.com/authorize");
+    // Construct authorization URL
+    const authUrl = new URL("https://auth.openai.com/oauth/authorize");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", "offline_access openid profile email");
+    authUrl.searchParams.set("scope", "openid profile email offline_access api.connectors.read api.connectors.invoke");
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("id_token_add_organizations", "true");
+    authUrl.searchParams.set("codex_cli_simplified_flow", "true");
 
     return new Response(
       JSON.stringify({ authUrl: authUrl.toString() }),

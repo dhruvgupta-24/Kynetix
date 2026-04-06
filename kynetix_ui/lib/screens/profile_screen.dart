@@ -160,12 +160,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
     try {
-      await Supabase.instance.client.functions.invoke(
+      final res = await Supabase.instance.client.functions.invoke(
         'openai-link-finish',
         body: {'code': code, 'state': state},
       );
       if (!mounted) return;
-      setState(() { _aiIsConnected = true; _aiIsLoading = false; });
+      if (res.status == 200 && res.data != null && res.data['success'] == true) {
+        setState(() { _aiIsConnected = true; _aiIsLoading = false; });
+      } else {
+        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Server validation failed'; });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to complete authentication'; });
