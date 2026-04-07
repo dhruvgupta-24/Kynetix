@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/supabase_secrets.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -47,45 +49,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _aiVerificationUrl;
   bool _aiIsPolling = false;
 
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
+
   @override
   void initState() {
     super.initState();
-    final session = Supabase.instance.client.auth.currentSession;
-    final user = Supabase.instance.client.auth.currentUser;
-    debugPrint('╔══════════════════════════════════════════════════');
-    debugPrint('║ [ProfileScreen] initState DIAGNOSTICS');
-    debugPrint('║ session null?   : ${session == null}');
-    debugPrint('║ user id         : ${user?.id ?? "NULL"}');
-    debugPrint(
-      '║ token prefix    : ${session?.accessToken.substring(0, session.accessToken.length.clamp(0, 20)) ?? "NULL"}',
-    );
-    debugPrint('╚══════════════════════════════════════════════════');
     _checkAiStatus();
-    _probeEdgeFunctionOnStartup();
-  }
-
-  // ── TEMPORARY STARTUP PROBE ──────────────────────────────────────────
-  // Directly invokes openai-link-status to prove any edge function works at all.
-  Future<void> _probeEdgeFunctionOnStartup() async {
-    debugPrint('[PROBE] ▶ Starting openai-link-status probe...');
-    try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'openai-link-status',
-      );
-      debugPrint('[PROBE] ✔ Response received');
-      debugPrint('[PROBE]   data        : ${res.data}');
-      debugPrint('[PROBE]   status      : ${res.status}');
-    } catch (e, st) {
-      debugPrint('[PROBE] ✖ EXCEPTION: ${e.runtimeType}');
-      debugPrint('[PROBE]   message     : $e');
-      debugPrint('[PROBE]   stack trace :');
-      debugPrint(st.toString());
-    }
+    // Listen for deep links from the browser helper page
+    _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      if (uri.scheme == 'kynetix' &&
+          uri.host == 'openai-auth' &&
+          uri.path == '/callback') {
+        _handleDeepLink(uri);
+      }
+    });
   }
 
   @override
   void dispose() {
     _aiPollTimer?.cancel();
+    _linkSub?.cancel();
     super.dispose();
   }
 
@@ -126,37 +110,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) {
       if (!mounted) return;
-      setState(() => _aiErrorMessage = 'Session expired. Please sign out. ');
+      setState(() => _aiErrorMessage = 'Session expired. Please sign out.');
       return;
     }
     setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
+
+    final helperUrl = Uri.https(
+      'sjrcqvqhycxtwwbivizy.supabase.co',
+      '/functions/v1/openai-device-helper',
+      {
+        'token': session.accessToken,
+        'api': SupabaseSecrets.url,
+      },
+    );
+
+    debugPrint('[AI CONNECT] launching URL: $helperUrl');
+
     try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'openai-link-start',
-        headers: {
-          'Authorization': 'Bearer ${session.accessToken}',
-        },
+      final launched = await launchUrl(
+        helperUrl,
+        mode: LaunchMode.externalApplication,
       );
-      final data = res.data;
-      if (!mounted) return;
-      if (data == null || data['user_code'] == null) {
-        setState(() { _aiIsLoading = false; _aiErrorMessage = 'Invalid response'; });
-        return;
+      if (launched) {
+        debugPrint('[AI CONNECT] launch success');
+        if (!mounted) return;
+        setState(() {
+          _aiIsLoading = false;
+          _aiIsPolling = true;
+        });
+      } else {
+        debugPrint('[AI CONNECT] launchUrl returned false, trying platformDefault');
+        final fallback = await launchUrl(
+          helperUrl,
+          mode: LaunchMode.platformDefault,
+        );
+        debugPrint('[AI CONNECT] fallback result: $fallback');
+        if (!mounted) return;
+        if (fallback) {
+          setState(() { _aiIsLoading = false; _aiIsPolling = true; });
+        } else {
+          setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser. URL: $helperUrl'; });
+        }
       }
-      
-      setState(() {
-        _aiIsLoading = false;
-        _aiUserCode = data['user_code'];
-        _aiVerificationUrl = data['verification_url'];
-        _aiIsPolling = true;
-      });
-      
-      final interval = (data['interval_seconds'] as num?)?.toInt() ?? 5;
-      _startPolling(interval);
     } catch (e) {
+      debugPrint('[AI CONNECT] launch failed: $e');
       if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to fetch device code'; });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Launch error: $e'; });
     }
+  }
+
+  void _handleDeepLink(Uri uri) {
+    final userCode = uri.queryParameters['user_code'];
+    final verificationUri = uri.queryParameters['verification_uri'];
+    final intervalStr = uri.queryParameters['interval'];
+    final interval = int.tryParse(intervalStr ?? '') ?? 5;
+
+    if (userCode == null || verificationUri == null) {
+      if (mounted) setState(() => _aiErrorMessage = 'Bad callback from OpenAI helper.');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _aiUserCode = userCode;
+        _aiVerificationUrl = verificationUri;
+        _aiIsPolling = true;
+        _aiErrorMessage = null;
+        _aiIsLoading = false;
+      });
+    }
+    _startPolling(interval);
   }
 
   void _startPolling(int intervalSeconds) {
@@ -441,7 +464,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           _buildGoalCard(),
           const SizedBox(height: 16),
-          _buildHealthCard(),
           _buildHealthCard(),
           const SizedBox(height: 16),
           _buildAiIntegrationCard(),
