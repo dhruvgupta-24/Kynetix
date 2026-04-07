@@ -82,10 +82,13 @@
   </div>
   <script>
     (function () {
-      var NONCE = "18fef8c757587050b276c0368d2e653a165d94a060fe7ed5";
-      var SAVE_URL = "https://sjrcqvqhycxtwwbivizy.supabase.co/functions/v1/openai-link-save";
-      var CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-      var SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke";
+      // Read nonce and api from URL query params — NOT hardcoded
+      var params = new URLSearchParams(window.location.search);
+      var NONCE = params.get('nonce');
+      var API_BASE = params.get('api') || 'https://sjrcqvqhycxtwwbivizy.supabase.co';
+      var SAVE_URL = API_BASE + '/functions/v1/openai-link-save';
+      var CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+      var SCOPE = 'openid profile email offline_access api.connectors.read api.connectors.invoke';
       var deepLink = '';
 
       function setStatus(msg) {
@@ -114,6 +117,11 @@
         if (link) { window.location.href = link; }
       }
       async function run() {
+        // Guard: nonce must be present
+        if (!NONCE) {
+          showError('Missing session token. Please return to Kynetix and try again.');
+          return;
+        }
         try {
           setStatus('Requesting device code from OpenAI...');
           var deviceRes = await fetch('https://auth.openai.com/oauth/device/code', {
