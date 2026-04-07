@@ -66,8 +66,8 @@ Deno.serve(async (req: Request) => {
 
     const tokenResponse = await fetch('https://auth.openai.com/oauth/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
         client_id: clientId,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         device_code: sessionData.device_code

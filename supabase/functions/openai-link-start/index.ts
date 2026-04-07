@@ -60,11 +60,11 @@ Deno.serve(async (req: Request) => {
     const data = await openAiResponse.json();
 
     // Standardize variables
-    const normalizedDeviceCode = data.device_code;
+    const normalizedDeviceCode = data.device_code ?? data.device_auth_id;
     const normalizedUserCode = data.user_code;
-    const normalizedVerificationUrl = data.verification_uri ?? data.verification_url;
-    const normalizedInterval = data.interval ?? 5;
-    const normalizedExpiresAt = new Date(Date.now() + (data.expires_in ?? 1800) * 1000).toISOString();
+    const normalizedVerificationUrl = data.verification_uri ?? data.verification_url ?? "https://chatgpt.com/auth/device";
+    const normalizedInterval = data.interval ?? data.interval_seconds ?? 5;
+    const normalizedExpiresAt = data.expires_at ?? new Date(Date.now() + (data.expires_in ?? 1800) * 1000).toISOString();
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -95,9 +95,13 @@ Deno.serve(async (req: Request) => {
     // Return the sanitized device data back to Flutter
     return new Response(
       JSON.stringify({
+        device_code: normalizedDeviceCode,
         user_code: normalizedUserCode,
         verification_url: normalizedVerificationUrl,
+        verification_uri: normalizedVerificationUrl,
+        interval: normalizedInterval,
         interval_seconds: normalizedInterval,
+        expires_in: data.expires_in ?? 1800,
         expires_at: normalizedExpiresAt
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
