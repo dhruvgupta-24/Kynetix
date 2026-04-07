@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,6 +7,7 @@ import '../config/supabase_secrets.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/openai_deeplink_service.dart';
 import '../services/persistence_service.dart';
 
 // ─── Profile Screen ────────────────────────────────────────────────────────────
@@ -49,41 +49,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _aiVerificationUrl;
   bool _aiIsPolling = false;
 
-  final _appLinks = AppLinks();
-  StreamSubscription<Uri>? _linkSub;
-
   @override
   void initState() {
     super.initState();
+    debugPrint('[AI DEEPLINK] ProfileScreen.initState — attaching listener');
     _checkAiStatus();
 
-    // Handle deep link when app is already running (foreground)
-    _linkSub = _appLinks.uriLinkStream.listen((uri) {
-      debugPrint('[DEEP LINK] received: $uri');
-      if (uri.scheme == 'kynetix' &&
-          uri.host == 'openai-auth' &&
-          uri.path == '/callback') {
-        _handleDeepLink(uri);
-      }
-    });
+    // Subscribe to the app-level deep link service (always alive, never missed)
+    OpenAiDeepLinkService.instance.pending.addListener(_onDeepLinkNotified);
 
-    // Handle deep link that cold-started / resumed the app
-    _appLinks.getInitialLink().then((uri) {
-      if (uri != null) {
-        debugPrint('[DEEP LINK] initial link: $uri');
-        if (uri.scheme == 'kynetix' &&
-            uri.host == 'openai-auth' &&
-            uri.path == '/callback') {
-          _handleDeepLink(uri);
-        }
-      }
-    });
+    // If a pending URI already arrived before this screen mounted, handle it now
+    final existingUri = OpenAiDeepLinkService.instance.pending.value;
+    if (existingUri != null) {
+      debugPrint('[AI DEEPLINK] pending URI already queued: $existingUri');
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onDeepLinkNotified());
+    }
+  }
+
+  void _onDeepLinkNotified() {
+    final uri = OpenAiDeepLinkService.instance.pending.value;
+    if (uri == null) return;
+    debugPrint('[AI DEEPLINK] _onDeepLinkNotified: $uri');
+    OpenAiDeepLinkService.instance.consume();
+    _handleDeepLink(uri);
   }
 
   @override
   void dispose() {
     _aiPollTimer?.cancel();
-    _linkSub?.cancel();
+    OpenAiDeepLinkService.instance.pending.removeListener(_onDeepLinkNotified);
     super.dispose();
   }
 
@@ -192,10 +186,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final intervalStr = uri.queryParameters['interval'];
     final interval = int.tryParse(intervalStr ?? '') ?? 5;
 
+    debugPrint('[AI CALLBACK] _handleDeepLink called');
+    debugPrint('[AI CALLBACK]   user_code       = $userCode');
+    debugPrint('[AI CALLBACK]   verification_uri = $verificationUri');
+    debugPrint('[AI CALLBACK]   interval         = $interval');
+
     if (userCode == null || verificationUri == null) {
+      debugPrint('[AI CALLBACK] ✖ Missing required params — aborting');
       if (mounted) setState(() => _aiErrorMessage = 'Bad callback from OpenAI helper.');
       return;
     }
+
+    debugPrint('[AI CALLBACK] ✔ Params valid — updating UI and starting poll');
 
     if (mounted) {
       setState(() {
@@ -210,15 +212,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _startPolling(int intervalSeconds) {
+    debugPrint('[AI POLL] starting polling every ${intervalSeconds}s');
     _aiPollTimer?.cancel();
     _aiPollTimer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) async {
       try {
         final session = Supabase.instance.client.auth.currentSession;
         if (session == null) {
+          debugPrint('[AI POLL] session gone — cancelling timer');
           timer.cancel();
           return;
         }
 
+        debugPrint('[AI POLL] invoking openai-link-poll...');
         final res = await Supabase.instance.client.functions.invoke(
           'openai-link-poll',
           headers: {
@@ -232,6 +237,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
 
         final data = res.data;
+        debugPrint('[AI POLL] response: $data');
         if (data != null) {
           final status = data['status'];
           if (status == 'connected') {

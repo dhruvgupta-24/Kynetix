@@ -34,25 +34,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <intent-filter android:autoVerify="false">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:scheme="kynetix"
-                    android:host="openai-auth"
-                    android:path="/callback" />
-            </intent-filter>
-
-            <!-- ── Deep Linking for Supabase Auth ────────────────────────────── -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <!-- Accepts kynetix://reset-password -->
+
+                <data android:scheme="kynetix" android:host="openai-auth" />
                 <data android:scheme="kynetix" android:host="reset-password" />
-                <!-- Accepts kynetix://login-callback -->
                 <data android:scheme="kynetix" android:host="login-callback" />
             </intent-filter>
         </activity>
