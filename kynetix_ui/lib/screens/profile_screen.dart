@@ -115,11 +115,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
 
+    // Step 1: Exchange JWT for a short-lived opaque nonce (never exposes JWT in browser)
+    debugPrint('[AI CONNECT] requesting nonce...');
+    String nonce;
+    try {
+      final nonceRes = await Supabase.instance.client.functions.invoke(
+        'openai-link-issue-nonce',
+        headers: { 'Authorization': 'Bearer ${session.accessToken}' },
+      );
+      final nonceData = nonceRes.data;
+      if (nonceData == null || nonceData['nonce'] == null) {
+        throw Exception('Nonce response invalid: $nonceData');
+      }
+      nonce = nonceData['nonce'] as String;
+      debugPrint('[AI CONNECT] nonce received');
+    } catch (e) {
+      debugPrint('[AI CONNECT] nonce request failed: $e');
+      if (!mounted) return;
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start auth. Try again.'; });
+      return;
+    }
+
+    // Step 2: Open browser helper page with nonce only — no JWT in URL
     final helperUrl = Uri.https(
       'sjrcqvqhycxtwwbivizy.supabase.co',
       '/functions/v1/openai-device-helper',
       {
-        'token': session.accessToken,
+        'nonce': nonce,
         'api': SupabaseSecrets.url,
       },
     );
@@ -127,29 +149,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     debugPrint('[AI CONNECT] launching URL: $helperUrl');
 
     try {
-      final launched = await launchUrl(
-        helperUrl,
-        mode: LaunchMode.externalApplication,
-      );
+      final launched = await launchUrl(helperUrl, mode: LaunchMode.externalApplication);
       if (launched) {
         debugPrint('[AI CONNECT] launch success');
         if (!mounted) return;
-        setState(() {
-          _aiIsLoading = false;
-          _aiIsPolling = true;
-        });
+        setState(() { _aiIsLoading = false; _aiIsPolling = true; });
       } else {
-        debugPrint('[AI CONNECT] launchUrl returned false, trying platformDefault');
-        final fallback = await launchUrl(
-          helperUrl,
-          mode: LaunchMode.platformDefault,
-        );
+        debugPrint('[AI CONNECT] externalApplication failed, trying platformDefault');
+        final fallback = await launchUrl(helperUrl, mode: LaunchMode.platformDefault);
         debugPrint('[AI CONNECT] fallback result: $fallback');
         if (!mounted) return;
         if (fallback) {
           setState(() { _aiIsLoading = false; _aiIsPolling = true; });
         } else {
-          setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser. URL: $helperUrl'; });
+          setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser.'; });
         }
       }
     } catch (e) {

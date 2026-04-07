@@ -11,38 +11,11 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const token = authHeader.replace('Bearer ', '').trim();
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'Malformed Authorization header' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
-    if (userError || !user) {
-      console.error('[openai-link-save] Auth failed:', userError?.message || 'no user');
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
     const body = await req.json();
-    const { device_code, user_code, verification_url, interval_seconds, expires_at } = body;
+    const { nonce, device_code, user_code, verification_url, interval_seconds, expires_at } = body;
 
-    if (!device_code || !user_code) {
-      return new Response(JSON.stringify({ error: 'Missing device_code or user_code' }), {
+    if (!nonce || !device_code || !user_code) {
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -52,10 +25,39 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    // Look up the user from the nonce table — single-use, expires after 5 min
+    const { data: nonceRow, error: nonceError } = await supabaseAdmin
+      .from('openai_auth_nonces')
+      .select('user_id, expires_at')
+      .eq('nonce', nonce)
+      .single();
+
+    if (nonceError || !nonceRow) {
+      console.error('[openai-link-save] Nonce lookup failed:', JSON.stringify(nonceError));
+      return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (new Date(nonceRow.expires_at) < new Date()) {
+      console.error('[openai-link-save] Nonce expired for user:', nonceRow.user_id);
+      // Clean up expired nonce
+      await supabaseAdmin.from('openai_auth_nonces').delete().eq('nonce', nonce);
+      return new Response(JSON.stringify({ error: 'Session expired. Please try again.' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const userId = nonceRow.user_id;
+
+    // Delete nonce immediately — single use
+    await supabaseAdmin.from('openai_auth_nonces').delete().eq('nonce', nonce);
+
+    // Save device session
     const { error: upsertError } = await supabaseAdmin
       .from('openai_device_auth_sessions')
       .upsert({
-        user_id: user.id,
+        user_id: userId,
         device_code,
         user_code,
         verification_url: verification_url ?? 'https://chatgpt.com/auth/device',
@@ -71,7 +73,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    console.log(`[openai-link-save] Session saved for user ${user.id}`);
+    console.log(`[openai-link-save] Session saved for user ${userId}`);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
