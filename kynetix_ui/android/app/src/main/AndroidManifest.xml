@@ -34,12 +34,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
+            <!-- OpenAI device auth callback — dedicated filter with explicit path -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="kynetix"
+                    android:host="openai-auth"
+                    android:path="/callback" />
+            </intent-filter>
 
-                <data android:scheme="kynetix" android:host="openai-auth" />
+            <!-- Supabase Auth deep links -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="kynetix" android:host="reset-password" />
                 <data android:scheme="kynetix" android:host="login-callback" />
             </intent-filter>

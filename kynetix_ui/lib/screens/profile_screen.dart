@@ -144,7 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // Step 2: Open browser helper page with nonce only — no JWT in URL
+    // Step 2: Open browser helper page — nonce only, no JWT in URL
     final helperUrl = Uri.https(
       'sjrcqvqhycxtwwbivizy.supabase.co',
       '/functions/v1/openai-device-helper',
@@ -156,27 +156,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     debugPrint('[AI CONNECT] launching URL: $helperUrl');
 
-    try {
-      final launched = await launchUrl(helperUrl, mode: LaunchMode.externalApplication);
-      if (launched) {
-        debugPrint('[AI CONNECT] launch success');
-        if (!mounted) return;
-        setState(() { _aiIsLoading = false; _aiIsPolling = true; });
-      } else {
-        debugPrint('[AI CONNECT] externalApplication failed, trying platformDefault');
-        final fallback = await launchUrl(helperUrl, mode: LaunchMode.platformDefault);
-        debugPrint('[AI CONNECT] fallback result: $fallback');
-        if (!mounted) return;
-        if (fallback) {
-          setState(() { _aiIsLoading = false; _aiIsPolling = true; });
+    // Try launch modes in order. platformDefault lets Android route to Chrome
+    // as a normal web navigation (avoids "download" behaviour). externalApplication
+    // forces the external browser app. inAppBrowserView uses a Chrome Custom Tab
+    // (a full real browser embedded in the app) as a reliable final fallback.
+    final modes = [
+      (LaunchMode.platformDefault,    'platformDefault'),
+      (LaunchMode.externalApplication,'externalApplication'),
+      (LaunchMode.inAppBrowserView,   'inAppBrowserView'),
+    ];
+
+    bool launched = false;
+    for (final (mode, label) in modes) {
+      debugPrint('[AI CONNECT] trying $label');
+      try {
+        final ok = await launchUrl(helperUrl, mode: mode);
+        if (ok) {
+          debugPrint('[AI CONNECT] browser launch success via $label');
+          launched = true;
+          break;
         } else {
-          setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser.'; });
+          debugPrint('[AI CONNECT] browser launch failed via $label (returned false)');
         }
+      } catch (e) {
+        debugPrint('[AI CONNECT] browser launch failed via $label (exception: $e)');
       }
-    } catch (e) {
-      debugPrint('[AI CONNECT] launch failed: $e');
-      if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Launch error: $e'; });
+    }
+
+    if (!mounted) return;
+    if (launched) {
+      setState(() { _aiIsLoading = false; _aiIsPolling = true; });
+    } else {
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser. URL: $helperUrl'; });
     }
   }
 

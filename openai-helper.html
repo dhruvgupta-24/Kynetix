@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kynetix &#x2014; OpenAI Connection</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #13131F;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: #1E1E2C;
+      border: 1px solid #2E2E3E;
+      border-radius: 24px;
+      padding: 36px 28px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    .icon { font-size: 40px; margin-bottom: 16px; }
+    h1 { font-size: 20px; font-weight: 800; margin-bottom: 8px; color: #ffffff; }
+    .subtitle { color: #9CA3AF; font-size: 14px; line-height: 1.5; margin-bottom: 28px; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #2E2E3E;
+      border-top-color: #52B788;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status-text { font-size: 13px; color: #6B7280; min-height: 20px; margin-bottom: 20px; }
+    #return-btn {
+      display: none;
+      background: #52B788;
+      color: #ffffff;
+      border: none;
+      border-radius: 14px;
+      padding: 14px 24px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+    #return-btn:active { opacity: 0.85; }
+    #success-icon { display: none; font-size: 36px; margin-bottom: 12px; }
+    .error-box {
+      display: none;
+      background: rgba(255,107,53,0.1);
+      border: 1px solid rgba(255,107,53,0.35);
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 16px;
+      color: #FF8A65;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: left;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="main-icon">&#x1F517;</div>
+    <div id="success-icon">&#x2705;</div>
+    <h1 id="main-title">Connecting to OpenAI</h1>
+    <p class="subtitle" id="main-sub">Setting up your device login. This takes just a moment.</p>
+    <div class="spinner" id="spinner"></div>
+    <div id="status-text">Requesting device code...</div>
+    <button id="return-btn" onclick="doReturn()">Return to Kynetix</button>
+    <div class="error-box" id="error-box"></div>
+  </div>
+  <script>
+    (function () {
+      var NONCE = "18fef8c757587050b276c0368d2e653a165d94a060fe7ed5";
+      var SAVE_URL = "https://sjrcqvqhycxtwwbivizy.supabase.co/functions/v1/openai-link-save";
+      var CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+      var SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke";
+      var deepLink = '';
+
+      function setStatus(msg) {
+        document.getElementById('status-text').textContent = msg;
+      }
+      function showSuccess(link) {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('main-icon').style.display = 'none';
+        document.getElementById('success-icon').style.display = 'block';
+        document.getElementById('main-title').textContent = 'All set!';
+        document.getElementById('main-sub').textContent = 'Returning you to Kynetix now...';
+        setStatus('If the app did not open automatically, tap the button below.');
+        document.getElementById('return-btn').style.display = 'block';
+        document.getElementById('return-btn').setAttribute('data-href', link);
+      }
+      function showError(msg) {
+        document.getElementById('spinner').style.display = 'none';
+        var box = document.getElementById('error-box');
+        box.style.display = 'block';
+        box.textContent = msg;
+        setStatus('Something went wrong. Close this tab and try again in Kynetix.');
+      }
+      function doReturn() {
+        var btn = document.getElementById('return-btn');
+        var link = btn.getAttribute('data-href') || deepLink;
+        if (link) { window.location.href = link; }
+      }
+      async function run() {
+        try {
+          setStatus('Requesting device code from OpenAI...');
+          var deviceRes = await fetch('https://auth.openai.com/oauth/device/code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'client_id=' + encodeURIComponent(CLIENT_ID) + '&scope=' + encodeURIComponent(SCOPE)
+          });
+          if (!deviceRes.ok) {
+            var errText = await deviceRes.text();
+            showError('OpenAI error (' + deviceRes.status + '): ' + errText);
+            return;
+          }
+          var data = await deviceRes.json();
+          var deviceCode = data.device_code || data.device_auth_id;
+          var userCode = data.user_code;
+          var verificationUri = data.verification_uri || data.verification_url || 'https://chatgpt.com/auth/device';
+          var interval = data.interval || data.interval_seconds || 5;
+          var expiresIn = data.expires_in || 1800;
+          var expiresAt = data.expires_at || new Date(Date.now() + expiresIn * 1000).toISOString();
+          if (!deviceCode || !userCode) {
+            showError('Unexpected OpenAI response. Please try again.');
+            return;
+          }
+          setStatus('Saving your session...');
+          var saveRes = await fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              nonce: NONCE,
+              device_code: deviceCode,
+              user_code: userCode,
+              verification_url: verificationUri,
+              interval_seconds: interval,
+              expires_at: expiresAt
+            })
+          });
+          if (!saveRes.ok) {
+            var saveErr = await saveRes.text();
+            showError('Could not save session: ' + saveErr);
+            return;
+          }
+          deepLink = 'kynetix://openai-auth/callback'
+            + '?user_code=' + encodeURIComponent(userCode)
+            + '&verification_uri=' + encodeURIComponent(verificationUri)
+            + '&interval=' + interval;
+          showSuccess(deepLink);
+          setTimeout(function () { window.location.href = deepLink; }, 300);
+        } catch (e) {
+          showError((e && e.message) ? e.message : String(e));
+        }
+      }
+      run();
+    })();
+  </script>
+</body>
+</html>
