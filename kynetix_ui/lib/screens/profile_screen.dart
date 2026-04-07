@@ -144,10 +144,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // Step 2: Open browser helper page — nonce only, no JWT in URL
+    // Step 2: Open Vercel-hosted helper page with nonce + api params.
+    // Vercel serves the HTML correctly; Supabase Edge had rendering issues.
     final helperUrl = Uri.https(
-      'sjrcqvqhycxtwwbivizy.supabase.co',
-      '/functions/v1/openai-device-helper',
+      'kynetix-openai-helper.vercel.app',
+      '/',
       {
         'nonce': nonce,
         'api': SupabaseSecrets.url,
@@ -156,14 +157,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     debugPrint('[AI CONNECT] launching URL: $helperUrl');
 
-    // Try launch modes in order. platformDefault lets Android route to Chrome
-    // as a normal web navigation (avoids "download" behaviour). externalApplication
-    // forces the external browser app. inAppBrowserView uses a Chrome Custom Tab
-    // (a full real browser embedded in the app) as a reliable final fallback.
     final modes = [
-      (LaunchMode.platformDefault,    'platformDefault'),
-      (LaunchMode.externalApplication,'externalApplication'),
-      (LaunchMode.inAppBrowserView,   'inAppBrowserView'),
+      (LaunchMode.platformDefault,     'platformDefault'),
+      (LaunchMode.externalApplication, 'externalApplication'),
+      (LaunchMode.inAppBrowserView,    'inAppBrowserView'),
     ];
 
     bool launched = false;
@@ -187,9 +184,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (launched) {
       setState(() { _aiIsLoading = false; _aiIsPolling = true; });
     } else {
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser. URL: $helperUrl'; });
+      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser.'; });
     }
   }
+
 
   void _handleDeepLink(Uri uri) {
     final userCode = uri.queryParameters['user_code'];
