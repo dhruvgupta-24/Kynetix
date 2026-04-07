@@ -56,12 +56,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _checkAiStatus();
-    // Listen for deep links from the browser helper page
+
+    // Handle deep link when app is already running (foreground)
     _linkSub = _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('[DEEP LINK] received: $uri');
       if (uri.scheme == 'kynetix' &&
           uri.host == 'openai-auth' &&
           uri.path == '/callback') {
         _handleDeepLink(uri);
+      }
+    });
+
+    // Handle deep link that cold-started / resumed the app
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) {
+        debugPrint('[DEEP LINK] initial link: $uri');
+        if (uri.scheme == 'kynetix' &&
+            uri.host == 'openai-auth' &&
+            uri.path == '/callback') {
+          _handleDeepLink(uri);
+        }
       }
     });
   }
