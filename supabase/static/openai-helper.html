@@ -66,6 +66,7 @@
       line-height: 1.6;
       text-align: left;
       word-break: break-word;
+      white-space: pre-wrap;
     }
   </style>
 </head>
@@ -83,32 +84,40 @@
 
   <script>
     (function () {
-      // ── Config: read from URL params, never hardcoded ─────────────────────
-      var params    = new URLSearchParams(window.location.search);
-      var NONCE     = params.get('nonce');
-      var API_BASE  = params.get('api') || 'https://sjrcqvqhycxtwwbivizy.supabase.co';
-      var SAVE_URL  = API_BASE + '/functions/v1/openai-link-save';
+      // ── Read params from URL — never hardcoded ────────────────────────────
+      var params   = new URLSearchParams(window.location.search);
+      var NONCE    = params.get('nonce');
+      var API_BASE = params.get('api') || 'https://sjrcqvqhycxtwwbivizy.supabase.co';
+      var SAVE_URL = API_BASE + '/functions/v1/openai-link-save';
 
-      // ── OpenAI device authorization ───────────────────────────────────────
-      var CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-      var SCOPE = 'openid profile email offline_access api.connectors.read api.connectors.invoke';
+      // ── OpenAI device authorization constants ─────────────────────────────
+      // Source: openai/codex — codex-rs/login/src/device_code_auth.rs
+      //   Endpoint: {issuer}/api/accounts/deviceauth/usercode  (line 70)
+      //   Body:     JSON { client_id }  (scope is NOT sent here)
+      //   Response: { device_auth_id, user_code, interval }
+      //   Verification URL: {issuer}/codex/device  (line 169)
+      var CLIENT_ID        = 'app_EMoamEEZ73f0CkXaXp7hrann';
+      var DEVICE_CODE_URL  = 'https://auth.openai.com/api/accounts/deviceauth/usercode';
+      var VERIFICATION_URL = 'https://auth.openai.com/codex/device';
 
-      var deepLink  = '';
+      var deepLink = '';
 
       // ── Helpers ───────────────────────────────────────────────────────────
       function setStatus(msg) {
         document.getElementById('status-text').textContent = msg;
       }
+
       function showSuccess(link) {
-        document.getElementById('spinner').style.display    = 'none';
-        document.getElementById('main-icon').style.display  = 'none';
+        document.getElementById('spinner').style.display      = 'none';
+        document.getElementById('main-icon').style.display    = 'none';
         document.getElementById('success-icon').style.display = 'block';
-        document.getElementById('main-title').textContent   = 'All set!';
-        document.getElementById('main-sub').textContent     = 'Returning you to Kynetix now\u2026';
+        document.getElementById('main-title').textContent     = 'All set!';
+        document.getElementById('main-sub').textContent       = 'Returning you to Kynetix now\u2026';
         setStatus('If the app did not open automatically, tap the button below.');
-        document.getElementById('return-btn').style.display = 'block';
+        document.getElementById('return-btn').style.display   = 'block';
         document.getElementById('return-btn').setAttribute('data-href', link);
       }
+
       function showError(msg) {
         document.getElementById('spinner').style.display = 'none';
         var box = document.getElementById('error-box');
@@ -116,6 +125,7 @@
         box.textContent = msg;
         setStatus('Something went wrong. Close this tab and try again in Kynetix.');
       }
+
       function doReturn() {
         var btn  = document.getElementById('return-btn');
         var link = btn.getAttribute('data-href') || deepLink;
@@ -124,52 +134,52 @@
 
       // ── Main flow ─────────────────────────────────────────────────────────
       async function run() {
-        // Guard: session token must be present
         if (!NONCE) {
-          showError('Missing session token (?nonce=). Return to Kynetix and try again.');
+          showError('Missing session token (?nonce=).\nReturn to Kynetix and try again.');
           return;
         }
 
         try {
-          // ── Step 1: Request device code from OpenAI ──────────────────────
+          // Step 1 — Request device code from OpenAI
+          // POST /api/accounts/deviceauth/usercode with JSON { client_id }
           setStatus('Requesting device code from OpenAI\u2026');
 
-          var deviceRes = await fetch('https://auth.openai.com/oauth/device/code', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'client_id=' + encodeURIComponent(CLIENT_ID)
-                + '&scope='     + encodeURIComponent(SCOPE)
+          var deviceRes = await fetch(DEVICE_CODE_URL, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ client_id: CLIENT_ID })
           });
 
           var rawBody = await deviceRes.text();
 
           if (!deviceRes.ok) {
-            // Surface the full raw error so it's debuggable — not swallowed.
             showError(
-              'OpenAI device-code request failed.\n'
-              + 'Status: ' + deviceRes.status + '\n'
-              + 'Body: '   + rawBody
+              'OpenAI device-code request failed.\nStatus: ' + deviceRes.status +
+              '\nBody: ' + rawBody
             );
             return;
           }
 
           var data;
           try { data = JSON.parse(rawBody); }
-          catch (_) { showError('OpenAI returned non-JSON: ' + rawBody); return; }
+          catch (_) { showError('OpenAI returned non-JSON:\n' + rawBody); return; }
 
-          var deviceCode    = data.device_code   || data.device_auth_id;
-          var userCode      = data.user_code;
-          var verificationUri = data.verification_uri || data.verification_url || 'https://chatgpt.com/auth/device';
-          var interval      = data.interval       || data.interval_seconds || 5;
-          var expiresIn     = data.expires_in     || 1800;
-          var expiresAt     = data.expires_at     || new Date(Date.now() + expiresIn * 1000).toISOString();
+          // Response fields per openai/codex UserCodeResp struct:
+          //   device_auth_id, user_code, interval
+          var deviceAuthId = data.device_auth_id;
+          var userCode     = data.user_code;
+          var interval     = parseInt(data.interval, 10) || 5;
+          // Expiry: Codex source uses 15-minute polling window
+          var expiresAt    = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-          if (!deviceCode || !userCode) {
-            showError('Unexpected OpenAI response (missing device_code / user_code):\n' + rawBody);
+          if (!deviceAuthId || !userCode) {
+            showError(
+              'Unexpected OpenAI response (missing device_auth_id / user_code):\n' + rawBody
+            );
             return;
           }
 
-          // ── Step 2: Save session to Supabase via nonce ───────────────────
+          // Step 2 — Save session to Supabase via nonce
           setStatus('Saving your session\u2026');
 
           var saveRes = await fetch(SAVE_URL, {
@@ -177,9 +187,9 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               nonce:            NONCE,
-              device_code:      deviceCode,
+              device_code:      deviceAuthId,   // store as device_code in DB
               user_code:        userCode,
-              verification_url: verificationUri,
+              verification_url: VERIFICATION_URL,
               interval_seconds: interval,
               expires_at:       expiresAt
             })
@@ -191,15 +201,13 @@
             return;
           }
 
-          // ── Step 3: Deep-link back into app ──────────────────────────────
+          // Step 3 — Deep-link back into app
           deepLink = 'kynetix://openai-auth/callback'
-            + '?user_code='       + encodeURIComponent(userCode)
-            + '&verification_uri=' + encodeURIComponent(verificationUri)
+            + '?user_code='        + encodeURIComponent(userCode)
+            + '&verification_uri=' + encodeURIComponent(VERIFICATION_URL)
             + '&interval='         + interval;
 
           showSuccess(deepLink);
-
-          // Auto-redirect (Android may block without user gesture → button fallback above)
           setTimeout(function () { window.location.href = deepLink; }, 300);
 
         } catch (e) {
