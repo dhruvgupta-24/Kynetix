@@ -1,12 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
-import '../config/secrets.dart';
 
 class AiEscalationContext {
   final String localInterpretation;
@@ -33,16 +31,12 @@ class AiNutritionService {
   AiNutritionService._();
   static final AiNutritionService instance = AiNutritionService._();
 
-  static const _apiKey = AppSecrets.openRouterApiKey;
-
-  static const _model    = 'deepseek/deepseek-chat-v3-0324';
-  static const _endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-
   // ── Public API ────────────────────────────────────────────────────────────
 
-  bool get isConfigured => _apiKey.isNotEmpty && _apiKey != 'YOUR_OPENROUTER_API_KEY_HERE';
+  /// Always configured — routing handled by backend ai-chat-router.
+  bool get isConfigured => true;
 
-  static String get modelName => _model;
+  static String get modelName => 'ai-chat-router';
 
   Future<NutritionResult> estimate(String rawInput) async {
     return estimateWithContext(rawInput);
@@ -54,68 +48,35 @@ class AiNutritionService {
   }) async {
     debugPrint('[AI] estimating: "$rawInput"');
 
-    String targetEndpoint = _endpoint;
-    String targetModel    = _model;
-    String authHeader     = 'Bearer $_apiKey';
-    bool usesLinkedOpenAI = false;
+    // ── Route through backend ai-chat-router ─────────────────────────────────
+    // The backend handles provider selection: OpenAI first, OpenRouter fallback.
+    // No API keys or provider logic on the client.
+    final messages = [
+      {'role': 'system', 'content': _systemPrompt()},
+      {'role': 'user',   'content': _userPrompt(rawInput, context: context)},
+    ];
 
-    // 1. Check if user has linked their own OpenAI account
-    try {
-      final statusRes = await Supabase.instance.client.functions.invoke('openai-link-status');
-      if (statusRes.data['isConnected'] == true && statusRes.data['accessToken'] != null) {
-        targetEndpoint = 'https://api.openai.com/v1/chat/completions';
-        targetModel    = 'gpt-4o-mini'; // Use faster tier for text parsing tasks
-        authHeader     = 'Bearer ${statusRes.data['accessToken']}';
-        usesLinkedOpenAI = true;
-        debugPrint('[AI] Intercepted link: Routing via User-linked OpenAI Token');
-      }
-    } catch (e) {
-      debugPrint('[AI] Silent fail checking OpenAI link status: $e');
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) throw Exception('Not authenticated');
+
+    final res = await Supabase.instance.client.functions.invoke(
+      'ai-chat-router',
+      body: {'messages': messages},
+      headers: {'Authorization': 'Bearer ${session.accessToken}'},
+    );
+
+    final data = res.data as Map<String, dynamic>?;
+    if (data == null || data['success'] != true) {
+      final errMsg = data?['error'] ?? 'ai-chat-router returned no data';
+      debugPrint('[AI] ❌ router error: $errMsg');
+      throw Exception('AI router error: $errMsg');
     }
 
-    http.Response response;
-    try {
-      response = await _dispatchAiHttp(
-        endpoint: targetEndpoint,
-        model: targetModel,
-        authHeader: authHeader,
-        rawInput: rawInput,
-        context: context,
-      );
+    final providerUsed  = data['provider_used'] as String? ?? 'unknown';
+    final fallbackUsed  = data['fallback_used'] == true;
+    final text          = data['response'] as String? ?? '';
 
-      // 3. Trigger fallback on explicit linked-token failure (e.g. expired, revoked)
-      if (response.statusCode != 200 && usesLinkedOpenAI) {
-        throw Exception('User Token Failure (HTTP ${response.statusCode})');
-      }
-
-    } catch (e) {
-      if (usesLinkedOpenAI) {
-        debugPrint('[AI] User token execution failed: $e');
-        debugPrint('[AI] Falling back to OpenRouter Global Network...');
-        response = await _dispatchAiHttp(
-          endpoint: _endpoint,
-          model: _model,
-          authHeader: 'Bearer $_apiKey',
-          rawInput: rawInput,
-          context: context,
-        );
-      } else {
-        rethrow;
-      }
-    }
-
-    debugPrint('[AI] HTTP status: ${response.statusCode}');
-
-    if (response.statusCode != 200) {
-      final snippet = response.body.substring(0, response.body.length.clamp(0, 500));
-      debugPrint('[AI] ❌ error body: $snippet');
-      throw Exception('AI HTTP ${response.statusCode}: $snippet');
-    }
-
-    // OpenAI-compatible response: choices[0].message.content
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final text    = decoded['choices']?[0]?['message']?['content']
-        as String? ?? '';
+    debugPrint('[AI] provider=$providerUsed fallback=$fallbackUsed');
     debugPrint('[AI] raw response (first 600): '
         '${text.substring(0, text.length.clamp(0, 600))}');
 
@@ -203,33 +164,9 @@ class AiNutritionService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  Future<http.Response> _dispatchAiHttp({
-    required String endpoint,
-    required String model,
-    required String authHeader,
-    required String rawInput,
-    AiEscalationContext? context,
-  }) async {
-    return http.post(
-      Uri.parse(endpoint),
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type':  'application/json',
-        'HTTP-Referer':  'https://kynetix.local',
-        'X-Title':       'Kynetix',
-      },
-      body: jsonEncode({
-        'model': model,
-        'messages': [
-          {'role': 'system', 'content': _systemPrompt()},
-          {'role': 'user', 'content': _userPrompt(rawInput, context: context)},
-        ],
-        'temperature': 0.15,
-        'max_tokens': 1200,
-        'response_format': {'type': 'json_object'},
-      }),
-    ).timeout(const Duration(seconds: 20));
-  }
+  // NOTE: _dispatchAiHttp removed — all provider dispatch is now in the
+  // ai-chat-router Supabase Edge Function. No HTTP calls to AI providers
+  // from the Flutter client.
 
   NutrientRange _rng(Map<String, dynamic> m) => NutrientRange(
         min: (m['min'] as num?)?.toDouble() ?? 0,
