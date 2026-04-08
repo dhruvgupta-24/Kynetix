@@ -81,15 +81,19 @@ async function refreshTokens(refreshToken: string): Promise<{
   };
 }
 
-// ── Step B: Exchange id_token → openai-api-key ────────────────────────────────
-// Source: openai/codex server.rs obtain_api_key() lines 1066-1101
-async function exchangeIdTokenForApiKey(idToken: string): Promise<string> {
+// ── Step B: Exchange access_token → openai-api-key ───────────────────────────
+// Source: openai/codex server.rs obtain_api_key()
+// IMPORTANT: We use the access_token (not id_token) from the refresh response.
+// The refresh grant returns a minimal id_token WITHOUT organization_id claims,
+// which causes "Invalid ID token: missing organization_id" (401).
+// The access_token carries the full org context and works correctly.
+async function exchangeAccessTokenForApiKey(accessToken: string): Promise<string> {
   const body = new URLSearchParams({
     grant_type:         'urn:ietf:params:oauth:grant-type:token-exchange',
     client_id:          CLIENT_ID,
     requested_token:    'openai-api-key',
-    subject_token:      idToken,
-    subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+    subject_token:      accessToken,
+    subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
   }).toString();
 
   const res = await fetch(`${OPENAI_ISSUER}/oauth/token`, {
@@ -116,6 +120,7 @@ async function exchangeIdTokenForApiKey(idToken: string): Promise<string> {
 
   return data.access_token;
 }
+
 
 // ── Safe content extraction ───────────────────────────────────────────────────
 // Handles all known response shapes from OpenAI/OpenRouter:
@@ -310,9 +315,10 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', user.id);
         console.log(`[AI ROUTER] persisted fresh tokens for user=${user.id}`);
 
-        // ── Exchange fresh id_token for an API key ───────────────────────────
-        console.log(`[AI ROUTER] starting api-key token exchange with fresh id_token`);
-        const apiKey = await exchangeIdTokenForApiKey(refreshed.id_token);
+        // ── Exchange fresh access_token for an API key ───────────────────────
+        // Use access_token, NOT id_token — the refreshed id_token lacks org claims.
+        console.log(`[AI ROUTER] starting api-key token exchange with fresh access_token`);
+        const apiKey = await exchangeAccessTokenForApiKey(refreshed.access_token);
         console.log(`[AI ROUTER] api-key exchange success — calling OpenAI`);
 
         const { text, usage } = await callChat(
