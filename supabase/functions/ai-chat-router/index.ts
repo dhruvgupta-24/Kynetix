@@ -81,45 +81,14 @@ async function refreshTokens(refreshToken: string): Promise<{
   };
 }
 
-// ── Step B: Exchange access_token → openai-api-key ───────────────────────────
-// Source: openai/codex server.rs obtain_api_key()
-// IMPORTANT: We use the access_token (not id_token) from the refresh response.
-// The refresh grant returns a minimal id_token WITHOUT organization_id claims,
-// which causes "Invalid ID token: missing organization_id" (401).
-// The access_token carries the full org context and works correctly.
-async function exchangeAccessTokenForApiKey(accessToken: string): Promise<string> {
-  const body = new URLSearchParams({
-    grant_type:         'urn:ietf:params:oauth:grant-type:token-exchange',
-    client_id:          CLIENT_ID,
-    requested_token:    'openai-api-key',
-    subject_token:      accessToken,
-    subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
-  }).toString();
-
-  const res = await fetch(`${OPENAI_ISSUER}/oauth/token`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-
-  const raw = await res.text();
-  console.log(`[AI ROUTER] key exchange status=${res.status} body_preview=${raw.slice(0, 200)}`);
-
-  if (!res.ok) {
-    throw new Error(`API key exchange failed (${res.status}): ${raw.slice(0, 300)}`);
-  }
-
-  let data: any;
-  try { data = JSON.parse(raw); } catch (_) {
-    throw new Error(`API key exchange non-JSON: ${raw.slice(0, 200)}`);
-  }
-
-  if (!data.access_token) {
-    throw new Error(`API key exchange no access_token. keys=${Object.keys(data).join(',')}`);
-  }
-
-  return data.access_token;
-}
+// NOTE: No token-exchange step needed.
+// The access_token from the refresh grant already has:
+//   aud: ["https://api.openai.com/v1"]
+// This means it IS the correct bearer token for the OpenAI API directly.
+// Token-exchange attempts to get a separate "openai-api-key" always fail:
+//   - With id_token type → "missing organization_id" (refresh id_token lacks org claims)
+//   - With access_token type → "token_expired" (wrong grant, server rejects)
+// Solution: skip token-exchange entirely, use access_token as Bearer directly.
 
 
 // ── Safe content extraction ───────────────────────────────────────────────────
@@ -315,11 +284,11 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', user.id);
         console.log(`[AI ROUTER] persisted fresh tokens for user=${user.id}`);
 
-        // ── Exchange fresh access_token for an API key ───────────────────────
-        // Use access_token, NOT id_token — the refreshed id_token lacks org claims.
-        console.log(`[AI ROUTER] starting api-key token exchange with fresh access_token`);
-        const apiKey = await exchangeAccessTokenForApiKey(refreshed.access_token);
-        console.log(`[AI ROUTER] api-key exchange success — calling OpenAI`);
+        // ── Use access_token directly as Bearer — no token-exchange needed ──────
+        // The access_token has aud=["https://api.openai.com/v1"] — it IS the API token.
+        console.log(`[AI ROUTER] using refreshed access_token directly as OpenAI Bearer`);
+        const apiKey = refreshed.access_token;
+        console.log(`[AI ROUTER] calling OpenAI with access_token (len=${apiKey.length})`);
 
         const { text, usage } = await callChat(
           OPENAI_CHAT_URL,
