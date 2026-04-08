@@ -90,15 +90,8 @@
       var SAVE_URL  = API_BASE + '/functions/v1/openai-link-save';
 
       // ── OpenAI device authorization ───────────────────────────────────────
-      // CLIENT_ID for ChatGPT operator/connector flow.
-      // Endpoint: Auth0-hosted OpenAI authorization server.
-      // NOTE: if auth.openai.com/oauth/device/code returns 404, the CLIENT_ID
-      // is invalid or the device-code grant has been disabled for this client.
-      // Check https://platform.openai.com or your app registration.
       var CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-      var SCOPE = 'openid profile email offline_access model.request model.read organization.read';
-      // ^ scope updated: "api.connectors.*" scopes were ChatGPT-plugin era and are now deprecated.
-      //   Use platform scopes instead. If your CLIENT_ID requires specific scopes, adjust here.
+      var SCOPE = 'openid profile email offline_access api.connectors.read api.connectors.invoke';
 
       var deepLink  = '';
 
