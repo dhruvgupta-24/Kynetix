@@ -10,6 +10,7 @@ import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
+import 'ai_coach_screen.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -166,6 +167,12 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         widget.date.day == now.day;
   }
 
+  /// Date key in YYYYMMDD format matching persistence_service.dart
+  String get _dateKey {
+    final d = widget.date;
+    return '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
+  }
+
   /// Engine-computed target for this day.
   /// Recomputes on every rebuild so gym toggle takes effect instantly.
   ///
@@ -251,6 +258,14 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF13131F),
+      floatingActionButton: _AiCoachFab(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => AiCoachScreen(dateKey: _dateKey),
+          ),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       appBar: AppBar(
         backgroundColor: const Color(0xFF13131F),
         surfaceTintColor: Colors.transparent,
@@ -319,7 +334,56 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   }
 }
 
-// ─── Gym tracking card ─────────────────────────────────────────────────────────────────
+// ─── AI Coach FAB ─────────────────────────────────────────────────────────────
+
+class _AiCoachFab extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AiCoachFab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF52B788), Color(0xFF2D6A4F)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF52B788).withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Text(
+              'Ask AI',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Gym tracking card ────────────────────────────────────────────────────────
 
 class _GymCard extends StatelessWidget {
   final DayLog      log;
