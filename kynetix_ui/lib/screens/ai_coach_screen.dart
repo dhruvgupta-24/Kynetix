@@ -20,16 +20,18 @@ enum _Role { user, assistant }
 class _ChatMessage {
   final _Role      role;
   final String     text;
-  final Uint8List? imageBytes; // user-attached image preview
+  final Uint8List? imageBytes;
   final String?    providerUsed;
   final bool       fallbackUsed;
+  final String     openaiFailType; // 'none' | 'quota' | 'error'
 
   const _ChatMessage({
     required this.role,
     required this.text,
     this.imageBytes,
     this.providerUsed,
-    this.fallbackUsed = false,
+    this.fallbackUsed    = false,
+    this.openaiFailType  = 'none',
   });
 }
 
@@ -124,8 +126,9 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
         _messages.add(_ChatMessage(
           role:         _Role.assistant,
           text:         res.message,
-          providerUsed: res.providerUsed,
-          fallbackUsed: res.fallbackUsed,
+          providerUsed:   res.providerUsed,
+          fallbackUsed:   res.fallbackUsed,
+          openaiFailType: res.openaiFailType,
         ));
         _loading = false;
       });
@@ -460,8 +463,9 @@ class _ChatBubble extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 4, left: 2),
                     child: _ProviderBadge(
-                      provider:     message.providerUsed!,
-                      fallbackUsed: message.fallbackUsed,
+                      provider:      message.providerUsed!,
+                      fallbackUsed:  message.fallbackUsed,
+                      openaiFailType:message.openaiFailType,
                     ),
                   ),
               ],
@@ -479,15 +483,39 @@ class _ChatBubble extends StatelessWidget {
 class _ProviderBadge extends StatelessWidget {
   final String provider;
   final bool   fallbackUsed;
-  const _ProviderBadge({required this.provider, required this.fallbackUsed});
+  final String openaiFailType; // 'none' | 'quota' | 'error'
+  const _ProviderBadge({
+    required this.provider,
+    required this.fallbackUsed,
+    this.openaiFailType = 'none',
+  });
 
   @override
   Widget build(BuildContext context) {
     final isOpenAI = provider == 'openai';
-    final color    = isOpenAI ? const Color(0xFF52B788) : const Color(0xFF60A5FA);
-    final label    = isOpenAI
-        ? '⚡ OpenAI'
-        : fallbackUsed ? '↩ OpenRouter (fallback)' : '~ OpenRouter';
+    final isQuota  = openaiFailType == 'quota';
+
+    // Badge color:
+    //   openai success → green
+    //   openrouter (quota issue) → orange (billing warning)
+    //   openrouter (auth/other fallback) → blue
+    //   openrouter (primary, no openai link) → blue muted
+    final Color color;
+    final String label;
+
+    if (isOpenAI) {
+      color = const Color(0xFF52B788);
+      label = '⚡ OpenAI';
+    } else if (isQuota) {
+      color = const Color(0xFFF59E0B); // amber — billing issue
+      label = '⚠️ OpenRouter (OpenAI needs credits)';
+    } else if (fallbackUsed) {
+      color = const Color(0xFF60A5FA);
+      label = '↩ OpenRouter';
+    } else {
+      color = const Color(0xFF818CF8);
+      label = '~ OpenRouter';
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

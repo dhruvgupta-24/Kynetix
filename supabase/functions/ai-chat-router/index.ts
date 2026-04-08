@@ -28,12 +28,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const OPENAI_ISSUER        = 'https://auth.openai.com';
-const OPENAI_CHAT_URL      = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
-const OPENROUTER_CHAT_URL  = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL     = 'deepseek/deepseek-chat-v3-0324';
-const CLIENT_ID            = 'app_EMoamEEZ73f0CkXaXp7hrann';
+const OPENAI_ISSUER           = 'https://auth.openai.com';
+// Codex CLI uses the Responses API (/v1/responses), NOT chat completions.
+// codex-mini-latest is only available on this endpoint — not on /v1/chat/completions.
+const OPENAI_RESPONSES_URL    = 'https://api.openai.com/v1/responses';
+const OPENAI_DEFAULT_MODEL    = 'codex-mini-latest';
+const OPENROUTER_CHAT_URL     = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL        = 'deepseek/deepseek-chat-v3-0324';
+const CLIENT_ID               = 'app_EMoamEEZ73f0CkXaXp7hrann';
 
 // ── Step A: Refresh to get a fresh id_token ───────────────────────────────────
 // The stored id_token has ~1hr TTL. We must refresh before attempting key exchange.
@@ -81,15 +83,62 @@ async function refreshTokens(refreshToken: string): Promise<{
   };
 }
 
-// NOTE: No token-exchange step needed.
-// The access_token from the refresh grant already has:
-//   aud: ["https://api.openai.com/v1"]
-// This means it IS the correct bearer token for the OpenAI API directly.
-// Token-exchange attempts to get a separate "openai-api-key" always fail:
-//   - With id_token type → "missing organization_id" (refresh id_token lacks org claims)
-//   - With access_token type → "token_expired" (wrong grant, server rejects)
-// Solution: skip token-exchange entirely, use access_token as Bearer directly.
+// ── Responses API call (Codex) ───────────────────────────────────────────────
+// The Codex CLI uses POST /v1/responses, not /v1/chat/completions.
+// Request:  { model, input: [{role, content}], stream: false }
+// Response: { output: [{ type:'message', content: [{type:'output_text', text:'...'}] }] }
+async function callResponsesApi(
+  accessToken: string,
+  model:       string,
+  messages:    any[],
+): Promise<{ text: string; usage: any }> {
+  console.log(`[AI ROUTER] → ${OPENAI_RESPONSES_URL} model=${model} msgs=${messages.length}`);
 
+  const res = await fetch(OPENAI_RESPONSES_URL, {
+    method:  'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      input:  messages, // same shape as chat messages: [{role, content}]
+      stream: false,
+    }),
+    // @ts-ignore
+    signal: AbortSignal.timeout(28_000),
+  });
+
+  const raw = await res.text();
+  console.log(`[AI ROUTER] ← status=${res.status} body_preview=${raw.slice(0, 400)}`);
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${raw.slice(0, 400)}`);
+  }
+
+  let json: any;
+  try { json = JSON.parse(raw); }
+  catch (_) { throw new Error(`Non-JSON response: ${raw.slice(0, 200)}`); }
+
+  // Responses API: output[0].content[0].text
+  const text = json?.output?.[0]?.content?.find?.((c: any) => c.type === 'output_text')?.text
+            ?? json?.output?.[0]?.content?.[0]?.text
+            ?? '';
+
+  if (!text) {
+    // Try fallback paths for other response shapes
+    const alt = json?.output?.[0]?.text ?? json?.text ?? '';
+    if (alt) {
+      console.log(`[AI ROUTER] Responses API alt-path text len=${alt.length}`);
+      return { text: alt, usage: json?.usage ?? null };
+    }
+    console.error(`[AI ROUTER] Responses API empty text. raw=${raw.slice(0, 300)}`);
+    throw new Error(`Empty text from Responses API. raw=${raw.slice(0, 200)}`);
+  }
+
+  console.log(`[AI ROUTER] Responses API text len=${text.length} preview="${text.slice(0, 100)}"`);
+  return { text, usage: json?.usage ?? null };
+}
 
 // ── Safe content extraction ───────────────────────────────────────────────────
 // Handles all known response shapes from OpenAI/OpenRouter:
@@ -284,15 +333,12 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', user.id);
         console.log(`[AI ROUTER] persisted fresh tokens for user=${user.id}`);
 
-        // ── Use access_token directly as Bearer — no token-exchange needed ──────
-        // The access_token has aud=["https://api.openai.com/v1"] — it IS the API token.
-        console.log(`[AI ROUTER] using refreshed access_token directly as OpenAI Bearer`);
-        const apiKey = refreshed.access_token;
-        console.log(`[AI ROUTER] calling OpenAI with access_token (len=${apiKey.length})`);
-
-        const { text, usage } = await callChat(
-          OPENAI_CHAT_URL,
-          apiKey,
+        // ── Call Codex via Responses API (/v1/responses) ────────────────────
+        // The access_token (aud=api.openai.com/v1) is used directly as Bearer.
+        // codex-mini-latest is only available on /v1/responses, NOT /v1/chat/completions.
+        console.log(`[AI ROUTER] calling Codex Responses API with access_token`);
+        const { text, usage } = await callResponsesApi(
+          refreshed.access_token,
           OPENAI_DEFAULT_MODEL,
           messages,
         );
@@ -311,7 +357,14 @@ Deno.serve(async (req: Request) => {
       } catch (err: any) {
         openaiApiFailed  = true;
         openaiFailReason = err?.message ?? String(err);
-        console.error(`[AI ROUTER] OpenAI FAILED → fallback reason: ${openaiFailReason}`);
+        // Detect quota/billing errors — these are account config issues, not auth bugs
+        const isQuotaError = openaiFailReason.includes('insufficient_quota') ||
+                             openaiFailReason.includes('exceeded your current quota') ||
+                             openaiFailReason.includes('429');
+        console.error(`[AI ROUTER] OpenAI FAILED (${isQuotaError ? 'QUOTA' : 'ERROR'}) → ${openaiFailReason.slice(0, 200)}`);
+        if (isQuotaError) {
+          console.warn(`[AI ROUTER] OpenAI quota exhausted — account needs API credits at platform.openai.com/billing`);
+        }
       }
 
     } else {
@@ -351,12 +404,16 @@ Deno.serve(async (req: Request) => {
       );
 
       console.log(`[AI ROUTER] OpenRouter SUCCESS provider=openrouter`);
+      // Determine why we're using OpenRouter
+      const isQuota   = openaiApiFailed && (openaiFailReason.includes('insufficient_quota') || openaiFailReason.includes('429'));
+      const failType  = !openaiApiFailed ? 'none' : isQuota ? 'quota' : 'error';
       return new Response(JSON.stringify({
-        success:       true,
-        provider_used: 'openrouter',
-        response:      text,
+        success:            true,
+        provider_used:      'openrouter',
+        response:           text,
         usage,
-        fallback_used: openaiApiFailed,
+        fallback_used:      openaiApiFailed,
+        openai_fail_type:  failType,
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
