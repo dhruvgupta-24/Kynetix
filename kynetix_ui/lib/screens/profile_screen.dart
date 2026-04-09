@@ -270,21 +270,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _disconnectAi() async {
-    setState(() {
-      _aiIsLoading = true;
-    });
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      if (!mounted) return;
+      setState(() => _aiErrorMessage = 'Session expired. Please sign out and back in.');
+      return;
+    }
+    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
     try {
-      await Supabase.instance.client.functions.invoke('openai-link-disconnect');
+      final res = await Supabase.instance.client.functions.invoke(
+        'openai-link-disconnect',
+        headers: { 'Authorization': 'Bearer ${session.accessToken}' },
+      );
+      // Check for a non-success response body even on HTTP 200
+      final data = res.data as Map<String, dynamic>?;
+      if (data != null && data['success'] != true) {
+        final errMsg = data['error']?.toString() ?? 'Disconnect failed';
+        debugPrint('[AI DISCONNECT] ✖ backend error: $errMsg');
+        if (!mounted) return;
+        setState(() { _aiIsLoading = false; _aiErrorMessage = errMsg; });
+        return;
+      }
+      debugPrint('[AI DISCONNECT] ✔ success');
       if (!mounted) return;
       setState(() {
         _aiIsConnected = false;
-        _aiIsLoading = false;
+        _aiIsLoading  = false;
+        _aiErrorMessage = null;
       });
     } catch (e) {
+      debugPrint('[AI DISCONNECT] ✖ exception: $e');
       if (!mounted) return;
       setState(() {
-        _aiIsLoading = false;
-        _aiErrorMessage = 'Failed to disconnect';
+        _aiIsLoading  = false;
+        _aiErrorMessage = e.toString().replaceAll('Exception: ', '');
       });
     }
   }

@@ -207,10 +207,9 @@ async function callChat(
     m.content.some((b: any) => b?.type === 'image_url')
   );
 
-  // gpt-4o-mini supports vision; gpt-4o is stronger but costlier
-  const effectiveModel = (endpoint === OPENAI_CHAT_URL && hasImages)
-    ? 'gpt-4o'
-    : model;
+  // For OpenRouter vision requests, keep the model as-is (OpenRouter handles routing).
+  // Image support via callResponsesApi handles vision for the Codex path separately.
+  const effectiveModel = model;
 
   const requestBody: any = {
     model:       effectiveModel,
@@ -301,17 +300,17 @@ Deno.serve(async (req: Request) => {
 
     const { data: link, error: linkErr } = await supabaseAdmin
       .from('user_openai_links')
-      .select('id_token, access_token, refresh_token, is_connected, expires_at')
+      .select('id_token, access_token, refresh_token, is_connected, expires_at, responses_api_blocked')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    console.log(`[AI ROUTER] OpenAI linked=${!!link} is_connected=${link?.is_connected} linkErr=${linkErr?.message ?? 'none'}`);
+    console.log(`[AI ROUTER] OpenAI linked=${!!link} is_connected=${link?.is_connected} blocked=${link?.responses_api_blocked ?? false} linkErr=${linkErr?.message ?? 'none'}`);
     console.log(`[AI ROUTER] id_token len=${link?.id_token?.length ?? 0} refresh_token len=${link?.refresh_token?.length ?? 0}`);
 
     let openaiApiFailed  = false;
     let openaiFailReason = '';
 
-    if (link?.is_connected && link?.refresh_token) {
+    if (link?.is_connected && link?.refresh_token && !link?.responses_api_blocked) {
       try {
         // ── Refresh first to get a fresh id_token ───────────────────────────
         // id_token JWTs expire in ~1hr. ALWAYS refresh before exchanging.
@@ -357,15 +356,28 @@ Deno.serve(async (req: Request) => {
       } catch (err: any) {
         openaiApiFailed  = true;
         openaiFailReason = err?.message ?? String(err);
-        // Detect quota/billing errors — these are account config issues, not auth bugs
-        const isQuotaError = openaiFailReason.includes('insufficient_quota') ||
-                             openaiFailReason.includes('exceeded your current quota') ||
-                             openaiFailReason.includes('429');
-        console.error(`[AI ROUTER] OpenAI FAILED (${isQuotaError ? 'QUOTA' : 'ERROR'}) → ${openaiFailReason.slice(0, 200)}`);
-        if (isQuotaError) {
-          console.warn(`[AI ROUTER] OpenAI quota exhausted — account needs API credits at platform.openai.com/billing`);
+        const isQuota = openaiFailReason.includes('insufficient_quota') ||
+                        openaiFailReason.includes('exceeded your current quota');
+        const isScope = openaiFailReason.includes('api.responses.write') ||
+                        openaiFailReason.includes('insufficient permissions') ||
+                        openaiFailReason.includes('Missing scopes');
+        const tag = isQuota ? 'QUOTA' : isScope ? 'SCOPE' : 'ERROR';
+        console.error(`[AI ROUTER] OpenAI FAILED (${tag}) → ${openaiFailReason.slice(0, 200)}`);
+        if (isScope) {
+          // Permanently mark this token as blocked for the Responses API.
+          // This stops the 700ms wasted roundtrip on every future request.
+          console.warn(`[AI ROUTER] OpenAI scope issue — setting responses_api_blocked=true to skip future attempts`);
+          await supabaseAdmin
+            .from('user_openai_links')
+            .update({ responses_api_blocked: true, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
         }
       }
+
+    } else if (link?.responses_api_blocked) {
+      console.log(`[AI ROUTER] OpenAI skipped — responses_api_blocked=true (scope issue confirmed); using OpenRouter directly`);
+      openaiApiFailed  = true;
+      openaiFailReason = 'Missing scopes: api.responses.write';
 
     } else {
       const reason = !link
@@ -404,16 +416,22 @@ Deno.serve(async (req: Request) => {
       );
 
       console.log(`[AI ROUTER] OpenRouter SUCCESS provider=openrouter`);
-      // Determine why we're using OpenRouter
-      const isQuota   = openaiApiFailed && (openaiFailReason.includes('insufficient_quota') || openaiFailReason.includes('429'));
-      const failType  = !openaiApiFailed ? 'none' : isQuota ? 'quota' : 'error';
+      // Determine why we're using OpenRouter and whether to label it as fallback
+      const isQuota   = openaiFailReason.includes('insufficient_quota');
+      const isScope   = openaiFailReason.includes('api.responses.write') ||
+                        openaiFailReason.includes('insufficient permissions') ||
+                        openaiFailReason.includes('Missing scopes');
+      // Quota and scope errors are infrastructure mismatches, not true runtime fallbacks.
+      // Only flag fallback_used=true for unexpected auth/network failures.
+      const isTrueFallback = openaiApiFailed && !isQuota && !isScope;
+      const failType = !openaiApiFailed ? 'none' : isQuota ? 'quota' : isScope ? 'scope' : 'error';
       return new Response(JSON.stringify({
-        success:            true,
-        provider_used:      'openrouter',
-        response:           text,
+        success:           true,
+        provider_used:     'openrouter',
+        response:          text,
         usage,
-        fallback_used:      openaiApiFailed,
-        openai_fail_type:  failType,
+        fallback_used:     isTrueFallback,
+        openai_fail_type: failType,
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

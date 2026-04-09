@@ -45,7 +45,8 @@ Deno.serve(async (req: Request) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: clientId,
-        scope: "openid profile email offline_access api.connectors.read api.connectors.invoke",
+        scope: "openid profile email offline_access api.connectors.read api.connectors.invoke api.responses.write",
+
       }),
     });
 

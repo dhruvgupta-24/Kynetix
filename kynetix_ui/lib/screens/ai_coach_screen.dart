@@ -509,6 +509,10 @@ class _ProviderBadge extends StatelessWidget {
     } else if (isQuota) {
       color = const Color(0xFFF59E0B); // amber — billing issue
       label = '⚠️ OpenRouter (OpenAI needs credits)';
+    } else if (openaiFailType == 'scope') {
+      // Scope/permissions mismatch — OpenRouter is effectively the primary provider
+      color = const Color(0xFF818CF8);
+      label = '~ OpenRouter';
     } else if (fallbackUsed) {
       color = const Color(0xFF60A5FA);
       label = '↩ OpenRouter';
@@ -516,6 +520,7 @@ class _ProviderBadge extends StatelessWidget {
       color = const Color(0xFF818CF8);
       label = '~ OpenRouter';
     }
+
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
