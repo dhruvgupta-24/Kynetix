@@ -13,12 +13,12 @@ Thumbs.db
 .swiftpm/
 migrate_working_dir/
 
-# Kynetix Config & Secrets
+# ── Kynetix Config & Secrets (NEVER commit) ───────────────────────────────────
 lib/config/secrets.dart
 lib/config/supabase_secrets.dart
 config/secrets.dart
 
-# Environment & secret files — NEVER commit these
+# ── Environment & secret files ────────────────────────────────────────────────
 .env
 .env.local
 .env.development
@@ -29,16 +29,28 @@ secrets.json
 *.pem
 *.key
 
-# IntelliJ related
+# ── Debug / analysis dump files ───────────────────────────────────────────────
+analysis*.txt
+analyze*.txt
+build*.txt
+error*.txt
+err*.txt
+out*.txt
+dart_analyze*.txt
+output_*.txt
+sha.txt
+.gemini_*
+
+# ── IntelliJ related ──────────────────────────────────────────────────────────
 *.iml
 *.ipr
 *.iws
 .idea/
 
-# VS Code related
+# ── VS Code related ───────────────────────────────────────────────────────────
 .vscode/
 
-# Flutter/Dart/Pub related
+# ── Flutter/Dart/Pub related ──────────────────────────────────────────────────
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
@@ -51,21 +63,19 @@ build/
 /coverage/
 .packages
 
-# iOS Build
+# ── iOS Build ─────────────────────────────────────────────────────────────────
 ios/Pods/
 ios/.symlinks/
 
-# Android Build
+# ── Android Build ─────────────────────────────────────────────────────────────
 android/.gradle/
 android/app/build/
 
-# Symbolication related
+# ── Symbolication / Obfuscation ───────────────────────────────────────────────
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# ── Android Studio build artifacts ───────────────────────────────────────────
 /android/app/debug
 /android/app/profile
 /android/app/release

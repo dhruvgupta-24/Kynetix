@@ -1,8 +1,0 @@
-﻿Analyzing kynetix_ui...
-
-  error - lib\services\auth_service.dart:104:48 - The class 'google.GoogleSignIn' doesn't have an unnamed constructor. Try using one of the named constructors defined in 'google.GoogleSignIn'. - new_with_undefined_constructor_default
-  error - lib\services\auth_service.dart:109:45 - The method 'signIn' isn't defined for the type 'GoogleSignIn'. Try correcting the name to the name of an existing method, or defining a method named 'signIn'. - undefined_method
-warning - lib\services\meal_suggestion_service.dart:2:8 - Unused import: '../models/workout_session.dart'. Try removing the import directive. - unused_import
-warning - lib\services\nutrition_guardrails.dart:360:16 - The value of the local variable 'm' isn't used. Try removing the variable or using it. - unused_local_variable
-
-4 issues found.

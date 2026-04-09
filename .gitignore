@@ -1,21 +1,36 @@
 # ─── Kynetix Root .gitignore ──────────────────────────────────────────────────
 
-# ── Secrets & environment files — NEVER commit these ──────────────────────────
+# ── Secrets & environment files (NEVER commit) ────────────────────────────────
 .env
-.env.local
-.env.development
-.env.production
 .env.*
+supabase/.env
+supabase/functions/.env
 *.secret
 secrets.json
 *.pem
 *.key
-supabase/.env
-supabase/functions/.env
 
-# ── Node / JS ─────────────────────────────────────────────────────────────────
+# ── Debug / analysis / AI dump files ─────────────────────────────────────────
+*.log
+analysis*.txt
+analyze*.txt
+build*.txt
+error*.txt
+err*.txt
+out*.txt
+dart_analyze*.txt
+output_*.txt
+sha.txt
+.gemini_*
+
+# ── Temporary scripts ─────────────────────────────────────────────────────────
+fix_*.py
+run_*.py
+
+# ── Node / JavaScript ─────────────────────────────────────────────────────────
 node_modules/
 npm-debug.log*
+package-lock.json
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
@@ -25,6 +40,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 
 # ── Supabase ──────────────────────────────────────────────────────────────────
 supabase/.branches

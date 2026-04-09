@@ -1,6 +1,0 @@
-﻿Analyzing add_meal_screen.dart, day_detail_screen.dart...
-
-   info - lib\screens\add_meal_screen.dart:948:32 - Statements in a for should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
-   info - lib\screens\add_meal_screen.dart:949:32 - Statements in a for should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
-
-2 issues found.
