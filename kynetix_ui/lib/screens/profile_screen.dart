@@ -1,13 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../config/supabase_secrets.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
-import '../services/openai_deeplink_service.dart';
 import '../services/persistence_service.dart';
 
 // ─── Profile Screen ────────────────────────────────────────────────────────────
@@ -39,273 +35,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _syncing = false;
   String? _syncMessage;
 
-  // ── AI Integration State ──
-  bool _aiIsLoading = true;
-  bool _aiIsConnected = false;
-  String? _aiErrorMessage;
-
-  Timer? _aiPollTimer;
-  String? _aiUserCode;
-  String? _aiVerificationUrl;
-  bool _aiIsPolling = false;
-
   @override
   void initState() {
     super.initState();
-    debugPrint('[AI DEEPLINK] ProfileScreen.initState — attaching listener');
-    _checkAiStatus();
-
-    // Subscribe to the app-level deep link service (always alive, never missed)
-    OpenAiDeepLinkService.instance.pending.addListener(_onDeepLinkNotified);
-
-    // If a pending URI already arrived before this screen mounted, handle it now
-    final existingUri = OpenAiDeepLinkService.instance.pending.value;
-    if (existingUri != null) {
-      debugPrint('[AI DEEPLINK] pending URI already queued: $existingUri');
-      WidgetsBinding.instance.addPostFrameCallback((_) => _onDeepLinkNotified());
-    }
-  }
-
-  void _onDeepLinkNotified() {
-    final uri = OpenAiDeepLinkService.instance.pending.value;
-    if (uri == null) return;
-    debugPrint('[AI DEEPLINK] _onDeepLinkNotified: $uri');
-    OpenAiDeepLinkService.instance.consume();
-    _handleDeepLink(uri);
   }
 
   @override
   void dispose() {
-    _aiPollTimer?.cancel();
-    OpenAiDeepLinkService.instance.pending.removeListener(_onDeepLinkNotified);
     super.dispose();
-  }
-
-  Future<void> _checkAiStatus() async {
-    final session = Supabase.instance.client.auth.currentSession;
-    debugPrint(
-      '[_checkAiStatus] session null? ${session == null} | user: ${session?.user.id ?? "NULL"}',
-    );
-    if (session == null) {
-      if (!mounted) return;
-      setState(() => _aiIsLoading = false);
-      return;
-    }
-
-    try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'openai-link-status',
-      );
-      debugPrint(
-        '[_checkAiStatus] ✔ data: ${res.data} | status: ${res.status}',
-      );
-      if (!mounted) return;
-      setState(() {
-        _aiIsConnected = res.data['isConnected'] == true;
-        _aiIsLoading = false;
-      });
-    } catch (e, st) {
-      debugPrint('[_checkAiStatus] ✖ ${e.runtimeType}: $e');
-      debugPrint(st.toString());
-      if (!mounted) return;
-      setState(() {
-        _aiIsLoading = false;
-      });
-    }
-  }
-
-  Future<void> _connectAi() async {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      if (!mounted) return;
-      setState(() => _aiErrorMessage = 'Session expired. Please sign out.');
-      return;
-    }
-    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
-
-    // Step 1: Exchange JWT for a short-lived opaque nonce (never exposes JWT in browser)
-    debugPrint('[AI CONNECT] requesting nonce...');
-    String nonce;
-    try {
-      final nonceRes = await Supabase.instance.client.functions.invoke(
-        'openai-link-issue-nonce',
-        headers: { 'Authorization': 'Bearer ${session.accessToken}' },
-      );
-      final nonceData = nonceRes.data;
-      if (nonceData == null || nonceData['nonce'] == null) {
-        throw Exception('Nonce response invalid: $nonceData');
-      }
-      nonce = nonceData['nonce'] as String;
-      debugPrint('[AI CONNECT] nonce received');
-    } catch (e) {
-      debugPrint('[AI CONNECT] nonce request failed: $e');
-      if (!mounted) return;
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Failed to start auth. Try again.'; });
-      return;
-    }
-
-    // Step 2: Open Vercel-hosted helper page with nonce + api params.
-    // Vercel serves the HTML correctly; Supabase Edge had rendering issues.
-    final helperUrl = Uri.https(
-      'kynetix-openai-helper.vercel.app',
-      '/',
-      {
-        'nonce': nonce,
-        'api': SupabaseSecrets.url,
-      },
-    );
-
-    debugPrint('[AI CONNECT] launching URL: $helperUrl');
-
-    final modes = [
-      (LaunchMode.platformDefault,     'platformDefault'),
-      (LaunchMode.externalApplication, 'externalApplication'),
-      (LaunchMode.inAppBrowserView,    'inAppBrowserView'),
-    ];
-
-    bool launched = false;
-    for (final (mode, label) in modes) {
-      debugPrint('[AI CONNECT] trying $label');
-      try {
-        final ok = await launchUrl(helperUrl, mode: mode);
-        if (ok) {
-          debugPrint('[AI CONNECT] browser launch success via $label');
-          launched = true;
-          break;
-        } else {
-          debugPrint('[AI CONNECT] browser launch failed via $label (returned false)');
-        }
-      } catch (e) {
-        debugPrint('[AI CONNECT] browser launch failed via $label (exception: $e)');
-      }
-    }
-
-    if (!mounted) return;
-    if (launched) {
-      setState(() { _aiIsLoading = false; _aiIsPolling = true; });
-    } else {
-      setState(() { _aiIsLoading = false; _aiErrorMessage = 'Could not open browser.'; });
-    }
-  }
-
-
-  void _handleDeepLink(Uri uri) {
-    final userCode = uri.queryParameters['user_code'];
-    final verificationUri = uri.queryParameters['verification_uri'];
-    final intervalStr = uri.queryParameters['interval'];
-    final interval = int.tryParse(intervalStr ?? '') ?? 5;
-
-    debugPrint('[AI CALLBACK] _handleDeepLink called');
-    debugPrint('[AI CALLBACK]   user_code       = $userCode');
-    debugPrint('[AI CALLBACK]   verification_uri = $verificationUri');
-    debugPrint('[AI CALLBACK]   interval         = $interval');
-
-    if (userCode == null || verificationUri == null) {
-      debugPrint('[AI CALLBACK] ✖ Missing required params — aborting');
-      if (mounted) setState(() => _aiErrorMessage = 'Bad callback from OpenAI helper.');
-      return;
-    }
-
-    debugPrint('[AI CALLBACK] ✔ Params valid — updating UI and starting poll');
-
-    if (mounted) {
-      setState(() {
-        _aiUserCode = userCode;
-        _aiVerificationUrl = verificationUri;
-        _aiIsPolling = true;
-        _aiErrorMessage = null;
-        _aiIsLoading = false;
-      });
-    }
-    _startPolling(interval);
-  }
-
-  void _startPolling(int intervalSeconds) {
-    debugPrint('[AI POLL] starting polling every ${intervalSeconds}s');
-    _aiPollTimer?.cancel();
-    _aiPollTimer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) async {
-      try {
-        final session = Supabase.instance.client.auth.currentSession;
-        if (session == null) {
-          debugPrint('[AI POLL] session gone — cancelling timer');
-          timer.cancel();
-          return;
-        }
-
-        debugPrint('[AI POLL] invoking openai-link-poll...');
-        final res = await Supabase.instance.client.functions.invoke(
-          'openai-link-poll',
-          headers: {
-            'Authorization': 'Bearer ${session.accessToken}',
-          },
-        );
-
-        if (!mounted) {
-          timer.cancel();
-          return;
-        }
-
-        final data = res.data;
-        debugPrint('[AI POLL] response: $data');
-        if (data != null) {
-          final status = data['status'];
-          if (status == 'connected') {
-            timer.cancel();
-            setState(() {
-              _aiIsConnected = true;
-              _aiIsPolling = false;
-            });
-          } else if (status == 'expired') {
-            timer.cancel();
-            setState(() {
-              _aiIsPolling = false;
-              _aiErrorMessage = 'Pairing code expired. Try again.';
-            });
-          }
-        }
-      } catch (e) {
-        debugPrint('Polling exception: $e');
-      }
-    });
-  }
-
-  Future<void> _disconnectAi() async {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      if (!mounted) return;
-      setState(() => _aiErrorMessage = 'Session expired. Please sign out and back in.');
-      return;
-    }
-    setState(() { _aiIsLoading = true; _aiErrorMessage = null; });
-    try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'openai-link-disconnect',
-        headers: { 'Authorization': 'Bearer ${session.accessToken}' },
-      );
-      // Check for a non-success response body even on HTTP 200
-      final data = res.data as Map<String, dynamic>?;
-      if (data != null && data['success'] != true) {
-        final errMsg = data['error']?.toString() ?? 'Disconnect failed';
-        debugPrint('[AI DISCONNECT] ✖ backend error: $errMsg');
-        if (!mounted) return;
-        setState(() { _aiIsLoading = false; _aiErrorMessage = errMsg; });
-        return;
-      }
-      debugPrint('[AI DISCONNECT] ✔ success');
-      if (!mounted) return;
-      setState(() {
-        _aiIsConnected = false;
-        _aiIsLoading  = false;
-        _aiErrorMessage = null;
-      });
-    } catch (e) {
-      debugPrint('[AI DISCONNECT] ✖ exception: $e');
-      if (!mounted) return;
-      setState(() {
-        _aiIsLoading  = false;
-        _aiErrorMessage = e.toString().replaceAll('Exception: ', '');
-      });
-    }
   }
 
   Future<void> _doSync() async {
@@ -527,7 +264,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           _buildHealthCard(),
           const SizedBox(height: 16),
-          _buildAiIntegrationCard(),
+          _buildAiCard(),
           const SizedBox(height: 16),
           _buildAboutCard(),
         ],
@@ -817,201 +554,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return ActivityTier.high;
   }
 
-  // ── AI Integration ──────────────────────────────────────────────────────────
+  // ── AI Engine Info ───────────────────────────────────────────────────────────
 
-  Widget _buildAiIntegrationCard() {
-    Widget content;
-
-    if (_aiIsLoading) {
-      content = const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Color(0xFF52B788),
-            ),
+  Widget _buildAiCard() {
+    return _Section(
+      title: 'AI Engine',
+      child: Column(
+        children: const [
+          _InfoRow(
+            icon: Icons.auto_awesome_rounded,
+            label: 'Provider',
+            value: 'OpenAI (gpt-4o-mini)',
           ),
-        ),
-      );
-    } else if (_aiIsPolling && _aiUserCode != null && _aiVerificationUrl != null) {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.sync_rounded, size: 16, color: Color(0xFFFFB347)),
-              const SizedBox(width: 8),
-              const Text(
-                'Waiting for pairing...',
-                style: TextStyle(
-                  color: Color(0xFFFFB347), fontSize: 13, fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              const SizedBox(
-                width: 14, height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFFB347)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF13131F),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF2E2E3E)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  '1. Copy this code:',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _aiUserCode!,
-                        style: const TextStyle(
-                          color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 2,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.copy_rounded, color: Color(0xFF52B788), size: 20),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: _aiUserCode!));
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Code copied!'))
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  '2. Open the page and log in:',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: () async {
-                    final uri = Uri.tryParse(_aiVerificationUrl!);
-                    if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF52B788),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: const Text('Open Authorization Page', style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
+          _InfoRow(
+            icon: Icons.swap_horiz_rounded,
+            label: 'Fallback',
+            value: 'OpenRouter (auto)',
+            isLast: true,
           ),
         ],
-      );
-    } else {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                _aiIsConnected
-                    ? Icons.auto_awesome_rounded
-                    : Icons.auto_awesome_outlined,
-                size: 16,
-                color: _aiIsConnected
-                    ? const Color(0xFF52B788)
-                    : const Color(0xFF6B7280),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _aiIsConnected ? 'Connected to OpenAI' : 'Not Connected',
-                style: TextStyle(
-                  color: _aiIsConnected
-                      ? const Color(0xFF52B788)
-                      : const Color(0xFF6B7280),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              if (_aiIsConnected)
-                GestureDetector(
-                  onTap: _disconnectAi,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B35).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFFFF6B35).withValues(alpha: 0.4),
-                      ),
-                    ),
-                    child: const Text(
-                      'Disconnect',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFFFF6B35),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                GestureDetector(
-                  onTap: _connectAi,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF52B788).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFF52B788).withValues(alpha: 0.4),
-                      ),
-                    ),
-                    child: const Text(
-                      'Connect OpenAI',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF52B788),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-
-          if (_aiErrorMessage != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _aiErrorMessage!,
-              style: const TextStyle(fontSize: 12, color: Color(0xFFFF6B35)),
-            ),
-          ],
-        ],
-      );
-    }
-
-    return _Section(title: 'AI Integration', child: content);
+      ),
+    );
   }
 
   // ── About ──────────────────────────────────────────────────────────────────

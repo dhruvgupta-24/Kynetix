@@ -5,7 +5,6 @@ import '../services/ai_coach_service.dart';
 
 // ─── Design constants ─────────────────────────────────────────────────────────
 // Top-level so they can be used inside const widget trees.
-const _kBg          = Color(0xFF13131F);
 const _kCard        = Color(0xFF1E1E2C);
 const _kBorder      = Color(0xFF2E2E3E);
 const _kGreen       = Color(0xFF52B788);
@@ -23,15 +22,13 @@ class _ChatMessage {
   final Uint8List? imageBytes;
   final String?    providerUsed;
   final bool       fallbackUsed;
-  final String     openaiFailType; // 'none' | 'quota' | 'error'
 
   const _ChatMessage({
     required this.role,
     required this.text,
     this.imageBytes,
     this.providerUsed,
-    this.fallbackUsed    = false,
-    this.openaiFailType  = 'none',
+    this.fallbackUsed = false,
   });
 }
 
@@ -126,9 +123,8 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
         _messages.add(_ChatMessage(
           role:         _Role.assistant,
           text:         res.message,
-          providerUsed:   res.providerUsed,
-          fallbackUsed:   res.fallbackUsed,
-          openaiFailType: res.openaiFailType,
+          providerUsed: res.providerUsed,
+          fallbackUsed: res.fallbackUsed,
         ));
         _loading = false;
       });
@@ -458,14 +454,13 @@ class _ChatBubble extends StatelessWidget {
                       style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.55),
                     ),
                   ),
-                // Provider badge (assistant only)
+                  // Provider badge (assistant only)
                 if (!isUser && message.providerUsed != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4, left: 2),
                     child: _ProviderBadge(
-                      provider:      message.providerUsed!,
-                      fallbackUsed:  message.fallbackUsed,
-                      openaiFailType:message.openaiFailType,
+                      provider:     message.providerUsed!,
+                      fallbackUsed: message.fallbackUsed,
                     ),
                   ),
               ],
@@ -483,43 +478,17 @@ class _ChatBubble extends StatelessWidget {
 class _ProviderBadge extends StatelessWidget {
   final String provider;
   final bool   fallbackUsed;
-  final String openaiFailType; // 'none' | 'quota' | 'error'
   const _ProviderBadge({
     required this.provider,
     required this.fallbackUsed,
-    this.openaiFailType = 'none',
   });
 
   @override
   Widget build(BuildContext context) {
     final isOpenAI = provider == 'openai';
-    final isQuota  = openaiFailType == 'quota';
 
-    // Badge color:
-    //   openai success → green
-    //   openrouter (quota issue) → orange (billing warning)
-    //   openrouter (auth/other fallback) → blue
-    //   openrouter (primary, no openai link) → blue muted
-    final Color color;
-    final String label;
-
-    if (isOpenAI) {
-      color = const Color(0xFF52B788);
-      label = '⚡ OpenAI';
-    } else if (isQuota) {
-      color = const Color(0xFFF59E0B); // amber — billing issue
-      label = '⚠️ OpenRouter (OpenAI needs credits)';
-    } else if (openaiFailType == 'scope') {
-      // Scope/permissions mismatch — OpenRouter is effectively the primary provider
-      color = const Color(0xFF818CF8);
-      label = '~ OpenRouter';
-    } else if (fallbackUsed) {
-      color = const Color(0xFF60A5FA);
-      label = '↩ OpenRouter';
-    } else {
-      color = const Color(0xFF818CF8);
-      label = '~ OpenRouter';
-    }
+    final Color  color = isOpenAI ? const Color(0xFF52B788) : const Color(0xFF818CF8);
+    final String label = isOpenAI ? '⚡ OpenAI' : (fallbackUsed ? '↩ OpenRouter' : '~ OpenRouter');
 
 
     return Container(

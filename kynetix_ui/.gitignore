@@ -16,8 +16,18 @@ migrate_working_dir/
 # Kynetix Config & Secrets
 lib/config/secrets.dart
 lib/config/supabase_secrets.dart
-.env
 config/secrets.dart
+
+# Environment & secret files — NEVER commit these
+.env
+.env.local
+.env.development
+.env.production
+.env.*
+*.secret
+secrets.json
+*.pem
+*.key
 
 # IntelliJ related
 *.iml

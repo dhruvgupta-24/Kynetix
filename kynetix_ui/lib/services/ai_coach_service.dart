@@ -38,23 +38,20 @@ class AiCoachResponse {
   final String         message;
   final String         providerUsed;   // 'openai' | 'openrouter' | 'none'
   final bool           fallbackUsed;
-  final String         openaiFailType; // 'none' | 'quota' | 'error'
   final AiCoachContext? context;
 
   const AiCoachResponse({
     required this.message,
     required this.providerUsed,
     required this.fallbackUsed,
-    this.openaiFailType = 'none',
     this.context,
   });
 
   factory AiCoachResponse.fromJson(Map<String, dynamic> j) => AiCoachResponse(
-    message:       j['message']          as String? ?? '',
-    providerUsed:  j['provider_used']    as String? ?? 'unknown',
-    fallbackUsed:  j['fallback_used']    as bool?   ?? false,
-    openaiFailType:j['openai_fail_type'] as String? ?? 'none',
-    context:       j['context'] != null
+    message:      j['message']       as String? ?? '',
+    providerUsed: j['provider_used'] as String? ?? 'unknown',
+    fallbackUsed: j['fallback_used'] as bool?   ?? false,
+    context:      j['context'] != null
         ? AiCoachContext.fromJson(j['context'] as Map<String, dynamic>)
         : null,
   );

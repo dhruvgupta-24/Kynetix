@@ -5,11 +5,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth_gate.dart';
 import 'screens/reset_password_screen.dart';
 import 'services/meal_memory.dart';
-import 'services/openai_deeplink_service.dart';
 import 'services/personal_nutrition_memory.dart';
 import 'services/persistence_service.dart';
 import 'services/workout_service.dart';
-import 'config/secrets.dart';
 import 'config/supabase_secrets.dart';
 
 Future<void> main() async {
@@ -32,19 +30,6 @@ Future<void> main() async {
   // Local-first load
   await PersistenceService.load();   
   await WorkoutService.instance.init(); 
-
-  const apiKey = AppSecrets.openRouterApiKey;
-  if (apiKey.isEmpty || apiKey == 'YOUR_OPENROUTER_API_KEY_HERE') {
-    debugPrint('[main] ⚠️  OPENROUTER_API_KEY is EMPTY — AI will fall back locally');
-  } else {
-    final preview = apiKey.length <= 8
-        ? 'provided'
-        : '${apiKey.substring(0, 4)}…${apiKey.substring(apiKey.length - 4)}';
-    debugPrint('[main] ✅ OPENROUTER_API_KEY detected ($preview) — AI enabled');
-  }
-
-  // Start app-level deep link listener (must be before runApp)
-  OpenAiDeepLinkService.instance.init();
 
   runApp(const KynetixApp());
 }
