@@ -21,12 +21,12 @@ const corsHeaders = {
 
 const SUPABASE_URL = () => Deno.env.get('SUPABASE_URL') ?? '';
 
-// ── Nutrition target formula (mirrors NutritionTargetEngine in Flutter) ────────
-// BMR: Mifflin-St Jeor
-// TDEE: BMR × activity_multiplier
-// Fat loss:  −500 kcal/day; Lean bulk: +250; Maintenance: 0
-// Calorie cycle: ±120 kcal (training vs rest)
-// Protein: 1.85 g/kg avg for fat loss, 1.7 for lean bulk, 1.6 for maintenance
+// ── Nutrition target formula — mirrors NutritionTargetEngine in Flutter exactly ──
+// BMR:  Mifflin-St Jeor
+// TDEE: BMR × activity_multiplier (8-tier, resistance-training calibrated)
+// Goal delta: percentage-based, bounded (matches Flutter _goalAdjustment)
+// Protein: goal- and day-aware (training vs rest) — matches Flutter values
+// Calorie cycle: scales with training frequency (matches Flutter _calorieCycle)
 
 function computeTargets(profile: any, isGymDay: boolean): { calories: number; protein: number; label: string } {
   const w = parseFloat(profile.weight_kg ?? 70);
@@ -35,38 +35,66 @@ function computeTargets(profile: any, isGymDay: boolean): { calories: number; pr
   const isMale = (profile.gender ?? 'Male') === 'Male';
   const goal = (profile.goal ?? 'Fat Loss').toLowerCase();
 
-  // Mifflin-St Jeor BMR
+  // ── Mifflin-St Jeor BMR ──────────────────────────────────────────────────
   const bmr = isMale
     ? 10 * w + 6.25 * h - 5 * a + 5
     : 10 * w + 6.25 * h - 5 * a - 161;
 
-  // Activity multiplier (conservative for lifting athletes)
-  const gymDaysPerWeek = ((parseInt(profile.workout_days_min ?? 4) + parseInt(profile.workout_days_max ?? 5)) / 2);
-  const activityMultiplier = gymDaysPerWeek >= 5 ? 1.45 : gymDaysPerWeek >= 3 ? 1.375 : 1.25;
+  // ── 8-tier resistance-training activity multiplier (matches Flutter) ─────
+  // Deliberately lower than classic Mifflin tables (which assume cardio).
+  const gymDaysPerWeek = (parseInt(profile.workout_days_min ?? 4) + parseInt(profile.workout_days_max ?? 5)) / 2;
+  let actMult: number;
+  if      (gymDaysPerWeek <= 0.5) actMult = 1.20; // sedentary
+  else if (gymDaysPerWeek <= 1.5) actMult = 1.25; // 1 day/wk
+  else if (gymDaysPerWeek <= 2.5) actMult = 1.29; // 2 days/wk
+  else if (gymDaysPerWeek <= 3.5) actMult = 1.33; // 3 days/wk
+  else if (gymDaysPerWeek <= 4.5) actMult = 1.37; // 4 days/wk
+  else if (gymDaysPerWeek <= 5.5) actMult = 1.41; // 5 days/wk
+  else if (gymDaysPerWeek <= 6.5) actMult = 1.45; // 6 days/wk
+  else                             actMult = 1.50; // 7 days/wk
 
-  const tdee = bmr * activityMultiplier;
+  const tdee = bmr * actMult;
 
-  let avgCalories: number;
-  let proteinPerKg: number;
+  // ── Goal calorie adjustment — percentage-based, bounded (matches Flutter) ─
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  let goalDelta: number;
+  if      (goal.includes('fat loss') || goal.includes('cut'))  goalDelta = -clamp(tdee * 0.22, 350, 550);
+  else if (goal.includes('lean bulk'))                         goalDelta =  clamp(tdee * 0.08, 150, 250);
+  else if (goal.includes('bulk'))                              goalDelta =  clamp(tdee * 0.15, 250, 450);
+  else if (goal.includes('recomp'))                            goalDelta = -clamp(tdee * 0.09, 120, 250);
+  else                                                          goalDelta = 0; // Maintenance
+
+  const avgCalories = tdee + goalDelta;
+  const calFloor    = bmr + 200; // absolute minimum
+
+  // ── Calorie cycle (matches Flutter _calorieCycle) ───────────────────────
+  let cycleDelta: number;
+  if      (gymDaysPerWeek <= 1) cycleDelta = 70;
+  else if (gymDaysPerWeek <= 3) cycleDelta = 90;
+  else if (gymDaysPerWeek <= 5) cycleDelta = 105;
+  else                          cycleDelta = 120;
+
+  const calories = Math.round(Math.max(calFloor, isGymDay ? avgCalories + cycleDelta : avgCalories - cycleDelta));
+
+  // ── Day-aware protein — matches Flutter protein switch tables ────────────
+  let protein: number;
   if (goal.includes('fat loss') || goal.includes('cut')) {
-    avgCalories = tdee - 500;
-    proteinPerKg = 1.85;
-  } else if (goal.includes('bulk') || goal.includes('gain')) {
-    avgCalories = tdee + 250;
-    proteinPerKg = 1.7;
+    protein = isGymDay ? w * 1.95 : w * 1.75;
+  } else if (goal.includes('lean bulk')) {
+    protein = isGymDay ? w * 1.80 : w * 1.60;
+  } else if (goal.includes('bulk')) {
+    protein = isGymDay ? w * 2.00 : w * 1.70;
+  } else if (goal.includes('recomp')) {
+    protein = isGymDay ? w * 2.15 : w * 1.85;
   } else {
-    avgCalories = tdee;
-    proteinPerKg = 1.6;
+    // Maintenance — still training regularly, needs adequate protein
+    protein = isGymDay ? w * 1.85 : w * 1.65;
   }
-
-  const cycleDelta = 120;
-  const calories = isGymDay ? avgCalories + cycleDelta : avgCalories - cycleDelta;
-  const protein = w * proteinPerKg;
 
   return {
     calories: Math.round(calories),
-    protein: Math.round(protein),
-    label: isGymDay ? 'Training Day' : 'Rest Day',
+    protein:  Math.round(protein),
+    label:    isGymDay ? 'Training Day' : 'Rest Day',
   };
 }
 
@@ -127,10 +155,17 @@ function buildMealContext(sectionsJson: any): {
 function buildFoodMemory(memoryRows: any[]): string {
   if (!memoryRows.length) return '(no food memory yet)';
   return memoryRows
-    .slice(0, 25)
+    .slice(0, 30)
     .map((r: any) => {
-      const unit = r.reference_unit ? `per ${r.reference_quantity ?? 1} ${r.reference_unit}` : '';
-      return `• ${r.canonical_meal}: ~${Math.round(r.calories)} kcal, ${Math.round(r.protein)}g protein ${unit}`.trim();
+      // calories/protein columns store PER-UNIT values (e.g. 0.65 kcal per ml).
+      // Multiply by reference_quantity to get the correct serving-size total.
+      const qty    = parseFloat(r.reference_quantity ?? 1);
+      const calPer = parseFloat(r.calories_per_unit ?? r.calories ?? 0);
+      const proPer = parseFloat(r.protein_per_unit  ?? r.protein  ?? 0);
+      const cal    = Math.round(calPer * qty);
+      const pro    = Math.round(proPer * qty);
+      const label  = r.reference_unit ? `${qty} ${r.reference_unit}` : '1 serving';
+      return `• ${r.canonical_meal}: ${cal} kcal, ${pro}g protein — for ${label}`;
     })
     .join('\n');
 }
@@ -195,10 +230,12 @@ USER'S KNOWN EATING HABITS (follow these strictly)
 • NEVER describe a mess meal with paneer, ghee rice or oily sabzi as "light" or "clean".
 
 ═══════════════════════════════════════════════════
-USER'S PERSONAL FOOD MEMORY
+USER'S CONFIRMED FOOD MACROS — GROUND TRUTH
 ═══════════════════════════════════════════════════
-These are foods this user has previously logged with confirmed nutrition values.
-Always use these values when recommending or referencing these foods:
+WARNING: These calorie and protein values have been personally confirmed by the
+user in their food tracker. They OVERRIDE your training data completely.
+If a food the user mentions matches (or is close to) any food listed below,
+you MUST use the EXACT numbers shown below — do NOT substitute your own estimate.
 ${foodMemory}
 
 ═══════════════════════════════════════════════════
@@ -209,10 +246,12 @@ RESPONSE RULES (non-negotiable)
 3. Respect remaining targets — don't suggest more than what fits
 4. Never suggest whey (it's already taken)
 5. Reference today's logged meals in your reasoning
-6. If user asks about food not in memory, estimate using known baselines
+6. If user asks about a food NOT listed in their food memory, estimate using the baselines below
 7. For image analysis: compare options against remaining targets and recommend the best fit
 8. Keep response concise but complete — coach speak, not textbook
 9. When recommending, show: food + quantity + calories + protein + remaining after
+10. MOST IMPORTANT: If a food matches the user's confirmed food macros section above, use
+    those EXACT numbers. Never use a different calorie/protein estimate for a confirmed food.
 
 ═══════════════════════════════════════════════════
 REFERENCE BASELINES (use when food not in memory)
@@ -230,7 +269,7 @@ Never use dry/lean estimates. When in doubt, use the upper end of the range.
 1 katori rajma/chhole (mess): 150–180 kcal, 7–9g protein
 1 mess serving sabzi (potato, mixed veg, etc.): 120–180 kcal, 2–4g protein
 100g paneer (restaurant/mess, with oil): 340–370 kcal, 16–18g protein
-150g tofu: 120–140 kcal, 15–17g protein
+150g tofu (firm/extra-firm): 206 kcal, 22g protein
 3 egg whites: 51 kcal, 11g protein
 1 whole egg: 75 kcal, 6.5g protein
 100g curd: 60 kcal, 3.5g protein
@@ -300,7 +339,7 @@ Deno.serve(async (req: Request) => {
     const [profileRes, dayLogRes, memoryRes] = await Promise.all([
       supabaseAdmin.from('profiles').select('*').eq('id', user.id).maybeSingle(),
       supabaseAdmin.from('day_logs').select('sections_json, gym_day_json').eq('user_id', user.id).eq('date_key', dateKey).maybeSingle(),
-      supabaseAdmin.from('user_nutrition_memory').select('canonical_meal, calories, protein, reference_quantity, reference_unit, times_used').eq('user_id', user.id).order('times_used', { ascending: false }).limit(30),
+      supabaseAdmin.from('user_nutrition_memory').select('canonical_meal, calories, protein, calories_per_unit, protein_per_unit, reference_quantity, reference_unit, times_used').eq('user_id', user.id).order('times_used', { ascending: false }).limit(30),
     ]);
 
     const profile = profileRes.data;

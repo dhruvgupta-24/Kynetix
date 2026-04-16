@@ -324,27 +324,27 @@ class NutritionTargetEngine {
   // ── Protein — goal- and day-aware ─────────────────────────────────────────
 
   double _baseProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.85),
-    kLeanBulk      => _r(p.weight * 1.70),
-    kBulk          => _r(p.weight * 1.85),
-    kRecomposition => _r(p.weight * 1.95),
-    _              => _r(p.weight * 1.55),
+    kFatLoss       => _r(p.weight * 1.85),   // high — protect muscle in deficit
+    kLeanBulk      => _r(p.weight * 1.70),   // enough to drive growth
+    kBulk          => _r(p.weight * 1.85),   // same as fat loss — mass phase protein
+    kRecomposition => _r(p.weight * 2.00),   // highest — simultaneous cut+build
+    _              => _r(p.weight * 1.75),   // Maintenance — still training 4-6×/wk
   };
 
   double _trainingProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.95),
-    kLeanBulk      => _r(p.weight * 1.80),
-    kBulk          => _r(p.weight * 2.05),
-    kRecomposition => _r(p.weight * 2.10),
-    _              => _r(p.weight * 1.65),
+    kFatLoss       => _r(p.weight * 1.95),   // peak day — max muscle protection
+    kLeanBulk      => _r(p.weight * 1.80),   // anabolic stimulus day
+    kBulk          => _r(p.weight * 2.00),   // heavy training day
+    kRecomposition => _r(p.weight * 2.15),   // highest of all goals on training day
+    _              => _r(p.weight * 1.85),   // Maintenance training day
   };
 
   double _restProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.75),
-    kLeanBulk      => _r(p.weight * 1.55),
-    kBulk          => _r(p.weight * 1.70),
-    kRecomposition => _r(p.weight * 1.80),
-    _              => _r(p.weight * 1.45),
+    kFatLoss       => _r(p.weight * 1.75),   // reduced but muscle-protective
+    kLeanBulk      => _r(p.weight * 1.60),   // rest day — recovery focused
+    kBulk          => _r(p.weight * 1.70),   // still elevated for mass phase
+    kRecomposition => _r(p.weight * 1.85),   // recomp rest day — never drop low
+    _              => _r(p.weight * 1.65),   // Maintenance rest day
   };
 
   double _bounded(double value, double min, double max) =>

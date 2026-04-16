@@ -571,8 +571,21 @@ class _MarkdownText extends StatelessWidget {
         continue;
       }
 
-      // ── Bullet list: - item  or  • item
-      final bulletMatch = RegExp(r'^[-•*]\s+(.+)$').firstMatch(trimmed);
+      // ── Whole-line bold: **Label** or **Label:** → render as bold heading
+      // Must check BEFORE bullet so **text** isn't consumed as a * bullet
+      final wholeLineMatch = RegExp(r'^\*\*(.+?)\*\*:?\s*$').firstMatch(trimmed);
+      if (wholeLineMatch != null) {
+        widgets.add(Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: RichText(
+            text: TextSpan(text: wholeLineMatch.group(1)!, style: _bold),
+          ),
+        ));
+        continue;
+      }
+
+      // ── Bullet list: - item  or  • item  (NOT * — that's italic/bold)
+      final bulletMatch = RegExp(r'^[-•]\s+(.+)$').firstMatch(trimmed);
       if (bulletMatch != null) {
         widgets.add(Padding(
           padding: const EdgeInsets.only(left: 4, top: 1),
