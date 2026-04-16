@@ -78,13 +78,13 @@ class AiCoachService {
       'message': message,
     };
 
-    // Date key (YYYYMMDD format matching persistence_service.dart)
+    // Date key — must match YYYY-MM-DD format used by cloud_sync_service / day_logs table.
     if (dateKey != null) {
       body['date_key'] = dateKey;
     } else {
       final now = DateTime.now();
-      body['date_key'] = '${now.year}'
-          '${now.month.toString().padLeft(2, '0')}'
+      body['date_key'] = '${now.year}-'
+          '${now.month.toString().padLeft(2, '0')}-'
           '${now.day.toString().padLeft(2, '0')}';
     }
 

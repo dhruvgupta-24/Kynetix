@@ -192,7 +192,8 @@ Deno.serve(async (req: Request) => {
 
       } catch (err: any) {
         const reason = err?.message ?? String(err);
-        console.error(`[AI ROUTER] OpenAI failed → fallback to OpenRouter. reason=${reason.slice(0, 200)}`);
+        console.error(`[AI ROUTER] OpenAI FAILED → falling back to OpenRouter`);
+        console.error(`[AI ROUTER] OpenAI error detail: ${reason.slice(0, 400)}`);
         // Fall through to OpenRouter
       }
     } else {
