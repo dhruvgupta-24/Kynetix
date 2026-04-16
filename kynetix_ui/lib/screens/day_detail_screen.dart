@@ -167,10 +167,10 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         widget.date.day == now.day;
   }
 
-  /// Date key in YYYYMMDD format matching persistence_service.dart
+  /// Date key in YYYY-MM-DD format matching cloud_sync_service / day_logs table
   String get _dateKey {
     final d = widget.date;
-    return '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
   /// Engine-computed target for this day.
