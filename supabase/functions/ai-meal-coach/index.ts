@@ -10,7 +10,7 @@
 //   7. Return { message, provider_used, fallback_used, ... } to client
 
 // @ts-ignore
-import { createClient } from "npm:@supabase/supabase-js@2.44.2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 declare const Deno: any;
 
@@ -245,9 +245,16 @@ Deno.serve(async (req: Request) => {
     }
     const jwt = authHeader.replace('Bearer ', '').trim();
 
-    const supabaseAnon = createClient(SUPABASE_URL(), Deno.env.get('SUPABASE_ANON_KEY') ?? '');
-    const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser(jwt);
+    // Inject JWT via global headers — Supabase Auth API verifies server-side (ES256 safe).
+    // Passing jwt directly to getUser(jwt) triggers local HS256 check which fails on ES256 tokens.
+    const supabaseAnon = createClient(
+      SUPABASE_URL(),
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: `Bearer ${jwt}` } } },
+    );
+    const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser();
     if (userErr || !user) {
+      console.error(`[ai-meal-coach] Auth failed: ${userErr?.message ?? 'no user'}`);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

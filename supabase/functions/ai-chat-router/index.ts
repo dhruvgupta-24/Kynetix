@@ -11,7 +11,7 @@
 // instead of gpt-4o-mini for vision capability.
 
 // @ts-ignore
-import { createClient } from "npm:@supabase/supabase-js@2.44.2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 declare const Deno: any;
 
@@ -136,12 +136,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const userJwt = authHeader.replace('Bearer ', '').trim();
+    // Inject the JWT via global headers — this lets Supabase Auth API verify
+    // it server-side (supports ES256). Do NOT pass userJwt to getUser() directly
+    // as that triggers local HS256 verification which fails on ES256 tokens.
     const supabaseAnon = createClient(
       Deno.env.get('SUPABASE_URL')      ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: `Bearer ${userJwt}` } } },
     );
-    const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser(userJwt);
+    const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser();
     if (userErr || !user) {
+      console.error(`[AI ROUTER] Auth failed: ${userErr?.message ?? 'no user'}`);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
