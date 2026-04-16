@@ -27,11 +27,6 @@ sha.txt
 fix_*.py
 run_*.py
 
-# ── Node / JavaScript ─────────────────────────────────────────────────────────
-node_modules/
-npm-debug.log*
-package-lock.json
-
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

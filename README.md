@@ -212,9 +212,6 @@ Kynetix/
 │       ├── ai-meal-coach/       # Context builder + nutrition coach
 │       └── .env.example         # Template for local dev secrets
 │
-├── engine/                      # TypeScript nutrition estimation engine (backend)
-├── parser/                      # Food text parsing logic
-├── processor/                   # Data processing utilities
 ├── docs/                        # PRD, system design, API docs
 └── README.md
 ```
