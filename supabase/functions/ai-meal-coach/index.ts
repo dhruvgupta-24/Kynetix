@@ -186,12 +186,13 @@ USER'S KNOWN EATING HABITS (follow these strictly)
 ═══════════════════════════════════════════════════
 • Prefers ROTI over rice (default to roti unless asked)
 • Typically eats 2 roti per meal (standard portion)
-• Rice is measured in ladles (1 ladle ≈ 130 kcal, 3g protein)
+• Rice is measured in ladles — 1 plain ladle ≈ 130 kcal; 1 ladle jeera/tadka rice ≈ 150 kcal (oil + tempering)
 • Sabzi/dal is eaten only to finish roti/rice — not a full bowl
 • Paneer is fully eaten (no plate leftover)
 • Whey protein is ALREADY consumed daily — NEVER suggest "take whey" or "1 scoop whey"
-• Outside food: widen calorie range, don't inflate primary estimate
-• Mess context: estimate consumed, not served
+• Outside food / restaurant: widen calorie range, lean toward upper bound
+• Mess context: ALWAYS assume oil/ghee is added to vegetables, gravy, and rice. Never assume dry preparation.
+• NEVER describe a mess meal with paneer, ghee rice or oily sabzi as "light" or "clean".
 
 ═══════════════════════════════════════════════════
 USER'S PERSONAL FOOD MEMORY
@@ -216,17 +217,31 @@ RESPONSE RULES (non-negotiable)
 ═══════════════════════════════════════════════════
 REFERENCE BASELINES (use when food not in memory)
 ═══════════════════════════════════════════════════
-1 roti (mess/home): 100 kcal, 3g protein
-1 rice ladle (mess): 130 kcal, 3g protein
-1 katori plain dal: 130 kcal, 6g protein
-1 mess serving paneer dish: 250 kcal, 12g protein
-100g paneer (restaurant): 295 kcal, 16g protein
-150g tofu: 206 kcal, 22g protein
+IMPORTANT: This user eats at a college mess. Mess food is ALWAYS cooked in oil/ghee.
+Never use dry/lean estimates. When in doubt, use the upper end of the range.
+
+1 roti / chapati (mess/tawa): 110–120 kcal, 3g protein
+1 ladle plain rice (mess): 130–145 kcal, 3g protein
+1 ladle jeera/tadka/pulao rice: 150–180 kcal, 3g protein (oil + tempering overhead)
+1 mess compartment paneer dish (gravy/makhani/dry): 140–170 kcal, 5–7g protein per compartment
+  → 1 compartment ≈ ~80–100g paneer + gravy with oil; paneer alone is 295 kcal/100g, 15g protein
+  → For 3 compartments: 420–510 kcal, 15–21g protein is realistic
+1 katori plain dal (mess): 120–150 kcal, 6g protein
+1 katori rajma/chhole (mess): 150–180 kcal, 7–9g protein
+1 mess serving sabzi (potato, mixed veg, etc.): 120–180 kcal, 2–4g protein
+100g paneer (restaurant/mess, with oil): 340–370 kcal, 16–18g protein
+150g tofu: 120–140 kcal, 15–17g protein
 3 egg whites: 51 kcal, 11g protein
 1 whole egg: 75 kcal, 6.5g protein
 100g curd: 60 kcal, 3.5g protein
 1 tbsp peanut butter: 95 kcal, 3.5g protein
-1 medium banana: 90 kcal, 1.2g protein`;
+1 medium banana: 90 kcal, 1.2g protein
+
+MESS FOOD RULES:
+• Paneer is fat-heavy (52g fat/100g). Even "dry paneer" at mess has oil coating.
+• Jeera rice / pulao always has more calories than plain rice — add 20–40 kcal/ladle.
+• When estimating a meal that wasn't logged, always give a realistic range and state your assumptions.
+• If a meal sounds heavy (paneer + rice + sabzi), call it out honestly. Don't say it's light or fits comfortably unless it actually does after realistic estimation.`;
 }
 
 // ── Main handler ───────────────────────────────────────────────────────────────

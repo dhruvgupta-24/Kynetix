@@ -460,15 +460,6 @@ class _ChatBubble extends StatelessWidget {
                           )
                         : _MarkdownText(message.text),
                   ),
-                  // Provider badge (assistant only)
-                if (!isUser && message.providerUsed != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4, left: 2),
-                    child: _ProviderBadge(
-                      provider:     message.providerUsed!,
-                      fallbackUsed: message.fallbackUsed,
-                    ),
-                  ),
               ],
             ),
           ),
@@ -618,38 +609,6 @@ class _MarkdownText extends StatelessWidget {
   }
 }
 
-// ─── Provider badge ───────────────────────────────────────────────────────────
-
-class _ProviderBadge extends StatelessWidget {
-  final String provider;
-  final bool   fallbackUsed;
-  const _ProviderBadge({
-    required this.provider,
-    required this.fallbackUsed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isOpenAI = provider == 'openai';
-
-    final Color  color = isOpenAI ? const Color(0xFF52B788) : const Color(0xFF818CF8);
-    final String label = isOpenAI ? '⚡ OpenAI' : (fallbackUsed ? '↩ OpenRouter' : '~ OpenRouter');
-
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-}
 
 // ─── Typing indicator ─────────────────────────────────────────────────────────
 
