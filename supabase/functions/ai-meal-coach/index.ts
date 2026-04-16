@@ -284,7 +284,9 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const userMessage: string = body.message ?? '';
     const imageBase64: string | null = body.image_base64 ?? null;
-    const dateKey: string = body.date_key ?? new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const streamMode: boolean = body.stream === true;
+    // date_key must be YYYY-MM-DD (matches cloud_sync_service format in Flutter)
+    const dateKey: string = body.date_key ?? new Date().toISOString().slice(0, 10);
 
     if (!userMessage.trim() && !imageBase64) {
       return new Response(JSON.stringify({ error: 'message or image_base64 required' }), {
@@ -352,10 +354,43 @@ Deno.serve(async (req: Request) => {
       { role: 'user',   content: userContent },
     ];
 
-    // ── Call ai-chat-router ───────────────────────────────────────────────────
+    // ── Call ai-chat-router ────────────────────────────────────────────────────────────
     const routerUrl = `${SUPABASE_URL()}/functions/v1/ai-chat-router`;
-    console.log(`[ai-meal-coach] calling ai-chat-router at ${routerUrl}`);
+    console.log(`[ai-meal-coach] calling ai-chat-router stream=${streamMode}`);
 
+    // ══════════════════════════════════════════════════
+    // STREAMING PATH — pipe SSE from router back to Flutter
+    // ══════════════════════════════════════════════════
+    if (streamMode) {
+      const routerRes = await fetch(routerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+        body: JSON.stringify({ messages, stream: true }),
+      });
+
+      if (!routerRes.ok) {
+        const errText = await routerRes.text();
+        console.error(`[ai-meal-coach] router stream error ${routerRes.status}: ${errText.slice(0, 200)}`);
+        return new Response(JSON.stringify({ error: 'AI router failed', detail: errText }), {
+          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const provider = routerRes.headers.get('x-provider-used') ?? 'unknown';
+      console.log(`[ai-meal-coach] piping SSE stream, provider=${provider}`);
+      return new Response(routerRes.body, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type':    'text/event-stream',
+          'Cache-Control':   'no-cache',
+          'X-Provider-Used': provider,
+        },
+      });
+    }
+
+    // ══════════════════════════════════════════════════
+    // NON-STREAMING PATH (unchanged)
+    // ══════════════════════════════════════════════════
     const routerRes = await fetch(routerUrl, {
       method: 'POST',
       headers: {

@@ -81,6 +81,47 @@ async function callChat(
   return { text, usage: data.usage ?? null };
 }
 
+// ── Chat completions in streaming mode (SSE passthrough) ─────────────────────
+async function callChatStream(
+  endpoint:     string,
+  apiKey:       string,
+  model:        string,
+  messages:     any[],
+  extraHeaders: Record<string, string> = {},
+): Promise<Response> {
+  const hasImages = messages.some(m =>
+    Array.isArray(m?.content) &&
+    m.content.some((b: any) => b?.type === 'image_url')
+  );
+  const effectiveModel =
+    (endpoint === OPENAI_CHAT_URL && hasImages) ? OPENAI_VISION_MODEL : model;
+
+  console.log(`[AI ROUTER] stream → ${endpoint} model=${effectiveModel}`);
+
+  const res = await fetch(endpoint, {
+    method:  'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type':  'application/json',
+      ...extraHeaders,
+    },
+    body: JSON.stringify({
+      model: effectiveModel,
+      messages,
+      temperature: 0.25,
+      max_tokens:  1500,
+      stream:      true,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 400)}`);
+  }
+
+  return res; // caller pipes res.body
+}
+
 // ── Extract plain text from a chat completions response ─────────────────────────
 function extractText(rawBody: string, data: any): string {
   const choice  = data?.choices?.[0];
@@ -153,8 +194,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Parse request ─────────────────────────────────────────────────────────
-    const body     = await req.json().catch(() => ({}));
+    const body         = await req.json().catch(() => ({}));
     const messages: any[] = body.messages ?? [];
+    const streamMode: boolean = body.stream === true;
     if (!messages.length) {
       return new Response(JSON.stringify({ error: 'messages array is required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -167,9 +209,57 @@ Deno.serve(async (req: Request) => {
 
     // Redacted prefix for safe logging
     const keyHint = openaiKey ? `sk-...${openaiKey.slice(-4)}` : '(not set)';
-    console.log(`[AI ROUTER] user=${user.id} msgs=${messages.length} openai_key=${keyHint}`);
+    console.log(`[AI ROUTER] user=${user.id} msgs=${messages.length} stream=${streamMode} openai_key=${keyHint}`);
 
-    // ── Step 1: Try OpenAI with API key ──────────────────────────────────────
+    // ══════════════════════════════════════════════════
+    // STREAMING PATH — pipe SSE directly back to client
+    // ══════════════════════════════════════════════════
+    if (streamMode) {
+      if (openaiKey) {
+        try {
+          const sRes = await callChatStream(OPENAI_CHAT_URL, openaiKey, OPENAI_MODEL, messages);
+          console.log(`[AI ROUTER] streaming via OpenAI`);
+          return new Response(sRes.body, {
+            headers: {
+              ...corsHeaders,
+              'Content-Type':     'text/event-stream',
+              'Cache-Control':    'no-cache',
+              'X-Provider-Used':  'openai',
+            },
+          });
+        } catch (err: any) {
+          console.error(`[AI ROUTER] OpenAI stream failed: ${err?.message?.slice(0, 300)}`);
+          // Fall through to OpenRouter
+        }
+      }
+      if (openrouterKey) {
+        try {
+          const sRes = await callChatStream(
+            OPENROUTER_URL, openrouterKey, OPENROUTER_MODEL, messages,
+            { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
+          );
+          console.log(`[AI ROUTER] streaming via OpenRouter`);
+          return new Response(sRes.body, {
+            headers: {
+              ...corsHeaders,
+              'Content-Type':    'text/event-stream',
+              'Cache-Control':   'no-cache',
+              'X-Provider-Used': 'openrouter',
+            },
+          });
+        } catch (err: any) {
+          console.error(`[AI ROUTER] OpenRouter stream failed: ${err?.message?.slice(0, 300)}`);
+        }
+      }
+      return new Response(JSON.stringify({ error: 'All providers failed for streaming' }), {
+        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ══════════════════════════════════════════════════
+    // NON-STREAMING PATH (unchanged)
+    // ══════════════════════════════════════════════════
+
     if (openaiKey) {
       try {
         const { text, usage } = await callChat(

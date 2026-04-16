@@ -20,15 +20,11 @@ class _ChatMessage {
   final _Role      role;
   final String     text;
   final Uint8List? imageBytes;
-  final String?    providerUsed;
-  final bool       fallbackUsed;
 
   const _ChatMessage({
     required this.role,
     required this.text,
     this.imageBytes,
-    this.providerUsed,
-    this.fallbackUsed = false,
   });
 }
 
@@ -62,7 +58,9 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   // Static so history persists across navigations within the same session.
   static final List<_ChatMessage> _messages = [];
 
-  bool        _loading    = false;
+  bool        _loading      = false;
+  bool        _isStreaming  = false;   // true while SSE tokens are arriving
+  String      _streamingText = '';     // accumulates during streaming
   Uint8List?  _pendingImg; // image attached but not yet sent
 
 
@@ -98,47 +96,62 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
 
   Future<void> _send([String? overrideText]) async {
     final text = (overrideText ?? _controller.text).trim();
-    if ((text.isEmpty && _pendingImg == null) || _loading) return;
+    if ((text.isEmpty && _pendingImg == null) || _loading || _isStreaming) return;
 
     final imageBytes = _pendingImg;
     setState(() {
-      _messages.add(_ChatMessage(
-        role:       _Role.user,
-        text:       text,
-        imageBytes: imageBytes,
-      ));
-      _loading    = true;
-      _pendingImg = null;
+      _messages.add(_ChatMessage(role: _Role.user, text: text, imageBytes: imageBytes));
+      _loading       = true;
+      _isStreaming   = false;
+      _streamingText = '';
+      _pendingImg    = null;
     });
     _controller.clear();
     _scrollToBottom();
 
     try {
-      final res = await AiCoachService.instance.sendMessage(
+      final stream = AiCoachService.instance.streamMessage(
         message:    text,
         imageBytes: imageBytes,
         dateKey:    widget.dateKey,
       );
 
+      bool firstChunk = true;
+      await for (final token in stream) {
+        if (!mounted) return;
+        setState(() {
+          if (firstChunk) {
+            _loading     = false;   // hide typing dots
+            _isStreaming = true;    // show live bubble
+            firstChunk   = false;
+          }
+          _streamingText += token;
+        });
+        _scrollToBottom();
+      }
+
+      // Stream completed — commit to history
       if (!mounted) return;
       setState(() {
-        _messages.add(_ChatMessage(
-          role:         _Role.assistant,
-          text:         res.message,
-          providerUsed: res.providerUsed,
-          fallbackUsed: res.fallbackUsed,
-        ));
-        _loading = false;
+        _isStreaming = false;
+        _loading     = false;
+        if (_streamingText.isNotEmpty) {
+          _messages.add(_ChatMessage(role: _Role.assistant, text: _streamingText));
+        }
+        _streamingText = '';
       });
       _scrollToBottom();
+
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _loading     = false;
+        _isStreaming = false;
         _messages.add(_ChatMessage(
           role: _Role.assistant,
           text: 'Something went wrong: ${e.toString().replaceAll('Exception: ', '')}',
         ));
-        _loading = false;
+        _streamingText = '';
       });
       _scrollToBottom();
     }
@@ -152,7 +165,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
       body: Column(
         children: [
           Expanded(
-            child: _messages.isEmpty
+            child: (_messages.isEmpty && !_isStreaming)
                 ? _buildEmptyState()
                 : _buildMessageList(),
           ),
@@ -299,12 +312,26 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   }
 
   Widget _buildMessageList() {
+    // Total items = committed messages + optional tail item (typing dots OR live bubble)
+    final hasTail = _loading || _isStreaming;
     return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      itemCount: _messages.length + (_loading ? 1 : 0),
+      itemCount: _messages.length + (hasTail ? 1 : 0),
       itemBuilder: (_, i) {
-        if (i == _messages.length) return const _TypingBubble();
+        if (i == _messages.length) {
+          // Streaming: show live growing bubble
+          if (_isStreaming && _streamingText.isNotEmpty) {
+            return _ChatBubble(
+              message: _ChatMessage(
+                role: _Role.assistant,
+                text: _streamingText,
+              ),
+            );
+          }
+          // Waiting for first token: show typing dots
+          return const _TypingBubble();
+        }
         return _ChatBubble(message: _messages[i]);
       },
     );
