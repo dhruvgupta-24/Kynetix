@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import '../config/app_theme.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
 import '../models/day_status.dart';
+import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/coach_service.dart';
 import '../services/health_service.dart';
 import '../services/meal_suggestion_service.dart';
+import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
 import '../services/workout_service.dart';
@@ -117,6 +120,66 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     if (h < 19) return MealSection.eveningSnack;
     if (h < 23) return MealSection.dinner;
     return MealSection.lateNight;
+  }
+
+  /// Directly adds a quick-add meal entry without navigating to AddMealScreen.
+  void _quickAddMeal({
+    required String name,
+    required double calories,
+    required double protein,
+    MealSection? section,
+  }) {
+    final sec = section ?? _currentSection;
+    final entry = MealEntry(
+      rawInput:        name,
+      finalSavedInput: name,
+      section:         sec,
+      addedAt:         DateTime.now(),
+      dayOfWeek:       widget.date.weekday,
+      parsedFoods:     [name],
+      result: NutritionResult(
+        canonicalMeal: name,
+        items: [
+          NutritionItem(
+            name:      name,
+            quantity:  1,
+            unit:      'serving',
+            estimated: false,
+            mode:      EstimationMode.packagedKnown,
+            calories:  NutrientRange(min: calories, max: calories),
+            protein:   NutrientRange(min: protein,  max: protein),
+          ),
+        ],
+        calories:   NutrientRange(min: calories, max: calories),
+        protein:    NutrientRange(min: protein,  max: protein),
+        confidence: 1.0,
+        warnings:   const [],
+        source:     'quick_add',
+        createdAt:  DateTime.now(),
+      ),
+    );
+    _log.add(sec, entry);
+    _refresh();
+    kHapticMedium();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
+            const SizedBox(width: 8),
+            Text('Added $name', style: const TextStyle(fontSize: 13, color: Colors.white)),
+          ],
+        ),
+        duration: const Duration(seconds: 2),
+        backgroundColor: KColor.surface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: KRadius.md,
+          side: const BorderSide(color: KColor.border, width: 0.5),
+        ),
+        margin: const EdgeInsets.all(12),
+      ),
+    );
   }
 
   Future<void> _openEditMeal(MealEntry entry) async {
@@ -261,7 +324,11 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       floatingActionButton: _AiCoachFab(
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => AiCoachScreen(dateKey: _dateKey),
+            builder: (_) => AiCoachScreen(
+              dateKey: _dateKey,
+              isGymDay: target?.isTrainingDay,
+              workoutType: target?.isTrainingDay == true ? target?.label : null,
+            ),
           ),
         ),
       ),
@@ -304,15 +371,9 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             const SizedBox(height: 12),
           ],
 
-          // ── What to eat next ──────────────────────────────────
-          if (suggestions.isNotEmpty) ...[
-            _SuggestionCard(
-              suggestions: suggestions,
-              onSuggestionTap: _openAddMealWithText,
-            ),
-            const SizedBox(height: 12),
-          ],
-
+          // ── Quick Add ─────────────────────────────────────────
+          _QuickAddCard(onAdd: _quickAddMeal),
+          const SizedBox(height: 12),
           // ── Gym tracking ──────────────────────────────────────
           _GymCard(log: _log, date: widget.date, onChanged: _refresh),
           const SizedBox(height: 4),
@@ -1595,6 +1656,97 @@ class _SuggestionRow extends StatelessWidget {
                 color: Color(0xFF52B788),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Quick Add card ────────────────────────────────────────────────────────────
+
+class _QuickAddCard extends StatelessWidget {
+  final void Function({
+    required String name,
+    required double calories,
+    required double protein,
+    MealSection? section,
+  }) onAdd;
+
+  const _QuickAddCard({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2E2E3E)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Row(
+              children: [
+                Icon(Icons.bolt_rounded, size: 14, color: Color(0xFF52B788)),
+                SizedBox(width: 6),
+                Text('Quick Add', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: Color(0xFF2A2A3A), height: 1),
+          _QuickAddRow(
+            emoji: '🥛',
+            title: '1 scoop whey',
+            meta: '120 kcal  ·  24g protein',
+            onTap: () => onAdd(name: '1 scoop whey protein', calories: 120, protein: 24),
+          ),
+          const Divider(color: Color(0xFF252535), height: 1, indent: 16, endIndent: 16),
+          _QuickAddRow(
+            emoji: '🥚',
+            title: '4 egg whites + 400ml milk',
+            meta: '220 kcal  ·  36g protein  ·  Breakfast',
+            onTap: () => onAdd(name: '4 egg whites + 400ml milk', calories: 220, protein: 36, section: MealSection.breakfast),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickAddRow extends StatelessWidget {
+  final String emoji;
+  final String title;
+  final String meta;
+  final VoidCallback onTap;
+  const _QuickAddRow({required this.emoji, required this.title, required this.meta, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 18)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, height: 1.3)),
+                  const SizedBox(height: 2),
+                  Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
+                ],
+              ),
+            ),
+            const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
           ],
         ),
       ),

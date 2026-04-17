@@ -42,9 +42,16 @@ const _kQuickSuggestions = [
 // ─── AiCoachScreen ────────────────────────────────────────────────────────────
 
 class AiCoachScreen extends StatefulWidget {
-  final String dateKey; // YYYYMMDD
+  final String  dateKey;    // YYYY-MM-DD
+  final bool?   isGymDay;   // real-time gym state from DayDetailScreen
+  final String? workoutType; // e.g. 'Push', 'Pull'
 
-  const AiCoachScreen({super.key, required this.dateKey});
+  const AiCoachScreen({
+    super.key,
+    required this.dateKey,
+    this.isGymDay,
+    this.workoutType,
+  });
 
   @override
   State<AiCoachScreen> createState() => _AiCoachScreenState();
@@ -125,9 +132,11 @@ class _AiCoachScreenState extends State<AiCoachScreen>
 
     try {
       final stream = AiCoachService.instance.streamMessage(
-        message:    text,
-        imageBytes: imageBytes,
-        dateKey:    widget.dateKey,
+        message:     text,
+        imageBytes:  imageBytes,
+        dateKey:     widget.dateKey,
+        isGymDay:    widget.isGymDay,
+        workoutType: widget.workoutType,
       );
 
       bool firstChunk = true;
@@ -395,9 +404,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           ),
         ],
       ),
-      padding: EdgeInsets.fromLTRB(
-        12, 10, 12, MediaQuery.of(context).viewInsets.bottom + 10,
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [

@@ -351,7 +351,15 @@ Deno.serve(async (req: Request) => {
 
     // ── Derive gym day status ─────────────────────────────────────────────────
     const gymDayJson = dayLogRes.data?.gym_day_json;
-    const isGymDay: boolean = gymDayJson?.didGym === true;
+    // Prefer client's real-time state, fallback to DB
+    const isGymDay: boolean = typeof body.is_gym_day === 'boolean'
+        ? body.is_gym_day
+        : gymDayJson?.didGym === true;
+    
+    // Also extract workout_type if provided (from flutter client)
+    const workoutType: string = typeof body.workout_type === 'string' && body.workout_type.trim() !== ''
+        ? body.workout_type
+        : (isGymDay ? 'Training' : 'Rest');
 
     // ── Compute targets ───────────────────────────────────────────────────────
     const { calories: targetCal, protein: targetPro, label: dayLabel } =
@@ -371,7 +379,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Build messages for ai-chat-router ────────────────────────────────────
     const systemPrompt = buildSystemPrompt({
-      profile, targetCal, targetPro, dayLabel,
+      profile, targetCal, targetPro, dayLabel: workoutType,
       mealContext, totalCal, totalPro,
       remainCal, remainPro, foodMemory, isGymDay,
     });

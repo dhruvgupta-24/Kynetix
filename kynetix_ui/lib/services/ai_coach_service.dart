@@ -128,6 +128,8 @@ class AiCoachService {
     required String  message,
     Uint8List?       imageBytes,
     String?          dateKey,
+    bool?            isGymDay,     // client real-time value — overrides stale DB
+    String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
   }) async* {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
@@ -139,6 +141,11 @@ class AiCoachService {
     };
     if (imageBytes != null) {
       body['image_base64'] = base64Encode(imageBytes);
+    }
+    // Pass client gym state so edge function uses real-time data instead of stale DB
+    if (isGymDay != null) {
+      body['is_gym_day']   = isGymDay;
+      body['workout_type'] = workoutType ?? '';
     }
 
     debugPrint('[AiCoachService] ↔ streaming → ai-meal-coach');
