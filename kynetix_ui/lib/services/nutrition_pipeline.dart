@@ -549,6 +549,65 @@ class NutritionPipeline {
         fallbackReason: 'Empty input',
         createdAt:      DateTime.now(),
       );
+
+  /// Synchronous memory evaluation. Useful for UI elements that need memory numbers instantly 
+  /// without risking an async OpenRouter AI API call.
+  NutritionResult? fastMemoryLookupSync(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.isEmpty) return null;
+
+    final parsedItems = ItemParser.parse(trimmed);
+    final finalItems = <NutritionItem>[];
+
+    for (final parsed in parsedItems) {
+      final normParsed = _normalizeParsed(parsed);
+      final name = normParsed.normalizedName;
+      final itemStr = _constructItemString(normParsed);
+
+      final userOverride = UserNutritionMemory.instance.lookup(name);
+      if (userOverride != null) {
+        final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
+        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
+      final personalExact = PersonalNutritionMemory.instance.lookupExact(itemStr);
+      if (personalExact != null) {
+        final candidate = _itemFromPortionMemory(normParsed, personalExact);
+        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
+      final exactKnown = MealMemory.instance.lookupExactKnownFood(itemStr);
+      if (exactKnown != null) {
+        final candidate = _itemFromPortionMemory(normParsed, exactKnown);
+        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
+      final cached = MealMemory.instance.lookupRecurring(itemStr);
+      if (cached != null) {
+        final candidate = _itemFromPortionMemory(normParsed, cached);
+        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
+      return null; // Atomic item missed memory, requires AI -> fail sync lookup
+    }
+
+    double sumCalMin = 0, sumCalMax = 0, sumProMin = 0, sumProMax = 0;
+    for (final item in finalItems) {
+      sumCalMin += item.calories.min; sumCalMax += item.calories.max;
+      sumProMin += item.protein.min; sumProMax += item.protein.max;
+    }
+
+    return NutritionResult(
+      canonicalMeal: trimmed,
+      items: finalItems,
+      calories: NutrientRange(min: sumCalMin, max: sumCalMax),
+      protein: NutrientRange(min: sumProMin, max: sumProMax),
+      confidence: 0.95,
+      warnings: const [],
+      source: 'memory_exact',
+      createdAt: DateTime.now(),
+    );
+  }
 }
 
 class _ComplexityAssessment {
