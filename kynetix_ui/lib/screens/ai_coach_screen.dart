@@ -1,16 +1,16 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../config/app_theme.dart';
 import '../services/ai_coach_service.dart';
 
-// ─── Design constants ─────────────────────────────────────────────────────────
-// Top-level so they can be used inside const widget trees.
-const _kCard        = Color(0xFF1E1E2C);
-const _kBorder      = Color(0xFF2E2E3E);
-const _kGreen       = Color(0xFF52B788);
-const _kGreenDark   = Color(0xFF2D6A4F);
-const _kMuted       = Color(0xFF6B7280);
-const _kLight       = Color(0xFF9CA3AF);
+// ─── Design constants (kept for MarkdownText which can't use KColor in const) ─
+const _kCard      = KColor.card;
+const _kBorder    = KColor.border;
+const _kGreen     = KColor.green;
+const _kGreenDark = KColor.greenDark;
+const _kMuted     = KColor.textMuted;
+const _kLight     = KColor.textSecondary;
 
 // ─── Chat message model ───────────────────────────────────────────────────────
 
@@ -312,7 +312,6 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   }
 
   Widget _buildMessageList() {
-    // Total items = committed messages + optional tail item (typing dots OR live bubble)
     final hasTail = _loading || _isStreaming;
     return ListView.builder(
       controller: _scrollCtrl,
@@ -320,19 +319,26 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
       itemCount: _messages.length + (hasTail ? 1 : 0),
       itemBuilder: (_, i) {
         if (i == _messages.length) {
-          // Streaming: show live growing bubble
+          // Streaming: live bubble with blinking cursor
           if (_isStreaming && _streamingText.isNotEmpty) {
-            return _ChatBubble(
-              message: _ChatMessage(
-                role: _Role.assistant,
-                text: _streamingText,
+            return _AnimatedChatEntry(
+              key: const ValueKey('streaming'),
+              child: _ChatBubble(
+                message: _ChatMessage(
+                  role: _Role.assistant,
+                  text: _streamingText,
+                ),
+                showCursor: true,
               ),
             );
           }
-          // Waiting for first token: show typing dots
+          // Waiting for first token
           return const _TypingBubble();
         }
-        return _ChatBubble(message: _messages[i]);
+        return _AnimatedChatEntry(
+          key: ValueKey(i),
+          child: _ChatBubble(message: _messages[i]),
+        );
       },
     );
   }
@@ -363,8 +369,16 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   Widget _buildInputBar() {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A28),
-        border: Border(top: BorderSide(color: const Color(0xFF2E2E3E).withValues(alpha: 0.6))),
+        color: KColor.surface,
+        border: Border(
+          top: BorderSide(color: KColor.border.withValues(alpha: 0.7), width: 0.5),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 12, offset: const Offset(0, -4),
+          ),
+        ],
       ),
       padding: EdgeInsets.fromLTRB(
         12, 10, 12, MediaQuery.of(context).viewInsets.bottom + 10,
@@ -372,59 +386,102 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // Image button
           _IconBtn(
             icon: Icons.add_photo_alternate_rounded,
             color: _pendingImg != null ? _kGreen : _kMuted,
             onTap: _pickImage,
           ),
           const SizedBox(width: 8),
-          // Text field
           Expanded(
             child: Container(
               constraints: const BoxConstraints(maxHeight: 120),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFF2E2E3E)),
+                color: KColor.card,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: KColor.border, width: 0.5),
               ),
               child: TextField(
                 controller: _controller,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
+                style: const TextStyle(
+                  color: Colors.white, fontSize: 15, height: 1.45,
+                ),
                 maxLines:   null,
                 minLines:   1,
                 textInputAction: TextInputAction.newline,
                 decoration: const InputDecoration(
-                  hintText:        'Ask anything about your nutrition…',
-                  hintStyle:       TextStyle(color: _kMuted, fontSize: 14),
-                  border:          InputBorder.none,
-                  contentPadding:  EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  hintText:       'Ask anything about your nutrition…',
+                  hintStyle:      TextStyle(color: _kMuted, fontSize: 14),
+                  border:         InputBorder.none,
+                  enabledBorder:  InputBorder.none,
+                  focusedBorder:  InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 11),
                 ),
                 onSubmitted: (_) => _send(),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          // Send button
-          _SendBtn(loading: _loading, onTap: _send),
+          _SendBtn(loading: _loading || _isStreaming, onTap: _send),
         ],
       ),
     );
   }
 }
 
+// ─── _AnimatedChatEntry — slide+fade each bubble in ──────────────────────────
+
+class _AnimatedChatEntry extends StatefulWidget {
+  final Widget child;
+  const _AnimatedChatEntry({super.key, required this.child});
+
+  @override
+  State<_AnimatedChatEntry> createState() => _AnimatedChatEntryState();
+}
+
+class _AnimatedChatEntryState extends State<_AnimatedChatEntry>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double>   _fade;
+  late final Animation<Offset>   _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 300),
+    )..forward();
+    _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.12), end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: _fade,
+    child: SlideTransition(position: _slide, child: widget.child),
+  );
+}
+
 // ─── Chat bubble ──────────────────────────────────────────────────────────────
 
 class _ChatBubble extends StatelessWidget {
   final _ChatMessage message;
-  const _ChatBubble({required this.message});
+  final bool         showCursor;   // blinking | during streaming
+  const _ChatBubble({required this.message, this.showCursor = false});
 
   @override
   Widget build(BuildContext context) {
     final isUser = message.role == _Role.user;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.symmetric(
+        vertical: 5,
+        horizontal: isUser ? 0 : 0,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -485,7 +542,9 @@ class _ChatBubble extends StatelessWidget {
                               color: Colors.white, fontSize: 14, height: 1.55,
                             ),
                           )
-                        : _MarkdownText(message.text),
+                        : showCursor
+                            ? _StreamingMarkdown(text: message.text)
+                            : _MarkdownText(message.text),
                   ),
               ],
             ),
@@ -752,18 +811,22 @@ class _QuickChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
+    return Pressable(
+      onTap: () { kHapticSelect(); onTap(); },
+      borderRadius: BorderRadius.circular(22),
+      scale: 0.96,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
+          color: KColor.card,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: const Color(0xFF2E2E3E)),
+          border: Border.all(color: KColor.border, width: 0.5),
         ),
         child: Text(
           label,
-          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+          style: const TextStyle(
+            color: KColor.textSecondary, fontSize: 13, height: 1.3,
+          ),
         ),
       ),
     );
@@ -780,14 +843,16 @@ class _IconBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      scale: 0.92,
       child: Container(
         width: 42, height: 42,
         decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
+          color: KColor.card,
           borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: const Color(0xFF2E2E3E)),
+          border: Border.all(color: KColor.border, width: 0.5),
         ),
         child: Icon(icon, color: color, size: 22),
       ),
@@ -798,39 +863,86 @@ class _IconBtn extends StatelessWidget {
 // ─── Send button ──────────────────────────────────────────────────────────────
 
 class _SendBtn extends StatelessWidget {
-  final bool     loading;
+  final bool         loading;
   final VoidCallback onTap;
   const _SendBtn({required this.loading, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: loading ? null : onTap,
+    return Pressable(
+      onTap: loading ? null : () { kHaptic(); onTap(); },
+      borderRadius: BorderRadius.circular(13),
+      scale: 0.90,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: const Duration(milliseconds: 200),
         width: 42, height: 42,
         decoration: BoxDecoration(
           gradient: loading
               ? null
               : const LinearGradient(
-                  colors: [Color(0xFF52B788), Color(0xFF2D6A4F)],
+                  colors: [_kGreen, _kGreenDark],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-          color: loading ? const Color(0xFF2E2E3E) : null,
+          color: loading ? KColor.border : null,
           borderRadius: BorderRadius.circular(13),
+          boxShadow: loading ? null : [
+            BoxShadow(
+              color: _kGreen.withValues(alpha: 0.3),
+              blurRadius: 8, offset: const Offset(0, 3),
+            ),
+          ],
         ),
         child: loading
             ? const Center(
                 child: SizedBox(
                   width: 18, height: 18,
                   child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Color(0xFF52B788),
+                    strokeWidth: 2, color: _kGreen,
                   ),
                 ),
               )
-            : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+            : const Icon(Icons.send_rounded, color: Colors.white, size: 19),
       ),
+    );
+  }
+}
+
+// ─── Streaming markdown: MarkdownText + blinking cursor ───────────────────────
+
+class _StreamingMarkdown extends StatefulWidget {
+  final String text;
+  const _StreamingMarkdown({required this.text});
+
+  @override
+  State<_StreamingMarkdown> createState() => _StreamingMarkdownState();
+}
+
+class _StreamingMarkdownState extends State<_StreamingMarkdown>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _cursorCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _cursorCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 530),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() { _cursorCtrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _cursorCtrl,
+      builder: (_, __) {
+        final showBar = _cursorCtrl.value > 0.5;
+        return _MarkdownText(
+          widget.text + (showBar ? ' ▍' : '  '),
+        );
+      },
     );
   }
 }

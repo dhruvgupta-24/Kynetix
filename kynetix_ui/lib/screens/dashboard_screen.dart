@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/day_detail_screen.dart';
 import '../screens/profile_screen.dart';
@@ -184,11 +185,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildHeader() {
     final hour = TimeOfDay.now().hour;
     final greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    final emoji = _profile.gender == 'Male' ? '💪' : '🌟';
+    final emoji = _profile.gender == 'Male' ? '\u{1F4AA}' : '\u{1F31F}';
+    final isToday = dateKey(_selectedDate) == dateKey(DateTime.now());
+    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final dateLabel = isToday
+        ? 'Today'
+        : '${months[_selectedDate.month - 1]} ${_selectedDate.day}';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+      padding: const EdgeInsets.fromLTRB(KSpacing.xl, 28, KSpacing.xl, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
@@ -196,28 +203,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Text(
                   '$greeting, ${_profile.name} $emoji',
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  style: KText.caption,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'Today\'s Overview',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text('Overview', style: KText.h1),
+                    const SizedBox(width: 10),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.3), end: Offset.zero,
+                          ).animate(anim),
+                          child: child,
+                        ),
+                      ),
+                      child: KChip(
+                        dateLabel,
+                        key: ValueKey(dateLabel),
+                        color: isToday ? KColor.green : KColor.textMuted,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          // Tapping the avatar badge opens the profile screen.
-          GestureDetector(
+          Pressable(
             onTap: () async {
+              kHaptic();
               await Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => ProfileScreen(
@@ -225,8 +242,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               );
-              setState(() {}); // re-read possibly updated profile
+              setState(() {});
             },
+            borderRadius: BorderRadius.circular(50),
             child: _AvatarBadge(profile: _profile),
           ),
         ],
@@ -534,18 +552,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ── Section title ─────────────────────────────────────────────────────────────
 
   Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
+    return KSectionTitle(title);
   }
 }
 
@@ -733,8 +740,11 @@ class _RingStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = (consumed / target).clamp(0.0, 1.0);
-    return _Card(
+    final ratio    = (consumed / target).clamp(0.0, 1.0);
+    final isOver   = consumed > target;
+    final ringColor = isOver ? KColor.warning : color;
+    return KCard(
+      padding: const EdgeInsets.all(KSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -742,49 +752,46 @@ class _RingStatCard extends StatelessWidget {
             alignment: Alignment.center,
             children: [
               SizedBox(
-                width: 72,
-                height: 72,
+                width: 76, height: 76,
                 child: TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0, end: ratio),
-                  duration: const Duration(milliseconds: 800),
+                  duration: const Duration(milliseconds: 900),
                   curve: Curves.easeOutCubic,
-                  builder: (_, value, child) => CircularProgressIndicator(
+                  builder: (_, value, __) => CircularProgressIndicator(
                     value: value,
                     strokeWidth: 7,
-                    backgroundColor: const Color(0xFF2E2E3E),
-                    valueColor: AlwaysStoppedAnimation(color),
+                    backgroundColor: KColor.border,
+                    valueColor: AlwaysStoppedAnimation(ringColor),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
               ),
-              Text(
-                '${(ratio * 100).toInt()}%',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: color,
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: ratio),
+                duration: const Duration(milliseconds: 900),
+                curve: Curves.easeOutCubic,
+                builder: (_, value, __) => Text(
+                  '${(value * 100).toInt()}%',
+                  style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w800, color: ringColor,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              color: Color(0xFF6B7280),
-              letterSpacing: 0.6,
-              fontWeight: FontWeight.w600,
-            ),
+            label.toUpperCase(),
+            style: KText.label,
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Text(
-            '${consumed.toInt()} / ${target.toInt()} $unit',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
+            '${consumed.toInt()}',
+            style: KText.h3,
+          ),
+          Text(
+            '/ ${target.toInt()} $unit',
+            style: KText.caption,
           ),
         ],
       ),
@@ -807,36 +814,26 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Card(
+    return KCard(
+      padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg, vertical: KSpacing.md),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 38, height: 38,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: Icon(icon, size: 18, color: color),
+            child: Icon(icon, size: 19, color: color),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF6B7280),
-                      letterSpacing: 0.5,
-                    )),
-                const SizedBox(height: 2),
-                Text(value,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    )),
+                Text(label, style: KText.label.copyWith(fontSize: 10)),
+                const SizedBox(height: 3),
+                Text(value, style: KText.h3),
               ],
             ),
           ),
@@ -918,23 +915,24 @@ class _AddMealFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
+    return Pressable(
+      onTap: () { kHapticMedium(); onTap(); },
+      borderRadius: BorderRadius.circular(27),
+      scale: 0.95,
       child: Container(
-        height: 54,
+        height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 24),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF2D6A4F), Color(0xFF52B788)],
+            colors: [KColor.greenDark, KColor.green],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(27),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF2D6A4F).withValues(alpha: 0.45),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+              color: KColor.greenDark.withValues(alpha: 0.5),
+              blurRadius: 16, offset: const Offset(0, 6),
             ),
           ],
         ),
