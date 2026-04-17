@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/app_theme.dart';
 import '../services/ai_coach_service.dart';
@@ -50,7 +50,8 @@ class AiCoachScreen extends StatefulWidget {
   State<AiCoachScreen> createState() => _AiCoachScreenState();
 }
 
-class _AiCoachScreenState extends State<AiCoachScreen> {
+class _AiCoachScreenState extends State<AiCoachScreen>
+    with WidgetsBindingObserver {
   final _controller    = TextEditingController();
   final _scrollCtrl    = ScrollController();
   final _imagePicker   = ImagePicker();
@@ -59,13 +60,26 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   static final List<_ChatMessage> _messages = [];
 
   bool        _loading      = false;
-  bool        _isStreaming  = false;   // true while SSE tokens are arriving
-  String      _streamingText = '';     // accumulates during streaming
-  Uint8List?  _pendingImg; // image attached but not yet sent
+  bool        _isStreaming  = false;
+  String      _streamingText = '';
+  Uint8List?  _pendingImg;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeMetrics() {
+    // Keyboard opened/closed — scroll to bottom so last message stays visible
+    final kb = WidgetsBinding.instance.platformDispatcher.views.first.viewInsets.bottom;
+    if (kb > 50) _scrollToBottom();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -161,6 +175,7 @@ class _AiCoachScreenState extends State<AiCoachScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF13131F),
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: Column(
         children: [
@@ -478,10 +493,7 @@ class _ChatBubble extends StatelessWidget {
     final isUser = message.role == _Role.user;
 
     return Padding(
-      padding: EdgeInsets.symmetric(
-        vertical: 5,
-        horizontal: isUser ? 0 : 0,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -521,30 +533,60 @@ class _ChatBubble extends StatelessWidget {
                   ),
                 // Bubble
                 if (message.text.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isUser ? _kGreenDark : _kCard,
-                      borderRadius: BorderRadius.only(
-                        topLeft:     const Radius.circular(18),
-                        topRight:    const Radius.circular(18),
-                        bottomLeft:  Radius.circular(isUser ? 18 : 4),
-                        bottomRight: Radius.circular(isUser ? 4 : 18),
+                  GestureDetector(
+                    // Long-press copies the user's own message to clipboard
+                    onLongPress: isUser ? () {
+                      Clipboard.setData(ClipboardData(text: message.text));
+                      kHapticMedium();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Row(
+                            children: [
+                              Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
+                              SizedBox(width: 8),
+                              Text('Copied to clipboard',
+                                style: TextStyle(fontSize: 13, color: Colors.white)),
+                            ],
+                          ),
+                          duration: const Duration(seconds: 2),
+                          backgroundColor: KColor.surface,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: KRadius.md,
+                            side: const BorderSide(color: KColor.border, width: 0.5),
+                          ),
+                          margin: const EdgeInsets.all(12),
+                        ),
+                      );
+                    } : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isUser ? _kGreenDark : _kCard,
+                        borderRadius: BorderRadius.only(
+                          topLeft:     const Radius.circular(18),
+                          topRight:    const Radius.circular(18),
+                          bottomLeft:  Radius.circular(isUser ? 18 : 4),
+                          bottomRight: Radius.circular(isUser ? 4 : 18),
+                        ),
+                        border: Border.all(
+                          color: isUser
+                              ? _kGreen.withValues(alpha: 0.2)
+                              : _kBorder,
+                          width: 0.5,
+                        ),
                       ),
-                      border: Border.all(
-                        color: isUser ? _kGreen.withValues(alpha: 0.2) : _kBorder,
-                      ),
+                      child: isUser
+                          ? Text(
+                              message.text,
+                              style: const TextStyle(
+                                color: Colors.white, fontSize: 14, height: 1.55,
+                              ),
+                            )
+                          : showCursor
+                              ? _StreamingMarkdown(text: message.text)
+                              : _MarkdownText(message.text),
                     ),
-                    child: isUser
-                        ? Text(
-                            message.text,
-                            style: const TextStyle(
-                              color: Colors.white, fontSize: 14, height: 1.55,
-                            ),
-                          )
-                        : showCursor
-                            ? _StreamingMarkdown(text: message.text)
-                            : _MarkdownText(message.text),
                   ),
               ],
             ),
@@ -630,17 +672,39 @@ class _MarkdownText extends StatelessWidget {
         continue;
       }
 
-      // ── Whole-line bold: **Label** or **Label:** → render as bold heading
-      // Must check BEFORE bullet so **text** isn't consumed as a * bullet
-      final wholeLineMatch = RegExp(r'^\*\*(.+?)\*\*:?\s*$').firstMatch(trimmed);
-      if (wholeLineMatch != null) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: RichText(
-            text: TextSpan(text: wholeLineMatch.group(1)!, style: _bold),
-          ),
-        ));
-        continue;
+      // ── Whole-line bold: **Label**, **Label:**, **Label:**
+      // Strategy: reliable string ops, no regex edge-cases.
+      // Matches if line starts AND ends with ** and has no ** inside inner text.
+      if (trimmed.startsWith('**') && trimmed.endsWith('**') && trimmed.length > 4) {
+        // Strip outer ** ... **
+        final inner = trimmed.substring(2, trimmed.length - 2).trim();
+        // Reject if inner still contains ** (e.g. **a** and **b**)
+        if (inner.isNotEmpty && !inner.contains('**')) {
+          // Strip a trailing colon that the AI sometimes includes inside
+          final label = inner.endsWith(':') ? inner.substring(0, inner.length - 1) : inner;
+          widgets.add(Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 1),
+            child: RichText(
+              text: TextSpan(text: label, style: _bold),
+            ),
+          ));
+          continue;
+        }
+      }
+
+      // ── Line ends with :** (AI wraps headers like **Title:**)
+      // Catches: **Option 1: Roti + Dal (Best Fit):**
+      if (trimmed.startsWith('**') && trimmed.endsWith(':**') && trimmed.length > 5) {
+        final inner = trimmed.substring(2, trimmed.length - 3).trim();
+        if (inner.isNotEmpty && !inner.contains('**')) {
+          widgets.add(Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 1),
+            child: RichText(
+              text: TextSpan(text: inner, style: _bold),
+            ),
+          ));
+          continue;
+        }
       }
 
       // ── Bullet list: - item  or  • item  (NOT * — that's italic/bold)

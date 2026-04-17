@@ -31,6 +31,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // Pre-mark as syncing if user already connected — avoids a
+    // flash of the "Connect" button while the async init runs.
+    if (currentUserProfile?.healthSyncEnabled == true) {
+      _syncing = true;
+    }
     _initHealth();
   }
 
@@ -39,9 +44,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     setState(() => _hcAvailable = available);
 
-    // Auto-refresh if user already granted permission previously
     if (available && (currentUserProfile?.healthSyncEnabled == true)) {
-      _doSync();
+      _doSync(); // auto-refresh on every launch
+    } else {
+      // Not connected or HC unavailable — clear the pre-set syncing flag
+      if (mounted) setState(() => _syncing = false);
     }
   }
 

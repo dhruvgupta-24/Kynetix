@@ -119,11 +119,17 @@ class HealthService {
         );
       }
 
-      final avg14 = await _computeAvgSteps(now, 14);
-      final avg30 = await _computeAvgSteps(now, 30);
+      // Skip today (i=0) — partial steps skew the daily average low.
+      // Use yesterday as the anchor day for all windows.
+      final yesterday = DateTime(now.year, now.month, now.day)
+          .subtract(const Duration(days: 1));
 
-      // Prefer 30-day average; fall back to 14-day.
-      final effective = avg30 ?? avg14;
+      final avg7  = await _computeAvgSteps(yesterday, 7);
+      final avg14 = await _computeAvgSteps(yesterday, 14);
+      final avg30 = await _computeAvgSteps(yesterday, 30);
+
+      // Prefer 14-day (recent enough, enough data points); fall back to shorter.
+      final effective = avg14 ?? avg7 ?? avg30;
 
       return HealthSyncResult(
         averageDailySteps14d:  avg14,
@@ -142,28 +148,30 @@ class HealthService {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  /// Fetches total steps per day over the past [days] days.
-  /// Ignores days with zero steps (device off / not worn).
-  /// Returns null if no valid days found.
-  Future<double?> _computeAvgSteps(DateTime now, int days) async {
+  /// Fetches total steps per day from [anchor] going [days] days back.
+  /// Skips days with zero steps (device not worn).
+  /// Returns null if fewer than 3 valid days found (not enough signal).
+  Future<double?> _computeAvgSteps(DateTime anchor, int days) async {
+    // anchor is typically 'yesterday' — we count backwards from there.
+    final dayAnchor = DateTime(anchor.year, anchor.month, anchor.day);
     final totals = <double>[];
 
     for (int i = 0; i < days; i++) {
-      final dayStart = DateTime(now.year, now.month, now.day)
-          .subtract(Duration(days: i));
-      final dayEnd = dayStart.add(const Duration(days: 1));
+      final dayStart = dayAnchor.subtract(Duration(days: i));
+      final dayEnd   = dayStart.add(const Duration(days: 1));
 
       try {
         final steps = await _health.getTotalStepsInInterval(dayStart, dayEnd);
-        if (steps != null && steps > 0) {
+        if (steps != null && steps > 100) {   // ignore trivially small values
           totals.add(steps.toDouble());
         }
       } catch (_) {
-        // Skip days that error (e.g. historical data not available)
+        // Skip days that error
       }
     }
 
-    if (totals.isEmpty) return null;
+    // Require at least 3 valid data points to compute a meaningful average.
+    if (totals.length < 3) return null;
     final sum = totals.fold<double>(0, (a, b) => a + b);
     return double.parse((sum / totals.length).toStringAsFixed(0));
   }
