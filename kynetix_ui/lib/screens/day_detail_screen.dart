@@ -1677,19 +1677,6 @@ class _QuickAddCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dynamic memory lookup, safely falls back to defaults if not overriden
-    final wheyTitle = '1 scoop whey protein';
-    final wheyMem = NutritionPipeline.instance.fastMemoryLookupSync(wheyTitle);
-    final wheyCal = wheyMem != null ? ((wheyMem.calories.min + wheyMem.calories.max)/2) : 120.0;
-    final wheyPro = wheyMem != null ? ((wheyMem.protein.min + wheyMem.protein.max)/2) : 24.0;
-    final wheyMeta = '${wheyCal.toStringAsFixed(0)} kcal  ·  {wheyPro.toStringAsFixed(0)}g protein';
-
-    final eggTitle = '4 egg whites + 400ml milk';
-    final eggMem = NutritionPipeline.instance.fastMemoryLookupSync(eggTitle);
-    final eggCal = eggMem != null ? ((eggMem.calories.min + eggMem.calories.max)/2) : 220.0;
-    final eggPro = eggMem != null ? ((eggMem.protein.min + eggMem.protein.max)/2) : 36.0;
-    final eggMeta = '${eggCal.toStringAsFixed(0)} kcal  ·  {eggPro.toStringAsFixed(0)}g protein  ·  Breakfast';
-
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E2C),
@@ -1714,15 +1701,15 @@ class _QuickAddCard extends StatelessWidget {
           _QuickAddRow(
             emoji: '🥛',
             title: '1 scoop whey',
-            meta: wheyMeta,
-            onTap: () => onAdd(name: wheyTitle, calories: wheyCal, protein: wheyPro),
+            meta: '115 kcal  ·  22g protein',
+            onTap: () => onAdd(name: '1 scoop whey', calories: 115, protein: 22),
           ),
           const Divider(color: Color(0xFF252535), height: 1, indent: 16, endIndent: 16),
           _QuickAddRow(
             emoji: '🥚',
             title: '4 egg whites + 400ml milk',
-            meta: eggMeta,
-            onTap: () => onAdd(name: eggTitle, calories: eggCal, protein: eggPro, section: MealSection.breakfast),
+            meta: '328 kcal  ·  27g protein  ·  Breakfast',
+            onTap: () => onAdd(name: '4 egg whites + 400ml milk', calories: 328, protein: 27, section: MealSection.breakfast),
           ),
           const SizedBox(height: 4),
         ],
