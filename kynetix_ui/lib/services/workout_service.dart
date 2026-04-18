@@ -676,21 +676,43 @@ class WorkoutService extends ChangeNotifier {
       final raw = prefs.getString(_kData);
       if (raw != null) {
         final data = jsonDecode(raw) as Map<String, dynamic>;
+        // Load each field independently so a corrupted session list doesn't
+        // wipe the split config or the setupDone flag.
         _setupDone = data['setupDone'] as bool? ?? false;
         if (data['split'] != null) {
-          _split = WorkoutSplit.fromJson(data['split'] as Map<String, dynamic>);
+          try {
+            _split = WorkoutSplit.fromJson(data['split'] as Map<String, dynamic>);
+          } catch (e) {
+            debugPrint('[WorkoutService] split parse error: $e — keeping default');
+          }
         }
-        _sessions = (data['sessions'] as List<dynamic>? ?? [])
-            .map((s) => WorkoutSession.fromJson(s as Map<String, dynamic>))
-            .toList();
-        _customExercises = (data['customExercises'] as List<dynamic>? ?? [])
-            .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
-            .toList();
+        try {
+          _sessions = (data['sessions'] as List<dynamic>? ?? [])
+              .map((s) => WorkoutSession.fromJson(s as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('[WorkoutService] sessions parse error: $e — starting with empty list');
+          _sessions = [];
+        }
+        try {
+          _customExercises = (data['customExercises'] as List<dynamic>? ?? [])
+              .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('[WorkoutService] customExercises parse error: $e');
+          _customExercises = [];
+        }
         if (data['draftSession'] != null) {
-          _draftSession = WorkoutSession.fromJson(data['draftSession'] as Map<String, dynamic>);
+          try {
+            _draftSession = WorkoutSession.fromJson(data['draftSession'] as Map<String, dynamic>);
+          } catch (e) {
+            debugPrint('[WorkoutService] draftSession parse error: $e — ignoring');
+          }
         }
       }
     } catch (e) {
+      // Only a total JSON decode failure reaches here — individual field
+      // failures are caught above, preserving setup config.
       debugPrint('[WorkoutService] load error: $e — starting fresh');
       _split = null;
       _sessions = [];
