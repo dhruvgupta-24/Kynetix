@@ -31,8 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Pre-mark as syncing if user already connected — avoids a
-    // flash of the "Connect" button while the async init runs.
+    // Show a loading indicator if user already connected
     if (currentUserProfile?.healthSyncEnabled == true) {
       _syncing = true;
     }
@@ -45,15 +44,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _hcAvailable = available);
 
     if (available && (currentUserProfile?.healthSyncEnabled == true)) {
-      _doSync(); // auto-refresh on every launch
+      _doSyncInternal(); // auto-refresh on every launch
     } else {
-      // Not connected or HC unavailable — clear the pre-set syncing flag
       if (mounted) setState(() => _syncing = false);
     }
   }
 
+  // Called from UI "Connect" button — guarded against double-tap.
   Future<void> _doSync() async {
     if (_syncing) return;
+    _doSyncInternal();
+  }
+
+  // Internal sync — always runs regardless of the busy flag.
+  // Sets _syncing=true itself so the UI shows a spinner.
+  Future<void> _doSyncInternal() async {
+    if (!mounted) return;
     setState(() => _syncing = true);
 
     // Ask for permission if not yet granted
@@ -70,12 +76,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     if (!result.hasError && result.hasData) {
-      // Write step data back into UserProfile so TDEE recalculates.
       currentUserProfile = currentUserProfile!.copyWithHealth(
         averageDailySteps: result.effectiveAverageSteps!.toInt(),
         lastHealthSyncAt:  result.syncedAt,
       );
-      // Persist updated profile so HC step data survives restart.
       PersistenceService.saveProfile(currentUserProfile!).ignore();
     }
     setState(() {
@@ -262,6 +266,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ── Calendar ─────────────────────────────────────────────────────────────────
 
   Widget _buildCalendar() {
+    // Compute which days have nutrition data for the focused month.
+    // "completed" = ≥88% of the profile's avg daily calorie target hit.
+    // "logged"    = any meals recorded but target not fully met.
+    // (We use avg daily target here since we don't know per-day gym state for
+    //  historic dates without expensive lookups. 88% is a generous threshold.)
+    final avgTarget = _weeklyPlan.avgDailyCalories;
+    final completedDayKeys = <String>{};
+    final loggedDayKeys    = <String>{};
+    for (final entry in dayLogStore.entries) {
+      final log = entry.value;
+      if (log.isEmpty) continue;
+      final cal = log.totalCaloriesMid;
+      if (cal >= avgTarget * 0.88) {
+        completedDayKeys.add(entry.key);
+      } else if (cal > 0) {
+        loggedDayKeys.add(entry.key);
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: _Card(
@@ -274,8 +297,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             _CalendarGrid(
-              focusedMonth: _focusedMonth,
-              selectedDate: _selectedDate,
+              focusedMonth:     _focusedMonth,
+              selectedDate:     _selectedDate,
+              completedDayKeys: completedDayKeys,
+              loggedDayKeys:    loggedDayKeys,
               onSelect: (d) {
                 setState(() => _selectedDate = d);
                 _openDay(d);
@@ -615,11 +640,15 @@ class _CalendarGrid extends StatelessWidget {
   final DateTime focusedMonth;
   final DateTime selectedDate;
   final ValueChanged<DateTime> onSelect;
+  final Set<String> completedDayKeys;
+  final Set<String> loggedDayKeys;
 
   const _CalendarGrid({
     required this.focusedMonth,
     required this.selectedDate,
     required this.onSelect,
+    this.completedDayKeys = const {},
+    this.loggedDayKeys    = const {},
   });
 
   static const _weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -628,16 +657,13 @@ class _CalendarGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final today = DateTime.now();
     final firstDay = DateTime(focusedMonth.year, focusedMonth.month, 1);
-    // weekday: 1=Mon … 7=Sun; shift so Mon=0
     final startOffset = (firstDay.weekday - 1) % 7;
-    final daysInMonth =
-        DateTime(focusedMonth.year, focusedMonth.month + 1, 0).day;
+    final daysInMonth = DateTime(focusedMonth.year, focusedMonth.month + 1, 0).day;
     final totalCells = startOffset + daysInMonth;
     final rows = (totalCells / 7).ceil();
 
     return Column(
       children: [
-        // Weekday labels
         Row(
           children: _weekdays
               .map((d) => Expanded(
@@ -653,7 +679,6 @@ class _CalendarGrid extends StatelessWidget {
               .toList(),
         ),
         const SizedBox(height: 6),
-        // Day grid
         for (int row = 0; row < rows; row++)
           Row(
             children: List.generate(7, (col) {
@@ -663,12 +688,15 @@ class _CalendarGrid extends StatelessWidget {
                 return const Expanded(child: SizedBox(height: 36));
               }
               final date = DateTime(focusedMonth.year, focusedMonth.month, dayNum);
-              final isToday   = date.year == today.year && date.month == today.month && date.day == today.day;
+              final isToday    = date.year == today.year && date.month == today.month && date.day == today.day;
               final isSelected = date.year == selectedDate.year &&
                   date.month == selectedDate.month &&
                   date.day == selectedDate.day;
 
-              final hasGym = dayLogStore[dateKey(date)]?.gymDay?.didGym == true;
+              final dk          = dateKey(date);
+              final hasGym      = dayLogStore[dk]?.gymDay?.didGym == true;
+              final isCompleted = completedDayKeys.contains(dk);
+              final isLogged    = loggedDayKeys.contains(dk);
 
               return Expanded(
                 child: GestureDetector(
@@ -679,13 +707,17 @@ class _CalendarGrid extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: isSelected
                           ? const Color(0xFF2D6A4F)
-                          : isToday
-                              ? const Color(0xFF52B788).withValues(alpha: 0.15)
-                              : Colors.transparent,
+                          : isCompleted && !isToday
+                              ? const Color(0xFF52B788).withValues(alpha: 0.13)
+                              : isToday
+                                  ? const Color(0xFF52B788).withValues(alpha: 0.15)
+                                  : Colors.transparent,
                       borderRadius: BorderRadius.circular(9),
                       border: isToday && !isSelected
                           ? Border.all(color: const Color(0xFF52B788), width: 1.5)
-                          : null,
+                          : isCompleted && !isSelected && !isToday
+                              ? Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.35), width: 1)
+                              : null,
                     ),
                     child: Stack(
                       alignment: Alignment.center,
@@ -694,28 +726,53 @@ class _CalendarGrid extends StatelessWidget {
                           '$dayNum',
                           style: TextStyle(
                             fontSize: 13,
-                            fontWeight: isToday || isSelected
-                                ? FontWeight.w700
-                                : FontWeight.w400,
+                            fontWeight: isToday || isSelected ? FontWeight.w700 : FontWeight.w400,
                             color: isSelected
                                 ? Colors.white
                                 : isToday
                                     ? const Color(0xFF52B788)
-                                    : const Color(0xFF9CA3AF),
+                                    : isCompleted
+                                        ? const Color(0xFF74C69D)
+                                        : const Color(0xFF9CA3AF),
                           ),
                         ),
-                        if (hasGym)
-                          Positioned(
-                            bottom: 3,
-                            child: Container(
-                              width: 4,
-                              height: 4,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF52B788),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
+                        Positioned(
+                          bottom: 3,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isCompleted)
+                                Container(
+                                  width: 4, height: 4,
+                                  margin: const EdgeInsets.symmetric(horizontal: 1),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF52B788),
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              else if (isLogged)
+                                Container(
+                                  width: 4, height: 4,
+                                  margin: const EdgeInsets.symmetric(horizontal: 1),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFFB347),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              if (hasGym)
+                                Container(
+                                  width: 4, height: 4,
+                                  margin: const EdgeInsets.symmetric(horizontal: 1),
+                                  decoration: BoxDecoration(
+                                    color: isCompleted
+                                        ? const Color(0xFF52B788).withValues(alpha: 0.6)
+                                        : const Color(0xFF60A5FA),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                            ],
                           ),
+                        ),
                       ],
                     ),
                   ),
