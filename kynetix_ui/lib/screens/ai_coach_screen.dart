@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/app_theme.dart';
 import '../services/ai_coach_service.dart';
@@ -626,168 +627,21 @@ class _MarkdownText extends StatelessWidget {
   final String text;
   const _MarkdownText(this.text);
 
-  static const _base    = TextStyle(color: Colors.white, fontSize: 14, height: 1.6);
-  static const _bold    = TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontWeight: FontWeight.w700);
-  static const _italic  = TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontStyle: FontStyle.italic);
-  static const _code    = TextStyle(color: Color(0xFF52B788), fontSize: 13, height: 1.6, fontFamily: 'monospace');
-
-  /// Splits a line into [TextSpan]s handling **bold**, *italic*, `code`.
-  List<TextSpan> _parseInline(String line) {
-    final spans = <TextSpan>[];
-    // Pattern: **bold** or *italic* or `code`
-    final re = RegExp(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`');
-    int cursor = 0;
-    for (final m in re.allMatches(line)) {
-      if (m.start > cursor) {
-        spans.add(TextSpan(text: line.substring(cursor, m.start), style: _base));
-      }
-      if (m.group(1) != null) {
-        spans.add(TextSpan(text: m.group(1), style: _bold));
-      } else if (m.group(2) != null) {
-        spans.add(TextSpan(text: m.group(2), style: _italic));
-      } else if (m.group(3) != null) {
-        spans.add(TextSpan(text: m.group(3), style: _code));
-      }
-      cursor = m.end;
-    }
-    if (cursor < line.length) {
-      spans.add(TextSpan(text: line.substring(cursor), style: _base));
-    }
-    if (spans.isEmpty) spans.add(TextSpan(text: line, style: _base));
-    return spans;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final lines = text.split('\n');
-    final widgets = <Widget>[];
-
-    for (int i = 0; i < lines.length; i++) {
-      final raw = lines[i];
-      final trimmed = raw.trim();
-
-      if (trimmed.isEmpty) {
-        // Blank line → small gap between paragraphs
-        if (widgets.isNotEmpty) widgets.add(const SizedBox(height: 6));
-        continue;
-      }
-
-      // ── Heading: ### or ## or #
-      final headMatch = RegExp(r'^(#{1,3})\s+(.+)$').firstMatch(trimmed);
-      if (headMatch != null) {
-        final level = headMatch.group(1)!.length;
-        final headText = headMatch.group(2)!;
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 2),
-          child: Text(
-            headText,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: level == 1 ? 16 : level == 2 ? 15 : 14,
-              fontWeight: FontWeight.w700,
-              height: 1.4,
-            ),
-          ),
-        ));
-        continue;
-      }
-
-      // ── Whole-line bold: **Label**, **Label:**, **Label:**
-      // Strategy: reliable string ops, no regex edge-cases.
-      // Matches if line starts AND ends with ** and has no ** inside inner text.
-      if (trimmed.startsWith('**') && trimmed.endsWith('**') && trimmed.length > 4) {
-        // Strip outer ** ... **
-        final inner = trimmed.substring(2, trimmed.length - 2).trim();
-        // Reject if inner still contains ** (e.g. **a** and **b**)
-        if (inner.isNotEmpty && !inner.contains('**')) {
-          // Strip a trailing colon that the AI sometimes includes inside
-          final label = inner.endsWith(':') ? inner.substring(0, inner.length - 1) : inner;
-          widgets.add(Padding(
-            padding: const EdgeInsets.only(top: 6, bottom: 1),
-            child: RichText(
-              text: TextSpan(text: label, style: _bold),
-            ),
-          ));
-          continue;
-        }
-      }
-
-      // ── Line ends with :** (AI wraps headers like **Title:**)
-      // Catches: **Option 1: Roti + Dal (Best Fit):**
-      if (trimmed.startsWith('**') && trimmed.endsWith(':**') && trimmed.length > 5) {
-        final inner = trimmed.substring(2, trimmed.length - 3).trim();
-        if (inner.isNotEmpty && !inner.contains('**')) {
-          widgets.add(Padding(
-            padding: const EdgeInsets.only(top: 6, bottom: 1),
-            child: RichText(
-              text: TextSpan(text: inner, style: _bold),
-            ),
-          ));
-          continue;
-        }
-      }
-
-      // ── Bullet list: - item  or  • item  (NOT * — that's italic/bold)
-      final bulletMatch = RegExp(r'^[-•]\s+(.+)$').firstMatch(trimmed);
-      if (bulletMatch != null) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(left: 4, top: 1),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(top: 5, right: 8),
-                child: CircleAvatar(
-                  radius: 3,
-                  backgroundColor: Color(0xFF52B788),
-                ),
-              ),
-              Expanded(
-                child: RichText(
-                  text: TextSpan(children: _parseInline(bulletMatch.group(1)!)),
-                ),
-              ),
-            ],
-          ),
-        ));
-        continue;
-      }
-
-      // ── Numbered list: 1. item
-      final numMatch = RegExp(r'^(\d+)\.\s+(.+)$').firstMatch(trimmed);
-      if (numMatch != null) {
-        widgets.add(Padding(
-          padding: const EdgeInsets.only(left: 4, top: 1),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text(
-                  '${numMatch.group(1)}.',
-                  style: _bold.copyWith(color: const Color(0xFF52B788)),
-                ),
-              ),
-              Expanded(
-                child: RichText(
-                  text: TextSpan(children: _parseInline(numMatch.group(2)!)),
-                ),
-              ),
-            ],
-          ),
-        ));
-        continue;
-      }
-
-      // ── Plain paragraph line
-      widgets.add(RichText(
-        text: TextSpan(children: _parseInline(trimmed)),
-      ));
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
+    return MarkdownBody(
+      data: text,
+      styleSheet: MarkdownStyleSheet(
+        p: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+        strong: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontWeight: FontWeight.w700),
+        em: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontStyle: FontStyle.italic),
+        code: const TextStyle(color: Color(0xFF52B788), fontSize: 13, height: 1.6, fontFamily: 'monospace'),
+        h1: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, height: 1.4),
+        h2: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.4),
+        h3: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700, height: 1.4),
+        listBullet: const TextStyle(color: Color(0xFF52B788), fontSize: 14, fontWeight: FontWeight.w700, height: 1.6),
+        blockquote: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.6, fontStyle: FontStyle.italic),
+      ),
     );
   }
 }
