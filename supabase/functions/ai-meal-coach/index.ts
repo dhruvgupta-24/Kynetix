@@ -396,8 +396,21 @@ Deno.serve(async (req: Request) => {
       userContent = userMessage;
     }
 
+    // Parse conversation history sent from the client (multi-turn context).
+    // Each entry is { role: 'user'|'assistant', content: string }.
+    // We cap at last 10 turns server-side as a safety measure.
+    const rawHistory: Array<{ role: string; content: string }> = Array.isArray(body.history)
+      ? body.history.slice(-10)
+      : [];
+
+    // Sanitise: only allow 'user' and 'assistant' roles, non-empty content
+    const historyMessages = rawHistory
+      .filter(h => (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string' && h.content.trim() !== '')
+      .map(h => ({ role: h.role, content: h.content }));
+
     const messages = [
       { role: 'system', content: systemPrompt },
+      ...historyMessages,
       { role: 'user',   content: userContent },
     ];
 
