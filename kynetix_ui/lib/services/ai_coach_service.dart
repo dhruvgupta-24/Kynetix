@@ -130,6 +130,7 @@ class AiCoachService {
     String?          dateKey,
     bool?            isGymDay,     // client real-time value — overrides stale DB
     String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
+    List<Map<String, String>>? conversationHistory, // prior turns for multi-turn context
   }) async* {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
@@ -146,6 +147,14 @@ class AiCoachService {
     if (isGymDay != null) {
       body['is_gym_day']   = isGymDay;
       body['workout_type'] = workoutType ?? '';
+    }
+    // Pass conversation history so AI has full context from prior messages.
+    // Limit to last 10 messages to avoid excessive tokens.
+    if (conversationHistory != null && conversationHistory.isNotEmpty) {
+      final limited = conversationHistory.length > 10
+          ? conversationHistory.sublist(conversationHistory.length - 10)
+          : conversationHistory;
+      body['history'] = limited;
     }
 
     debugPrint('[AiCoachService] ↔ streaming → ai-meal-coach');

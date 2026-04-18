@@ -131,12 +131,25 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     _scrollToBottom();
 
     try {
+      // Build conversation history from prior committed messages (exclude last user msg
+      // which is being sent as 'message' itself).
+      final history = _messages
+          .where((m) => m.text.isNotEmpty)
+          // last entry is the user message we just added — exclude it (backend uses 'message' field)
+          .take(_messages.length - 1)
+          .map((m) => {
+                'role': m.role == _Role.user ? 'user' : 'assistant',
+                'content': m.text,
+              })
+          .toList();
+
       final stream = AiCoachService.instance.streamMessage(
-        message:     text,
-        imageBytes:  imageBytes,
-        dateKey:     widget.dateKey,
-        isGymDay:    widget.isGymDay,
-        workoutType: widget.workoutType,
+        message:             text,
+        imageBytes:          imageBytes,
+        dateKey:             widget.dateKey,
+        isGymDay:            widget.isGymDay,
+        workoutType:         widget.workoutType,
+        conversationHistory: history,
       );
 
       bool firstChunk = true;
