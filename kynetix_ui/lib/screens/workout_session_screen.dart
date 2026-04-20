@@ -205,6 +205,52 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
     });
   }
 
+  Future<void> _removeExerciseFromSession(int index) async {
+    if (index < 0 || index >= _sessionExercises.length) return;
+    final ex = _sessionExercises[index];
+    final hasSets = (_sets[ex.id] ?? []).isNotEmpty;
+
+    if (hasSets) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Remove exercise?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: Text(
+            'You already logged sets for "${ex.name}". Removing it will discard those sets for today only — your split is unchanged.',
+            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove', style: TextStyle(color: Color(0xFFF87171), fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
+    setState(() {
+      _sessionExercises.removeAt(index);
+      _sets.remove(ex.id);
+      _weightCtrl.remove(ex.id)?.dispose();
+      _repsCtrl.remove(ex.id)?.dispose();
+      _rpeCtrl.remove(ex.id)?.dispose();
+      if (_selectedIndex >= _sessionExercises.length) {
+        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
+      }
+    });
+  }
+
   void _removeSet(String exId, int index) {
     setState(() => _sets[exId]!.removeAt(index));
     HapticFeedback.selectionClick();
@@ -439,6 +485,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> {
               onSelect: (i) => setState(() => _selectedIndex = i),
               onAddExercise: _addExerciseToSession,
               onReorder: _reorderSessionExercise,
+              onRemoveExercise: _removeExerciseFromSession,
             ),
             // ── Exercise body ─────────────────────────────────────────────────
             Expanded(child: _buildExerciseBody()),
@@ -777,6 +824,7 @@ class _ExerciseChipBar extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final VoidCallback onAddExercise;
   final void Function(int oldIndex, int newIndex) onReorder;
+  final Future<void> Function(int index) onRemoveExercise;
 
   const _ExerciseChipBar({
     required this.exercises,
@@ -785,6 +833,7 @@ class _ExerciseChipBar extends StatelessWidget {
     required this.onSelect,
     required this.onAddExercise,
     required this.onReorder,
+    required this.onRemoveExercise,
   });
 
   @override
@@ -810,6 +859,70 @@ class _ExerciseChipBar extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 8),
                 child: GestureDetector(
                   onTap: () => onSelect(i),
+                  onLongPress: () async {
+                    if (exercises.length <= 1) return; // can't remove last exercise
+                    await showModalBottomSheet(
+                      context: context,
+                      backgroundColor: const Color(0xFF1E1E2C),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                      ),
+                      builder: (_) => SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Center(
+                                child: Container(
+                                  width: 36, height: 4,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4B5563),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                ex.name,
+                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                ex.muscleGroup,
+                                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                              ),
+                              const SizedBox(height: 16),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Container(
+                                  width: 36, height: 36,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF87171).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF87171), size: 18),
+                                ),
+                                title: const Text(
+                                  'Remove from today',
+                                  style: TextStyle(color: Color(0xFFF87171), fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                                subtitle: const Text(
+                                  "Split is unchanged — today only",
+                                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                                ),
+                                onTap: () async {
+                                  Navigator.of(context).pop();
+                                  await onRemoveExercise(i);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
                     padding: const EdgeInsets.symmetric(horizontal: 12),

@@ -725,6 +725,7 @@ class _CreateCustomExerciseSheetState
     'Rear Delts',
     'Traps',
     'Biceps',
+    'Forearms',
     'Triceps',
     'Quads',
     'Hamstrings',

@@ -371,9 +371,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             const SizedBox(height: 12),
           ],
 
-          // ── Quick Add ─────────────────────────────────────────
-          _QuickAddCard(onAdd: _quickAddMeal),
-          const SizedBox(height: 12),
           // ── Gym tracking ──────────────────────────────────────
           _GymCard(log: _log, date: widget.date, onChanged: _refresh),
           const SizedBox(height: 4),
@@ -1663,93 +1660,3 @@ class _SuggestionRow extends StatelessWidget {
   }
 }
 
-// ─── Quick Add card ────────────────────────────────────────────────────────────
-
-class _QuickAddCard extends StatelessWidget {
-  final void Function({
-    required String name,
-    required double calories,
-    required double protein,
-    MealSection? section,
-  }) onAdd;
-
-  const _QuickAddCard({required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E2E3E)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Row(
-              children: [
-                Icon(Icons.bolt_rounded, size: 14, color: Color(0xFF52B788)),
-                SizedBox(width: 6),
-                Text('Quick Add', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Divider(color: Color(0xFF2A2A3A), height: 1),
-          _QuickAddRow(
-            emoji: '🥛',
-            title: '1 scoop whey',
-            meta: '115 kcal  ·  22g protein',
-            onTap: () => onAdd(name: '1 scoop whey', calories: 115, protein: 22),
-          ),
-          const Divider(color: Color(0xFF252535), height: 1, indent: 16, endIndent: 16),
-          _QuickAddRow(
-            emoji: '🥚',
-            title: '4 egg whites + 400ml milk',
-            meta: '328 kcal  ·  27g protein  ·  Breakfast',
-            onTap: () => onAdd(name: '4 egg whites + 400ml milk', calories: 328, protein: 27, section: MealSection.breakfast),
-          ),
-          const SizedBox(height: 4),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickAddRow extends StatelessWidget {
-  final String emoji;
-  final String title;
-  final String meta;
-  final VoidCallback onTap;
-  const _QuickAddRow({required this.emoji, required this.title, required this.meta, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: Row(
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 18)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, height: 1.3)),
-                  const SizedBox(height: 2),
-                  Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
-                ],
-              ),
-            ),
-            const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
-          ],
-        ),
-      ),
-    );
-  }
-}

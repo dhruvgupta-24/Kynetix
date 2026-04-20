@@ -62,13 +62,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     setState(() => _syncing = true);
 
-    // Ask for permission if not yet granted
-    final hasPerm = await HealthService().hasPermission();
-    if (!hasPerm) {
-      final granted = await HealthService().requestPermission();
-      if (!granted) {
-        if (mounted) setState(() => _syncing = false);
-        return;
+    // Only ask for permission if user hasn't previously connected.
+    // When healthSyncEnabled=true the user already granted access once;
+    // calling hasPermission() on Android can unreliably return false and
+    // trigger the permission dialog on every launch — avoid that.
+    final alreadyConnected = currentUserProfile?.healthSyncEnabled == true;
+    if (!alreadyConnected) {
+      final hasPerm = await HealthService().hasPermission();
+      if (!hasPerm) {
+        final granted = await HealthService().requestPermission();
+        if (!granted) {
+          if (mounted) setState(() => _syncing = false);
+          return;
+        }
       }
     }
 
