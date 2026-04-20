@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
@@ -370,6 +372,10 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             _CoachInsightCard(insights: insights),
             const SizedBox(height: 12),
           ],
+
+          // ── Quick Add ─────────────────────────────────────────
+          _QuickAddCard(onAdd: _quickAddMeal),
+          const SizedBox(height: 12),
 
           // ── Gym tracking ──────────────────────────────────────
           _GymCard(log: _log, date: widget.date, onChanged: _refresh),
@@ -1658,5 +1664,554 @@ class _SuggestionRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Quick Add item model ─────────────────────────────────────────────────────
+
+class _QuickItem {
+  final String name;
+  final double calories;
+  final double protein;
+  final String emoji;
+  final bool builtIn;
+
+  const _QuickItem({
+    required this.name,
+    required this.calories,
+    required this.protein,
+    this.emoji = '⚡',
+    this.builtIn = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'calories': calories,
+        'protein': protein,
+        'emoji': emoji,
+      };
+
+  factory _QuickItem.fromJson(Map<String, dynamic> j) => _QuickItem(
+        name:     j['name'] as String,
+        calories: (j['calories'] as num).toDouble(),
+        protein:  (j['protein'] as num).toDouble(),
+        emoji:    j['emoji'] as String? ?? '⚡',
+      );
+}
+
+// ─── Quick Add card ───────────────────────────────────────────────────────────
+
+class _QuickAddCard extends StatefulWidget {
+  final void Function({
+    required String name,
+    required double calories,
+    required double protein,
+    MealSection? section,
+  }) onAdd;
+
+  const _QuickAddCard({required this.onAdd});
+
+  @override
+  State<_QuickAddCard> createState() => _QuickAddCardState();
+}
+
+class _QuickAddCardState extends State<_QuickAddCard> {
+  static const _prefsKey = 'quick_add_custom_items';
+
+  static const _builtIn = [
+    _QuickItem(name: '1 scoop whey',              calories: 115, protein: 22, emoji: '🥛', builtIn: true),
+    _QuickItem(name: '4 egg whites + 400ml milk', calories: 328, protein: 27, emoji: '🥚', builtIn: true),
+  ];
+
+  List<_QuickItem> _custom = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCustomItems();
+  }
+
+  Future<void> _loadCustomItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_prefsKey) ?? [];
+    if (mounted) {
+      setState(() {
+        _custom = raw.map((s) {
+          try { return _QuickItem.fromJson(jsonDecode(s) as Map<String, dynamic>); }
+          catch (_) { return null; }
+        }).whereType<_QuickItem>().toList();
+      });
+    }
+  }
+
+  Future<void> _saveCustomItems() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_prefsKey, _custom.map((i) => jsonEncode(i.toJson())).toList());
+  }
+
+  Future<void> _deleteCustomItem(_QuickItem item) async {
+    setState(() => _custom.removeWhere((i) => i.name == item.name));
+    await _saveCustomItems();
+  }
+
+  Future<void> _openAddCustom() async {
+    final result = await showModalBottomSheet<_QuickItem>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AddCustomQuickSheet(),
+    );
+    if (result == null || !mounted) return;
+    final exists = [..._builtIn, ..._custom].any(
+      (i) => i.name.toLowerCase() == result.name.toLowerCase(),
+    );
+    if (exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Already in Quick Add'), backgroundColor: Color(0xFF1E1E2C), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    setState(() => _custom.add(result));
+    await _saveCustomItems();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final allItems = [..._builtIn, ..._custom];
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2E2E3E)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 0),
+            child: Row(
+              children: [
+                const Icon(Icons.bolt_rounded, size: 14, color: Color(0xFF52B788)),
+                const SizedBox(width: 6),
+                const Text('Quick Add', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _openAddCustom,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.4)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_rounded, size: 13, color: Color(0xFF52B788)),
+                        SizedBox(width: 4),
+                        Text('Add', style: TextStyle(color: Color(0xFF52B788), fontSize: 11, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: Color(0xFF2A2A3A), height: 1),
+
+          // Items
+          ...allItems.asMap().entries.map((entry) {
+            final i = entry.key;
+            final item = entry.value;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _QuickAddRow(
+                  emoji: item.emoji,
+                  title: item.name,
+                  meta: '${item.calories.toInt()} kcal  ·  ${item.protein.toInt()}g protein',
+                  isCustom: !item.builtIn,
+                  onTap: () => widget.onAdd(name: item.name, calories: item.calories, protein: item.protein),
+                  onDelete: !item.builtIn ? () => _deleteCustomItem(item) : null,
+                ),
+                if (i < allItems.length - 1)
+                  const Divider(color: Color(0xFF252535), height: 1, indent: 16, endIndent: 16),
+              ],
+            );
+          }),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Quick Add row ────────────────────────────────────────────────────────────
+
+class _QuickAddRow extends StatelessWidget {
+  final String       emoji;
+  final String       title;
+  final String       meta;
+  final bool         isCustom;
+  final VoidCallback onTap;
+  final VoidCallback? onDelete;
+
+  const _QuickAddRow({
+    required this.emoji,
+    required this.title,
+    required this.meta,
+    required this.isCustom,
+    required this.onTap,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      onLongPress: isCustom && onDelete != null
+          ? () => showDialog(
+                context: context,
+                builder: (_) => AlertDialog(
+                  backgroundColor: const Color(0xFF1E1E2C),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Text('Remove from Quick Add?',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  content: Text('Remove "$title" from your quick add list?',
+                      style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+                    ),
+                    TextButton(
+                      onPressed: () { Navigator.of(context).pop(); onDelete!(); },
+                      child: const Text('Remove',
+                          style: TextStyle(color: Color(0xFFF87171), fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              )
+          : null,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 18)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(title,
+                            style: const TextStyle(color: Colors.white, fontSize: 13,
+                                fontWeight: FontWeight.w600, height: 1.3)),
+                      ),
+                      if (isCustom) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('custom',
+                              style: TextStyle(color: Color(0xFF52B788), fontSize: 9,
+                                  fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
+                ],
+              ),
+            ),
+            const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Add custom quick-add sheet ───────────────────────────────────────────────
+
+class _AddCustomQuickSheet extends StatefulWidget {
+  const _AddCustomQuickSheet();
+
+  @override
+  State<_AddCustomQuickSheet> createState() => _AddCustomQuickSheetState();
+}
+
+class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
+  final _ctrl    = TextEditingController();
+  final _calCtrl = TextEditingController();
+  final _proCtrl = TextEditingController();
+
+  bool    _loading  = false;
+  String? _error;
+  double? _calories;
+  double? _protein;
+  bool    _showEdit = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _calCtrl.dispose();
+    _proCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _estimate() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() { _loading = true; _error = null; _calories = null; _protein = null; _showEdit = false; });
+    try {
+      final result = await NutritionPipeline.instance.estimateMeal(text);
+      if (!mounted) return;
+      final cal = result.primaryCaloriesEstimate;
+      final pro = result.primaryProteinEstimate;
+      _calCtrl.text = cal.toInt().toString();
+      _proCtrl.text = pro.toInt().toString();
+      setState(() { _calories = cal; _protein = pro; _loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = 'Could not estimate. Try again.'; });
+    }
+  }
+
+  void _accept() {
+    final cal  = double.tryParse(_calCtrl.text.trim()) ?? _calories ?? 0;
+    final pro  = double.tryParse(_proCtrl.text.trim()) ?? _protein  ?? 0;
+    final name = _ctrl.text.trim();
+    if (name.isEmpty || cal <= 0) return;
+    Navigator.of(context).pop(_QuickItem(
+      name: name, calories: cal, protein: pro, emoji: _pickEmoji(name),
+    ));
+  }
+
+  String _pickEmoji(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('oat'))                            return '🥣';
+    if (n.contains('rice') || n.contains('roti'))     return '🍚';
+    if (n.contains('egg'))                            return '🥚';
+    if (n.contains('whey') || n.contains('protein'))  return '🥛';
+    if (n.contains('chicken'))                        return '🍗';
+    if (n.contains('banana'))                         return '🍌';
+    if (n.contains('bread') || n.contains('sandwich'))return '🥪';
+    if (n.contains('milk'))                           return '🥛';
+    if (n.contains('paneer') || n.contains('cheese')) return '🧀';
+    if (n.contains('dal') || n.contains('lentil'))    return '🍲';
+    if (n.contains('salad'))                          return '🥗';
+    if (n.contains('peanut') || n.contains('almond')) return '🥜';
+    if (n.contains('fish') || n.contains('tuna'))     return '🐟';
+    return '⚡';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kbHeight = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF1A1A28),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 14, 20, 20 + kbHeight),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(color: const Color(0xFF4B5563), borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('Add to Quick Add',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          const Text("Type a food — we'll estimate nutrition for you.",
+              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
+          const SizedBox(height: 14),
+
+          // Input row
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _estimate(),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. 2 rotis with dal',
+                    hintStyle: const TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+                    filled: true,
+                    fillColor: const Color(0xFF1E1E2C),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: _loading ? null : _estimate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2D6A4F),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Estimate',
+                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Color(0xFFFFB347), fontSize: 12)),
+          ],
+
+          // Result
+          if (_calories != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E2C),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded, size: 13, color: Color(0xFFA78BFA)),
+                      const SizedBox(width: 5),
+                      const Text('AI Estimate',
+                          style: TextStyle(color: Color(0xFFA78BFA), fontSize: 11, fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => setState(() => _showEdit = !_showEdit),
+                        child: Text(_showEdit ? 'Hide edit' : 'Fix values',
+                            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (!_showEdit)
+                    Row(
+                      children: [
+                        _EstimateChip(
+                          icon: Icons.local_fire_department_rounded,
+                          color: const Color(0xFFFF6B35),
+                          value: '${_calories!.toInt()} kcal',
+                        ),
+                        const SizedBox(width: 10),
+                        _EstimateChip(
+                          icon: Icons.fitness_center_rounded,
+                          color: const Color(0xFF52B788),
+                          value: '${_protein!.toInt()}g protein',
+                        ),
+                      ],
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(child: _NumField(controller: _calCtrl, label: 'kcal', color: const Color(0xFFFF6B35))),
+                        const SizedBox(width: 10),
+                        Expanded(child: _NumField(controller: _proCtrl, label: 'g protein', color: const Color(0xFF52B788))),
+                      ],
+                    ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _accept,
+                      child: const Text('Accept & Save to Quick Add'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EstimateChip extends StatelessWidget {
+  final IconData icon;
+  final Color    color;
+  final String   value;
+  const _EstimateChip({required this.icon, required this.color, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 5),
+        Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+      ],
+    ),
+  );
+}
+
+class _NumField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final Color  color;
+  const _NumField({required this.controller, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: controller,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w700),
+    textAlign: TextAlign.center,
+    decoration: InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 11),
+      filled: true,
+      fillColor: color.withValues(alpha: 0.08),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: color.withValues(alpha: 0.3))),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: color.withValues(alpha: 0.3))),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: color, width: 1.5)),
+      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+    ),
+  );
 }
 

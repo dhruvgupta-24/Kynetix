@@ -328,25 +328,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
-
-                    // ── Quick examples ───────────────────────────
-                    const _SectionLabel('Quick examples'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing:    8,
-                      runSpacing: 8,
-                      children: _examples
-                          .map((e) => _ExampleChip(
-                                label: e,
-                                onTap: () {
-                                  _controller.text = e;
-                                  _calculate();
-                                },
-                              ))
-                          .toList(),
-                    ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 10),
 
                     // ── Calculate button ─────────────────────────
                     SizedBox(
