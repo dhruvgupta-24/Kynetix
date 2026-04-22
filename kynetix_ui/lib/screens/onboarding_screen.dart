@@ -70,6 +70,9 @@ class UserProfile {
     int? workoutDaysMin,
     int? workoutDaysMax,
     Goal? goal,
+    int? averageDailySteps,
+    bool? healthSyncEnabled,
+    DateTime? lastHealthSyncAt,
   }) => UserProfile(
     name:              name ?? this.name,
     age:               age ?? this.age,
@@ -79,9 +82,9 @@ class UserProfile {
     workoutDaysMin:    workoutDaysMin ?? this.workoutDaysMin,
     workoutDaysMax:    workoutDaysMax ?? this.workoutDaysMax,
     goal:              goal ?? this.goal,
-    averageDailySteps: averageDailySteps,
-    healthSyncEnabled: healthSyncEnabled,
-    lastHealthSyncAt:  lastHealthSyncAt,
+    averageDailySteps: averageDailySteps ?? this.averageDailySteps,
+    healthSyncEnabled: healthSyncEnabled ?? this.healthSyncEnabled,
+    lastHealthSyncAt:  lastHealthSyncAt ?? this.lastHealthSyncAt,
   );
 
   // ── JSON serialization ──────────────────────────────────────────────────────

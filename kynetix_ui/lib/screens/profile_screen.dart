@@ -5,6 +5,7 @@ import '../screens/onboarding_screen.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
+import '../services/profile_service.dart';
 
 // ─── Profile Screen ────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _saveProfile(UserProfile newProfile) {
     currentUserProfile = newProfile;
     PersistenceService.saveProfile(currentUserProfile!).ignore();
+    ProfileService.instance.upsertProfile(currentUserProfile!).ignore(); // Upload to cloud
     widget.onProfileChanged?.call();
     setState(() {});
   }

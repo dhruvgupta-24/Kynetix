@@ -128,6 +128,7 @@ class NutritionTargetEngine {
     HealthSyncResult? health,
     WorkoutSession? session,
     String? workoutTypeName, // e.g. "Push", "Cardio", "Rest"
+    double? targetCaloriesOverride,
   }) {
     final plan = weeklyPlan(profile, health: health);
 
@@ -148,8 +149,11 @@ class NutritionTargetEngine {
       calBonus  = _loadToCalBonus(loadScore, session);
     }
 
-    final totalCal = _r((cal + calBonus).clamp(
+    final calculatedTotalCal = _r((cal + calBonus).clamp(
         _calFloor(profile), double.infinity));
+        
+    final isOverride = targetCaloriesOverride != null;
+    final finalCal = targetCaloriesOverride ?? calculatedTotalCal;
 
     // Build a meaningful label from the actual split name / workout type
     final label = _dayLabel(
@@ -158,19 +162,25 @@ class NutritionTargetEngine {
       isTraining: actuallyTraining,
     );
 
-    final noteBase = actuallyTraining
-        ? '+${plan.trainingDayCalories - plan.avgDailyCalories} kcal vs daily avg'
-        : '${plan.restDayCalories - plan.avgDailyCalories} kcal vs daily avg';
-    final noteExtra = calBonus != 0
-        ? ' | session load: ${calBonus > 0 ? '+' : ''}$calBonus kcal'
-        : '';
+    final String note;
+    if (isOverride) {
+      note = 'Manual Override (${calculatedTotalCal.toInt()} kcal original)';
+    } else {
+      final noteBase = actuallyTraining
+          ? '+${plan.trainingDayCalories - plan.avgDailyCalories} kcal vs daily avg'
+          : '${plan.restDayCalories - plan.avgDailyCalories} kcal vs daily avg';
+      final noteExtra = calBonus != 0
+          ? ' | session load: ${calBonus > 0 ? '+' : ''}$calBonus kcal'
+          : '';
+      note = '$noteBase$noteExtra';
+    }
 
     return DayTarget(
-      calories:         totalCal,
+      calories:         finalCal,
       protein:          pro,
       isTrainingDay:    actuallyTraining,
-      label:            label,
-      note:             '$noteBase$noteExtra',
+      label:            isOverride ? 'Manual Override' : label,
+      note:             note,
       workoutLoadScore: loadScore,
       workoutCalBonus:  calBonus == 0 ? null : calBonus,
     );

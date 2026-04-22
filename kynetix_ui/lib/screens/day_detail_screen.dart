@@ -219,6 +219,102 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     }
   }
 
+  Future<void> _editDailyTarget() async {
+    final t = _dayTarget;
+    if (t == null) return;
+    final currentOverride = _log.gymDay?.targetCaloriesOverride;
+    
+    final ctrl = TextEditingController(
+      text: currentOverride != null ? currentOverride.toInt().toString() : t.calories.toInt().toString(),
+    );
+    
+    final result = await showModalBottomSheet<double?>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Override Daily Target', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                  const SizedBox(height: 8),
+                  const Text('Manually adjust your calorie target for this day.', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    decoration: InputDecoration(
+                      labelText: 'Calories (kcal)',
+                      labelStyle: const TextStyle(color: Color(0xFF4B5563)),
+                      filled: true,
+                      fillColor: const Color(0xFF0F0F14),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      if (currentOverride != null) ...[
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(ctx, -1.0), // -1 means clear
+                            child: const Text('Clear Override', style: TextStyle(color: Color(0xFFF87171))),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final val = double.tryParse(ctrl.text);
+                            Navigator.pop(ctx, val);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF52B788),
+                            foregroundColor: const Color(0xFF0F0F14),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (result == null) return;
+
+    if (result == -1.0) {
+      if (_log.gymDay != null) {
+        _log.gymDay = _log.gymDay!.withTargetCaloriesOverride(null);
+      }
+    } else {
+      if (_log.gymDay == null) {
+        _log.gymDay = GymDay(didGym: false, targetCaloriesOverride: result);
+      } else {
+        _log.gymDay = _log.gymDay!.withTargetCaloriesOverride(result);
+      }
+    }
+    _refresh();
+  }
+
   String get _dateLabel {
     final d = widget.date;
     final wd = _weekdays[d.weekday - 1];
@@ -293,6 +389,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       health:          widget.health,
       session:         session,
       workoutTypeName: workoutTypeName,
+      targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
     );
   }
 
@@ -364,7 +461,12 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
-          _DaySummaryBanner(log: _log, target: target, dayStatus: dayStatus),
+          _DaySummaryBanner(
+            log: _log, 
+            target: target, 
+            dayStatus: dayStatus,
+            onEditTarget: _editDailyTarget,
+          ),
           const SizedBox(height: 12),
 
           // ── Coach insights ────────────────────────────────────
@@ -767,7 +869,8 @@ class _DaySummaryBanner extends StatelessWidget {
   final DayLog log;
   final DayTarget? target;
   final DayOutcomeResult? dayStatus;
-  const _DaySummaryBanner({required this.log, this.target, this.dayStatus});
+  final VoidCallback? onEditTarget;
+  const _DaySummaryBanner({required this.log, this.target, this.dayStatus, this.onEditTarget});
 
   @override
   Widget build(BuildContext context) {
@@ -802,7 +905,18 @@ class _DaySummaryBanner extends StatelessWidget {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
+                  Row(
+                    children: [
+                      _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
+                      if (onEditTarget != null) ...[
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: onEditTarget,
+                          child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF6B7280)),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -854,7 +968,18 @@ class _DaySummaryBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (t != null) ...[
-            _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
+            Row(
+              children: [
+                _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
+                if (onEditTarget != null) ...[
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: onEditTarget,
+                    child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF6B7280)),
+                  ),
+                ],
+              ],
+            ),
             const SizedBox(height: 12),
           ],
           Row(

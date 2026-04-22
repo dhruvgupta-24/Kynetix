@@ -77,11 +77,15 @@ class GymDay {
   /// default. Used to distinguish a deliberate override from a prefill.
   final bool splitOverridden;
 
+  /// Manual override for the day's calorie target
+  final double? targetCaloriesOverride;
+
   const GymDay({
     required this.didGym,
     this.workoutType,
     this.splitDayName,
     this.splitOverridden = false,
+    this.targetCaloriesOverride,
   });
 
   /// Returns a copy with the user's manually-chosen split day name and type.
@@ -92,6 +96,7 @@ class GymDay {
     workoutType:     type,
     splitDayName:    splitName,
     splitOverridden: true,
+    targetCaloriesOverride: targetCaloriesOverride,
   );
 
   /// Returns a copy that marks the day as gym without changing the split prefill.
@@ -100,6 +105,16 @@ class GymDay {
     workoutType:     did ? workoutType : null,
     splitDayName:    splitDayName,
     splitOverridden: did ? splitOverridden : false,
+    targetCaloriesOverride: targetCaloriesOverride,
+  );
+
+  /// Returns a copy with a new calorie override. Set to null to clear.
+  GymDay withTargetCaloriesOverride(double? override) => GymDay(
+    didGym:          didGym,
+    workoutType:     workoutType,
+    splitDayName:    splitDayName,
+    splitOverridden: splitOverridden,
+    targetCaloriesOverride: override,
   );
 
   Map<String, dynamic> toJson() => {
@@ -107,6 +122,7 @@ class GymDay {
     if (workoutType  != null) 'workoutType':     workoutType!.name,
     if (splitDayName != null) 'splitDayName':    splitDayName,
     if (splitOverridden)      'splitOverridden': splitOverridden,
+    if (targetCaloriesOverride != null) 'targetCaloriesOverride': targetCaloriesOverride,
   };
 
   factory GymDay.fromJson(Map<String, dynamic> j) => GymDay(
@@ -116,6 +132,7 @@ class GymDay {
         : null,
     splitDayName:    j['splitDayName']    as String?,
     splitOverridden: j['splitOverridden'] as bool?   ?? false,
+    targetCaloriesOverride: (j['targetCaloriesOverride'] as num?)?.toDouble(),
   );
 
   static WorkoutType? _safeWorkoutType(String name) {

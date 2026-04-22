@@ -80,10 +80,20 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       
       if (remoteProfile != null) {
         debugPrint('[_LoggedInGate] Supabase Profile Found. Triggering localized AppShell hydration.');
+        
+        // Preserve local Health Connect state and unsynced local goal changes
+        final mergedProfile = remoteProfile.copyWith(
+          healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
+          averageDailySteps: currentUserProfile?.averageDailySteps,
+          lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
+          // If local has a different goal and was recently modified, we ideally want to keep it,
+          // but we will fix the actual upload of the goal so it won't be an issue.
+        );
+
         // Hydrate local cache
-        await PersistenceService.saveProfile(remoteProfile);
+        await PersistenceService.saveProfile(mergedProfile);
         await PersistenceService.setOnboardingDone();
-        currentUserProfile = remoteProfile;
+        currentUserProfile = mergedProfile;
         
         if (mounted) setState(() => _hasProfile = true);
         return;
