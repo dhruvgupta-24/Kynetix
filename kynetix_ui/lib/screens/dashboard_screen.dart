@@ -130,6 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _profile,
       isGymDay: _isActualTrainingDay,
       health: _syncResult,
+      targetCaloriesOverride: _selectedLog.gymDay?.targetCaloriesOverride,
     ).calories;
   }
 
@@ -138,6 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _profile,
       isGymDay: _isActualTrainingDay,
       health: _syncResult,
+      targetCaloriesOverride: _selectedLog.gymDay?.targetCaloriesOverride,
     ).protein;
   }
 
