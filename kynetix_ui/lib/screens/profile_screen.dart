@@ -540,20 +540,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Shows the actual weight-aware calorie offset for the persisted step count.
+  /// Uses the same formula as NutritionTargetEngine._stepCorrectionKcal.
   String _stepOffsetLabel(int steps) {
-    if (steps < 3000) return '−120 kcal (Very low steps)';
-    if (steps < 5000) return '−60 kcal (Low steps)';
-    if (steps < 7500) return '0 kcal (Baseline confirmed)';
-    if (steps < 10000) return '+75 kcal (Moderate steps)';
-    if (steps < 12000) return '+100 kcal (High steps)';
-    return '+120 kcal (Very high steps)';
+    final weight = _profile.weight;
+    const baseline = 7000.0;
+    const strideKm = 0.00075;
+    const metFactor = 0.55;
+    final kcalPerStep = weight * strideKm * metFactor;
+    final rawOffset = ((steps - baseline) * kcalPerStep).clamp(-400.0, 400.0).round();
+    final sign = rawOffset >= 0 ? '+' : '';
+    return '$sign$rawOffset kcal vs baseline';
   }
 
   ActivityTier _tierFromPersistedSteps(int steps) {
-    if (steps < 4000) return ActivityTier.sedentary;
-    if (steps < 7000) return ActivityTier.light;
+    if (steps < 4000)  return ActivityTier.sedentary;
+    if (steps < 7000)  return ActivityTier.light;
     if (steps < 10000) return ActivityTier.moderate;
-    return ActivityTier.high;
+    if (steps < 13000) return ActivityTier.active;
+    return ActivityTier.veryActive;
   }
 
   // ── AI Engine Info ───────────────────────────────────────────────────────────

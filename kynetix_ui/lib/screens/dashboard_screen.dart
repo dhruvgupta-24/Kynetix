@@ -1302,7 +1302,7 @@ class _ActivitySyncCard extends StatelessWidget {
                   ),
                   Text(
                     '${r.activityTier.displayName}  •  '
-                    'Calorie offset: ${r.stepCalorieOffset >= 0 ? '+' : ''}${r.stepCalorieOffset} kcal',
+                    'Calorie offset: ${r.stepCalorieOffsetAt65kg >= 0 ? '+' : ''}${r.stepCalorieOffsetAt65kg} kcal',
                     style: const TextStyle(
                         fontSize: 11, color: Color(0xFF6B7280)),
                   ),
