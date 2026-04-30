@@ -158,49 +158,28 @@ class HealthService {
 
       // Anchor on yesterday midnight — today is partial, would skew averages low.
       final todayStart = DateTime(now.year, now.month, now.day);
-      final windowEnd   = todayStart; // exclusive: up to but not including today
-      final windowStart = windowEnd.subtract(const Duration(days: 30));
 
-      // ── Single batch fetch for 30 days ──────────────────────────────────────
-      // This is one network call instead of 30+ sequential calls.
-      List<HealthDataPoint> rawPoints;
-      try {
-        rawPoints = await _health.getHealthDataFromTypes(
-          startTime: windowStart,
-          endTime:   windowEnd,
-          types:     _types,
-        );
-      } catch (e) {
-        return HealthSyncResult(
-          syncedAt: now,
-          error: 'Could not read step data: ${e.toString().split('\n').first}',
-        );
-      }
 
-      // ── Aggregate into per-day totals ────────────────────────────────────
-      final Map<String, double> dayTotals = {};
+      // ── Parallel fetch for 30 days using native aggregation ───────────────
+      // We must use getTotalStepsInInterval because it leverages Health Connect's
+      // native deduplication. getHealthDataFromTypes returns overlapping raw points
+      // from multiple apps, causing massively inflated step counts.
+      // We run them in parallel to avoid slow sequential loops.
+      final daysToFetch = 30;
+      final stepFutures = List.generate(daysToFetch, (i) {
+        final dayStart = todayStart.subtract(Duration(days: i + 1));
+        final dayEnd   = dayStart.add(const Duration(days: 1));
+        return _health.getTotalStepsInInterval(dayStart, dayEnd).catchError((_) => null);
+      });
 
-      for (final point in rawPoints) {
-        // Use the date of the data point's start time (device local time bucket)
-        final date = point.dateFrom;
-        final key  = '${date.year}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}';
-
-        double value = 0;
-        final v = point.value;
-        if (v is NumericHealthValue) {
-          value = v.numericValue.toDouble();
-        }
-        dayTotals[key] = (dayTotals[key] ?? 0) + value;
-      }
+      final results = await Future.wait(stepFutures);
 
       // ── Build ordered per-day lists (most recent = index 0) ──────────────
       final List<double> last14 = [];
       final List<double> last30 = [];
 
-      for (int i = 0; i < 30; i++) {
-        final d   = todayStart.subtract(Duration(days: i + 1)); // i+1 skips today
-        final key = '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
-        final val = dayTotals[key] ?? 0;
+      for (int i = 0; i < daysToFetch; i++) {
+        final val = (results[i] ?? 0).toDouble();
 
         // Only include days with meaningful step data.
         // < 500 steps = phone not worn / left at home. Excluded to avoid dragging
