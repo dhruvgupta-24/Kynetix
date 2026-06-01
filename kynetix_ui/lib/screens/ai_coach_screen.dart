@@ -46,12 +46,14 @@ class AiCoachScreen extends StatefulWidget {
   final String  dateKey;    // YYYY-MM-DD
   final bool?   isGymDay;   // real-time gym state from DayDetailScreen
   final String? workoutType; // e.g. 'Push', 'Pull'
+  final double? targetCaloriesOverride; // active manual calorie override for this day
 
   const AiCoachScreen({
     super.key,
     required this.dateKey,
     this.isGymDay,
     this.workoutType,
+    this.targetCaloriesOverride,
   });
 
   @override
@@ -145,12 +147,13 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           .toList();
 
       final stream = AiCoachService.instance.streamMessage(
-        message:             text,
-        imageBytes:          imageBytes,
-        dateKey:             widget.dateKey,
-        isGymDay:            widget.isGymDay,
-        workoutType:         widget.workoutType,
-        conversationHistory: history,
+        message:                text,
+        imageBytes:             imageBytes,
+        dateKey:                widget.dateKey,
+        isGymDay:               widget.isGymDay,
+        workoutType:            widget.workoutType,
+        targetCaloriesOverride: widget.targetCaloriesOverride,
+        conversationHistory:    history,
       );
 
       bool firstChunk = true;
@@ -242,7 +245,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'AI Coach',
+                'Kyno',
                 style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
               ),
               Text(
@@ -284,7 +287,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         const SizedBox(height: 20),
         const Center(
           child: Text(
-            'Your Nutrition Coach',
+            'Kyno',
             style: TextStyle(
               color: Colors.white,
               fontSize: 22, fontWeight: FontWeight.w800,

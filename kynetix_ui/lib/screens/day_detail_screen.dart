@@ -315,6 +315,59 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     _refresh();
   }
 
+  // ── Meal deletion with undo ───────────────────────────────────────────────
+
+  /// Removes [entry] from [section] immediately and shows an Undo snackbar
+  /// for 4 seconds. If the user taps Undo, the entry is re-inserted.
+  /// Only if the snackbar expires untapped is the deletion considered final.
+  void _handleDeleteWithUndo(MealSection section, MealEntry entry) {
+    _log.remove(section, entry);
+    _refresh();
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          backgroundColor: const Color(0xFF1E1E2C),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0xFF2E2E3E), width: 0.5),
+          ),
+          content: Row(
+            children: [
+              const Icon(Icons.delete_outline_rounded,
+                  color: Color(0xFF9CA3AF), size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Deleted ${entry.finalSavedInput}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Undo',
+            textColor: const Color(0xFF52B788),
+            onPressed: () {
+              _log.add(section, entry);
+              _refresh();
+              kHapticMedium();
+            },
+          ),
+        ),
+      );
+  }
+
   String get _dateLabel {
     final d = widget.date;
     final wd = _weekdays[d.weekday - 1];
@@ -424,9 +477,10 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => AiCoachScreen(
-              dateKey: _dateKey,
-              isGymDay: target?.isTrainingDay,
-              workoutType: target?.isTrainingDay == true ? target?.label : null,
+              dateKey:                _dateKey,
+              isGymDay:               target?.isTrainingDay,
+              workoutType:            target?.isTrainingDay == true ? target?.label : null,
+              targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
             ),
           ),
         ),
@@ -488,10 +542,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               log: _log,
               onAdd: () => _openAddMeal(section),
               onEdit: _openEditMeal,
-              onDelete: (entry) {
-                _log.remove(section, entry);
-                _refresh();
-              },
+              onDelete: (entry) => _handleDeleteWithUndo(section, entry),
             ),
           ),
         ],
@@ -534,7 +585,7 @@ class _AiCoachFab extends StatelessWidget {
             Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20),
             SizedBox(width: 8),
             Text(
-              'Ask AI',
+              'Ask Kyno',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 14,

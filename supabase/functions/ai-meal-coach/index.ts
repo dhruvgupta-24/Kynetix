@@ -172,22 +172,30 @@ function buildFoodMemory(memoryRows: any[]): string {
 
 // ── Build complete system prompt ───────────────────────────────────────────────
 function buildSystemPrompt(params: {
-  profile:        any;
-  targetCal:      number;
-  targetPro:      number;
-  dayLabel:       string;
-  mealContext:    string;
-  totalCal:       number;
-  totalPro:       number;
-  remainCal:      number;
-  remainPro:      number;
-  foodMemory:     string;
-  isGymDay:       boolean;
+  profile:            any;
+  targetCal:          number;
+  targetPro:          number;
+  dayLabel:           string;
+  mealContext:        string;
+  totalCal:           number;
+  totalPro:           number;
+  remainCal:          number;
+  remainPro:          number;
+  foodMemory:         string;
+  isGymDay:           boolean;
+  isManualOverride:   boolean;
 }): string {
   const { profile, targetCal, targetPro, dayLabel, mealContext,
-          totalCal, totalPro, remainCal, remainPro, foodMemory, isGymDay } = params;
+          totalCal, totalPro, remainCal, remainPro, foodMemory,
+          isGymDay, isManualOverride } = params;
 
-  return `You are Kynetix AI Coach — a personal nutrition coach embedded inside the Kynetix fitness app.
+  // When user has manually set a calorie target for the day, tell the AI explicitly
+  // so it doesn't express surprise or confusion about an unusual number.
+  const overrideNote = isManualOverride
+    ? ' [user-set manual override — respect this exact number]'
+    : '';
+
+  return `You are Kyno — a personal nutrition coach embedded inside the Kynetix fitness app.
 You already have full access to this user's data for today. Use it to give SPECIFIC, PRACTICAL advice.
 
 ═══════════════════════════════════════════════════
@@ -202,11 +210,11 @@ Gender: ${profile.gender}
 Gym days/week: ${profile.workout_days_min}–${profile.workout_days_max}
 
 ═══════════════════════════════════════════════════
-TODAY'S TARGETS — ${dayLabel}
+TODAY'S TARGETS — ${dayLabel}${isManualOverride ? ' (Manual Override)' : ''}
 ═══════════════════════════════════════════════════
-Calorie target:  ${targetCal} kcal
+Calorie target:  ${targetCal} kcal${overrideNote}
 Protein target:  ${targetPro} g
-Day type:        ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}
+Day type:        ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}${isManualOverride ? '\n⚠️  Note: calorie target for today was manually overridden by the user. The number above is the actual target to use — NOT a formula estimate.' : ''}
 
 ═══════════════════════════════════════════════════
 TODAY'S LOGGED MEALS
@@ -361,9 +369,28 @@ Deno.serve(async (req: Request) => {
         ? body.workout_type
         : (isGymDay ? 'Training' : 'Rest');
 
+    // ── Manual calorie override ───────────────────────────────────────────────
+    // Priority (same pattern as isGymDay):
+    //   1. body.target_calories_override — client real-time (highest truth)
+    //   2. gymDayJson?.targetCaloriesOverride — persisted DB value
+    //   3. null — use formula from computeTargets()
+    const bodyOverride = typeof body.target_calories_override === 'number' && body.target_calories_override > 0
+        ? body.target_calories_override as number
+        : null;
+    const dbOverride = typeof gymDayJson?.targetCaloriesOverride === 'number' && gymDayJson.targetCaloriesOverride > 0
+        ? gymDayJson.targetCaloriesOverride as number
+        : null;
+    const caloriesOverride: number | null = bodyOverride ?? dbOverride;
+
     // ── Compute targets ───────────────────────────────────────────────────────
-    const { calories: targetCal, protein: targetPro, label: dayLabel } =
+    const { calories: computedCal, protein: targetPro, label: dayLabel } =
       computeTargets(profile, isGymDay);
+
+    // Apply override: user-set calorie target takes precedence over formula.
+    // Protein is never overridden — it stays formula-computed for the day type.
+    const isManualOverride = caloriesOverride !== null;
+    const targetCal = isManualOverride ? Math.round(caloriesOverride!) : computedCal;
+    console.log(`[ai-meal-coach] calorieTarget=${targetCal}${isManualOverride ? ' (MANUAL OVERRIDE, original='+computedCal+')' : ' (formula)'}  protein=${targetPro}`);
 
     // ── Build meal context ────────────────────────────────────────────────────
     const { text: mealContext, totalCal, totalPro } =
@@ -381,7 +408,7 @@ Deno.serve(async (req: Request) => {
     const systemPrompt = buildSystemPrompt({
       profile, targetCal, targetPro, dayLabel: workoutType,
       mealContext, totalCal, totalPro,
-      remainCal, remainPro, foodMemory, isGymDay,
+      remainCal, remainPro, foodMemory, isGymDay, isManualOverride,
     });
 
     // Construct user message content (text + optional image)

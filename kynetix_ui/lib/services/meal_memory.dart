@@ -179,14 +179,36 @@ class MealMemory {
 
   /// Exact known foods / saved defaults have highest priority and must never be
   /// overridden by AI.
+  ///
+  /// Falls back to a conservative token-subset match when no exact hit exists:
+  /// all query tokens must be present in the stored key AND the stored key may
+  /// have at most 1 extra token beyond the query (to avoid collapsing distinct
+  /// foods like "paneer" and "paneer butter masala").
   NutritionResult? lookupExactKnownFood(String rawInput) {
     final key = normalize(rawInput);
-    final known = _knownFoods[key];
-    return known?.copyWith(source: 'memory_exact');
+    final exact = _knownFoods[key];
+    if (exact != null) return exact.copyWith(source: 'memory_exact');
+    // Conservative alias fallback
+    final alias = _lookupByTokenSubset(_knownFoods, key);
+    return alias?.copyWith(source: 'memory_exact');
   }
 
   /// Recurring memory = previously confirmed full-meal matches.
-  NutritionResult? lookupRecurring(String rawInput) => lookup(rawInput);
+  ///
+  /// Falls back to token-subset matching when no exact normalized key is found
+  /// (e.g. user types "oreo" but memory stored "oreo biscuit").
+  NutritionResult? lookupRecurring(String rawInput) {
+    final exact = lookup(rawInput);
+    if (exact != null) return exact;
+    // Conservative alias fallback — update hit count on match
+    final key = normalize(rawInput);
+    final aliasEntry = _lookupEntryByTokenSubset(_store, key);
+    if (aliasEntry == null) return null;
+    aliasEntry.timesUsed++;
+    aliasEntry.updatedAt = DateTime.now();
+    _persist().ignore();
+    return aliasEntry.result.copyWith(source: 'cache');
+  }
 
   /// Stores an AI result as a low-trust candidate first.
   /// Promotion to recurring memory happens only after repeated stable encounters.
@@ -313,6 +335,57 @@ class MealMemory {
     for (final entry in _defaultKnownFoods.entries) {
       _knownFoods[entry.key] = entry.value;
     }
+  }
+
+  /// Conservative token-subset lookup for a map of [NutritionResult] values.
+  ///
+  /// Rules:
+  ///   - All tokens in [queryKey] must appear in the candidate key.
+  ///   - The candidate key may have at most 1 extra token beyond [queryKey].
+  ///   - When multiple candidates match, prefer the one with fewest extra tokens.
+  ///
+  /// This intentionally rejects multi-word elaborations ("paneer" ≠ "paneer
+  /// butter masala") while accepting single-word qualifiers ("oreo" ≡ "oreo
+  /// biscuit").
+  NutritionResult? _lookupByTokenSubset(
+      Map<String, NutritionResult> map, String queryKey) {
+    final queryTokens = queryKey.split(' ').toSet();
+    NutritionResult? best;
+    int bestExtraTokens = 999;
+
+    for (final entry in map.entries) {
+      final storedTokens = entry.key.split(' ').toSet();
+      final extraTokens = storedTokens.difference(queryTokens).length;
+      if (queryTokens.isNotEmpty &&
+          queryTokens.every(storedTokens.contains) &&
+          extraTokens <= 1 &&
+          extraTokens < bestExtraTokens) {
+        best = entry.value;
+        bestExtraTokens = extraTokens;
+      }
+    }
+    return best;
+  }
+
+  /// Conservative token-subset lookup for the [MealMemoryEntry] store.
+  MealMemoryEntry? _lookupEntryByTokenSubset(
+      Map<String, MealMemoryEntry> map, String queryKey) {
+    final queryTokens = queryKey.split(' ').toSet();
+    MealMemoryEntry? best;
+    int bestExtraTokens = 999;
+
+    for (final entry in map.entries) {
+      final storedTokens = entry.key.split(' ').toSet();
+      final extraTokens = storedTokens.difference(queryTokens).length;
+      if (queryTokens.isNotEmpty &&
+          queryTokens.every(storedTokens.contains) &&
+          extraTokens <= 1 &&
+          extraTokens < bestExtraTokens) {
+        best = entry.value;
+        bestExtraTokens = extraTokens;
+      }
+    }
+    return best;
   }
 
   /// Conservative normalization (strips only meaningless connector words;

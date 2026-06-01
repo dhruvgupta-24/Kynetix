@@ -130,6 +130,7 @@ class AiCoachService {
     String?          dateKey,
     bool?            isGymDay,     // client real-time value — overrides stale DB
     String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
+    double?          targetCaloriesOverride, // active manual override for this day
     List<Map<String, String>>? conversationHistory, // prior turns for multi-turn context
   }) async* {
     final session = Supabase.instance.client.auth.currentSession;
@@ -147,6 +148,11 @@ class AiCoachService {
     if (isGymDay != null) {
       body['is_gym_day']   = isGymDay;
       body['workout_type'] = workoutType ?? '';
+    }
+    // Pass manual calorie override so AI uses the correct effective target for this day.
+    // Omit entirely when null so the server falls back to DB-stored override or formula.
+    if (targetCaloriesOverride != null) {
+      body['target_calories_override'] = targetCaloriesOverride;
     }
     // Pass conversation history so AI has full context from prior messages.
     // Limit to last 10 messages to avoid excessive tokens.
