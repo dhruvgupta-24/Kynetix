@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../screens/onboarding_screen.dart';
+import '../screens/connect_chatgpt_screen.dart';
+import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
@@ -36,9 +38,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _syncing = false;
   String? _syncMessage;
 
+  // ── AI provider state ─────────────────────────────────────────────────────
+  ChatGptLinkStatus? _aiStatus;
+  bool _aiStatusLoading = true;
+  bool _aiDisconnecting = false;
+
   @override
   void initState() {
     super.initState();
+    _loadAiStatus();
+  }
+
+  Future<void> _loadAiStatus() async {
+    setState(() => _aiStatusLoading = true);
+    try {
+      final status = await ChatGptLinkService.getStatus();
+      if (mounted) setState(() { _aiStatus = status; _aiStatusLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _aiStatus = ChatGptLinkStatus.disconnected; _aiStatusLoading = false; });
+    }
+  }
+
+  Future<void> _disconnectChatGpt() async {
+    setState(() => _aiDisconnecting = true);
+    try {
+      await ChatGptLinkService.disconnect();
+      await _loadAiStatus();
+    } finally {
+      if (mounted) setState(() => _aiDisconnecting = false);
+    }
   }
 
   @override
@@ -565,23 +593,181 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildAiCard() {
     return _Section(
-      title: 'AI Engine',
-      child: Column(
-        children: const [
+      title: 'Connected AI',
+      child: _aiStatusLoading
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 20, height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Color(0xFF52B788),
+                  ),
+                ),
+              ),
+            )
+          : _buildAiStatusBody(),
+    );
+  }
+
+  Widget _buildAiStatusBody() {
+    final s = _aiStatus ?? ChatGptLinkStatus.disconnected;
+    final isConnected = s.isConnected;
+    final providerColor = isConnected
+        ? const Color(0xFF52B788)
+        : const Color(0xFF60A5FA);
+    final providerLabel = isConnected ? 'ChatGPT (Personal)' : 'OpenRouter (Shared)';
+    final providerIcon = isConnected
+        ? Icons.account_circle_rounded
+        : Icons.cloud_queue_rounded;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Provider row ──────────────────────────────────────────────────────
+        Row(
+          children: [
+            Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(
+                color: providerColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(providerIcon, size: 14, color: providerColor),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                providerLabel,
+                style: TextStyle(
+                  color: providerColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            // Connect / Disconnect button
+            GestureDetector(
+              onTap: _aiDisconnecting
+                  ? null
+                  : isConnected
+                      ? _disconnectChatGpt
+                      : () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ConnectChatGptScreen(),
+                            ),
+                          );
+                          _loadAiStatus();
+                        },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: providerColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: providerColor.withValues(alpha: 0.4)),
+                ),
+                child: _aiDisconnecting
+                    ? const SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Color(0xFF52B788),
+                        ),
+                      )
+                    : Text(
+                        isConnected ? 'Disconnect' : 'Connect',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: providerColor,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+        const Divider(color: Color(0xFF2E2E3E), height: 1),
+        const SizedBox(height: 12),
+
+        // ── Model rows ────────────────────────────────────────────────────────
+        _InfoRow(
+          icon: Icons.auto_awesome_rounded,
+          label: 'Active Model',
+          value: s.activeModel ?? 'None',
+        ),
+        _InfoRow(
+          icon: Icons.psychology_rounded,
+          label: 'Selected Model',
+          value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
+        ),
+        _InfoRow(
+          icon: Icons.swap_horiz_rounded,
+          label: 'Last Provider',
+          value: _providerDisplayName(s.lastProviderUsed),
+        ),
+        _InfoRow(
+          icon: Icons.access_time_rounded,
+          label: 'Last Used',
+          value: _relativeTime(s.lastUsedAt),
+        ),
+        _InfoRow(
+          icon: Icons.verified_rounded,
+          label: 'Model Verified',
+          value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
+          isLast: !isConnected,
+        ),
+
+        // ── Extra info when connected ─────────────────────────────────────────
+        if (isConnected) ...[
           _InfoRow(
-            icon: Icons.auto_awesome_rounded,
-            label: 'Provider',
-            value: 'OpenAI (gpt-4o-mini)',
+            icon: Icons.schedule_rounded,
+            label: 'Connected',
+            value: _relativeTime(s.connectedAt),
           ),
           _InfoRow(
-            icon: Icons.swap_horiz_rounded,
+            icon: Icons.info_outline_rounded,
             label: 'Fallback',
-            value: 'OpenRouter (auto)',
+            value: 'OpenRouter',
             isLast: true,
           ),
         ],
-      ),
+
+        if (!isConnected) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Connect your ChatGPT account to use your own AI credits and access newer models.',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withValues(alpha: 0.35),
+              height: 1.5,
+            ),
+          ),
+        ],
+      ],
     );
+  }
+
+  String _providerDisplayName(String? raw) {
+    if (raw == null) return '—';
+    return switch (raw) {
+      'user_chatgpt' => 'ChatGPT (Personal)',
+      'openrouter'   => 'OpenRouter',
+      'openai'       => 'Kynetix OpenAI',
+      _              => raw,
+    };
+  }
+
+  String _relativeTime(DateTime? dt) {
+    if (dt == null) return 'Never';
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 
   // ── About ──────────────────────────────────────────────────────────────────

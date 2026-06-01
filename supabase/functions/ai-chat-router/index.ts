@@ -1,14 +1,15 @@
 // ai-chat-router — Central AI provider router
 //
 // Provider priority:
-//   1. OpenAI  — using OPENAI_API_KEY secret (standard /v1/chat/completions)
-//   2. OpenRouter — emergency fallback only if OpenAI fails
+//   1. user_chatgpt  — user's own authenticated OpenAI token (from user_openai_links)
+//                      uses the model discovered and verified by openai-link-verify
+//   2. openrouter    — shared fallback (Kynetix-funded, acknowledged in UI)
 //
-// The API key is read ONLY from Supabase secrets (environment variable).
+// Kynetix's own OPENAI_API_KEY is NOT in the provider chain.
+// Users never silently consume Kynetix OpenAI credits.
+//
+// The access_token is read ONLY from Supabase DB (server-side).
 // It is NEVER returned in any response, logged in full, or exposed to the client.
-//
-// Image support: when messages contain image_url content blocks, gpt-4o is used
-// instead of gpt-4o-mini for vision capability.
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -20,13 +21,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const OPENAI_CHAT_URL    = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_MODEL       = 'gpt-4o-mini';
-const OPENAI_VISION_MODEL = 'gpt-4o';      // used automatically when image_url is present
-const OPENROUTER_URL     = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL   = 'deepseek/deepseek-chat-v3-0324';
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENROUTER_URL  = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
 
-// ── Chat completions call (OpenAI & OpenRouter share the same API shape) ────────
+// ── Chat completions — non-streaming ─────────────────────────────────────────
 async function callChat(
   endpoint:     string,
   apiKey:       string,
@@ -40,18 +39,14 @@ async function callChat(
     m.content.some((b: any) => b?.type === 'image_url')
   );
 
-  // When images are present and we're hitting OpenAI, upgrade to vision model
-  const effectiveModel =
-    (endpoint === OPENAI_CHAT_URL && hasImages) ? OPENAI_VISION_MODEL : model;
-
   const requestBody: any = {
-    model:       effectiveModel,
+    model,
     messages,
     temperature: 0.25,
     max_tokens:  1500,
   };
 
-  console.log(`[AI ROUTER] → ${endpoint} model=${effectiveModel} hasImages=${hasImages} msgs=${messages.length}`);
+  console.log(`[AI ROUTER] → ${endpoint} model=${model} hasImages=${hasImages} msgs=${messages.length}`);
 
   const res = await fetch(endpoint, {
     method:  'POST',
@@ -72,16 +67,13 @@ async function callChat(
 
   const data = JSON.parse(rawBody);
   const text = extractText(rawBody, data);
-
-  if (!text) {
-    throw new Error(`Empty response from ${endpoint}. raw=${rawBody.slice(0, 200)}`);
-  }
+  if (!text) throw new Error(`Empty response from ${endpoint}. raw=${rawBody.slice(0, 200)}`);
 
   console.log(`[AI ROUTER] extracted len=${text.length} preview="${text.slice(0, 120)}"`);
   return { text, usage: data.usage ?? null };
 }
 
-// ── Chat completions in streaming mode (SSE passthrough) ─────────────────────
+// ── Chat completions — streaming SSE passthrough ──────────────────────────────
 async function callChatStream(
   endpoint:     string,
   apiKey:       string,
@@ -89,14 +81,7 @@ async function callChatStream(
   messages:     any[],
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
-  const hasImages = messages.some(m =>
-    Array.isArray(m?.content) &&
-    m.content.some((b: any) => b?.type === 'image_url')
-  );
-  const effectiveModel =
-    (endpoint === OPENAI_CHAT_URL && hasImages) ? OPENAI_VISION_MODEL : model;
-
-  console.log(`[AI ROUTER] stream → ${endpoint} model=${effectiveModel}`);
+  console.log(`[AI ROUTER] stream → ${endpoint} model=${model}`);
 
   const res = await fetch(endpoint, {
     method:  'POST',
@@ -106,7 +91,7 @@ async function callChatStream(
       ...extraHeaders,
     },
     body: JSON.stringify({
-      model: effectiveModel,
+      model,
       messages,
       temperature: 0.25,
       max_tokens:  1500,
@@ -118,22 +103,18 @@ async function callChatStream(
     const errBody = await res.text();
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 400)}`);
   }
-
-  return res; // caller pipes res.body
+  return res;
 }
 
-// ── Extract plain text from a chat completions response ─────────────────────────
+// ── Extract plain text from chat completions response ────────────────────────
 function extractText(rawBody: string, data: any): string {
   const choice  = data?.choices?.[0];
   const message = choice?.message;
-
   if (!message) {
     console.error(`[AI ROUTER] No choices[0].message. raw=${rawBody.slice(0, 300)}`);
     return '';
   }
-
   const content = message.content;
-
   if (typeof content === 'string' && content.trim()) {
     const trimmed = content.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -152,23 +133,53 @@ function extractText(rawBody: string, data: any): string {
     }
     return trimmed;
   }
-
   if (Array.isArray(content)) {
     const textBlock = content.find((b: any) => b?.type === 'text' && b?.text);
     if (textBlock?.text) return textBlock.text.trim();
   }
-
   return '';
 }
 
-// ── Main handler ────────────────────────────────────────────────────────────────
+// ── Look up user's connected ChatGPT token ────────────────────────────────────
+async function getUserChatGptProvider(
+  supabaseAdmin: any,
+  userId: string,
+): Promise<{ accessToken: string; model: string } | null> {
+  const { data, error } = await supabaseAdmin
+    .from('user_openai_links')
+    .select('is_connected, access_token, expires_at, selected_model, model_discovery_verified')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  if (!data.is_connected || !data.access_token) return null;
+  if (!data.model_discovery_verified || !data.selected_model) return null;
+
+  // Check token expiry
+  if (data.expires_at && new Date(data.expires_at) < new Date()) {
+    console.warn(`[AI ROUTER] user=${userId} token expired at ${data.expires_at}`);
+    return null;
+  }
+
+  return { accessToken: data.access_token, model: data.selected_model };
+}
+
+// ── Update last_provider_used after a successful call ─────────────────────────
+async function trackUsage(supabaseAdmin: any, userId: string, provider: string): Promise<void> {
+  await supabaseAdmin
+    .from('user_openai_links')
+    .update({ last_provider_used: provider, last_used_at: new Date().toISOString() })
+    .eq('user_id', userId);
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // ── Auth — verify the caller is a logged-in Kynetix user ─────────────────
+    // ── Auth ──────────────────────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
@@ -177,9 +188,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const userJwt = authHeader.replace('Bearer ', '').trim();
-    // Inject the JWT via global headers — this lets Supabase Auth API verify
-    // it server-side (supports ES256). Do NOT pass userJwt to getUser() directly
-    // as that triggers local HS256 verification which fails on ES256 tokens.
     const supabaseAnon = createClient(
       Deno.env.get('SUPABASE_URL')      ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -203,124 +211,124 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── Read secrets from environment (NEVER from client) ────────────────────
-    const openaiKey:    string = Deno.env.get('OPENAI_API_KEY')    ?? '';
-    const openrouterKey:string = Deno.env.get('OPENROUTER_API_KEY') ?? '';
+    // ── Set up service-role client for token lookup + tracking ────────────────
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')              ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    );
 
-    // Redacted prefix for safe logging
-    const keyHint = openaiKey ? `sk-...${openaiKey.slice(-4)}` : '(not set)';
-    console.log(`[AI ROUTER] user=${user.id} msgs=${messages.length} stream=${streamMode} openai_key=${keyHint}`);
+    const openrouterKey: string = Deno.env.get('OPENROUTER_API_KEY') ?? '';
+
+    // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
+    const userProvider = await getUserChatGptProvider(supabaseAdmin, user.id);
+    const providerLabel = userProvider ? 'user_chatgpt' : 'openrouter';
+
+    console.log(`[AI ROUTER] user=${user.id} stream=${streamMode} provider=${providerLabel} model=${userProvider?.model ?? OPENROUTER_MODEL}`);
 
     // ══════════════════════════════════════════════════
-    // STREAMING PATH — pipe SSE directly back to client
+    // STREAMING PATH
     // ══════════════════════════════════════════════════
     if (streamMode) {
-      if (openaiKey) {
+      // ── Attempt 1: User's ChatGPT ──────────────────────────────────────────
+      if (userProvider) {
         try {
-          const sRes = await callChatStream(OPENAI_CHAT_URL, openaiKey, OPENAI_MODEL, messages);
-          console.log(`[AI ROUTER] streaming via OpenAI`);
+          const sRes = await callChatStream(
+            OPENAI_CHAT_URL, userProvider.accessToken, userProvider.model, messages,
+          );
+          await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
+          console.log(`[AI ROUTER] streaming via user_chatgpt model=${userProvider.model}`);
           return new Response(sRes.body, {
             headers: {
               ...corsHeaders,
               'Content-Type':     'text/event-stream',
               'Cache-Control':    'no-cache',
-              'X-Provider-Used':  'openai',
+              'X-Provider-Used':  'user_chatgpt',
+              'X-Model-Used':     userProvider.model,
             },
           });
         } catch (err: any) {
-          console.error(`[AI ROUTER] OpenAI stream failed: ${err?.message?.slice(0, 300)}`);
+          console.error(`[AI ROUTER] user_chatgpt stream failed: ${err?.message?.slice(0, 300)}`);
           // Fall through to OpenRouter
         }
       }
+
+      // ── Attempt 2: OpenRouter ──────────────────────────────────────────────
       if (openrouterKey) {
         try {
           const sRes = await callChatStream(
             OPENROUTER_URL, openrouterKey, OPENROUTER_MODEL, messages,
             { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
           );
-          console.log(`[AI ROUTER] streaming via OpenRouter`);
+          console.log(`[AI ROUTER] streaming via openrouter`);
           return new Response(sRes.body, {
             headers: {
               ...corsHeaders,
               'Content-Type':    'text/event-stream',
               'Cache-Control':   'no-cache',
               'X-Provider-Used': 'openrouter',
+              'X-Model-Used':    OPENROUTER_MODEL,
             },
           });
         } catch (err: any) {
           console.error(`[AI ROUTER] OpenRouter stream failed: ${err?.message?.slice(0, 300)}`);
         }
       }
+
       return new Response(JSON.stringify({ error: 'All providers failed for streaming' }), {
         status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // ══════════════════════════════════════════════════
-    // NON-STREAMING PATH (unchanged)
+    // NON-STREAMING PATH
     // ══════════════════════════════════════════════════
 
-    if (openaiKey) {
+    // ── Attempt 1: User's ChatGPT ────────────────────────────────────────────
+    if (userProvider) {
       try {
         const { text, usage } = await callChat(
-          OPENAI_CHAT_URL,
-          openaiKey,
-          OPENAI_MODEL,
-          messages,
+          OPENAI_CHAT_URL, userProvider.accessToken, userProvider.model, messages,
         );
-
-        console.log(`[AI ROUTER] provider=OPENAI success`);
+        await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
+        console.log(`[AI ROUTER] provider=user_chatgpt model=${userProvider.model} success`);
         return new Response(JSON.stringify({
           success:       true,
-          provider_used: 'openai',
+          provider_used: 'user_chatgpt',
+          model_used:    userProvider.model,
           response:      text,
           usage,
           fallback_used: false,
-        }), {
-          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
       } catch (err: any) {
-        const reason = err?.message ?? String(err);
-        console.error(`[AI ROUTER] OpenAI FAILED → falling back to OpenRouter`);
-        console.error(`[AI ROUTER] OpenAI error detail: ${reason.slice(0, 400)}`);
+        console.error(`[AI ROUTER] user_chatgpt failed: ${err?.message?.slice(0, 300)}`);
         // Fall through to OpenRouter
       }
-    } else {
-      console.warn(`[AI ROUTER] OPENAI_API_KEY not set — skipping OpenAI, using OpenRouter directly`);
     }
 
-    // ── Step 2: OpenRouter fallback ───────────────────────────────────────────
+    // ── Attempt 2: OpenRouter ────────────────────────────────────────────────
     if (!openrouterKey) {
-      console.error(`[AI ROUTER] all providers failed — no OpenRouter key either`);
       return new Response(JSON.stringify({
         success:       false,
         provider_used: 'none',
-        error:         'No AI providers available. Contact support.',
-      }), {
-        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+        error:         'No AI providers available. Connect your ChatGPT account or contact support.',
+      }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     try {
       const { text, usage } = await callChat(
-        OPENROUTER_URL,
-        openrouterKey,
-        OPENROUTER_MODEL,
-        messages,
+        OPENROUTER_URL, openrouterKey, OPENROUTER_MODEL, messages,
         { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
       );
-
-      console.log(`[AI ROUTER] provider=OPENROUTER success`);
+      console.log(`[AI ROUTER] provider=openrouter success`);
       return new Response(JSON.stringify({
         success:       true,
         provider_used: 'openrouter',
+        model_used:    OPENROUTER_MODEL,
         response:      text,
         usage,
-        fallback_used: true,
-      }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+        fallback_used: !userProvider, // true if user never connected, false if user_chatgpt failed
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } catch (err: any) {
       const reason = err?.message ?? String(err);
@@ -329,11 +337,7 @@ Deno.serve(async (req: Request) => {
         success:       false,
         provider_used: 'none',
         error:         'All AI providers failed',
-        openai_error:  'See logs',
-        openrouter_error: reason.slice(0, 200),
-      }), {
-        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
   } catch (err: any) {

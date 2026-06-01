@@ -436,14 +436,16 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      const provider = routerRes.headers.get('x-provider-used') ?? 'unknown';
-      console.log(`[ai-meal-coach] piping SSE stream, provider=${provider}`);
+      const provider   = routerRes.headers.get('x-provider-used') ?? 'unknown';
+      const modelUsed  = routerRes.headers.get('x-model-used')    ?? 'unknown';
+      console.log(`[ai-meal-coach] piping SSE stream, provider=${provider} model=${modelUsed}`);
       return new Response(routerRes.body, {
         headers: {
           ...corsHeaders,
           'Content-Type':    'text/event-stream',
           'Cache-Control':   'no-cache',
           'X-Provider-Used': provider,
+          'X-Model-Used':    modelUsed,
         },
       });
     }
@@ -491,11 +493,12 @@ Deno.serve(async (req: Request) => {
     const aiResponse: string = routerData.response ?? '';
 
     // ── Return structured response ────────────────────────────────────────────
-    console.log(`[ai-meal-coach] ✅ success provider=${routerData.provider_used} fallback=${routerData.fallback_used}`);
+    console.log(`[ai-meal-coach] ✅ success provider=${routerData.provider_used} model=${routerData.model_used} fallback=${routerData.fallback_used}`);
     return new Response(JSON.stringify({
       success:        true,
       message:        aiResponse,
       provider_used:  routerData.provider_used,
+      model_used:     routerData.model_used ?? null,
       fallback_used:  routerData.fallback_used,
       context: {
         date_key:     dateKey,
