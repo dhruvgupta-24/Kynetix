@@ -30,6 +30,10 @@ class ParserLexicon {
     'sweet potato',
     'burger king',
     'kfc chicken',
+    'protein bar',
+    'tedhe medhe',
+    'energy bar',
+    'granola bar',
   };
 
   /// Implicit pairing mapping.

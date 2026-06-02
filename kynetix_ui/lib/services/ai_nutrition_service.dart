@@ -108,19 +108,64 @@ class AiNutritionService {
       throw FormatException('AI returned non-JSON: $text');
     }
 
-    for (final k in ['canonicalMeal', 'items', 'calories', 'protein', 'confidence']) {
-      if (!json.containsKey(k)) {
-        throw FormatException('AI response missing key: "$k"');
-      }
+    // Normalize snake_case keys to camelCase.
+    Map<String, dynamic> normalizeKeys(Map<String, dynamic> map) {
+      final result = <String, dynamic>{};
+      map.forEach((k, v) {
+        var newKey = k;
+        if (k == 'canonical_meal') {
+          newKey = 'canonicalMeal';
+        } else if (k == 'coach_summary') {
+          newKey = 'coachSummary';
+        } else if (k == 'best_next_foods') {
+          newKey = 'bestNextFoods';
+        } else if (k == 'meal_category') {
+          newKey = 'mealCategory';
+        } else if (k == 'meal_density') {
+          newKey = 'mealDensity';
+        } else if (k == 'risk_flags') {
+          newKey = 'riskFlags';
+        } else if (k == 'estimation_mode') {
+          newKey = 'estimationMode';
+        }
+        
+        if (v is Map<String, dynamic>) {
+          result[newKey] = normalizeKeys(v);
+        } else if (v is List) {
+          result[newKey] = v.map((item) {
+            if (item is Map<String, dynamic>) {
+              return normalizeKeys(item);
+            }
+            return item;
+          }).toList();
+        } else {
+          result[newKey] = v;
+        }
+      });
+      return result;
     }
 
-    final calMap  = json['calories'] as Map<String, dynamic>? ?? {};
-    final proMap  = json['protein']  as Map<String, dynamic>? ?? {};
-    final rawConf = (json['confidence'] as num?)?.toDouble() ?? 0.7;
+    json = normalizeKeys(json);
 
-    final items = (json['items'] as List<dynamic>? ?? [])
-        .map((el) => NutritionItem.fromJson(el as Map<String, dynamic>))
-        .toList();
+    final canonicalMeal = json['canonicalMeal'] as String? ?? rawInput;
+    final itemsList = json['items'] as List<dynamic>? ?? [];
+    final rawConf = (json['confidence'] as num?)?.toDouble() ?? 0.85;
+
+    final items = itemsList.map((el) {
+      if (el is Map<String, dynamic>) {
+        var itemMap = Map<String, dynamic>.from(el);
+        if (itemMap['calories'] is num) {
+          final c = (itemMap['calories'] as num).toDouble();
+          itemMap['calories'] = {'min': c, 'max': c};
+        }
+        if (itemMap['protein'] is num) {
+          final p = (itemMap['protein'] as num).toDouble();
+          itemMap['protein'] = {'min': p, 'max': p};
+        }
+        return NutritionItem.fromJson(itemMap);
+      }
+      return NutritionItem.fromJson(const {});
+    }).toList();
 
     // Cross-check: use item sums when they diverge from stated totals >15%.
     final sumCal = items.fold(
@@ -132,8 +177,26 @@ class AiNutritionService {
       (a, i) => (min: a.min + i.protein.min,  max: a.max + i.protein.max),
     );
 
-    final calTotal = _rng(calMap);
-    final proTotal = _rng(proMap);
+    NutrientRange parseRange(dynamic raw, ({double min, double max}) sumDefault) {
+      if (raw == null) return NutrientRange(min: sumDefault.min, max: sumDefault.max);
+      if (raw is num) {
+        final val = raw.toDouble();
+        return NutrientRange(min: val, max: val);
+      }
+      if (raw is Map<String, dynamic>) {
+        final minVal = (raw['min'] ?? raw['minimum'] ?? sumDefault.min) as num?;
+        final maxVal = (raw['max'] ?? raw['maximum'] ?? sumDefault.max) as num?;
+        return NutrientRange(
+          min: minVal?.toDouble() ?? sumDefault.min,
+          max: maxVal?.toDouble() ?? sumDefault.max,
+        );
+      }
+      return NutrientRange(min: sumDefault.min, max: sumDefault.max);
+    }
+
+    final calTotal = parseRange(json['calories'], sumCal);
+    final proTotal = parseRange(json['protein'], sumPro);
+
     final useCal   = _within15(calTotal, sumCal)
         ? calTotal
         : NutrientRange(min: _r(sumCal.min), max: _r(sumCal.max));
@@ -146,7 +209,7 @@ class AiNutritionService {
         '${usePro.min.toInt()}–${usePro.max.toInt()}g protein');
 
     return NutritionResult(
-      canonicalMeal: json['canonicalMeal'] as String? ?? rawInput,
+      canonicalMeal: canonicalMeal,
       items:         items,
       calories:      useCal,
       protein:       usePro,
@@ -168,10 +231,6 @@ class AiNutritionService {
   // ai-chat-router Supabase Edge Function. No HTTP calls to AI providers
   // from the Flutter client.
 
-  NutrientRange _rng(Map<String, dynamic> m) => NutrientRange(
-        min: (m['min'] as num?)?.toDouble() ?? 0,
-        max: (m['max'] as num?)?.toDouble() ?? 0,
-      );
 
   bool _within15(NutrientRange g, ({double min, double max}) s) {
     if (g.max == 0 && s.max == 0) return true;

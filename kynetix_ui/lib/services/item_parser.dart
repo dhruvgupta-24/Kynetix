@@ -74,7 +74,7 @@ class ItemParser {
     // Handle numerical prefixes if fractions didn't match.
     // e.g., "1.5 cup rice", "1 scoop whey"
     if (!handledFractions) {
-      final numberMatch = RegExp(r'^([0-9]*\.?[0-9]+)\s+(.*)').firstMatch(chunk);
+      final numberMatch = RegExp(r'^([0-9]*\.?[0-9]+)\s*[xX]?\s+(.*)').firstMatch(chunk);
       if (numberMatch != null) {
         final parsedNum = double.tryParse(numberMatch.group(1) ?? '');
         if (parsedNum != null) {

@@ -8,6 +8,7 @@ import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── Profile Screen ────────────────────────────────────────────────────────────
 
@@ -414,19 +415,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _Section(
       child: Row(
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2D6A4F),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Center(
-              child: Text(
-                _profile.gender == 'Male' ? '👨' : '👩',
-                style: const TextStyle(fontSize: 34),
-              ),
-            ),
+          Builder(
+            builder: (context) {
+              final user = Supabase.instance.client.auth.currentUser;
+              final avatarUrl = user?.userMetadata?['avatar_url'] ?? user?.userMetadata?['picture'] as String?;
+
+              String getInitials(String name) {
+                if (name.isEmpty) return 'K';
+                final parts = name.trim().split(RegExp(r'\s+'));
+                if (parts.length == 1) {
+                  return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
+                }
+                return (parts.first[0] + parts.last[0]).toUpperCase();
+              }
+
+              final initials = getInitials(_profile.name);
+
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  color: const Color(0xFF2D6A4F),
+                  child: avatarUrl != null && avatarUrl.isNotEmpty
+                      ? Image.network(
+                          avatarUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Center(
+                              child: Text(
+                                initials,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : Center(
+                          child: Text(
+                            initials,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                ),
+              );
+            },
           ),
           const SizedBox(width: 16),
           Expanded(

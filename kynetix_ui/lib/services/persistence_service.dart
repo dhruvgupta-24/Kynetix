@@ -5,6 +5,7 @@ import '../screens/onboarding_screen.dart';
 import '../models/day_log.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
+import 'widget_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -98,6 +99,7 @@ class PersistenceService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kProfile, jsonEncode(p.toJson()));
+      WidgetService.updateWidgetData().ignore();
     } catch (_) {}
   }
 
@@ -109,7 +111,6 @@ class PersistenceService {
     } catch (_) {}
   }
 
-  /// Persist all day logs, pruning entries older than 90 days.
   static Future<void> saveDayLogs() async {
     try {
       final cutoff = DateTime.now().subtract(const Duration(days: 90));
@@ -122,6 +123,8 @@ class PersistenceService {
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kDayLogs, jsonEncode(pruned));
+      
+      WidgetService.updateWidgetData().ignore();
       
       // Fire-and-forget sync to Supabase
       CloudSyncService.instance.syncDayLogsBackground();

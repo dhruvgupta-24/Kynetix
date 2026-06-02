@@ -12,6 +12,8 @@ Kynetix is an Android app built with Flutter for Indian users who want realistic
 - **Health Connect integration** - reads step history to gently influence maintenance estimate
 - **Workout tracker** - logs workouts and flags gym vs rest days
 - **Personalized food memory** - remembers your recurring meals and uses them in future estimates
+- **Weight Tracking Trend Chart & Stats** - stateful interactive custom trend chart supporting range selection (7D, 30D, 90D, ALL), interactive touch hover/tap detection (displays vertical line, neon intersection dot, and glassmorphism tooltip card with haptics), displays Min/Max/Avg weight range statistics, and includes data quality badges based on `WeightQualityReport`.
+- **Android Home Screen Widget** - native home widget supporting responsive layouts (2x2, 4x2, 4x4) and tap-to-open. The widget renders double concentric progress rings (Google Fit style) on a Canvas (Calories outer orange `#FF6B35`/yellow `#F59E0B`; Protein inner green `#52B788`/yellow `#F59E0B`), updates dynamically on meal/profile modifications, and supports date-based local rollover.
 
 ---
 
@@ -36,6 +38,12 @@ Flutter App (kynetix_ui / Android)
 ```
 
 **Security principle:** All private AI API keys live exclusively in Supabase Edge Function secrets. The Flutter frontend contains zero private keys.
+
+### Android Home Widget Synchronization
+- **Dart SharedPreferences**: When today's meal log, user targets, or profile details change, `WidgetService` calculates today's consumed/remaining calories and protein, serializes them to a JSON string, and saves it in SharedPreferences with the key `flutter.widget_data_v1`.
+- **MethodChannel Update Broadcast**: `WidgetService` fires an update call over the MethodChannel `com.kynetix.app/widget`. The native `MainActivity` intercepts it and broadcasts a refresh intent (`AppWidgetManager.ACTION_APPWIDGET_UPDATE`) containing all active widget IDs.
+- **Native Render & Layouts**: `KynetixWidgetProvider` intercepts the broadcast, parses the SharedPreferences JSON, dynamically draws concentric rings (outer orange/yellow for calories, inner green/yellow for protein) on a Bitmap via native `Canvas` and `Paint`, and updates `RemoteViews`.
+- **Offline Midnight Rollover**: `KynetixWidgetProvider` automatically tracks `last_update_date` in the SharedPreferences payload. If a new calendar day is reached, the widget provider automatically resets consumed values to `0.0` locally and refreshes the UI without requiring a prior launch of the Flutter app.
 
 ---
 

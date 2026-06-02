@@ -163,6 +163,20 @@ class _FoodEntry {
 
 
 const List<_FoodEntry> _db = [
+  _FoodEntry(
+    label:    'Protein Bar',
+    keywords: ['protein bar', 'energy bar', 'granola bar', 'bar'],
+    calories: NutrientRange(min: 180, max: 240),
+    protein:  NutrientRange(min: 15.0, max: 22.0),
+    tier:     _Tier.veryHigh,
+  ),
+  _FoodEntry(
+    label:    'Indian Snacks / Namkeen',
+    keywords: ['tedhe medhe', 'kurkure', 'chips', 'namkeen', 'snack', 'snacks', 'lay', 'lays', 'bingo'],
+    calories: NutrientRange(min: 130, max: 170),
+    protein:  NutrientRange(min: 1.5, max: 3.0),
+    tier:     _Tier.medium,
+  ),
   // ── Simple proteins (listed first — longer keywords matched before 'egg') ──
   // Egg white (1 white) ≈ 17 kcal, 3.6 g protein
   _FoodEntry(
@@ -557,6 +571,37 @@ NutrientRange _widen(NutrientRange r, double extraSpread) {
   return NutrientRange(min: _rnd(r.min - pad), max: _rnd(r.max + pad));
 }
 
+int _levenshtein(String s, String t) {
+  if (s == t) return 0;
+  if (s.isEmpty) return t.length;
+  if (t.isEmpty) return s.length;
+
+  List<int> v0 = List<int>.generate(t.length + 1, (i) => i);
+  List<int> v1 = List<int>.filled(t.length + 1, 0);
+
+  for (int i = 0; i < s.length; i++) {
+    v1[0] = i + 1;
+    for (int j = 0; j < t.length; j++) {
+      int cost = (s.codeUnitAt(i) == t.codeUnitAt(j)) ? 0 : 1;
+      v1[j + 1] = [v1[j] + 1, v0[j + 1] + 1, v0[j] + cost].reduce((a, b) => a < b ? a : b);
+    }
+    v0 = List<int>.from(v1);
+  }
+  return v0[t.length];
+}
+
+bool _isFuzzyMatch(String token, String part) {
+  if (token == part) return true;
+  // Handle simple plurals
+  if (token == '${part}s' || token == '${part}es' || part == '${token}s' || part == '${token}es') {
+    return true;
+  }
+  if (part.length <= 3) return false;
+  final dist = _levenshtein(token, part);
+  final maxDist = part.length <= 6 ? 1 : 2;
+  return dist <= maxDist;
+}
+
 /// Returns the set of token indices claimed by the match, or null if no match.
 /// Uses [claimed] to avoid re-using tokens already consumed by a prior match.
 /// This prevents 'egg' from matching after 'egg whites' has already claimed it.
@@ -572,7 +617,7 @@ Set<int>? _matchedIndices(
     for (final part in parts) {
       bool found = false;
       for (int i = 0; i < tokens.length; i++) {
-        if (tokens[i] == part && !claimed.contains(i) && !indices.contains(i)) {
+        if (_isFuzzyMatch(tokens[i], part) && !claimed.contains(i) && !indices.contains(i)) {
           indices.add(i);
           found = true;
           break;
@@ -640,11 +685,18 @@ const _coverageFillerTokens = {
   'for',
   'to',
   'plus',
+  'x',
 };
 
 LocalEstimationAnalysis analyzeLocalEstimation(String input) {
   final lc     = input.toLowerCase().trim();
-  final tokens = lc.split(RegExp(r'[\s,+&/]+'));
+  final rawTokens = lc.split(RegExp(r'[\s,+&/]+'));
+  final tokens = rawTokens.map((t) {
+    if (RegExp(r'^\d+(\.\d+)?[xX]$').hasMatch(t)) {
+      return t.substring(0, t.length - 1);
+    }
+    return t;
+  }).toList();
 
   if (lc.isEmpty) {
     return const LocalEstimationAnalysis(

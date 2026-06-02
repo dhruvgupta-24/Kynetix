@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async' show Timer;
 import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/day_detail_screen.dart';
@@ -7,8 +8,10 @@ import '../models/day_log.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
+import '../services/widget_service.dart';
 import '../services/workout_service.dart';
 import '../screens/app_shell.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -113,6 +116,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _weightHistory = weightHistory.isNotEmpty ? weightHistory : _weightHistory;
       _syncing       = false;
     });
+    WidgetService.updateWidgetData().ignore();
   }
 
   UserProfile get _profile => currentUserProfile!;
@@ -413,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _weightHistory = weights.isNotEmpty ? weights : _weightHistory;
       _syncing = false;
     });
+    WidgetService.updateWidgetData().ignore();
 
     if (weights.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1141,18 +1146,53 @@ class _AvatarBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
+    final user = Supabase.instance.client.auth.currentUser;
+    final avatarUrl = user?.userMetadata?['avatar_url'] ?? user?.userMetadata?['picture'] as String?;
+
+    String getInitials(String name) {
+      if (name.isEmpty) return 'K';
+      final parts = name.trim().split(RegExp(r'\s+'));
+      if (parts.length == 1) {
+        return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
+      }
+      return (parts.first[0] + parts.last[0]).toUpperCase();
+    }
+
+    final initials = getInitials(profile.name);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(13),
+      child: Container(
+        width: 44,
+        height: 44,
         color: const Color(0xFF2D6A4F),
-        borderRadius: BorderRadius.circular(13),
-      ),
-      child: Center(
-        child: Text(
-          profile.gender == 'Male' ? '👨' : '👩',
-          style: const TextStyle(fontSize: 22),
-        ),
+        child: avatarUrl != null && avatarUrl.isNotEmpty
+            ? Image.network(
+                avatarUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Center(
+                    child: Text(
+                      initials,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  );
+                },
+              )
+            : Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -1699,7 +1739,7 @@ class _WeightSummaryChip extends StatelessWidget {
 
 // ─── Weight Trend Card ────────────────────────────────────────────────────────
 
-class _WeightTrendCard extends StatelessWidget {
+class _WeightTrendCard extends StatefulWidget {
   final List<WeightReading>? weightHistory;
   final VoidCallback onRequestPermission;
 
@@ -1709,10 +1749,46 @@ class _WeightTrendCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final history = weightHistory;
+  State<_WeightTrendCard> createState() => _WeightTrendCardState();
+}
 
-    // No data: show a compact prompt to connect weight tracking.
+class _WeightTrendCardState extends State<_WeightTrendCard> {
+  String _range = '30D';
+  int? _hoveredIndex;
+  Timer? _tooltipTimer;
+
+  @override
+  void dispose() {
+    _tooltipTimer?.cancel();
+    super.dispose();
+  }
+
+  void _handleTouch(Offset localPos, double width, int pointCount) {
+    if (pointCount < 1) return;
+    _tooltipTimer?.cancel();
+    final idx = (localPos.dx / width * (pointCount - 1)).round().clamp(0, pointCount - 1);
+    if (idx != _hoveredIndex) {
+      setState(() {
+        _hoveredIndex = idx;
+      });
+      kHaptic();
+    }
+  }
+
+  void _clearTouch() {
+    _tooltipTimer?.cancel();
+    _tooltipTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _hoveredIndex = null;
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final history = widget.weightHistory;
     if (history == null || history.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -1748,7 +1824,7 @@ class _WeightTrendCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               ElevatedButton(
-                onPressed: onRequestPermission,
+                onPressed: widget.onRequestPermission,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF3B82F6),
                   foregroundColor: Colors.white,
@@ -1768,21 +1844,62 @@ class _WeightTrendCard extends StatelessWidget {
       );
     }
 
-    // Sparse data (< 3 readings): show mini list of recent weigh-ins.
-    if (history.length < 3) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        child: _Card(
-          child: _WeightMiniList(history: history),
-        ),
-      );
+    final now = DateTime.now();
+    final DateTime cutoff;
+    switch (_range) {
+      case '7D':
+        cutoff = now.subtract(const Duration(days: 7));
+        break;
+      case '30D':
+        cutoff = now.subtract(const Duration(days: 30));
+        break;
+      case '90D':
+        cutoff = now.subtract(const Duration(days: 90));
+        break;
+      case 'ALL':
+      default:
+        cutoff = DateTime(1970);
+        break;
     }
 
-    // Full chart: ≥ 3 readings.
-    final latest    = history.first;
-    final delta7d   = _delta7d(history);
-    final delta30d  = _delta30d(history);
-    final chartData = history.reversed.toList(); // oldest → newest for X axis
+    final filtered = history.where((r) => r.recordedAt.isAfter(cutoff)).toList();
+    final chartData = filtered.reversed.toList(); // oldest -> newest for X axis
+
+    final latest = history.first;
+    final fullContext = WeightContext.fromHistory(history);
+    final delta7d = fullContext?.delta7dKg;
+    final delta30d = fullContext?.delta30dKg;
+    final qualityLabel = fullContext?.quality.confidenceLabel ?? 'low';
+
+    double? minW, maxW, avgW;
+    if (filtered.isNotEmpty) {
+      final weights = filtered.map((r) => r.kg).toList();
+      minW = weights.reduce((a, b) => a < b ? a : b);
+      maxW = weights.reduce((a, b) => a > b ? a : b);
+      avgW = weights.reduce((a, b) => a + b) / weights.length;
+    }
+
+    final String trendText;
+    final IconData trendIcon;
+    final Color trendColor;
+    switch (fullContext?.trendDirection ?? 'unknown') {
+      case 'gaining':
+        trendText = 'Gaining';
+        trendIcon = Icons.trending_up_rounded;
+        trendColor = const Color(0xFFEF4444);
+        break;
+      case 'losing':
+        trendText = 'Losing';
+        trendIcon = Icons.trending_down_rounded;
+        trendColor = const Color(0xFF52B788);
+        break;
+      case 'stable':
+      default:
+        trendText = 'Stable';
+        trendIcon = Icons.remove_rounded;
+        trendColor = const Color(0xFF9CA3AF);
+        break;
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -1790,7 +1907,6 @@ class _WeightTrendCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1803,37 +1919,248 @@ class _WeightTrendCard extends StatelessWidget {
                             color: Color(0xFF9CA3AF),
                             fontWeight: FontWeight.w500)),
                     const SizedBox(height: 4),
-                    Text('${latest.kg.toStringAsFixed(1)} kg',
-                        style: const TextStyle(
-                            fontSize: 24,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5)),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text('${latest.kg.toStringAsFixed(1)} kg',
+                            style: const TextStyle(
+                                fontSize: 24,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5)),
+                        const SizedBox(width: 8),
+                        Icon(trendIcon, size: 14, color: trendColor),
+                        const SizedBox(width: 3),
+                        Text(trendText,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: trendColor,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ],
                 ),
-                // Delta chips
                 Row(
-                  children: [
-                    if (delta7d != null) _DeltaChip('7d', delta7d),
-                    if (delta30d != null) ...[
-                      const SizedBox(width: 8),
-                      _DeltaChip('30d', delta30d),
-                    ],
-                  ],
+                  children: ['7D', '30D', '90D', 'ALL'].map((r) {
+                    final isSelected = _range == r;
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: GestureDetector(
+                        onTap: () {
+                          kHaptic();
+                          setState(() {
+                            _range = r;
+                            _hoveredIndex = null;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFF52B788).withValues(alpha: 0.15) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF52B788) : Colors.transparent,
+                              width: 1,
+                            ),
+                          ),
+                          child: Text(
+                            r,
+                            style: TextStyle(
+                              color: isSelected ? const Color(0xFF52B788) : const Color(0xFF9CA3AF),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            // Chart
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (delta7d != null) _DeltaChip('7d', delta7d),
+                if (delta30d != null) ...[
+                  const SizedBox(width: 8),
+                  _DeltaChip('30d', delta30d),
+                ],
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (qualityLabel == 'high'
+                            ? const Color(0xFF52B788)
+                            : (qualityLabel == 'medium' ? const Color(0xFF60A5FA) : const Color(0xFFFFB347)))
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: (qualityLabel == 'high'
+                              ? const Color(0xFF52B788)
+                              : (qualityLabel == 'medium' ? const Color(0xFF60A5FA) : const Color(0xFFFFB347)))
+                          .withValues(alpha: 0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Text(
+                    '$qualityLabel data',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: qualityLabel == 'high'
+                          ? const Color(0xFF52B788)
+                          : (qualityLabel == 'medium' ? const Color(0xFF60A5FA) : const Color(0xFFFFB347)),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             SizedBox(
-              height: 100,
-              child: CustomPaint(
-                size: Size.infinite,
-                painter: _WeightChartPainter(readings: chartData),
-              ),
+              height: 110,
+              child: chartData.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No weigh-ins in this period',
+                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final width = constraints.maxWidth;
+                        final height = constraints.maxHeight;
+
+                        final weights = chartData.map((r) => r.kg).toList();
+                        final minWVal = weights.reduce((a, b) => a < b ? a : b);
+                        final maxWVal = weights.reduce((a, b) => a > b ? a : b);
+                        final rangeVal = (maxWVal - minWVal).clamp(0.5, double.infinity);
+                        final paddingVal = rangeVal * 0.2;
+                        
+                        double getY(double kg) {
+                          final norm = (kg - (minWVal - paddingVal)) / (rangeVal + paddingVal * 2);
+                          return height - norm * height;
+                        }
+
+                        Widget? tooltipWidget;
+                        if (_hoveredIndex != null && _hoveredIndex! < chartData.length) {
+                          final reading = chartData[_hoveredIndex!];
+                          final x = _hoveredIndex! / (chartData.length - 1) * width;
+                          final y = getY(reading.kg);
+
+                          final dateStr = '${reading.recordedAt.month}/${reading.recordedAt.day}';
+                          tooltipWidget = Positioned(
+                            left: (x - 50).clamp(0.0, width - 100.0),
+                            top: (y - 45).clamp(0.0, height - 20.0),
+                            child: Container(
+                              width: 100,
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF222232),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFF52B788), width: 1),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  )
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '${reading.kg.toStringAsFixed(1)} kg',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    dateStr,
+                                    style: const TextStyle(
+                                      color: Color(0xFF9CA3AF),
+                                      fontSize: 9,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanStart: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                          onPanUpdate: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                          onPanEnd: (_) => _clearTouch(),
+                          onPanCancel: () => _clearTouch(),
+                          onTapDown: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                          onTapUp: (_) => _clearTouch(),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              CustomPaint(
+                                size: Size.infinite,
+                                painter: _WeightChartPainter(
+                                  readings: chartData,
+                                  hoveredIndex: _hoveredIndex,
+                                  getY: getY,
+                                ),
+                              ),
+                              if (tooltipWidget != null) tooltipWidget,
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
             const SizedBox(height: 10),
-            // Source note
+            if (chartData.length >= 2)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${chartData.first.recordedAt.month}/${chartData.first.recordedAt.day}',
+                      style: const TextStyle(fontSize: 9, color: Color(0xFF6B7280)),
+                    ),
+                    Text(
+                      '${chartData[chartData.length ~/ 2].recordedAt.month}/${chartData[chartData.length ~/ 2].recordedAt.day}',
+                      style: const TextStyle(fontSize: 9, color: Color(0xFF6B7280)),
+                    ),
+                    Text(
+                      '${chartData.last.recordedAt.month}/${chartData.last.recordedAt.day}',
+                      style: const TextStyle(fontSize: 9, color: Color(0xFF6B7280)),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+            if (minW != null && maxW != null && avgW != null)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E2E),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF2A2A3C), width: 0.5),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _StatCol('MIN', '${minW.toStringAsFixed(1)} kg'),
+                    Container(width: 1, height: 16, color: const Color(0xFF2A2A3C)),
+                    _StatCol('MAX', '${maxW.toStringAsFixed(1)} kg'),
+                    Container(width: 1, height: 16, color: const Color(0xFF2A2A3C)),
+                    _StatCol('AVG', '${avgW.toStringAsFixed(1)} kg'),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
             Text(
               '${history.length} readings · Last from ${latest.source}',
               style: TextStyle(
@@ -1845,28 +2172,153 @@ class _WeightTrendCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  double? _delta7d(List<WeightReading> h) {
-    if (h.length < 2) return null;
-    final now    = h.first.recordedAt;
-    final cutoff = now.subtract(const Duration(days: 8));
-    final older  = h.firstWhere(
-        (r) => r.recordedAt.isBefore(cutoff),
-        orElse: () => h.last);
-    if (older == h.first) return null;
-    return h.first.kg - older.kg;
+class _StatCol extends StatelessWidget {
+  final String label;
+  final String value;
+  const _StatCol(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 8, color: Color(0xFF6B7280), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+        const SizedBox(height: 2),
+        Text(value, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+}
+
+class _WeightChartPainter extends CustomPainter {
+  final List<WeightReading> readings;
+  final int? hoveredIndex;
+  final double Function(double) getY;
+
+  _WeightChartPainter({
+    required this.readings,
+    required this.hoveredIndex,
+    required this.getY,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (readings.isEmpty) return;
+
+    final gridPaint = Paint()
+      ..color = const Color(0xFF2A2A3C)
+      ..strokeWidth = 0.8
+      ..style = PaintingStyle.stroke;
+
+    void drawDashedLine(double y) {
+      const dashWidth = 4.0;
+      const dashSpace = 4.0;
+      double startX = 0.0;
+      while (startX < size.width) {
+        canvas.drawLine(Offset(startX, y), Offset(startX + dashWidth, y), gridPaint);
+        startX += dashWidth + dashSpace;
+      }
+    }
+
+    drawDashedLine(size.height * 0.25);
+    drawDashedLine(size.height * 0.50);
+    drawDashedLine(size.height * 0.75);
+
+    final n = readings.length;
+
+    if (n == 1) {
+      final y = getY(readings.first.kg);
+      final centerPoint = Offset(size.width / 2, y);
+
+      canvas.drawCircle(centerPoint, 6.0, Paint()..color = const Color(0xFF13131F)..style = PaintingStyle.fill);
+      canvas.drawCircle(centerPoint, 4.0, Paint()..color = const Color(0xFF52B788)..style = PaintingStyle.fill);
+
+      const dashWidth = 4.0;
+      const dashSpace = 4.0;
+      double startX = 0.0;
+      final dashedGuidePaint = Paint()
+        ..color = const Color(0xFF52B788).withValues(alpha: 0.3)
+        ..strokeWidth = 1.0;
+      while (startX < size.width) {
+        canvas.drawLine(Offset(startX, y), Offset(startX + dashWidth, y), dashedGuidePaint);
+        startX += dashWidth + dashSpace;
+      }
+      return;
+    }
+
+    final points = List.generate(n, (i) {
+      final x = i / (n - 1) * size.width;
+      final y = getY(readings[i].kg);
+      return Offset(x, y);
+    });
+
+    final linePaint = Paint()
+      ..color = const Color(0xFF52B788)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (int i = 1; i < points.length; i++) {
+      final prev = points[i - 1];
+      final curr = points[i];
+      final cpX  = (prev.dx + curr.dx) / 2;
+      path.cubicTo(cpX, prev.dy, cpX, curr.dy, curr.dx, curr.dy);
+    }
+    canvas.drawPath(path, linePaint);
+
+    final fillPath = Path.from(path)
+      ..lineTo(points.last.dx, size.height)
+      ..lineTo(points.first.dx, size.height)
+      ..close();
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFF52B788).withValues(alpha: 0.20),
+            const Color(0xFF52B788).withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
+    );
+
+    if (hoveredIndex != null && hoveredIndex! < points.length) {
+      final hoveredPt = points[hoveredIndex!];
+
+      final indicatorPaint = Paint()
+        ..color = const Color(0xFF52B788).withValues(alpha: 0.4)
+        ..strokeWidth = 1.0;
+      double startY = hoveredPt.dy;
+      while (startY < size.height) {
+        canvas.drawLine(Offset(hoveredPt.dx, startY), Offset(hoveredPt.dx, startY + 4.0), indicatorPaint);
+        startY += 8.0;
+      }
+
+      canvas.drawCircle(hoveredPt, 7.5, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.25)..style = PaintingStyle.fill);
+      canvas.drawCircle(hoveredPt, 5.0, Paint()..color = const Color(0xFF13131F)..style = PaintingStyle.fill);
+      canvas.drawCircle(hoveredPt, 3.5, Paint()..color = const Color(0xFF52B788)..style = PaintingStyle.fill);
+    } else {
+      final dotPaint = Paint()
+        ..color = const Color(0xFF52B788)
+        ..style = PaintingStyle.fill;
+      final rimPaint  = Paint()
+        ..color = const Color(0xFF1C1C2E)
+        ..style = PaintingStyle.fill;
+
+      for (final pt in points) {
+        canvas.drawCircle(pt, 5.5, rimPaint);
+        canvas.drawCircle(pt, 3.5, dotPaint);
+      }
+    }
   }
 
-  double? _delta30d(List<WeightReading> h) {
-    if (h.length < 2) return null;
-    final now    = h.first.recordedAt;
-    final cutoff = now.subtract(const Duration(days: 31));
-    final older  = h.firstWhere(
-        (r) => r.recordedAt.isBefore(cutoff),
-        orElse: () => h.last);
-    if (older == h.first) return null;
-    return h.first.kg - older.kg;
-  }
+  @override
+  bool shouldRepaint(_WeightChartPainter oldDelegate) =>
+      oldDelegate.readings != readings || oldDelegate.hoveredIndex != hoveredIndex;
 }
 
 class _DeltaChip extends StatelessWidget {
@@ -1898,146 +2350,3 @@ class _DeltaChip extends StatelessWidget {
   }
 }
 
-class _WeightMiniList extends StatelessWidget {
-  final List<WeightReading> history;
-  const _WeightMiniList({required this.history});
-
-  @override
-  Widget build(BuildContext context) {
-    final months = ['Jan','Feb','Mar','Apr','May','Jun',
-                    'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.monitor_weight_outlined,
-                  color: Color(0xFF3B82F6), size: 18),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Weight Tracking',
-                    style: TextStyle(
-                        fontSize: 14, color: Colors.white,
-                        fontWeight: FontWeight.w700)),
-                Text('${history.length} reading${history.length == 1 ? '' : 's'} — log more to see trend',
-                    style: const TextStyle(
-                        fontSize: 11, color: Color(0xFF9CA3AF))),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        ...history.take(3).map((r) {
-          final d = r.recordedAt;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '${months[d.month - 1]} ${d.day}, ${d.year}',
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                ),
-                Text(
-                  '${r.kg.toStringAsFixed(1)} kg',
-                  style: const TextStyle(
-                      fontSize: 13, color: Colors.white,
-                      fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-// ─── Weight Chart Painter ─────────────────────────────────────────────────────
-
-class _WeightChartPainter extends CustomPainter {
-  final List<WeightReading> readings; // oldest → newest
-
-  _WeightChartPainter({required this.readings});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (readings.length < 2) return;
-
-    final weights    = readings.map((r) => r.kg).toList();
-    final minW       = weights.reduce((a, b) => a < b ? a : b);
-    final maxW       = weights.reduce((a, b) => a > b ? a : b);
-    final range      = (maxW - minW).clamp(0.5, double.infinity);
-    final padding    = range * 0.2; // vertical breathing room
-
-    double normalizeY(double kg) =>
-        size.height - ((kg - (minW - padding)) / (range + padding * 2)) * size.height;
-
-    final n      = readings.length;
-    final points = List.generate(n, (i) {
-      final x = i / (n - 1) * size.width;
-      final y = normalizeY(readings[i].kg);
-      return Offset(x, y);
-    });
-
-    // Draw bezier line
-    final linePaint = Paint()
-      ..color = const Color(0xFF3B82F6)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (int i = 1; i < points.length; i++) {
-      final prev = points[i - 1];
-      final curr = points[i];
-      final cpX  = (prev.dx + curr.dx) / 2;
-      path.cubicTo(cpX, prev.dy, cpX, curr.dy, curr.dx, curr.dy);
-    }
-    canvas.drawPath(path, linePaint);
-
-    // Draw gradient fill under line
-    final fillPath = Path.from(path)
-      ..lineTo(points.last.dx, size.height)
-      ..lineTo(points.first.dx, size.height)
-      ..close();
-    canvas.drawPath(
-      fillPath,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            const Color(0xFF3B82F6).withValues(alpha: 0.25),
-            const Color(0xFF3B82F6).withValues(alpha: 0.0),
-          ],
-        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
-    );
-
-    // Draw dot markers
-    final dotPaint = Paint()
-      ..color = const Color(0xFF3B82F6)
-      ..style = PaintingStyle.fill;
-    final rimPaint  = Paint()
-      ..color = const Color(0xFF1C1C2E)
-      ..style = PaintingStyle.fill;
-
-    for (final pt in points) {
-      canvas.drawCircle(pt, 5.5, rimPaint);
-      canvas.drawCircle(pt, 3.5, dotPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_WeightChartPainter oldDelegate) =>
-      oldDelegate.readings != readings;
-}

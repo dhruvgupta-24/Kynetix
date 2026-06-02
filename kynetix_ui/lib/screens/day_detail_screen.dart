@@ -330,17 +330,27 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     _log.remove(section, entry);
     _refresh();
 
+    final media = MediaQuery.of(context);
+    final bottomPadding = media.padding.bottom;
+    final screenWidth = media.size.width;
+    final horizontalMargin = screenWidth > 600 ? (screenWidth - 400) / 2 : 16.0;
+
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 4),
-          backgroundColor: const Color(0xFF1E1E2C),
+          backgroundColor: const Color(0xFF222232),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(12),
+          margin: EdgeInsets.only(
+            bottom: bottomPadding + 80.0,
+            left: horizontalMargin,
+            right: horizontalMargin,
+          ),
+          elevation: 6.0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFF2E2E3E), width: 0.5),
+            side: const BorderSide(color: Color(0xFF52B788), width: 1.2),
           ),
           content: Row(
             children: [
