@@ -24,7 +24,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _selectedDate = DateTime.now();
 
   // ── Health Connect state ────────────────────────────────────────────────────
-  HealthSyncResult? _syncResult;
+  HealthSyncResult?    _syncResult;
+  List<WeightReading>? _weightHistory;  // 90-day weight from Health Connect
   bool _syncing     = false;
   bool _hcAvailable = false;
 
@@ -78,8 +79,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
-    final result = await HealthService().sync();
+    // Run step sync and weight sync concurrently.
+    // Weight permission is separate: a denial does not block step results.
+    // We do NOT auto-request weight permission here — the user must tap
+    // the weight card's "Connect" button to grant it explicitly.
+    final results = await Future.wait([
+      HealthService().sync(),
+      HealthService().syncWeight(),
+    ]);
+
     if (!mounted) return;
+
+    final result        = results[0] as HealthSyncResult;
+    final weightHistory = results[1] as List<WeightReading>;
 
     if (!result.hasError && result.hasData) {
       currentUserProfile = currentUserProfile!.copyWithHealth(
@@ -88,65 +100,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       PersistenceService.saveProfile(currentUserProfile!).ignore();
     }
+
     setState(() {
-      _syncResult = result;
-      _syncing    = false;
+      _syncResult    = result;
+      _weightHistory = weightHistory.isNotEmpty ? weightHistory : _weightHistory;
+      _syncing       = false;
     });
   }
 
   UserProfile get _profile => currentUserProfile!;
 
-  // ── Engine-based target getters ───────────────────────────────────────────
+  // ── Engine-based target ───────────────────────────────────────────────────
   //
-  // The engine is the single source of truth for all nutrition targets.
-  // We compute the weekly plan once per rebuild (pure math, microseconds).
+  // Single _effectiveDayTarget mirrors DayDetailScreen._dayTarget exactly.
+  // Priority order:
+  //   1. Actual logged WorkoutSession (highest truth — real volume/sets → load bonus)
+  //   2. log.gymDay (user manually toggled / type-selected)
+  //   3. WorkoutService split config for this date (auto-prefill)
+  //   4. Rest day fallback
+  //
+  // Calling dayTarget() ONCE ensures dashboard and DayDetail always match,
+  // including the ±200 kcal workout load bonus.
 
   WeeklyTargetPlan get _weeklyPlan =>
       NutritionTargetEngine().weeklyPlan(_profile, health: _syncResult);
 
-  bool get _isActualTrainingDay {
-    final ws = WorkoutService.instance;
-    final isToday = dateKey(_selectedDate) == dateKey(DateTime.now());
+  DayTarget? get _effectiveDayTarget {
+    final ws      = WorkoutService.instance;
+    final log     = _selectedLog;
+    final session = ws.sessionFor(_selectedDate);
+    final splitDay = ws.splitDayFor(_selectedDate);
+    final gymDay  = log.gymDay;
 
-    // 1. Active draft
-    if (isToday && ws.draftSession != null) return true;
-
-    // 2. Completed workout
-    if (ws.sessionsForDate(_selectedDate).isNotEmpty) return true;
-
-    // 3. Explicitly toggled in daily log
-    if (logFor(_selectedDate).gymDay != null) {
-      return logFor(_selectedDate).gymDay!.didGym;
+    // isGymDay: mirrors DayDetail logic exactly.
+    final bool isGymDay;
+    if (gymDay != null) {
+      isGymDay = gymDay.didGym || (session?.isEmpty == false);
+    } else {
+      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
+      isGymDay = splitIsTraining || (session?.isEmpty == false);
     }
 
-    // 4. Scheduled Split
-    if (ws.splitDayFor(_selectedDate) != null) return true;
+    // Best available workout type name: session > user-chosen > split.
+    final String? workoutTypeName;
+    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+      workoutTypeName = session.splitDayName;
+    } else if (gymDay?.workoutType != null) {
+      workoutTypeName = gymDay!.workoutType!.displayName;
+    } else if (gymDay?.splitDayName != null) {
+      workoutTypeName = gymDay!.splitDayName;
+    } else if (splitDay != null && !splitDay.isRestDay) {
+      workoutTypeName = splitDay.name;
+    } else {
+      workoutTypeName = null;
+    }
 
-    return false;
-  }
-
-  double get _targetCalories {
     return NutritionTargetEngine().dayTarget(
       _profile,
-      isGymDay: _isActualTrainingDay,
-      health: _syncResult,
-      targetCaloriesOverride: _selectedLog.gymDay?.targetCaloriesOverride,
-    ).calories;
-  }
-
-  double get _targetProtein {
-    return NutritionTargetEngine().dayTarget(
-      _profile,
-      isGymDay: _isActualTrainingDay,
-      health: _syncResult,
-      targetCaloriesOverride: _selectedLog.gymDay?.targetCaloriesOverride,
-    ).protein;
+      isGymDay:               isGymDay,
+      health:                 _syncResult,
+      session:                session,
+      workoutTypeName:        workoutTypeName,
+      targetCaloriesOverride: gymDay?.targetCaloriesOverride,
+    );
   }
 
   // Live reads from the global store
   DayLog get _selectedLog      => logFor(_selectedDate);
   double get _consumedCalories => _selectedLog.totalCaloriesMid;
   double get _consumedProtein  => _selectedLog.totalProteinMid;
+  double get _targetCalories   => _effectiveDayTarget?.calories ?? _weeklyPlan.avgDailyCalories;
+  double get _targetProtein    => _effectiveDayTarget?.protein  ?? _weeklyPlan.avgDailyProtein;
   double get _remainingCalories => (_targetCalories - _consumedCalories).clamp(0, double.infinity);
   double get _remainingProtein  => (_targetProtein  - _consumedProtein ).clamp(0, double.infinity);
 
@@ -189,6 +213,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 profile:    _profile,
                 onConnect:  _doSync,
                 onSync:     _doSync,
+              ),
+            ),
+            // Weight trend card — shown below Activity Sync once data is available.
+            SliverToBoxAdapter(
+              child: _WeightTrendCard(
+                weightHistory: _weightHistory,
+                onRequestPermission: _doRequestWeightPermission,
               ),
             ),
             SliverToBoxAdapter(child: _buildStreak()),
@@ -293,31 +324,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-      child: _Card(
-        child: Column(
-          children: [
-            _CalendarHeader(
-              month: _focusedMonth,
-              onPrev: _prevMonth,
-              onNext: _nextMonth,
-            ),
-            const SizedBox(height: 12),
-            _CalendarGrid(
-              focusedMonth:     _focusedMonth,
-              selectedDate:     _selectedDate,
-              completedDayKeys: completedDayKeys,
-              loggedDayKeys:    loggedDayKeys,
-              onSelect: (d) {
-                setState(() => _selectedDate = d);
-                _openDay(d);
-              },
-            ),
-          ],
+    // Swipe left → next month, swipe right → prev month.
+    // Velocity threshold: 300 px/s avoids accidental triggers during taps.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (details) {
+        final vx = details.velocity.pixelsPerSecond.dx;
+        if (vx < -300) {
+          setState(() => _focusedMonth =
+              DateTime(_focusedMonth.year, _focusedMonth.month + 1));
+        } else if (vx > 300) {
+          setState(() => _focusedMonth =
+              DateTime(_focusedMonth.year, _focusedMonth.month - 1));
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+        child: _Card(
+          child: Column(
+            children: [
+              _CalendarHeader(
+                month: _focusedMonth,
+                onPrev: _prevMonth,
+                onNext: _nextMonth,
+              ),
+              const SizedBox(height: 12),
+              _CalendarGrid(
+                focusedMonth:     _focusedMonth,
+                selectedDate:     _selectedDate,
+                completedDayKeys: completedDayKeys,
+                loggedDayKeys:    loggedDayKeys,
+                onSelect: (d) {
+                  setState(() => _selectedDate = d);
+                  _openDay(d);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  // ── Weight permission request ──────────────────────────────────────────────────────
+
+  Future<void> _doRequestWeightPermission() async {
+    if (_syncing) return;
+    final granted = await HealthService().requestWeightPermission();
+    if (!granted || !mounted) return;
+    // Permission just granted — fetch weight immediately.
+    final weights = await HealthService().syncWeight();
+    if (!mounted) return;
+    setState(() => _weightHistory = weights.isNotEmpty ? weights : _weightHistory);
   }
 
   // ── Workout State ─────────────────────────────────────────────────────────────
@@ -1509,4 +1567,349 @@ class _WorkoutTargetCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Weight Trend Card ────────────────────────────────────────────────────────
+
+class _WeightTrendCard extends StatelessWidget {
+  final List<WeightReading>? weightHistory;
+  final VoidCallback onRequestPermission;
+
+  const _WeightTrendCard({
+    required this.weightHistory,
+    required this.onRequestPermission,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final history = weightHistory;
+
+    // No data: show a compact prompt to connect weight tracking.
+    if (history == null || history.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: _Card(
+          child: Row(
+            children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.monitor_weight_outlined,
+                    color: Color(0xFF3B82F6), size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Weight Tracking',
+                        style: TextStyle(
+                            fontSize: 15, color: Colors.white,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 3),
+                    Text('Connect to see your weight trend',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withValues(alpha: 0.45),
+                            height: 1.2)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton(
+                onPressed: onRequestPermission,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: const Text('Connect',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Sparse data (< 3 readings): show mini list of recent weigh-ins.
+    if (history.length < 3) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: _Card(
+          child: _WeightMiniList(history: history),
+        ),
+      );
+    }
+
+    // Full chart: ≥ 3 readings.
+    final latest    = history.first;
+    final delta7d   = _delta7d(history);
+    final delta30d  = _delta30d(history);
+    final chartData = history.reversed.toList(); // oldest → newest for X axis
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: _Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Weight Trend',
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF9CA3AF),
+                            fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 4),
+                    Text('${latest.kg.toStringAsFixed(1)} kg',
+                        style: const TextStyle(
+                            fontSize: 24,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5)),
+                  ],
+                ),
+                // Delta chips
+                Row(
+                  children: [
+                    if (delta7d != null) _DeltaChip('7d', delta7d),
+                    if (delta30d != null) ...[
+                      const SizedBox(width: 8),
+                      _DeltaChip('30d', delta30d),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            // Chart
+            SizedBox(
+              height: 100,
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: _WeightChartPainter(readings: chartData),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Source note
+            Text(
+              '${history.length} readings · Last from ${latest.source}',
+              style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white.withValues(alpha: 0.30)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double? _delta7d(List<WeightReading> h) {
+    if (h.length < 2) return null;
+    final now    = h.first.recordedAt;
+    final cutoff = now.subtract(const Duration(days: 8));
+    final older  = h.firstWhere(
+        (r) => r.recordedAt.isBefore(cutoff),
+        orElse: () => h.last);
+    if (older == h.first) return null;
+    return h.first.kg - older.kg;
+  }
+
+  double? _delta30d(List<WeightReading> h) {
+    if (h.length < 2) return null;
+    final now    = h.first.recordedAt;
+    final cutoff = now.subtract(const Duration(days: 31));
+    final older  = h.firstWhere(
+        (r) => r.recordedAt.isBefore(cutoff),
+        orElse: () => h.last);
+    if (older == h.first) return null;
+    return h.first.kg - older.kg;
+  }
+}
+
+class _DeltaChip extends StatelessWidget {
+  final String label;
+  final double delta;
+
+  const _DeltaChip(this.label, this.delta);
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoss = delta < 0;
+    final isNeutral = delta.abs() < 0.1;
+    final color = isNeutral
+        ? const Color(0xFF9CA3AF)
+        : (isLoss ? const Color(0xFF52B788) : const Color(0xFFEF4444));
+    final sign  = isLoss ? '' : '+'; // negative sign comes from value
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$sign${delta.toStringAsFixed(1)} kg  $label',
+        style: TextStyle(
+            fontSize: 11, color: color, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _WeightMiniList extends StatelessWidget {
+  final List<WeightReading> history;
+  const _WeightMiniList({required this.history});
+
+  @override
+  Widget build(BuildContext context) {
+    final months = ['Jan','Feb','Mar','Apr','May','Jun',
+                    'Jul','Aug','Sep','Oct','Nov','Dec'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.monitor_weight_outlined,
+                  color: Color(0xFF3B82F6), size: 18),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Weight Tracking',
+                    style: TextStyle(
+                        fontSize: 14, color: Colors.white,
+                        fontWeight: FontWeight.w700)),
+                Text('${history.length} reading${history.length == 1 ? '' : 's'} — log more to see trend',
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF9CA3AF))),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        ...history.take(3).map((r) {
+          final d = r.recordedAt;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${months[d.month - 1]} ${d.day}, ${d.year}',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                ),
+                Text(
+                  '${r.kg.toStringAsFixed(1)} kg',
+                  style: const TextStyle(
+                      fontSize: 13, color: Colors.white,
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+// ─── Weight Chart Painter ─────────────────────────────────────────────────────
+
+class _WeightChartPainter extends CustomPainter {
+  final List<WeightReading> readings; // oldest → newest
+
+  _WeightChartPainter({required this.readings});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (readings.length < 2) return;
+
+    final weights    = readings.map((r) => r.kg).toList();
+    final minW       = weights.reduce((a, b) => a < b ? a : b);
+    final maxW       = weights.reduce((a, b) => a > b ? a : b);
+    final range      = (maxW - minW).clamp(0.5, double.infinity);
+    final padding    = range * 0.2; // vertical breathing room
+
+    double normalizeY(double kg) =>
+        size.height - ((kg - (minW - padding)) / (range + padding * 2)) * size.height;
+
+    final n      = readings.length;
+    final points = List.generate(n, (i) {
+      final x = i / (n - 1) * size.width;
+      final y = normalizeY(readings[i].kg);
+      return Offset(x, y);
+    });
+
+    // Draw bezier line
+    final linePaint = Paint()
+      ..color = const Color(0xFF3B82F6)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (int i = 1; i < points.length; i++) {
+      final prev = points[i - 1];
+      final curr = points[i];
+      final cpX  = (prev.dx + curr.dx) / 2;
+      path.cubicTo(cpX, prev.dy, cpX, curr.dy, curr.dx, curr.dy);
+    }
+    canvas.drawPath(path, linePaint);
+
+    // Draw gradient fill under line
+    final fillPath = Path.from(path)
+      ..lineTo(points.last.dx, size.height)
+      ..lineTo(points.first.dx, size.height)
+      ..close();
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFF3B82F6).withValues(alpha: 0.25),
+            const Color(0xFF3B82F6).withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
+    );
+
+    // Draw dot markers
+    final dotPaint = Paint()
+      ..color = const Color(0xFF3B82F6)
+      ..style = PaintingStyle.fill;
+    final rimPaint  = Paint()
+      ..color = const Color(0xFF1C1C2E)
+      ..style = PaintingStyle.fill;
+
+    for (final pt in points) {
+      canvas.drawCircle(pt, 5.5, rimPaint);
+      canvas.drawCircle(pt, 3.5, dotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WeightChartPainter oldDelegate) =>
+      oldDelegate.readings != readings;
 }

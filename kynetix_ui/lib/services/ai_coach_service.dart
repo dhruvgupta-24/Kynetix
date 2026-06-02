@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
+import '../screens/onboarding_screen.dart' show currentUserProfile;
 
 // ─── AiCoachResponse ──────────────────────────────────────────────────────────
 
@@ -97,6 +98,10 @@ class AiCoachService {
       debugPrint('[AiCoachService] attaching image ${imageBytes.length} bytes');
     }
 
+    // Pass portion anchor so the edge function can include it in the system prompt.
+    final portionHint = _portionAnchorHint();
+    if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
+
     debugPrint('[AiCoachService] → ai-meal-coach message="${message.substring(0, message.length.clamp(0, 80))}"');
 
     final res = await Supabase.instance.client.functions.invoke(
@@ -162,6 +167,9 @@ class AiCoachService {
           : conversationHistory;
       body['history'] = limited;
     }
+    // Portion anchor — edge function appends to system prompt when present.
+    final portionHint = _portionAnchorHint();
+    if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
 
     debugPrint('[AiCoachService] ↔ streaming → ai-meal-coach');
 
@@ -211,5 +219,14 @@ class AiCoachService {
     return '${now.year}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Returns the user's portion-anchor instruction string, or empty string
+  /// when the user hasn't set one. The edge function appends this to the
+  /// system prompt when non-empty.
+  String _portionAnchorHint() {
+    final anchor = currentUserProfile?.portionAnchor;
+    if (anchor == null) return '';
+    return anchor.aiHint;
   }
 }

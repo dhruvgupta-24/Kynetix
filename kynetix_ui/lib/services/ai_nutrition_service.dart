@@ -181,6 +181,18 @@ class AiNutritionService {
 
   double _r(double v) => double.parse(v.toStringAsFixed(1));
 
+  /// Returns the user's portion-anchor instruction for injection into the
+  /// DAL/SABZI section of the system prompt.
+  ///
+  /// Empty string when no portionAnchor is set (e.g. existing users who
+  /// skipped the onboarding step, or null profile) — the static section
+  /// already defaults to the balanced behaviour in that case.
+  String _portionAnchorHint() {
+    final anchor = currentUserProfile?.portionAnchor;
+    if (anchor == null) return '';
+    return '- USER PORTION STYLE: ${anchor.aiHint}';
+  }
+
   // ── System prompt ─────────────────────────────────────────────────────────
 
   String _systemPrompt() => '''
@@ -219,6 +231,7 @@ DAL / SABZI alongside roti or rice:
 - Rajma/chole alongside 2 roti: estimate ~70–90g consumed = 155–195 kcal, 7–9g protein.
 - Plain dal alongside 2 roti: estimate ~70–85 ml consumed = 95–130 kcal, 5–7g protein.
 - Do NOT assume a full 250ml bowl unless explicitly stated.
+${_portionAnchorHint()}
 
 PANEER DISHES (mess context):
 - User eats ALL paneer pieces/cubes.

@@ -187,6 +187,112 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _editEatingStyle() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(
+                    'Eating Style',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    'How do you eat a meal with roti or rice?',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ...PortionAnchor.values.map((anchor) {
+                  final isSel = anchor == _profile.portionAnchor;
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                    title: Text(
+                      anchor.displayLabel,
+                      style: TextStyle(
+                        color: isSel ? const Color(0xFF52B788) : Colors.white,
+                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: isSel
+                        ? const Icon(
+                            Icons.check_circle_rounded,
+                            color: Color(0xFF52B788),
+                          )
+                        : null,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _saveProfile(_profile.copyWith(portionAnchor: anchor));
+                    },
+                  );
+                }),
+                // Not specified option
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                  title: Text(
+                    'Not specified',
+                    style: TextStyle(
+                      color: _profile.portionAnchor == null
+                          ? const Color(0xFF52B788)
+                          : Colors.white,
+                      fontWeight: _profile.portionAnchor == null
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  trailing: _profile.portionAnchor == null
+                      ? const Icon(Icons.check_circle_rounded,
+                          color: Color(0xFF52B788))
+                      : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    // Save with portionAnchor explicitly null by rebuilding profile
+                    currentUserProfile = UserProfile(
+                      name:              _profile.name,
+                      age:               _profile.age,
+                      gender:            _profile.gender,
+                      height:            _profile.height,
+                      weight:            _profile.weight,
+                      workoutDaysMin:    _profile.workoutDaysMin,
+                      workoutDaysMax:    _profile.workoutDaysMax,
+                      goal:              _profile.goal,
+                      portionAnchor:     null,
+                      averageDailySteps: _profile.averageDailySteps,
+                      healthSyncEnabled: _profile.healthSyncEnabled,
+                      lastHealthSyncAt:  _profile.lastHealthSyncAt,
+                    );
+                    PersistenceService.saveProfile(currentUserProfile!).ignore();
+                    ProfileService.instance.upsertProfile(currentUserProfile!).ignore();
+                    widget.onProfileChanged?.call();
+                    setState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _editNumber(
     String title,
     String currentVal,
@@ -422,6 +528,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             value: _profile.goal,
             isEditable: true,
             onTap: _editGoal,
+          ),
+          _InfoRow(
+            icon: Icons.restaurant_outlined,
+            label: 'Eating Style',
+            value: _profile.portionAnchor?.displayLabel ?? 'Not specified',
+            isEditable: true,
+            onTap: _editEatingStyle,
           ),
           _InfoRow(
             icon: Icons.fitness_center_rounded,

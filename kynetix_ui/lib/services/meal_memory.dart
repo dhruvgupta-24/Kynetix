@@ -92,6 +92,40 @@ class MealCandidateEntry {
 /// [MealMemory.normalize] method can reference it.
 const _fillerWords = {'and', 'with', 'some', 'a', 'an', 'of', 'the'};
 
+// ─── Two-tier token-alias guards ─────────────────────────────────────────────
+//
+// When a query is a strict token-subset of a stored key (all query tokens
+// appear in the stored key AND the stored key has exactly 1 extra token),
+// the match is allowed ONLY if the extra token is in _safeQualifiers.
+//
+// An extra token in _ingredientModifiers means the stored food is
+// nutritionally DIFFERENT from the query (e.g. "dal" ≠ "dal makhani").
+// These matches are ALWAYS rejected, regardless of the ≤1 extra token rule.
+//
+// Any extra token NOT in either list → conservative reject.
+
+/// Non-nutritional brand/format/texture qualifiers that do not change the
+/// core food identity. Matching is ALLOWED when the extra token is one of these.
+const _safeQualifiers = <String>{
+  'biscuit', 'cookie', 'crackers', 'protein', 'powder',
+  'shake', 'concentrate', 'isolate', 'hydrolysate',
+  'bar', 'wafer', 'flavour', 'flavor', 'vanilla',
+  'chocolate', 'unflavored', 'plain',
+  'original', 'classic', 'lite', 'light', 'zero',
+};
+
+/// Ingredients and cooking modifiers that CHANGE the nutritional profile
+/// of the base food. Matching is REJECTED when the extra token is one of these.
+const _ingredientModifiers = <String>{
+  // Indian enrichment modifiers
+  'makhani', 'butter', 'malai', 'cream', 'ghee',
+  'tadka', 'jeera', 'tikka', 'masala', 'fried',
+  'korma', 'biryani', 'pulao', 'pilaf',
+  // General cooking modifiers
+  'baked', 'grilled', 'roasted', 'smoked', 'curried',
+  'sweet', 'spicy', 'salted', 'unsalted',
+};
+
 /// Session-persistent + SharedPreferences-backed meal cache.
 ///
 /// Cache matching is CONSERVATIVE:
@@ -339,14 +373,14 @@ class MealMemory {
 
   /// Conservative token-subset lookup for a map of [NutritionResult] values.
   ///
-  /// Rules:
-  ///   - All tokens in [queryKey] must appear in the candidate key.
-  ///   - The candidate key may have at most 1 extra token beyond [queryKey].
-  ///   - When multiple candidates match, prefer the one with fewest extra tokens.
-  ///
-  /// This intentionally rejects multi-word elaborations ("paneer" ≠ "paneer
-  /// butter masala") while accepting single-word qualifiers ("oreo" ≡ "oreo
-  /// biscuit").
+  /// Two-tier alias guard:
+  ///   Tier 1 — SAFE ALIAS: all query tokens appear in the stored key AND the
+  ///     single extra token is in [_safeQualifiers] (e.g. 'protein', 'biscuit').
+  ///     These words do not change the core food identity. MATCH ALLOWED.
+  ///   Tier 2 — RISKY MODIFIER: extra token is in [_ingredientModifiers]
+  ///     (e.g. 'makhani', 'tadka', 'ghee'). These change the calorie profile
+  ///     significantly. MATCH REJECTED.
+  ///   Default — extra token is unknown: REJECT (conservative).
   NutritionResult? _lookupByTokenSubset(
       Map<String, NutritionResult> map, String queryKey) {
     final queryTokens = queryKey.split(' ').toSet();
@@ -355,19 +389,26 @@ class MealMemory {
 
     for (final entry in map.entries) {
       final storedTokens = entry.key.split(' ').toSet();
-      final extraTokens = storedTokens.difference(queryTokens).length;
+      final extras = storedTokens.difference(queryTokens);
       if (queryTokens.isNotEmpty &&
           queryTokens.every(storedTokens.contains) &&
-          extraTokens <= 1 &&
-          extraTokens < bestExtraTokens) {
+          extras.length == 1 &&
+          extras.length < bestExtraTokens) {
+        final extraToken = extras.first;
+        // Tier 2: ingredient modifier → always reject
+        if (_ingredientModifiers.contains(extraToken)) continue;
+        // Tier 1: safe qualifier → allow; default: reject
+        if (!_safeQualifiers.contains(extraToken)) continue;
         best = entry.value;
-        bestExtraTokens = extraTokens;
+        bestExtraTokens = extras.length;
       }
     }
     return best;
   }
 
   /// Conservative token-subset lookup for the [MealMemoryEntry] store.
+  ///
+  /// Same two-tier alias guard as [_lookupByTokenSubset].
   MealMemoryEntry? _lookupEntryByTokenSubset(
       Map<String, MealMemoryEntry> map, String queryKey) {
     final queryTokens = queryKey.split(' ').toSet();
@@ -376,13 +417,18 @@ class MealMemory {
 
     for (final entry in map.entries) {
       final storedTokens = entry.key.split(' ').toSet();
-      final extraTokens = storedTokens.difference(queryTokens).length;
+      final extras = storedTokens.difference(queryTokens);
       if (queryTokens.isNotEmpty &&
           queryTokens.every(storedTokens.contains) &&
-          extraTokens <= 1 &&
-          extraTokens < bestExtraTokens) {
+          extras.length == 1 &&
+          extras.length < bestExtraTokens) {
+        final extraToken = extras.first;
+        // Tier 2: ingredient modifier → always reject
+        if (_ingredientModifiers.contains(extraToken)) continue;
+        // Tier 1: safe qualifier → allow; default: reject
+        if (!_safeQualifiers.contains(extraToken)) continue;
         best = entry.value;
-        bestExtraTokens = extraTokens;
+        bestExtraTokens = extras.length;
       }
     }
     return best;

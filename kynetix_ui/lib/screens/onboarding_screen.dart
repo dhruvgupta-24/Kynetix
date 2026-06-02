@@ -13,6 +13,52 @@ const kLeanBulk      = 'Lean Bulk';
 const kBulk          = 'Bulk / Gain';
 const kRecomposition = 'Recomposition';
 
+// ─── Portion anchor model ───────────────────────────────────────────────────────
+
+/// Describes how a user anchors portions in a mixed Indian meal.
+/// Captured during onboarding Step 4 (optional; null = not specified).
+enum PortionAnchor {
+  /// Carb-first: eats a fixed amount of roti/rice, uses sabzi/dal as
+  /// accompaniment. Dal/sabzi portion ≈ 2–3 tbsp per roti (condiment role).
+  carbAnchored,
+
+  /// Curry-first: eats until the dal/sabzi runs out, regardless of carb count.
+  /// Dal/sabzi consumed as a full katori (~150 ml) per sitting.
+  curryAnchored,
+
+  /// Balanced: eats similar amounts of both simultaneously. Midpoint estimate.
+  balanced;
+
+  String toJson() => name;
+
+  static PortionAnchor fromJson(String s) =>
+      PortionAnchor.values.firstWhere(
+        (e) => e.name == s,
+        orElse: () => PortionAnchor.balanced,
+      );
+
+  /// Human-readable label for Profile settings display.
+  String get displayLabel => switch (this) {
+    carbAnchored  => 'Carb-anchored (roti/rice first)',
+    curryAnchored => 'Curry-anchored (dal/sabzi first)',
+    balanced      => 'Balanced',
+  };
+
+  /// Short AI context hint injected into Kyno system prompt.
+  String get aiHint => switch (this) {
+    carbAnchored  =>
+      'User eats a fixed roti/rice amount and uses sabzi or dal as a condiment '
+      '(~2–3 tbsp per roti). Do NOT assume a full katori of dal/sabzi unless '
+      'the user explicitly mentions a large serving.',
+    curryAnchored =>
+      'User eats until the dal/sabzi runs out, treating it as the main dish. '
+      'Assume a full serving (~150 ml katori) of dal/sabzi per meal.',
+    balanced      =>
+      'User eats balanced portions of carbs and sides. Use standard Indian '
+      'hostel meal estimates for roti+dal/sabzi.',
+  };
+}
+
 class UserProfile {
   final String   name;
   final int      age;
@@ -22,6 +68,12 @@ class UserProfile {
   final int      workoutDaysMin;
   final int      workoutDaysMax;
   final Goal     goal;
+
+  // ── Portion behaviour (onboarding Step 4) ────────────────────────────────
+  /// How the user anchors portions in a mixed Indian meal.
+  /// Null for users who completed onboarding before this field was added.
+  /// Treated as [PortionAnchor.balanced] in estimation when null.
+  final PortionAnchor? portionAnchor;
 
   // ── Health Connect fields (all nullable / defaulted) ───────────────────────
   final int?      averageDailySteps; // from Health Connect sync
@@ -37,6 +89,7 @@ class UserProfile {
     required this.workoutDaysMin,
     required this.workoutDaysMax,
     required this.goal,
+    this.portionAnchor,
     this.averageDailySteps,
     this.healthSyncEnabled = false,
     this.lastHealthSyncAt,
@@ -55,6 +108,7 @@ class UserProfile {
     workoutDaysMin:    workoutDaysMin,
     workoutDaysMax:    workoutDaysMax,
     goal:              goal,
+    portionAnchor:     portionAnchor,
     averageDailySteps: averageDailySteps,
     healthSyncEnabled: true,
     lastHealthSyncAt:  lastHealthSyncAt,
@@ -70,6 +124,7 @@ class UserProfile {
     int? workoutDaysMin,
     int? workoutDaysMax,
     Goal? goal,
+    PortionAnchor? portionAnchor,
     int? averageDailySteps,
     bool? healthSyncEnabled,
     DateTime? lastHealthSyncAt,
@@ -82,6 +137,7 @@ class UserProfile {
     workoutDaysMin:    workoutDaysMin ?? this.workoutDaysMin,
     workoutDaysMax:    workoutDaysMax ?? this.workoutDaysMax,
     goal:              goal ?? this.goal,
+    portionAnchor:     portionAnchor ?? this.portionAnchor,
     averageDailySteps: averageDailySteps ?? this.averageDailySteps,
     healthSyncEnabled: healthSyncEnabled ?? this.healthSyncEnabled,
     lastHealthSyncAt:  lastHealthSyncAt ?? this.lastHealthSyncAt,
@@ -98,6 +154,7 @@ class UserProfile {
     'workoutDaysMin':    workoutDaysMin,
     'workoutDaysMax':    workoutDaysMax,
     'goal':              goal,
+    if (portionAnchor != null) 'portionAnchor': portionAnchor!.toJson(),
     if (averageDailySteps != null) 'averageDailySteps': averageDailySteps,
     'healthSyncEnabled': healthSyncEnabled,
     if (lastHealthSyncAt != null) 'lastHealthSyncAt': lastHealthSyncAt!.toIso8601String(),
@@ -112,6 +169,9 @@ class UserProfile {
     workoutDaysMin:    j['workoutDaysMin'] as int,
     workoutDaysMax:    j['workoutDaysMax'] as int,
     goal:              j['goal']           as String,
+    portionAnchor:     j['portionAnchor'] != null
+        ? PortionAnchor.fromJson(j['portionAnchor'] as String)
+        : null,
     averageDailySteps: j['averageDailySteps'] as int?,
     healthSyncEnabled: j['healthSyncEnabled'] as bool? ?? false,
     lastHealthSyncAt:  DateTime.tryParse(j['lastHealthSyncAt'] as String? ?? ''),
@@ -168,7 +228,7 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  static const _totalSteps = 3;
+  static const _totalSteps = 4;
 
   final _pageController = PageController();
   int _currentStep = 0;
@@ -188,6 +248,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Step 3 — Lifestyle
   int _workoutIdx = 1;   // default: 2–3 days
   String _goal    = kMaintenance;
+
+  // Step 4 — Eating style (optional; null = not answered)
+  PortionAnchor? _portionAnchor;
 
   final _step1Key = GlobalKey<FormState>();
   final _step2Key = GlobalKey<FormState>();
@@ -255,6 +318,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       workoutDaysMin: opt.daysMin,
       workoutDaysMax: opt.daysMax,
       goal:           _goal,
+      portionAnchor:  _portionAnchor,   // null if user skipped Step 4
     );
 
     // Persist before navigating so a quick kill won't lose profile.
@@ -313,6 +377,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     goal:             _goal,
                     onWorkout:        (i) => setState(() => _workoutIdx = i),
                     onGoal:           (v) => setState(() => _goal = v),
+                  ),
+                  _StepEatingStyle(
+                    selected: _portionAnchor,
+                    onSelect: (v) => setState(() => _portionAnchor = v),
+                    onSkip:   _submit,   // skip = submit with null portionAnchor
                   ),
                 ],
               ),
@@ -942,6 +1011,164 @@ class _SelectTile extends StatelessWidget {
             if (selected)
               const Icon(Icons.check_circle_rounded,
                   size: 18, color: Color(0xFF52B788)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Step 4: Eating Style (PortionAnchor) ────────────────────────────────────
+
+class _StepEatingStyle extends StatelessWidget {
+  final PortionAnchor? selected;
+  final ValueChanged<PortionAnchor> onSelect;
+  final VoidCallback onSkip;
+
+  const _StepEatingStyle({
+    required this.selected,
+    required this.onSelect,
+    required this.onSkip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your Eating Style',
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'How do you usually eat a meal with roti or rice?',
+            style: TextStyle(fontSize: 15, color: Color(0xFF9CA3AF), height: 1.4),
+          ),
+          const SizedBox(height: 28),
+
+          _PortionOption(
+            emoji: '🍽️',
+            title: 'Roti/rice first',
+            subtitle: 'I eat a set amount of roti or rice, then use sabzi\nor dal to finish it (carb-anchored)',
+            value:    PortionAnchor.carbAnchored,
+            selected: selected == PortionAnchor.carbAnchored,
+            onTap:    onSelect,
+          ),
+          const SizedBox(height: 12),
+
+          _PortionOption(
+            emoji: '🥘',
+            title: 'Curry/dal first',
+            subtitle: 'I eat until the curry or dal runs out, then stop\n(curry-anchored)',
+            value:    PortionAnchor.curryAnchored,
+            selected: selected == PortionAnchor.curryAnchored,
+            onTap:    onSelect,
+          ),
+          const SizedBox(height: 12),
+
+          _PortionOption(
+            emoji: '⚖️',
+            title: 'Balanced',
+            subtitle: 'I naturally eat similar amounts of both together',
+            value:    PortionAnchor.balanced,
+            selected: selected == PortionAnchor.balanced,
+            onTap:    onSelect,
+          ),
+          const SizedBox(height: 28),
+
+          // Skip link \u2014 does not affect existing data
+          Center(
+            child: GestureDetector(
+              onTap: onSkip,
+              child: const Text(
+                'Skip this step',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF6B7280),
+                  decoration: TextDecoration.underline,
+                  decorationColor: Color(0xFF6B7280),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PortionOption extends StatelessWidget {
+  final String emoji;
+  final String title;
+  final String subtitle;
+  final PortionAnchor value;
+  final bool selected;
+  final ValueChanged<PortionAnchor> onTap;
+
+  const _PortionOption({
+    required this.emoji,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onTap(value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF52B788).withValues(alpha: 0.12)
+              : const Color(0xFF1E2030),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF52B788)
+                : const Color(0xFF2D3048),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? Colors.white : const Color(0xFF9CA3AF),
+                      )),
+                  const SizedBox(height: 4),
+                  Text(subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF6B7280),
+                        height: 1.4,
+                      )),
+                ],
+              ),
+            ),
+            if (selected)
+              const Icon(Icons.check_circle_rounded,
+                  size: 20, color: Color(0xFF52B788)),
           ],
         ),
       ),

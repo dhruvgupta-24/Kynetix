@@ -511,42 +511,109 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               ),
           ],
         ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-        children: [
-          _DaySummaryBanner(
-            log: _log, 
-            target: target, 
-            dayStatus: dayStatus,
-            onEditTarget: _editDailyTarget,
-          ),
-          const SizedBox(height: 12),
-
-          // ── Coach insights ────────────────────────────────────
-          if (insights.isNotEmpty) ...[
-            _CoachInsightCard(insights: insights),
-            const SizedBox(height: 12),
-          ],
-
-          // ── Quick Add ─────────────────────────────────────────
-          _QuickAddCard(onAdd: _quickAddMeal),
-          const SizedBox(height: 12),
-
-          // ── Gym tracking ──────────────────────────────────────
-          _GymCard(log: _log, date: widget.date, onChanged: _refresh),
-          const SizedBox(height: 4),
-          ...MealSection.values.map(
-            (section) => _MealSectionCard(
-              section: section,
-              log: _log,
-              onAdd: () => _openAddMeal(section),
-              onEdit: _openEditMeal,
-              onDelete: (entry) => _handleDeleteWithUndo(section, entry),
+        // Navigation arrows for accessibility (non-swipe)
+        actions: [
+          if (!_isToday)
+            IconButton(
+              icon: const Icon(Icons.chevron_right_rounded, color: Colors.white),
+              tooltip: 'Next day',
+              onPressed: _navigateToNextDay,
             ),
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white),
+            tooltip: 'Previous day',
+            onPressed: _navigateToPrevDay,
           ),
         ],
       ),
+      // ── Horizontal swipe → previous / next day ──────────────────────────────
+      //
+      // GestureDetector is placed outside the ListView (which is vertical only)
+      // so horizontal detection is unambiguous. Velocity threshold 400 px/s
+      // avoids false positives from Dismissible end-to-start swipes.
+      // Guard: if a text field has keyboard focus, ignore the gesture so the
+      // user can type without triggering navigation.
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: (details) {
+          // Do not navigate while keyboard is up (user is typing).
+          final focusedChild = FocusScope.of(context).focusedChild;
+          if (focusedChild != null && focusedChild.hasFocus) return;
+          final vx = details.velocity.pixelsPerSecond.dx;
+          if (vx > 400) {
+            _navigateToPrevDay();
+          } else if (vx < -400) {
+            _navigateToNextDay();
+          }
+        },
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+          children: [
+            _DaySummaryBanner(
+              log: _log,
+              target: target,
+              dayStatus: dayStatus,
+              onEditTarget: _editDailyTarget,
+            ),
+            const SizedBox(height: 12),
+
+            // ── Coach insights ───────────────────────────────────────
+            if (insights.isNotEmpty) ...[
+              _CoachInsightCard(insights: insights),
+              const SizedBox(height: 12),
+            ],
+
+            // ── Quick Add ───────────────────────────────────────────
+            _QuickAddCard(onAdd: _quickAddMeal),
+            const SizedBox(height: 12),
+
+            // ── Gym tracking ──────────────────────────────────────────
+            _GymCard(log: _log, date: widget.date, onChanged: _refresh),
+            const SizedBox(height: 4),
+            ...MealSection.values.map(
+              (section) => _MealSectionCard(
+                section: section,
+                log: _log,
+                onAdd: () => _openAddMeal(section),
+                onEdit: _openEditMeal,
+                onDelete: (entry) => _handleDeleteWithUndo(section, entry),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Day navigation helpers ─────────────────────────────────────────────────
+
+  void _navigateToPrevDay() {
+    final prev = widget.date.subtract(const Duration(days: 1));
+    Navigator.of(context).pushReplacement(_daySlideRoute(prev, direction: 1));
+  }
+
+  /// Navigate forward one day. Blocked when already at today.
+  void _navigateToNextDay() {
+    final today = DateTime.now();
+    final todayMidnight = DateTime(today.year, today.month, today.day);
+    final thisMidnight  = DateTime(widget.date.year, widget.date.month, widget.date.day);
+    if (!thisMidnight.isBefore(todayMidnight)) return; // already at/past today
+    final next = widget.date.add(const Duration(days: 1));
+    Navigator.of(context).pushReplacement(_daySlideRoute(next, direction: -1));
+  }
+
+  PageRouteBuilder<void> _daySlideRoute(DateTime date, {required int direction}) {
+    return PageRouteBuilder(
+      pageBuilder: (_, __, ___) =>
+          DayDetailScreen(date: date, health: widget.health),
+      transitionsBuilder: (_, animation, __, child) => SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(direction.toDouble(), 0),
+          end: Offset.zero,
+        ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+        child: child,
+      ),
+      transitionDuration: const Duration(milliseconds: 300),
     );
   }
 }

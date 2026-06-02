@@ -1,3 +1,4 @@
+import '../screens/onboarding_screen.dart' show currentUserProfile, PortionAnchor;
 // ─── ConsumedPortionEngine ────────────────────────────────────────────────────
 //
 // Behavior-based consumed portion estimator for Indian hostel/mess meals.
@@ -45,15 +46,36 @@ class ConsumedPortionEngine {
     final carbLoad = ctx.rotiCount * 1.0 + ctx.riceLadles * 0.8;
     final effectiveCarbLoad = carbLoad < 0.5 ? 2.0 : carbLoad;
 
+    // ── Portion anchor scalar ───────────────────────────────────────────────────
+    // Adjusts how much curry/dal/sabzi the engine estimates the user consumed
+    // alongside their carbs, based on their self-reported eating behaviour.
+    //
+    //   carbAnchored:  0.78x — uses dal/sabzi as a condiment (fewer ml/g per roti)
+    //   balanced:      1.00x — default calibrated midpoint (unchanged behaviour)
+    //   curryAnchored: 1.30x — eats curry as the main dish, finishes a full katori
+    //
+    // The scalar is only applied when the user has explicitly chosen an anchor.
+    // Null anchor = balanced = no change to existing behaviour.
+    final anchorScalar = switch (currentUserProfile?.portionAnchor) {
+      PortionAnchor.carbAnchored  => 0.78,
+      PortionAnchor.balanced      => 1.00,
+      PortionAnchor.curryAnchored => 1.30,
+      null                        => 1.00,  // not set — keep existing calibration
+    };
+
+    // Clamp the scalar for safety in case of unexpected enum additions.
+    final safeScalar = anchorScalar.clamp(0.5, 2.0);
+    final scaledCarbLoad = (effectiveCarbLoad * safeScalar).clamp(0.5, 12.0);
+
     return switch (ctx.profile!) {
-      _DishProfile.paneer      => _paneer(ctx, effectiveCarbLoad),
-      _DishProfile.lentilDal   => _dal(ctx, effectiveCarbLoad, heavy: false),
-      _DishProfile.enrichedDal => _dal(ctx, effectiveCarbLoad, heavy: true),
-      _DishProfile.beans       => _beans(ctx, effectiveCarbLoad),
-      _DishProfile.drySabzi    => _drySabzi(ctx, effectiveCarbLoad),
-      _DishProfile.gravySabzi  => _gravySabzi(ctx, effectiveCarbLoad),
-      _DishProfile.soya        => _soya(ctx, effectiveCarbLoad),
-      _DishProfile.kadhi       => _kadhi(ctx, effectiveCarbLoad),
+      _DishProfile.paneer      => _paneer(ctx, scaledCarbLoad),
+      _DishProfile.lentilDal   => _dal(ctx, scaledCarbLoad, heavy: false),
+      _DishProfile.enrichedDal => _dal(ctx, scaledCarbLoad, heavy: true),
+      _DishProfile.beans       => _beans(ctx, scaledCarbLoad),
+      _DishProfile.drySabzi    => _drySabzi(ctx, scaledCarbLoad),
+      _DishProfile.gravySabzi  => _gravySabzi(ctx, scaledCarbLoad),
+      _DishProfile.soya        => _soya(ctx, scaledCarbLoad),
+      _DishProfile.kadhi       => _kadhi(ctx, scaledCarbLoad),
     };
   }
 
