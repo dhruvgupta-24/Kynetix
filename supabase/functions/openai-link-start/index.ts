@@ -97,12 +97,14 @@ Deno.serve(async (req: Request) => {
 
     const expiresAt = new Date(Date.now() + SESSION_TTL_MINUTES * 60 * 1000).toISOString();
 
-    // Delete any stale pending sessions for this user first
+    // Delete ALL existing sessions for this user before creating a new one.
+    // We must remove connected/expired/pending rows — the UNIQUE constraint
+    // on user_id means any leftover row blocks the INSERT (error 23505).
+    // This handles reconnect scenarios where the user already had a connected session.
     await supabaseAdmin
       .from('openai_device_auth_sessions')
       .delete()
-      .eq('user_id', user.id)
-      .eq('status', 'pending');
+      .eq('user_id', user.id);
 
     const { data: session, error: sessionErr } = await supabaseAdmin
       .from('openai_device_auth_sessions')

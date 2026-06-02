@@ -388,12 +388,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _doRequestWeightPermission() async {
     if (_syncing) return;
+    setState(() => _syncing = true);
+
     final granted = await HealthService().requestWeightPermission();
-    if (!granted || !mounted) return;
-    // Permission just granted — fetch weight immediately.
+
+    if (!mounted) return;
+    if (!granted) {
+      setState(() => _syncing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Weight permission was not granted. '
+              'Open Health Connect settings to enable it.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Permission granted — fetch weight immediately.
     final weights = await HealthService().syncWeight();
     if (!mounted) return;
-    setState(() => _weightHistory = weights.isNotEmpty ? weights : _weightHistory);
+
+    setState(() {
+      _weightHistory = weights.isNotEmpty ? weights : _weightHistory;
+      _syncing = false;
+    });
+
+    if (weights.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No weight readings found in Health Connect yet.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // ── Workout State ─────────────────────────────────────────────────────────────
