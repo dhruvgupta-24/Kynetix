@@ -95,8 +95,16 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                 if (caloriesRemaining < 0.0) caloriesRemaining = 0.0
                 if (proteinRemaining < 0.0) proteinRemaining = 0.0
 
-                val calRatio = (caloriesConsumed / caloriesTarget).toFloat().coerceIn(0f, 1f)
-                val proRatio = (proteinConsumed / proteinTarget).toFloat().coerceIn(0f, 1f)
+                val calRatio = if (caloriesTarget > 0.0) {
+                    (caloriesConsumed / caloriesTarget).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                val proRatio = if (proteinTarget > 0.0) {
+                    (proteinConsumed / proteinTarget).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
 
                 // Draw circular progress rings
                 val bitmap = drawMacroRings(calRatio, proRatio, caloriesConsumed > caloriesTarget, proteinConsumed > proteinTarget)
