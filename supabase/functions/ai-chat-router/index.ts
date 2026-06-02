@@ -2,7 +2,9 @@
 //
 // Provider priority:
 //   1. user_chatgpt  — user's own authenticated OpenAI token (from user_openai_links)
-//                      uses the model discovered and verified by openai-link-verify
+//                      Routes to: https://chatgpt.com/backend-api/codex/responses
+//                      (ChatGPT OAuth session tokens work only on this endpoint,
+//                       NOT on api.openai.com/v1 which requires a Platform API key)
 //   2. openrouter    — shared fallback (Kynetix-funded, acknowledged in UI)
 //
 // Kynetix's own OPENAI_API_KEY is NOT in the provider chain.
@@ -22,11 +24,233 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENROUTER_URL  = 'https://openrouter.ai/api/v1/chat/completions';
+// Codex backend endpoint (works with ChatGPT OAuth tokens)
+const CODEX_URL     = 'https://chatgpt.com/backend-api/codex/responses';
+const CODEX_MODEL   = 'codex'; // default; overridden by user's selected_model from DB
+
+// OpenRouter fallback
+const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
 
-// ── Chat completions — non-streaming ─────────────────────────────────────────
+// ── Convert standard messages[] → Codex request body ─────────────────────────
+// The Codex Responses API uses:
+//   - "instructions" for the system message
+//   - "input" array for user/assistant turns, each with a content block array
+//   - "stream": true  (required by the Codex backend)
+//   - "store": false  (prevents storing in ChatGPT history)
+function buildCodexBody(model: string, messages: any[]): string {
+  const systemMsg      = messages.find((m: any) => m.role === 'system');
+  const instructions   = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
+  const nonSystemMsgs  = messages.filter((m: any) => m.role !== 'system');
+
+  const input = nonSystemMsgs.map((m: any) => {
+    const contentText = typeof m.content === 'string'
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.map((b: any) => b?.text ?? '').join('')
+        : '';
+
+    // "input_text" for user turns, "output_text" for assistant turns
+    const contentType = m.role === 'user' ? 'input_text' : 'output_text';
+
+    return {
+      type:    'message',
+      role:    m.role,
+      content: [{ type: contentType, text: contentText }],
+    };
+  });
+
+  return JSON.stringify({
+    model,
+    instructions,
+    stream: true,
+    store:  false,
+    input,
+  });
+}
+
+// ── Drain Codex SSE → plain text (for non-streaming callers) ─────────────────
+async function drainCodexSSE(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return '';
+
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer   = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') return fullText;
+
+        try {
+          const ev = JSON.parse(payload);
+          if (ev?.type === 'response.output_text.delta' && typeof ev.delta === 'string') {
+            fullText += ev.delta;
+          } else if (ev?.type === 'response.output_text.done' && typeof ev.text === 'string') {
+            if (fullText.length === 0) fullText = ev.text; // fallback if delta missed
+          } else if (typeof ev?.choices?.[0]?.delta?.content === 'string') {
+            fullText += ev.choices[0].delta.content; // OpenAI-compatible gateway
+          } else if (typeof ev?.delta === 'string') {
+            fullText += ev.delta; // flat proxy format
+          }
+        } catch { /* skip malformed lines */ }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+
+  return fullText;
+}
+
+// ── Non-streaming Codex call ──────────────────────────────────────────────────
+async function callCodex(
+  accessToken: string,
+  model:       string,
+  messages:    any[],
+): Promise<{ text: string; usage: null }> {
+  const effectiveModel = model === 'codex' || !model ? CODEX_MODEL : model;
+  console.log(`[AI ROUTER] codex → ${CODEX_URL} model=${effectiveModel} msgs=${messages.length}`);
+
+  const res = await fetch(CODEX_URL, {
+    method:  'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type':  'application/json',
+    },
+    body: buildCodexBody(effectiveModel, messages),
+  });
+
+  console.log(`[AI ROUTER] codex ← status=${res.status}`);
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 400)}`);
+  }
+
+  const text = await drainCodexSSE(res);
+  if (!text.trim()) throw new Error(`Empty response from Codex endpoint`);
+
+  console.log(`[AI ROUTER] codex extracted len=${text.length} preview="${text.slice(0, 120)}"`);
+  return { text, usage: null };
+}
+
+// ── Streaming Codex call (converts Codex SSE → OpenAI Chat SSE format) ────────
+// Clients expect the standard OpenAI streaming format:
+//   data: {"choices":[{"delta":{"content":"..."},"index":0,"finish_reason":null}]}
+async function callCodexStream(
+  accessToken: string,
+  model:       string,
+  messages:    any[],
+): Promise<Response> {
+  const effectiveModel = model === 'codex' || !model ? CODEX_MODEL : model;
+  console.log(`[AI ROUTER] codex stream → ${CODEX_URL} model=${effectiveModel}`);
+
+  const res = await fetch(CODEX_URL, {
+    method:  'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type':  'application/json',
+    },
+    body: buildCodexBody(effectiveModel, messages),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 400)}`);
+  }
+
+  // Convert Codex SSE events → OpenAI Chat SSE events in a TransformStream
+  const { readable, writable } = new TransformStream();
+  const writer  = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  // Process the Codex stream in the background
+  (async () => {
+    const reader  = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer    = '';
+
+    const emitDelta = async (delta: string) => {
+      const chunk = JSON.stringify({
+        id:      'chatcmpl-codex',
+        object:  'chat.completion.chunk',
+        model:   effectiveModel,
+        choices: [{ index: 0, delta: { content: delta }, finish_reason: null }],
+      });
+      await writer.write(encoder.encode(`data: ${chunk}\n\n`));
+    };
+
+    const emitDone = async () => {
+      const chunk = JSON.stringify({
+        id:      'chatcmpl-codex',
+        object:  'chat.completion.chunk',
+        model:   effectiveModel,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      });
+      await writer.write(encoder.encode(`data: ${chunk}\n\n`));
+      await writer.write(encoder.encode('data: [DONE]\n\n'));
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') {
+            await emitDone();
+            return;
+          }
+
+          try {
+            const ev = JSON.parse(payload);
+            if (ev?.type === 'response.output_text.delta' && typeof ev.delta === 'string') {
+              await emitDelta(ev.delta);
+            } else if (typeof ev?.choices?.[0]?.delta?.content === 'string') {
+              await emitDelta(ev.choices[0].delta.content);
+            } else if (typeof ev?.delta === 'string') {
+              await emitDelta(ev.delta);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+      // If we exit the loop without seeing [DONE], emit the done event
+      await emitDone();
+    } catch (err: any) {
+      console.error(`[AI ROUTER] codex stream processing error: ${err?.message}`);
+    } finally {
+      try { reader.releaseLock(); } catch { /* ignore */ }
+      try { await writer.close(); } catch { /* ignore */ }
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type':  'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  });
+}
+
+// ── Standard OpenAI Chat Completions (OpenRouter / fallback) ─────────────────
 async function callChat(
   endpoint:     string,
   apiKey:       string,
@@ -34,20 +258,8 @@ async function callChat(
   messages:     any[],
   extraHeaders: Record<string, string> = {},
 ): Promise<{ text: string; usage: any }> {
-
-  const hasImages = messages.some(m =>
-    Array.isArray(m?.content) &&
-    m.content.some((b: any) => b?.type === 'image_url')
-  );
-
-  const requestBody: any = {
-    model,
-    messages,
-    temperature: 0.25,
-    max_tokens:  1500,
-  };
-
-  console.log(`[AI ROUTER] → ${endpoint} model=${model} hasImages=${hasImages} msgs=${messages.length}`);
+  const requestBody: any = { model, messages, temperature: 0.25, max_tokens: 1500 };
+  console.log(`[AI ROUTER] → ${endpoint} model=${model} msgs=${messages.length}`);
 
   const res = await fetch(endpoint, {
     method:  'POST',
@@ -62,9 +274,7 @@ async function callChat(
   const rawBody = await res.text();
   console.log(`[AI ROUTER] ← status=${res.status} body_preview=${rawBody.slice(0, 300)}`);
 
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${rawBody.slice(0, 400)}`);
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawBody.slice(0, 400)}`);
 
   const data = JSON.parse(rawBody);
   const text = extractText(rawBody, data);
@@ -74,7 +284,7 @@ async function callChat(
   return { text, usage: data.usage ?? null };
 }
 
-// ── Chat completions — streaming SSE passthrough ──────────────────────────────
+// ── Standard OpenAI streaming (OpenRouter fallback) ──────────────────────────
 async function callChatStream(
   endpoint:     string,
   apiKey:       string,
@@ -91,13 +301,7 @@ async function callChatStream(
       'Content-Type':  'application/json',
       ...extraHeaders,
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.25,
-      max_tokens:  1500,
-      stream:      true,
-    }),
+    body: JSON.stringify({ model, messages, temperature: 0.25, max_tokens: 1500, stream: true }),
   });
 
   if (!res.ok) {
@@ -107,7 +311,7 @@ async function callChatStream(
   return res;
 }
 
-// ── Extract plain text from chat completions response ────────────────────────
+// ── Extract plain text from Chat Completions response ────────────────────────
 function extractText(rawBody: string, data: any): string {
   const choice  = data?.choices?.[0];
   const message = choice?.message;
@@ -152,9 +356,7 @@ async function getUserChatGptProvider(
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (error || !data) {
-    return null;
-  }
+  if (error || !data) return null;
 
   if (!data.is_connected) {
     await supabaseAdmin
@@ -247,33 +449,24 @@ Deno.serve(async (req: Request) => {
     // STREAMING PATH
     // ══════════════════════════════════════════════════
     if (streamMode) {
-      // ── Attempt 1: User's ChatGPT ──────────────────────────────────────────
+      // ── Attempt 1: User's ChatGPT via Codex endpoint ──────────────────────
       if (userProvider) {
         try {
-          const sRes = await callChatStream(
-            OPENAI_CHAT_URL, userProvider.accessToken, userProvider.model, messages,
+          const streamRes = await callCodexStream(
+            userProvider.accessToken, userProvider.model, messages,
           );
           await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
-          console.log(`[AI ROUTER] streaming via user_chatgpt model=${userProvider.model}`);
-          return new Response(sRes.body, {
-            headers: {
-              ...corsHeaders,
-              'Content-Type':     'text/event-stream',
-              'Cache-Control':    'no-cache',
-              'X-Provider-Used':  'user_chatgpt',
-              'X-Model-Used':     userProvider.model,
-            },
-          });
+          console.log(`[AI ROUTER] streaming via user_chatgpt (Codex) model=${userProvider.model}`);
+          // Inject provider headers into the existing response headers
+          const headers = new Headers(streamRes.headers);
+          headers.set('X-Provider-Used', 'user_chatgpt');
+          headers.set('X-Model-Used', userProvider.model);
+          return new Response(streamRes.body, { headers });
         } catch (err: any) {
-          console.error(`[AI ROUTER] user_chatgpt stream failed: ${err?.message?.slice(0, 300)}`);
-          // Log and save specific API error
+          console.error(`[AI ROUTER] user_chatgpt (Codex) stream failed: ${err?.message?.slice(0, 300)}`);
           await supabaseAdmin
             .from('user_openai_links')
-            .update({
-              fallback_reason: 'api_error',
-              last_provider_used: 'openrouter',
-              updated_at: new Date().toISOString(),
-            })
+            .update({ fallback_reason: 'api_error', last_provider_used: 'openrouter', updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
           // Fall through to OpenRouter
         }
@@ -310,14 +503,14 @@ Deno.serve(async (req: Request) => {
     // NON-STREAMING PATH
     // ══════════════════════════════════════════════════
 
-    // ── Attempt 1: User's ChatGPT ────────────────────────────────────────────
+    // ── Attempt 1: User's ChatGPT via Codex endpoint ────────────────────────
     if (userProvider) {
       try {
-        const { text, usage } = await callChat(
-          OPENAI_CHAT_URL, userProvider.accessToken, userProvider.model, messages,
+        const { text, usage } = await callCodex(
+          userProvider.accessToken, userProvider.model, messages,
         );
         await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
-        console.log(`[AI ROUTER] provider=user_chatgpt model=${userProvider.model} success`);
+        console.log(`[AI ROUTER] provider=user_chatgpt (Codex) model=${userProvider.model} success`);
         return new Response(JSON.stringify({
           success:       true,
           provider_used: 'user_chatgpt',
@@ -328,15 +521,10 @@ Deno.serve(async (req: Request) => {
         }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
       } catch (err: any) {
-        console.error(`[AI ROUTER] user_chatgpt failed: ${err?.message?.slice(0, 300)}`);
-        // Log and save specific API error
+        console.error(`[AI ROUTER] user_chatgpt (Codex) failed: ${err?.message?.slice(0, 300)}`);
         await supabaseAdmin
           .from('user_openai_links')
-          .update({
-            fallback_reason: 'api_error',
-            last_provider_used: 'openrouter',
-            updated_at: new Date().toISOString(),
-          })
+          .update({ fallback_reason: 'api_error', last_provider_used: 'openrouter', updated_at: new Date().toISOString() })
           .eq('user_id', user.id);
         // Fall through to OpenRouter
       }
@@ -363,7 +551,7 @@ Deno.serve(async (req: Request) => {
         model_used:    OPENROUTER_MODEL,
         response:      text,
         usage,
-        fallback_used: !userProvider, // true if user never connected, false if user_chatgpt failed
+        fallback_used: !userProvider,
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } catch (err: any) {

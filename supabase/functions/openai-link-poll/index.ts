@@ -181,13 +181,32 @@ Deno.serve(async (req: Request) => {
     log('Exchanging authorization_code for tokens...');
 
     // ── 6. PKCE token exchange ────────────────────────────────────────────────
-    const tokens = await exchangeCodeForTokens(authorization_code, code_verifier, log);
-    if (!tokens) {
+    const exchangeResult = await exchangeCodeForTokens(authorization_code, code_verifier, log);
+    if (!exchangeResult.success) {
       log('Error: Token exchange failed');
       await flushLogs('error');
-      return json({ status: 'error', message: 'Token exchange failed' }, 502);
+
+      // Surface the actual OpenAI response/error as requested by the user
+      let upstreamError: any = 'Unknown token exchange failure';
+      if (exchangeResult.errorBody) {
+        try {
+          upstreamError = JSON.parse(exchangeResult.errorBody);
+        } catch (_) {
+          upstreamError = exchangeResult.errorBody;
+        }
+      } else if (exchangeResult.errorMessage) {
+        upstreamError = exchangeResult.errorMessage;
+      }
+
+      return json({
+        status: 'error',
+        message: 'Token exchange failed',
+        upstream_status: exchangeResult.errorStatus,
+        upstream_error: upstreamError,
+      }, 502);
     }
 
+    const tokens = exchangeResult.tokens!;
     log(`Token exchange success. access_token_len=${tokens.access_token.length}, has_refresh=${!!tokens.refresh_token}`);
 
     const expiresAt = tokens.expires_in
@@ -235,65 +254,73 @@ Deno.serve(async (req: Request) => {
   }
 });
 
+interface ExchangeResult {
+  success: boolean;
+  tokens?: {
+    access_token: string;
+    refresh_token?: string;
+    id_token?: string;
+    expires_in?: number;
+  };
+  errorStatus?: number;
+  errorBody?: string;
+  errorMessage?: string;
+}
+
 // ── PKCE token exchange — uses standard OAuth authorization_code + code_verifier
 async function exchangeCodeForTokens(
   authorization_code: string,
   code_verifier: string,
   log: (msg: string) => void,
-): Promise<{ access_token: string; refresh_token?: string; id_token?: string; expires_in?: number } | null> {
+): Promise<ExchangeResult> {
+  const redirect_uri = 'https://auth.openai.com/deviceauth/callback';
+  log(`Performing PKCE token exchange using redirect_uri="${redirect_uri}"`);
 
-  const params = new URLSearchParams({
-    grant_type:    'authorization_code',
-    code:          authorization_code,
-    code_verifier: code_verifier,
-    client_id:     CODEX_CLIENT_ID,
-  });
-
-  log(`Exchange Attempt 1: urlencoded POST to auth.openai.com/oauth/token`);
   try {
-    let res = await fetch(OPENAI_TOKEN_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    params.toString(),
+    const formParams = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: authorization_code,
+      code_verifier: code_verifier,
+      client_id: CODEX_CLIENT_ID,
+      redirect_uri: redirect_uri,
     });
 
-    log(`Exchange Attempt 1 status=${res.status}`);
+    const res = await fetch(OPENAI_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formParams.toString(),
+    });
 
-    if (!res.ok) {
-      const errBody = await res.text();
-      log(`Exchange Attempt 1 failed status=${res.status}, body=${errBody}`);
+    log(`Response status=${res.status}`);
+    const headerList: string[] = [];
+    res.headers.forEach((val, key) => {
+      headerList.push(`${key}: ${val}`);
+    });
+    log(`Response headers: ${headerList.join(', ')}`);
 
-      log(`Exchange Attempt 2: JSON POST to auth.openai.com/oauth/token`);
-      const jsonRes = await fetch(OPENAI_TOKEN_URL, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grant_type:    'authorization_code',
-          code:          authorization_code,
-          code_verifier: code_verifier,
-          client_id:     CODEX_CLIENT_ID,
-        }),
-      });
-
-      log(`Exchange Attempt 2 status=${jsonRes.status}`);
-      if (!jsonRes.ok) {
-        const errBody2 = await jsonRes.text();
-        log(`Exchange Attempt 2 failed status=${jsonRes.status}, body=${errBody2}`);
-        return null;
+    const bodyText = await res.text();
+    if (res.ok) {
+      try {
+        const data = JSON.parse(bodyText);
+        if (data.access_token) {
+          log(`Token exchange SUCCEEDED`);
+          return { success: true, tokens: data };
+        } else {
+          log(`Succeeded but response body missing access_token. Body: ${bodyText}`);
+          return { success: false, errorStatus: res.status, errorBody: bodyText };
+        }
+      } catch (e: any) {
+        log(`Failed to parse JSON: ${e.message}. Body: ${bodyText}`);
+        return { success: false, errorStatus: res.status, errorBody: bodyText };
       }
-      res = jsonRes;
+    } else {
+      log(`Token exchange FAILED. Status: ${res.status}. Body: ${bodyText}`);
+      return { success: false, errorStatus: res.status, errorBody: bodyText };
     }
-
-    const data = await res.json();
-    if (!data.access_token) {
-      log(`Exchange response missing access_token. Data keys: ${Object.keys(data).join(', ')}`);
-      return null;
-    }
-
-    return data;
   } catch (err: any) {
-    log(`Exchange network/parsing error: ${err?.message ?? String(err)}`);
-    return null;
+    const errMsg = err?.message ?? String(err);
+    log(`Token exchange exception: ${errMsg}`);
+    return { success: false, errorMessage: errMsg };
   }
 }
 
