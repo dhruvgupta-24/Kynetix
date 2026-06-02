@@ -18,6 +18,32 @@ class AppShell extends StatefulWidget {
 
 class AppShellState extends State<AppShell> {
   int _tab = 0;
+  static const _channel = MethodChannel('com.kynetix.app/widget');
+
+  @override
+  void initState() {
+    super.initState();
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onAction') {
+        final action = call.arguments as String?;
+        if (action == 'open_nutrition') {
+          switchToTab(0);
+        }
+      }
+    });
+    _checkPendingAction();
+  }
+
+  Future<void> _checkPendingAction() async {
+    try {
+      final action = await _channel.invokeMethod<String>('getPendingAction');
+      if (action == 'open_nutrition') {
+        switchToTab(0);
+      }
+    } catch (e) {
+      debugPrint('[AppShell] Error checking pending action: $e');
+    }
+  }
 
   void switchToTab(int index) {
     if (!mounted || index == _tab) return;

@@ -74,8 +74,10 @@ class WidgetService {
 
       // Build JSON payload
       final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
       final payload = {
         'last_update_date': dateStr,
+        'last_update_time': timeStr,
         'calories_consumed': consumedCalories,
         'calories_target': targetCalories,
         'calories_remaining': remainingCalories,

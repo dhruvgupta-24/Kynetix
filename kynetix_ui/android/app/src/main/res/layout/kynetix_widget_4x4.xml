@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/kynetix_widget_background"
+    android:padding="16dp">
+
+    <!-- Header Section -->
+    <RelativeLayout
+        android:id="@+id/widget_header_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="KYNETIX"
+            android:textColor="#52B788"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1" />
+
+        <TextView
+            android:id="@+id/widget_timestamp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:text="Updated --:--"
+            android:textColor="#9CA3AF"
+            android:textSize="10sp" />
+    </RelativeLayout>
+
+    <!-- Main Content Container: holds concentric rings in the center -->
+    <RelativeLayout
+        android:id="@+id/widget_content_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/widget_header_layout"
+        android:layout_above="@+id/widget_details_layout">
+
+        <!-- Rings container: ImageView + center text overlay -->
+        <FrameLayout
+            android:id="@+id/widget_rings_container"
+            android:layout_width="160dp"
+            android:layout_height="160dp"
+            android:layout_centerInParent="true">
+
+            <ImageView
+                android:id="@+id/widget_progress_rings"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitCenter" />
+
+            <!-- Center overlay text -->
+            <LinearLayout
+                android:id="@+id/widget_center_text_layout"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/widget_calories_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="--"
+                    android:textColor="#FFFFFF"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false" />
+
+                <TextView
+                    android:id="@+id/widget_calories_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="kcal left"
+                    android:textColor="#9CA3AF"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="4dp"
+                    android:includeFontPadding="false" />
+
+                <TextView
+                    android:id="@+id/widget_protein_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="--"
+                    android:textColor="#52B788"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false" />
+
+                <TextView
+                    android:id="@+id/widget_protein_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="protein left"
+                    android:textColor="#9CA3AF"
+                    android:textSize="10sp"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+        </FrameLayout>
+    </RelativeLayout>
+
+    <!-- Fallback state overlay -->
+    <TextView
+        android:id="@+id/widget_fallback_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:text="Open Kynetix to set targets"
+        android:textColor="#9CA3AF"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:textStyle="italic"
+        android:visibility="gone" />
+
+    <!-- Bottom details layout (horizontal split) -->
+    <LinearLayout
+        android:id="@+id/widget_details_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
+
+        <!-- Calories section -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CALORIES"
+                android:textColor="#FF6B35"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_calories_remaining"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-- kcal remaining"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_calories_consumed_target"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-- / -- kcal"
+                android:textColor="#9CA3AF"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Vertical separator -->
+        <View
+            android:layout_width="0.5dp"
+            android:layout_height="match_parent"
+            android:background="#2A2A3C" />
+
+        <!-- Protein section -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="PROTEIN"
+                android:textColor="#52B788"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_protein_remaining"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="--g remaining"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_protein_consumed_target"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-- / -- g"
+                android:textColor="#9CA3AF"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+</RelativeLayout>
