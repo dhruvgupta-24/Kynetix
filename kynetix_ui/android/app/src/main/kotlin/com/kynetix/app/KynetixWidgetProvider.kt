@@ -40,39 +40,45 @@ class KynetixWidgetProvider : AppWidgetProvider() {
             appWidgetId: Int,
             options: Bundle? = null
         ) {
-            val opts = options ?: appWidgetManager.getAppWidgetOptions(appWidgetId)
-            val minWidth = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-            val minHeight = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
-
-            Log.d(TAG, "updateAppWidget: id=$appWidgetId size=${minWidth}x${minHeight}")
-
-            val views = RemoteViews(context.packageName, R.layout.kynetix_widget)
-
-            // Setup click intent to open Kynetix app
-            val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                context, 
-                0, 
-                intent, 
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-
-            // Read SharedPreferences
-            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val dataStr = prefs.getString("flutter.widget_data_v1", null)
-
-            if (dataStr == null) {
-                // Fresh install / empty state fallback
-                views.setViewVisibility(R.id.widget_content_layout, View.GONE)
-                views.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
-                appWidgetManager.updateAppWidget(appWidgetId, views)
-                return
-            }
-
             try {
+                val views = RemoteViews(context.packageName, R.layout.kynetix_widget)
+
+                // Setup click intent to open Kynetix app
+                val intent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val pendingIntent = PendingIntent.getActivity(
+                    context, 
+                    0, 
+                    intent, 
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+
+                val opts = options ?: try {
+                    appWidgetManager.getAppWidgetOptions(appWidgetId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to get app widget options: ", e)
+                    null
+                }
+
+                val minWidth = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0
+                val minHeight = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0
+
+                Log.d(TAG, "updateAppWidget: id=$appWidgetId size=${minWidth}x${minHeight}")
+
+                // Read SharedPreferences
+                val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val dataStr = prefs.getString("flutter.widget_data_v1", null)
+
+                if (dataStr == null) {
+                    // Fresh install / empty state fallback
+                    views.setViewVisibility(R.id.widget_content_layout, View.GONE)
+                    views.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
+                    appWidgetManager.updateAppWidget(appWidgetId, views)
+                    return
+                }
+
                 views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
 
@@ -91,30 +97,39 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                 val proteinTarget = json.optDouble("protein_target", 120.0)
                 var proteinRemaining = if (isNewDay) proteinTarget else json.optDouble("protein_remaining", proteinTarget)
 
-                // Clamp values just in case
-                if (caloriesRemaining < 0.0) caloriesRemaining = 0.0
-                if (proteinRemaining < 0.0) proteinRemaining = 0.0
+                // Clean NaN or Infinite values
+                fun Double.clean(): Double = if (isNaN() || isInfinite()) 0.0 else this
+                caloriesConsumed = caloriesConsumed.clean()
+                val cleanCaloriesTarget = caloriesTarget.clean()
+                caloriesRemaining = caloriesRemaining.clean()
+                proteinConsumed = proteinConsumed.clean()
+                val cleanProteinTarget = proteinTarget.clean()
+                proteinRemaining = proteinRemaining.clean()
 
-                val calRatio = if (caloriesTarget > 0.0) {
-                    (caloriesConsumed / caloriesTarget).toFloat().coerceIn(0f, 1f)
+                // Clamp values just in case
+                val finalCaloriesRemaining = if (caloriesRemaining < 0.0) 0.0 else caloriesRemaining
+                val finalProteinRemaining = if (proteinRemaining < 0.0) 0.0 else proteinRemaining
+
+                val calRatio = if (cleanCaloriesTarget > 0.0) {
+                    (caloriesConsumed / cleanCaloriesTarget).toFloat().coerceIn(0f, 1f)
                 } else {
                     0f
                 }
-                val proRatio = if (proteinTarget > 0.0) {
-                    (proteinConsumed / proteinTarget).toFloat().coerceIn(0f, 1f)
+                val proRatio = if (cleanProteinTarget > 0.0) {
+                    (proteinConsumed / cleanProteinTarget).toFloat().coerceIn(0f, 1f)
                 } else {
                     0f
                 }
 
                 // Draw circular progress rings
-                val bitmap = drawMacroRings(calRatio, proRatio, caloriesConsumed > caloriesTarget, proteinConsumed > proteinTarget)
+                val bitmap = drawMacroRings(calRatio, proRatio, caloriesConsumed > cleanCaloriesTarget, proteinConsumed > cleanProteinTarget)
                 views.setImageViewBitmap(R.id.widget_progress_rings, bitmap)
 
                 // Format text values
-                val calRemainingText = "${caloriesRemaining.toInt()} kcal left"
-                val calConsumedTargetText = "${caloriesConsumed.toInt()} / ${caloriesTarget.toInt()} kcal"
-                val proRemainingText = "${proteinRemaining.toInt()}g protein left"
-                val proConsumedTargetText = "${proteinConsumed.toInt()} / ${proteinTarget.toInt()} g protein"
+                val calRemainingText = "${finalCaloriesRemaining.toInt()} kcal left"
+                val calConsumedTargetText = "${caloriesConsumed.toInt()} / ${cleanCaloriesTarget.toInt()} kcal"
+                val proRemainingText = "${finalProteinRemaining.toInt()}g protein left"
+                val proConsumedTargetText = "${proteinConsumed.toInt()} / ${cleanProteinTarget.toInt()} g protein"
 
                 // Responsive layout adjustments
                 // 2x2 widget size (minWidth < 180)
@@ -122,7 +137,7 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                     views.setViewVisibility(R.id.widget_header_layout, View.GONE)
                     views.setViewVisibility(R.id.widget_details_layout, View.GONE)
                     views.setViewVisibility(R.id.widget_center_text_layout, View.VISIBLE)
-                    views.setTextViewText(R.id.widget_center_value, "${caloriesRemaining.toInt()}")
+                    views.setTextViewText(R.id.widget_center_value, "${finalCaloriesRemaining.toInt()}")
                     views.setTextViewText(R.id.widget_center_label, "kcal left")
                 } 
                 // 4x2 widget size (minWidth >= 180, minHeight < 180)
@@ -151,13 +166,19 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                     views.setTextViewText(R.id.widget_protein_consumed_target, proConsumedTargetText)
                 }
 
+                appWidgetManager.updateAppWidget(appWidgetId, views)
+
             } catch (e: Exception) {
                 Log.e(TAG, "updateAppWidget error: ", e)
-                views.setViewVisibility(R.id.widget_content_layout, View.GONE)
-                views.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
+                try {
+                    val fallbackViews = RemoteViews(context.packageName, R.layout.kynetix_widget)
+                    fallbackViews.setViewVisibility(R.id.widget_content_layout, View.GONE)
+                    fallbackViews.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
+                    appWidgetManager.updateAppWidget(appWidgetId, fallbackViews)
+                } catch (ex: Exception) {
+                    Log.e(TAG, "Fatal widget fallback update failure: ", ex)
+                }
             }
-
-            appWidgetManager.updateAppWidget(appWidgetId, views)
         }
 
         private fun drawMacroRings(

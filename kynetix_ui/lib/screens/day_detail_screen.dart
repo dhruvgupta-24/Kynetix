@@ -340,6 +340,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       ..showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 4),
+          persist: false,
           backgroundColor: const Color(0xFF222232),
           behavior: SnackBarBehavior.floating,
           margin: EdgeInsets.only(

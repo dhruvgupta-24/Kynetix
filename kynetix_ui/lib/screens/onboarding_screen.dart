@@ -407,11 +407,12 @@ class _Header extends StatelessWidget {
 
   const _Header({required this.currentStep, required this.totalSteps});
 
-  static const _titles    = ['About You',        'Your Body',              'Your Goals'];
+  static const _titles    = ['About You',        'Your Body',              'Your Goals',             'Eating Style'];
   static const _subtitles = [
     'Tell us a little about yourself',
     'Help us estimate your needs',
     'What do you want to achieve?',
+    'How do you eat roti or rice?',
   ];
 
   @override
