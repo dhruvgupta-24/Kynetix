@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/chatgpt_link_service.dart';
 
 // ─── Connect ChatGPT Screen — Device-Code Auth Flow ───────────────────────────
@@ -51,7 +52,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     super.dispose();
   }
 
-  // ── Step 1: Start the flow ─────────────────────────────────────────────────
+  // ── Step 1: Start the flow ───────────────────────────────────────────────────
 
   Future<void> _startFlow() async {
     setState(() { _step = _FlowStep.starting; _errorMessage = null; });
@@ -60,6 +61,10 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       final session = await ChatGptLinkService.startLink();
       if (!mounted) return;
       setState(() { _session = session; _step = _FlowStep.waitingForUser; });
+
+      // Automatically open the verification URL in the browser.
+      // The correct URL is auth.openai.com/codex/device (returned by OpenAI API).
+      await _openVerificationUrl();
     } on DeviceCodeDisabledException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -72,6 +77,20 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         _step = _FlowStep.error;
         _errorMessage = 'Failed to start: ${e.toString().replaceFirst('Exception: ', '')}';
       });
+    }
+  }
+
+  // ── Open verification URL in browser ────────────────────────────────────────
+
+  Future<void> _openVerificationUrl() async {
+    final urlStr = _session?.verificationUrl;
+    if (urlStr == null || urlStr.isEmpty) return;
+    final uri = Uri.tryParse(urlStr);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[ConnectChatGpt] Could not launch browser: $e');
     }
   }
 
@@ -255,8 +274,8 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         const SizedBox(height: 36),
         _buildWarningBox(
           icon: Icons.settings_rounded,
-          text: 'Before connecting: go to chatgpt.com/settings → Security → '
-              'enable "Device code authorization".',
+          text: 'Before connecting: open chatgpt.com → Settings → Security → '
+              'enable "Device code authorization". This is required once.',
         ),
         const Spacer(),
         _buildPrimaryButton(
@@ -269,10 +288,12 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     );
   }
 
-  // ── Waiting for user to enter code ────────────────────────────────────────
+  // ── Waiting for user to authorize in browser ───────────────────────────────
 
   Widget _buildWaitingView() {
-    final code = _session?.userCode ?? '';
+    final code    = _session?.userCode ?? '';
+    final urlStr  = _session?.verificationUrl ?? 'https://auth.openai.com/codex/device';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -289,7 +310,8 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         ),
         const SizedBox(height: 12),
         Text(
-          'Open chatgpt.com/device in your browser and enter this code:',
+          'A browser tab has been opened for you. '
+          'Sign in to ChatGPT and enter the code below:',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.6),
             fontSize: 14,
@@ -343,15 +365,52 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           ),
         ),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+
+        // Re-open browser button (in case user dismissed the tab)
+        GestureDetector(
+          onTap: _openVerificationUrl,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E2C),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFF60A5FA).withValues(alpha: 0.2),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.open_in_browser_rounded, size: 14, color: Color(0xFF60A5FA)),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    urlStr,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF60A5FA),
+                      decoration: TextDecoration.underline,
+                      decorationColor: Color(0xFF60A5FA),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
         _buildWarningBox(
           icon: Icons.info_outline_rounded,
-          text: 'Enter this code at chatgpt.com/device. '
+          text: 'Enter the code at the page that opened in your browser. '
               'Make sure you are signed in to the correct ChatGPT account.',
         ),
         const Spacer(),
         _buildPrimaryButton(
-          label: 'I\'ve Entered the Code',
+          label: 'I\'ve Authorized in Browser',
           icon: Icons.check_rounded,
           color: const Color(0xFF60A5FA),
           onTap: _startPolling,

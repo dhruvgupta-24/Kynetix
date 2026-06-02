@@ -23,7 +23,11 @@ const corsHeaders = {
 // Codex CLI client_id — same as openai/codex repo
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_AUTH_BASE = 'https://auth.openai.com/api/accounts';
-const VERIFICATION_URL = 'https://chatgpt.com/device';
+
+// Fallback URL if the deviceauth endpoint does not return one.
+// The real URL returned by OpenAI is: https://auth.openai.com/codex/device
+// This constant is a safety net only — OpenAI's response is always preferred.
+const VERIFICATION_URL_FALLBACK = 'https://auth.openai.com/codex/device';
 
 // Session TTL: 15 minutes (OpenAI device codes typically expire in 15m)
 const SESSION_TTL_MINUTES = 15;
@@ -82,12 +86,20 @@ Deno.serve(async (req: Request) => {
       ? parseInt(interval_raw.trim(), 10)
       : Number(interval_raw);
 
+    // Use the verification_url returned by OpenAI directly.
+    // The API returns: https://auth.openai.com/codex/device
+    // Do NOT use a hardcoded override — chatgpt.com/device redirects to the homepage.
+    const verification_url: string =
+      deviceData.verification_url ??
+      deviceData.verificationUrl ??
+      VERIFICATION_URL_FALLBACK;
+
     if (!device_auth_id || !user_code) {
       console.error(`[openai-link-start] Unexpected response shape: ${JSON.stringify(deviceData).slice(0, 200)}`);
       return json({ error: 'Unexpected response from OpenAI device auth endpoint' }, 502);
     }
 
-    console.log(`[openai-link-start] Got user_code=${user_code} interval=${interval_seconds}s`);
+    console.log(`[openai-link-start] Got user_code=${user_code} interval=${interval_seconds}s verification_url=${verification_url}`);
 
     // ── 3. Save pending session to DB ─────────────────────────────────────────
     const supabaseAdmin = createClient(
@@ -112,7 +124,7 @@ Deno.serve(async (req: Request) => {
         user_id:          user.id,
         device_code:      device_auth_id,   // stores device_auth_id
         user_code:        user_code,
-        verification_url: VERIFICATION_URL,
+        verification_url: verification_url,  // real URL from OpenAI, not hardcoded
         interval_seconds: interval_seconds,
         expires_at:       expiresAt,
         status:           'pending',
@@ -131,8 +143,8 @@ Deno.serve(async (req: Request) => {
     return json({
       success:          true,
       session_id:       session.id,        // opaque ID, client uses this to poll
-      user_code:        user_code,         // user enters this at chatgpt.com/device
-      verification_url: VERIFICATION_URL,
+      user_code:        user_code,         // user enters this at auth.openai.com/codex/device
+      verification_url: verification_url,  // real URL from OpenAI
       interval_seconds: interval_seconds,
       expires_at:       expiresAt,
     });
