@@ -25,8 +25,10 @@ const corsHeaders = {
 };
 
 // Codex backend endpoint (works with ChatGPT OAuth tokens)
-const CODEX_URL     = 'https://chatgpt.com/backend-api/codex/responses';
-const CODEX_MODEL   = 'codex'; // default; overridden by user's selected_model from DB
+const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
+// NOTE: CODEX_MODEL is intentionally not hardcoded here.
+// The model is always discovered dynamically by openai-link-verify and
+// stored in user_openai_links.selected_model. We never guess model names.
 
 // OpenRouter fallback
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
@@ -60,13 +62,21 @@ function buildCodexBody(model: string, messages: any[]): string {
     };
   });
 
-  return JSON.stringify({
-    model,
+  // Build request body. The model MUST be a real slug from DB discovery — the
+  // Codex backend returns HTTP 400 for any unrecognised model identifier.
+  // If somehow the DB has an empty/placeholder, omit the field and let the
+  // backend use its subscription-based default.
+  const reqBody: Record<string, unknown> = {
     instructions,
     stream: true,
     store:  false,
     input,
-  });
+  };
+  if (model && model !== 'codex') {
+    reqBody.model = model;
+  }
+
+  return JSON.stringify(reqBody);
 }
 
 // ── Drain Codex SSE → plain text (for non-streaming callers) ─────────────────
@@ -119,8 +129,9 @@ async function callCodex(
   model:       string,
   messages:    any[],
 ): Promise<{ text: string; usage: null }> {
-  const effectiveModel = model === 'codex' || !model ? CODEX_MODEL : model;
-  console.log(`[AI ROUTER] codex → ${CODEX_URL} model=${effectiveModel} msgs=${messages.length}`);
+  // model comes directly from the DB-discovered slug (selected_model from user_openai_links).
+  // buildCodexBody already handles the case where model is empty/placeholder.
+  console.log(`[AI ROUTER] codex → ${CODEX_URL} model=${model || '(auto)'} msgs=${messages.length}`);
 
   const res = await fetch(CODEX_URL, {
     method:  'POST',
@@ -128,7 +139,7 @@ async function callCodex(
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type':  'application/json',
     },
-    body: buildCodexBody(effectiveModel, messages),
+    body: buildCodexBody(model, messages),
   });
 
   console.log(`[AI ROUTER] codex ← status=${res.status}`);
@@ -153,8 +164,7 @@ async function callCodexStream(
   model:       string,
   messages:    any[],
 ): Promise<Response> {
-  const effectiveModel = model === 'codex' || !model ? CODEX_MODEL : model;
-  console.log(`[AI ROUTER] codex stream → ${CODEX_URL} model=${effectiveModel}`);
+  console.log(`[AI ROUTER] codex stream → ${CODEX_URL} model=${model || '(auto)'}`);
 
   const res = await fetch(CODEX_URL, {
     method:  'POST',
@@ -162,7 +172,7 @@ async function callCodexStream(
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type':  'application/json',
     },
-    body: buildCodexBody(effectiveModel, messages),
+    body: buildCodexBody(model, messages),
   });
 
   if (!res.ok) {
@@ -185,7 +195,7 @@ async function callCodexStream(
       const chunk = JSON.stringify({
         id:      'chatcmpl-codex',
         object:  'chat.completion.chunk',
-        model:   effectiveModel,
+        model:   model || 'auto',
         choices: [{ index: 0, delta: { content: delta }, finish_reason: null }],
       });
       await writer.write(encoder.encode(`data: ${chunk}\n\n`));
@@ -195,7 +205,7 @@ async function callCodexStream(
       const chunk = JSON.stringify({
         id:      'chatcmpl-codex',
         object:  'chat.completion.chunk',
-        model:   effectiveModel,
+        model:   model || 'auto',
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
       });
       await writer.write(encoder.encode(`data: ${chunk}\n\n`));
