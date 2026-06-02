@@ -28,20 +28,8 @@ const corsHeaders = {
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 
 // ── Model ranking heuristic ───────────────────────────────────────────────────
-// Order: newest/most capable first. We do NOT hardcode which models exist —
-// this list is just the tiebreaker sort order for models discovered at runtime.
-// Any model NOT in this list gets deprioritized to the end (by creation date desc).
-const MODEL_PRIORITY_PREFIXES: string[] = [
-  'o3',
-  'o4',
-  'gpt-5',
-  'gpt-4.5',
-  'gpt-4.1',
-  'gpt-4o',      // below o-series and 4.x
-  'codex',
-  'gpt-4',
-  'gpt-3.5',
-];
+// We dynamically score and rank models based on family prefixes, generation major/minor numbers,
+// size penalties (like mini), and creation timestamps, rather than relying on a hardcoded list.
 
 // Models to explicitly skip (non-chat, deprecated, embedding, etc.)
 const SKIP_PATTERNS = [
@@ -114,20 +102,17 @@ Deno.serve(async (req: Request) => {
     console.log(`[openai-link-verify] Total models returned by API: ${allModels.length}`);
 
     // ── 4. Filter to chat-capable models ─────────────────────────────────────
-    const chatModels = allModels
+    const chatModelsObj = allModels
       .filter((m: any) => {
         const id: string = (m.id ?? '').toLowerCase();
         // Skip non-chat models
         if (SKIP_PATTERNS.some(p => id.includes(p))) return false;
         // Must be a gpt/o-series/codex chat model
         return id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3')
-          || id.startsWith('o4') || id.startsWith('codex') || id.startsWith('chatgpt');
-      })
-      .map((m: any) => m.id as string);
+          || id.startsWith('o4') || id.startsWith('o5') || id.startsWith('codex') || id.startsWith('chatgpt');
+      });
 
-    console.log(`[openai-link-verify] Chat-capable models (${chatModels.length}): ${chatModels.join(', ')}`);
-
-    if (chatModels.length === 0) {
+    if (chatModelsObj.length === 0) {
       await persistDiscovery(supabaseAdmin, user.id, [], null, false, null, allModels.map((m: any) => m.id));
       return json({
         success: false,
@@ -137,8 +122,9 @@ Deno.serve(async (req: Request) => {
       }, 400);
     }
 
-    // ── 5. Sort by capability (priority prefixes order) ───────────────────────
-    const sorted = sortModelsByPriority(chatModels);
+    // ── 5. Sort by capability dynamically (no hardcoded ranking list) ─────────
+    chatModelsObj.sort((a, b) => getModelScore(b) - getModelScore(a));
+    const sorted = chatModelsObj.map((m: any) => m.id as string);
     console.log(`[openai-link-verify] Models ranked: ${sorted.join(', ')}`);
 
     // ── 6. Test each candidate until one succeeds ─────────────────────────────
@@ -199,34 +185,47 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// ── Sort models by priority prefix order (newest/best first) ─────────────────
-function sortModelsByPriority(models: string[]): string[] {
-  return [...models].sort((a, b) => {
-    const aIdx = MODEL_PRIORITY_PREFIXES.findIndex(p => a.toLowerCase().startsWith(p));
-    const bIdx = MODEL_PRIORITY_PREFIXES.findIndex(p => b.toLowerCase().startsWith(p));
+// ── Dynamic capability scoring function (no hardcoded model rankings) ────────
+function getModelScore(model: any): number {
+  const id = (model.id ?? '').toLowerCase();
+  let score = 0;
 
-    // Both found in priority list
-    if (aIdx !== -1 && bIdx !== -1) {
-      if (aIdx !== bIdx) return aIdx - bIdx; // lower index = higher priority
-      // Same prefix family: sort by version descending (newer = higher)
-      return compareModelVersions(b, a);
+  // 1. Identify model family and generation
+  if (id.startsWith('o')) {
+    // Matches o1, o3, o4, o5, etc.
+    const match = id.match(/^o(\d+)/);
+    if (match) {
+      const gen = parseInt(match[1], 10);
+      score += 10 + gen; // e.g. o3 is 13, o1 is 11
+    } else {
+      score += 10; // generic o-series
     }
-    // One found, one not
-    if (aIdx !== -1) return -1;
-    if (bIdx !== -1) return 1;
-    // Neither found: sort alphabetically descending (guessing newer)
-    return b.localeCompare(a);
-  });
-}
+  } else if (id.startsWith('gpt-')) {
+    // Matches gpt-4, gpt-5, gpt-3.5
+    const match = id.match(/^gpt-(\d+)(?:\.(\d+))?/);
+    if (match) {
+      const major = parseInt(match[1], 10);
+      const minor = match[2] ? parseInt(match[2], 10) : 0;
+      score += major + (minor * 0.1); // e.g. gpt-4 is 4, gpt-3.5 is 3.5
+    } else if (id.includes('4o')) {
+      score += 4.5; // gpt-4o family is more capable than base gpt-4
+    } else {
+      score += 3.0; // generic gpt-series
+    }
+  }
 
-// Extract numeric versions for comparison (e.g. gpt-4o vs gpt-4o-mini)
-function compareModelVersions(a: string, b: string): number {
-  // Prefer non-mini models
-  const aMini = a.includes('mini');
-  const bMini = b.includes('mini');
-  if (aMini !== bMini) return aMini ? 1 : -1;
-  // Otherwise lexicographic descending
-  return a.localeCompare(b);
+  // 2. Penalties for lower-capability variants
+  if (id.includes('mini')) {
+    score -= 0.5; // prefer full-size models (e.g. gpt-4o over gpt-4o-mini)
+  }
+  if (id.includes('preview')) {
+    score -= 0.1; // prefer stable over preview if same generation
+  }
+
+  // 3. Use creation time as a minor decimal boost (newer = better)
+  score += (model.created || 0) / 1e11;
+
+  return score;
 }
 
 // ── Test generation with a specific model ─────────────────────────────────────

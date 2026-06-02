@@ -20,10 +20,10 @@ class ConnectChatGptScreen extends StatefulWidget {
   State<ConnectChatGptScreen> createState() => _ConnectChatGptScreenState();
 }
 
-enum _FlowStep { idle, starting, waitingForUser, polling, verifying, success, error }
+enum _FlowStep { idle, starting, waitingAndPolling, verifying, success, error }
 
 class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   _FlowStep _step = _FlowStep.idle;
   DeviceCodeSession? _session;
   ModelVerificationResult? _verifyResult;
@@ -36,6 +36,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -47,9 +48,24 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('[ConnectChatGpt] App resumed. Triggering immediate poll...');
+      if (_step == _FlowStep.waitingAndPolling) {
+        _doPoll();
+        _startPolling();
+      }
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      debugPrint('[ConnectChatGpt] App backgrounded. Pausing poll timer.');
+      _pollTimer?.cancel();
+    }
   }
 
   // ── Step 1: Start the flow ───────────────────────────────────────────────────
@@ -60,11 +76,14 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     try {
       final session = await ChatGptLinkService.startLink();
       if (!mounted) return;
-      setState(() { _session = session; _step = _FlowStep.waitingForUser; });
+      setState(() { _session = session; _step = _FlowStep.waitingAndPolling; });
 
       // Automatically open the verification URL in the browser.
       // The correct URL is auth.openai.com/codex/device (returned by OpenAI API).
       await _openVerificationUrl();
+
+      // Automatically start background polling
+      _startPolling();
     } on DeviceCodeDisabledException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -94,13 +113,12 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     }
   }
 
-  // ── Step 2: User opened chatgpt.com/device, start polling ─────────────────
+  // ── Step 2: Start background polling ───────────────────────────────────────
 
   void _startPolling() {
     if (_session == null) return;
-    setState(() { _step = _FlowStep.polling; });
-
     final interval = Duration(seconds: _session!.intervalSeconds.clamp(3, 10));
+    _pollTimer?.cancel();
     _pollTimer = Timer.periodic(interval, (_) => _doPoll());
     // Poll immediately on first call
     _doPoll();
@@ -228,8 +246,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     return switch (_step) {
       _FlowStep.idle       => _buildIdleView(),
       _FlowStep.starting   => _buildLoadingView('Starting authentication…'),
-      _FlowStep.waitingForUser => _buildWaitingView(),
-      _FlowStep.polling    => _buildPollingView(),
+      _FlowStep.waitingAndPolling => _buildWaitingAndPollingView(),
       _FlowStep.verifying  => _buildLoadingView('Discovering available models…'),
       _FlowStep.success    => _buildSuccessView(),
       _FlowStep.error      => _buildErrorView(),
@@ -288,11 +305,12 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     );
   }
 
-  // ── Waiting for user to authorize in browser ───────────────────────────────
+  // ── Waiting and Polling combined view ──────────────────────────────────────
 
-  Widget _buildWaitingView() {
+  Widget _buildWaitingAndPollingView() {
     final code    = _session?.userCode ?? '';
     final urlStr  = _session?.verificationUrl ?? 'https://auth.openai.com/codex/device';
+    final interval = _session?.intervalSeconds ?? 5;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,122 +420,63 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         _buildWarningBox(
           icon: Icons.info_outline_rounded,
           text: 'Enter the code at the page that opened in your browser. '
-              'Make sure you are signed in to the correct ChatGPT account.',
+              'Once authorized, Kynetix will automatically detect completion.',
         ),
         const Spacer(),
-        _buildPrimaryButton(
-          label: 'I\'ve Authorized in Browser',
-          icon: Icons.check_rounded,
-          color: const Color(0xFF60A5FA),
-          onTap: _startPolling,
-        ),
-        const SizedBox(height: 12),
+
+        // Dynamic background polling status indicator
         Center(
-          child: TextButton(
-            onPressed: () => setState(() => _step = _FlowStep.idle),
-            child: Text(
-              'Start over',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Polling ───────────────────────────────────────────────────────────────
-
-  Widget _buildPollingView() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        AnimatedBuilder(
-          animation: _pulseAnim,
-          builder: (_, child) => Opacity(
-            opacity: _pulseAnim.value,
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: const Color(0xFF52B788).withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.sync_rounded,
-                color: Color(0xFF52B788),
-                size: 40,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 28),
-        const Text(
-          'Waiting for authorization…',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Checking every ${_session?.intervalSeconds ?? 5} seconds',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.5),
-            fontSize: 13,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (_session?.userCode != null) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E2C),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _session!.userCode,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 4,
+          child: Column(
+            children: [
+              AnimatedBuilder(
+                animation: _pulseAnim,
+                builder: (_, child) => Opacity(
+                  opacity: _pulseAnim.value,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF52B788),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Checking status every $interval seconds...',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _copyCode,
-                  child: const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF52B788)),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  _pollTimer?.cancel();
+                  setState(() => _step = _FlowStep.idle);
+                },
+                child: Text(
+                  'Cancel & Start Over',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    fontSize: 13,
+                  ),
                 ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 36),
-        TextButton(
-          onPressed: () {
-            _pollTimer?.cancel();
-            setState(() => _step = _FlowStep.idle);
-          },
-          child: Text(
-            'Cancel',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.4),
-              fontSize: 13,
-            ),
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 12),
       ],
     );
   }

@@ -726,11 +726,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildAiStatusBody() {
     final s = _aiStatus ?? ChatGptLinkStatus.disconnected;
     final isConnected = s.isConnected;
-    final providerColor = isConnected
+    final isActiveChatGPT = s.activeProvider == 'user_chatgpt';
+    
+    final providerColor = isActiveChatGPT
         ? const Color(0xFF52B788)
         : const Color(0xFF60A5FA);
-    final providerLabel = isConnected ? 'ChatGPT (Personal)' : 'OpenRouter (Shared)';
-    final providerIcon = isConnected
+    final providerLabel = isActiveChatGPT ? 'ChatGPT (Personal)' : 'OpenRouter (Shared)';
+    final providerIcon = isActiveChatGPT
         ? Icons.account_circle_rounded
         : Icons.cloud_queue_rounded;
 
@@ -806,48 +808,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const Divider(color: Color(0xFF2E2E3E), height: 1),
         const SizedBox(height: 12),
 
-        // ── Model rows ────────────────────────────────────────────────────────
+        // ── Model & Provider rows ─────────────────────────────────────────────
         _InfoRow(
-          icon: Icons.auto_awesome_rounded,
-          label: 'Active Model',
-          value: s.activeModel ?? 'None',
+          icon: Icons.sync_rounded,
+          label: 'Connection Status',
+          value: isConnected ? 'Connected' : 'Disconnected',
+        ),
+        _InfoRow(
+          icon: Icons.cloud_queue_rounded,
+          label: 'Active Provider',
+          value: _providerDisplayName(s.activeProvider),
         ),
         _InfoRow(
           icon: Icons.psychology_rounded,
           label: 'Selected Model',
           value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
         ),
-        _InfoRow(
-          icon: Icons.swap_horiz_rounded,
-          label: 'Last Provider',
-          value: _providerDisplayName(s.lastProviderUsed),
-        ),
-        _InfoRow(
-          icon: Icons.access_time_rounded,
-          label: 'Last Used',
-          value: _relativeTime(s.lastUsedAt),
-        ),
-        _InfoRow(
-          icon: Icons.verified_rounded,
-          label: 'Model Verified',
-          value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
-          isLast: !isConnected,
-        ),
-
-        // ── Extra info when connected ─────────────────────────────────────────
         if (isConnected) ...[
+          _InfoRow(
+            icon: Icons.refresh_rounded,
+            label: 'Last Token Refresh',
+            value: _relativeTime(s.lastRefreshedAt),
+          ),
+          _InfoRow(
+            icon: Icons.assignment_turned_in_rounded,
+            label: 'Last Test Gen',
+            value: s.testGenerationSnippet != null ? '"${s.testGenerationSnippet}"' : '—',
+          ),
           _InfoRow(
             icon: Icons.schedule_rounded,
             label: 'Connected',
             value: _relativeTime(s.connectedAt),
           ),
+        ],
+        _InfoRow(
+          icon: Icons.access_time_rounded,
+          label: 'Last Used',
+          value: _relativeTime(s.lastUsedAt),
+        ),
+        if (s.fallbackReason != null) ...[
           _InfoRow(
-            icon: Icons.info_outline_rounded,
-            label: 'Fallback',
-            value: 'OpenRouter',
-            isLast: true,
+            icon: Icons.warning_amber_rounded,
+            label: 'Fallback Reason',
+            value: _fallbackReasonDisplayName(s.fallbackReason),
           ),
         ],
+        _InfoRow(
+          icon: Icons.verified_rounded,
+          label: 'Model Verified',
+          value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
+          isLast: true,
+        ),
 
         if (!isConnected) ...[
           const SizedBox(height: 10),
@@ -868,9 +879,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (raw == null) return '—';
     return switch (raw) {
       'user_chatgpt' => 'ChatGPT (Personal)',
-      'openrouter'   => 'OpenRouter',
+      'openrouter'   => 'OpenRouter (Shared)',
       'openai'       => 'Kynetix OpenAI',
       _              => raw,
+    };
+  }
+
+  String _fallbackReasonDisplayName(String? reason) {
+    if (reason == null) return '—';
+    return switch (reason) {
+      'account_disconnected' => 'Account Disconnected',
+      'token_expired'        => 'Token Expired',
+      'refresh_failed'       => 'Refresh Failed',
+      'model_unavailable'    => 'Model Unavailable',
+      'api_error'            => 'API Error (completions failed)',
+      _                      => reason,
     };
   }
 

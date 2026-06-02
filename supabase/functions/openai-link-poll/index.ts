@@ -25,15 +25,49 @@ const CODEX_CLIENT_ID  = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_AUTH_BASE = 'https://auth.openai.com/api/accounts';
 const OPENAI_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 
+// @ts-ignore
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const logs: string[] = [];
+  let currentSessionId = '';
+  let supabaseAdmin: any = null;
+
+  const log = (msg: string) => {
+    const time = new Date().toISOString();
+    logs.push(`[${time}] ${msg}`);
+    console.log(`[openai-link-poll] ${msg}`);
+  };
+
+  const flushLogs = async (statusOverride?: string) => {
+    if (!supabaseAdmin || !currentSessionId) return;
+    try {
+      const updateData: any = { debug_logs: { logs } };
+      if (statusOverride) {
+        updateData.status = statusOverride;
+      }
+      const { error } = await supabaseAdmin
+        .from('openai_device_auth_sessions')
+        .update(updateData)
+        .eq('id', currentSessionId);
+      if (error) {
+        console.error(`[openai-link-poll] Failed to save debug_logs: ${error.message}`);
+      }
+    } catch (e) {
+      console.error(`[openai-link-poll] Failed to flush logs: ${e}`);
+    }
+  };
+
   try {
+    log('--- POLL ATTEMPT START ---');
     // ── 1. Verify Supabase JWT ────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return json({ error: 'Missing Authorization header' }, 401);
+    if (!authHeader) {
+      log('Error: Missing Authorization header');
+      return json({ error: 'Missing Authorization header' }, 401);
+    }
 
     const jwt = authHeader.replace('Bearer ', '').trim();
     const supabaseAnon = createClient(
@@ -43,17 +77,22 @@ Deno.serve(async (req: Request) => {
     );
     const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser();
     if (userErr || !user) {
+      log(`Error: Unauthorized userErr=${userErr?.message}`);
       return json({ error: 'Unauthorized' }, 401);
     }
+    log(`Auth success: user_id=${user.id}`);
 
     // ── 2. Parse request: need session_id ────────────────────────────────────
     const body = await req.json().catch(() => ({}));
     const session_id: string = body.session_id ?? '';
     if (!session_id) {
+      log('Error: Missing session_id');
       return json({ error: 'session_id required' }, 400);
     }
+    currentSessionId = session_id;
+    log(`session_id=${session_id}`);
 
-    const supabaseAdmin = createClient(
+    supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
@@ -67,88 +106,96 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (sessionErr || !session) {
+      log(`Error: Session not found or error=${sessionErr?.message}`);
+      await flushLogs();
       return json({ status: 'expired', message: 'Session not found' }, 404);
     }
 
+    log(`Session found: status=${session.status}, expires_at=${session.expires_at}`);
+
     // Check expiry
     if (new Date(session.expires_at) < new Date()) {
-      await supabaseAdmin
-        .from('openai_device_auth_sessions')
-        .update({ status: 'expired' })
-        .eq('id', session_id);
+      log('Session expired based on expires_at');
+      await flushLogs('expired');
       return json({ status: 'expired' });
     }
 
     if (session.status === 'claimed') {
+      log('Session already claimed');
+      await flushLogs();
       return json({ status: 'connected' });
     }
 
-    const device_auth_id = session.device_code; // stored in device_code column
+    const device_auth_id = session.device_code;
     const user_code      = session.user_code;
-
-    console.log(`[openai-link-poll] user=${user.id} session=${session_id} polling...`);
+    log(`device_auth_id=${device_auth_id}, user_code=${user_code}`);
 
     // ── 4. Poll OpenAI device token endpoint ─────────────────────────────────
+    log(`Calling OpenAI deviceauth/token...`);
     const pollRes = await fetch(`${OPENAI_AUTH_BASE}/deviceauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device_auth_id, user_code }),
     });
 
-    // 428 / authorization_pending = still waiting
-    // 400 / slow_down = wait longer
-    // 200 = authorized
+    log(`OpenAI deviceauth/token status=${pollRes.status}`);
+
     if (pollRes.status === 428 || pollRes.status === 400) {
       const pollBody = await pollRes.json().catch(() => ({}));
       const errCode = pollBody?.error ?? pollBody?.code ?? '';
+      log(`OpenAI pending status. errCode=${errCode}, body=${JSON.stringify(pollBody)}`);
+
       if (errCode === 'expired_token' || errCode === 'access_denied') {
-        await supabaseAdmin
-          .from('openai_device_auth_sessions')
-          .update({ status: 'expired' })
-          .eq('id', session_id);
+        log(`Session expired/denied by OpenAI: ${errCode}`);
+        await flushLogs('expired');
         return json({ status: 'expired', reason: errCode });
       }
-      // Still pending (authorization_pending or slow_down)
+      await flushLogs();
       return json({ status: 'pending' });
     }
 
     if (!pollRes.ok) {
       const errBody = await pollRes.text();
-      console.error(`[openai-link-poll] Poll error ${pollRes.status}: ${errBody.slice(0, 200)}`);
-      // If it's a 4xx about the user not having authorized yet:
+      log(`OpenAI error status=${pollRes.status}, body=${errBody}`);
       if (pollRes.status === 401 || pollRes.status === 403) {
+        await flushLogs();
         return json({ status: 'pending' });
       }
+      await flushLogs('error');
       return json({ status: 'error', message: `Poll failed: ${pollRes.status}` }, 502);
     }
 
     // ── 5. Parse authorized response ─────────────────────────────────────────
     const pollData = await pollRes.json();
-    console.log(`[openai-link-poll] Poll response keys: ${Object.keys(pollData).join(', ')}`);
+    log(`OpenAI authorized. Response keys: ${Object.keys(pollData).join(', ')}`);
 
     const authorization_code: string = pollData.authorization_code ?? '';
     const code_verifier: string      = pollData.code_verifier ?? '';
-    // code_challenge is also returned but we only need code_verifier for exchange
 
     if (!authorization_code || !code_verifier) {
-      console.error(`[openai-link-poll] Missing auth code or verifier in poll response: ${JSON.stringify(pollData).slice(0, 300)}`);
+      log(`Error: Missing authorization_code or code_verifier. Response: ${JSON.stringify(pollData)}`);
+      await flushLogs('error');
       return json({ status: 'error', message: 'Unexpected poll response format' }, 502);
     }
 
-    console.log(`[openai-link-poll] Got authorization_code, exchanging for tokens...`);
+    log('Exchanging authorization_code for tokens...');
 
     // ── 6. PKCE token exchange ────────────────────────────────────────────────
-    // Try standard PKCE exchange first, then fallback variant
-    const tokens = await exchangeCodeForTokens(authorization_code, code_verifier);
+    const tokens = await exchangeCodeForTokens(authorization_code, code_verifier, log);
     if (!tokens) {
+      log('Error: Token exchange failed');
+      await flushLogs('error');
       return json({ status: 'error', message: 'Token exchange failed' }, 502);
     }
+
+    log(`Token exchange success. access_token_len=${tokens.access_token.length}, has_refresh=${!!tokens.refresh_token}`);
 
     const expiresAt = tokens.expires_in
       ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
       : null;
 
     // ── 7. Save tokens to user_openai_links ───────────────────────────────────
+    log('Upserting user_openai_links...');
     const { error: upsertErr } = await supabaseAdmin
       .from('user_openai_links')
       .upsert({
@@ -160,26 +207,31 @@ Deno.serve(async (req: Request) => {
         expires_at:    expiresAt,
         connected_at:  new Date().toISOString(),
         updated_at:    new Date().toISOString(),
+        fallback_reason: null,
       }, { onConflict: 'user_id' });
 
     if (upsertErr) {
-      console.error(`[openai-link-poll] DB upsert failed: ${upsertErr.message}`);
-      return json({ status: 'error', message: 'Failed to persist tokens' }, 500);
+      log(`Error: DB upsert failed: ${upsertErr.message}`);
+      await flushLogs('error');
+      return json({ status: 'error', message: `Failed to persist tokens: ${upsertErr.message}` }, 500);
     }
 
-    // Mark session as claimed
+    log('Marking session as claimed...');
     await supabaseAdmin
       .from('openai_device_auth_sessions')
       .update({ status: 'claimed', claimed_at: new Date().toISOString() })
       .eq('id', session_id);
 
-    console.log(`[openai-link-poll] ✅ Tokens persisted for user=${user.id}`);
-
+    log('✅ Successfully completed connection flow');
+    await flushLogs();
     return json({ status: 'connected' });
 
   } catch (err: any) {
-    console.error(`[openai-link-poll] Unhandled: ${err?.message ?? err}`);
-    return json({ error: 'Internal Server Error' }, 500);
+    const errMsg = err?.message ?? String(err);
+    const stack = err?.stack ?? '';
+    log(`CRITICAL UNHANDLED EXCEPTION: ${errMsg}\nStack: ${stack}`);
+    await flushLogs('error');
+    return json({ error: 'Internal Server Error', message: errMsg, stack }, 500);
   }
 });
 
@@ -187,54 +239,62 @@ Deno.serve(async (req: Request) => {
 async function exchangeCodeForTokens(
   authorization_code: string,
   code_verifier: string,
+  log: (msg: string) => void,
 ): Promise<{ access_token: string; refresh_token?: string; id_token?: string; expires_in?: number } | null> {
 
-  // Attempt 1: standard PKCE form-encoded exchange (no redirect_uri for device flow)
   const params = new URLSearchParams({
     grant_type:    'authorization_code',
     code:          authorization_code,
     code_verifier: code_verifier,
-    client_id:     'app_EMoamEEZ73f0CkXaXp7hrann',
+    client_id:     CODEX_CLIENT_ID,
   });
 
-  let res = await fetch('https://auth.openai.com/oauth/token', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    params.toString(),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    console.warn(`[openai-link-poll] Exchange attempt 1 failed (${res.status}): ${errBody.slice(0, 300)}`);
-
-    // Attempt 2: JSON body (some OpenAI endpoints accept JSON)
-    const jsonRes = await fetch('https://auth.openai.com/oauth/token', {
+  log(`Exchange Attempt 1: urlencoded POST to auth.openai.com/oauth/token`);
+  try {
+    let res = await fetch(OPENAI_TOKEN_URL, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        grant_type:    'authorization_code',
-        code:          authorization_code,
-        code_verifier: code_verifier,
-        client_id:     'app_EMoamEEZ73f0CkXaXp7hrann',
-      }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    params.toString(),
     });
 
-    if (!jsonRes.ok) {
-      const errBody2 = await jsonRes.text();
-      console.error(`[openai-link-poll] Exchange attempt 2 also failed (${jsonRes.status}): ${errBody2.slice(0, 300)}`);
+    log(`Exchange Attempt 1 status=${res.status}`);
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      log(`Exchange Attempt 1 failed status=${res.status}, body=${errBody}`);
+
+      log(`Exchange Attempt 2: JSON POST to auth.openai.com/oauth/token`);
+      const jsonRes = await fetch(OPENAI_TOKEN_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type:    'authorization_code',
+          code:          authorization_code,
+          code_verifier: code_verifier,
+          client_id:     CODEX_CLIENT_ID,
+        }),
+      });
+
+      log(`Exchange Attempt 2 status=${jsonRes.status}`);
+      if (!jsonRes.ok) {
+        const errBody2 = await jsonRes.text();
+        log(`Exchange Attempt 2 failed status=${jsonRes.status}, body=${errBody2}`);
+        return null;
+      }
+      res = jsonRes;
+    }
+
+    const data = await res.json();
+    if (!data.access_token) {
+      log(`Exchange response missing access_token. Data keys: ${Object.keys(data).join(', ')}`);
       return null;
     }
-    res = jsonRes;
-  }
 
-  const data = await res.json();
-  if (!data.access_token) {
-    console.error(`[openai-link-poll] Token exchange response missing access_token: ${JSON.stringify(data).slice(0, 300)}`);
+    return data;
+  } catch (err: any) {
+    log(`Exchange network/parsing error: ${err?.message ?? String(err)}`);
     return null;
   }
-
-  console.log(`[openai-link-poll] Token exchange success. expires_in=${data.expires_in}`);
-  return data;
 }
 
 function json(data: unknown, status = 200): Response {

@@ -13,6 +13,7 @@
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { refreshAccessTokenIfNeeded } from "../shared/oauth_refresh.ts";
 
 declare const Deno: any;
 
@@ -147,21 +148,38 @@ async function getUserChatGptProvider(
 ): Promise<{ accessToken: string; model: string } | null> {
   const { data, error } = await supabaseAdmin
     .from('user_openai_links')
-    .select('is_connected, access_token, expires_at, selected_model, model_discovery_verified')
+    .select('is_connected, access_token, refresh_token, expires_at, selected_model, model_discovery_verified')
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (error || !data) return null;
-  if (!data.is_connected || !data.access_token) return null;
-  if (!data.model_discovery_verified || !data.selected_model) return null;
-
-  // Check token expiry
-  if (data.expires_at && new Date(data.expires_at) < new Date()) {
-    console.warn(`[AI ROUTER] user=${userId} token expired at ${data.expires_at}`);
+  if (error || !data) {
     return null;
   }
 
-  return { accessToken: data.access_token, model: data.selected_model };
+  if (!data.is_connected) {
+    await supabaseAdmin
+      .from('user_openai_links')
+      .update({ fallback_reason: 'account_disconnected', updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return null;
+  }
+
+  if (!data.model_discovery_verified || !data.selected_model) {
+    await supabaseAdmin
+      .from('user_openai_links')
+      .update({ fallback_reason: 'model_unavailable', updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return null;
+  }
+
+  // Auto-refresh token if expired or expiring
+  const refreshed = await refreshAccessTokenIfNeeded(supabaseAdmin, userId, data);
+  if (!refreshed) {
+    console.warn(`[AI ROUTER] user=${userId} token refresh failed.`);
+    return null;
+  }
+
+  return { accessToken: refreshed.accessToken, model: data.selected_model };
 }
 
 // ── Update last_provider_used after a successful call ─────────────────────────
@@ -248,6 +266,15 @@ Deno.serve(async (req: Request) => {
           });
         } catch (err: any) {
           console.error(`[AI ROUTER] user_chatgpt stream failed: ${err?.message?.slice(0, 300)}`);
+          // Log and save specific API error
+          await supabaseAdmin
+            .from('user_openai_links')
+            .update({
+              fallback_reason: 'api_error',
+              last_provider_used: 'openrouter',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
           // Fall through to OpenRouter
         }
       }
@@ -302,6 +329,15 @@ Deno.serve(async (req: Request) => {
 
       } catch (err: any) {
         console.error(`[AI ROUTER] user_chatgpt failed: ${err?.message?.slice(0, 300)}`);
+        // Log and save specific API error
+        await supabaseAdmin
+          .from('user_openai_links')
+          .update({
+            fallback_reason: 'api_error',
+            last_provider_used: 'openrouter',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', user.id);
         // Fall through to OpenRouter
       }
     }

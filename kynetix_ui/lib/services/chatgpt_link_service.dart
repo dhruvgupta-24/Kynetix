@@ -41,6 +41,9 @@ class ChatGptLinkStatus {
   final bool modelDiscoveryVerified;
   final List<String>? chatCapableModels;
   final DateTime? discoveryTimestamp;
+  final DateTime? lastRefreshedAt;
+  final String? fallbackReason;
+  final String? testGenerationSnippet;
 
   const ChatGptLinkStatus({
     required this.isConnected,
@@ -55,6 +58,9 @@ class ChatGptLinkStatus {
     this.modelDiscoveryVerified = false,
     this.chatCapableModels,
     this.discoveryTimestamp,
+    this.lastRefreshedAt,
+    this.fallbackReason,
+    this.testGenerationSnippet,
   });
 
   static ChatGptLinkStatus get disconnected => const ChatGptLinkStatus(
@@ -145,7 +151,10 @@ class ChatGptLinkService {
       };
     } catch (e) {
       debugPrint('[ChatGptLinkService] pollLink error: $e');
-      return LinkPollResult(LinkPollStatus.error, message: e.toString());
+      if (e is FunctionException) {
+        return LinkPollResult(LinkPollStatus.error, message: e.details?.toString() ?? e.toString());
+      }
+      rethrow;
     }
   }
 
@@ -230,6 +239,9 @@ class ChatGptLinkService {
         modelDiscoveryVerified:  data['model_discovery_verified'] as bool? ?? false,
         chatCapableModels:       chatModels,
         discoveryTimestamp:      _parseDate(data['discovery_timestamp']),
+        lastRefreshedAt:         _parseDate(data['last_refreshed_at']),
+        fallbackReason:          data['fallback_reason'] as String?,
+        testGenerationSnippet:   data['test_generation_snippet'] as String?,
       );
     } catch (e) {
       debugPrint('[ChatGptLinkService] getStatus error: $e');

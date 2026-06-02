@@ -3,6 +3,7 @@
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { refreshAccessTokenIfNeeded } from "../shared/oauth_refresh.ts";
 
 declare const Deno: any;
 
@@ -36,12 +37,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: link } = await supabaseAdmin
       .from('user_openai_links')
-      .select(
-        'is_connected, connected_at, expires_at, updated_at, ' +
-        'selected_model, discovered_models, discovery_timestamp, ' +
-        'model_discovery_verified, last_provider_used, last_used_at, ' +
-        'responses_api_blocked'
-      )
+      .select('*')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -59,29 +55,48 @@ Deno.serve(async (req: Request) => {
         model_discovery_verified: false,
         discovered_models: null,
         discovery_timestamp: null,
+        last_refreshed_at: null,
+        fallback_reason:   null,
+        test_generation_snippet: null,
       });
     }
 
-    // Check if token is expired
-    const tokenExpired = link.expires_at
-      ? new Date(link.expires_at) < new Date()
+    // Proactively refresh access token if expired or expiring
+    // This keeps status checks accurate and heals expired access tokens on app open
+    await refreshAccessTokenIfNeeded(supabaseAdmin, user.id, link);
+
+    // Fetch the updated columns
+    const { data: latestLink } = await supabaseAdmin
+      .from('user_openai_links')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    const activeLink = latestLink || link;
+
+    // Check if token is still expired after refresh attempt
+    const tokenExpired = activeLink.expires_at
+      ? new Date(activeLink.expires_at) < new Date()
       : false;
 
-    const isEffectivelyConnected = link.is_connected && !tokenExpired;
+    const isEffectivelyConnected = activeLink.is_connected && !tokenExpired;
 
     return json({
       is_connected:            isEffectivelyConnected,
       token_expired:           tokenExpired,
       active_provider:         isEffectivelyConnected ? 'user_chatgpt' : 'openrouter',
-      active_model:            isEffectivelyConnected ? (link.selected_model ?? null) : null,
-      selected_model:          link.selected_model ?? null,
-      last_provider_used:      link.last_provider_used ?? null,
-      last_used_at:            link.last_used_at ?? null,
-      connected_at:            link.connected_at ?? null,
-      expires_at:              link.expires_at ?? null,
-      model_discovery_verified: link.model_discovery_verified ?? false,
-      discovered_models:       link.discovered_models ?? null,
-      discovery_timestamp:     link.discovery_timestamp ?? null,
+      active_model:            isEffectivelyConnected ? (activeLink.selected_model ?? null) : null,
+      selected_model:          activeLink.selected_model ?? null,
+      last_provider_used:      activeLink.last_provider_used ?? null,
+      last_used_at:            activeLink.last_used_at ?? null,
+      connected_at:            activeLink.connected_at ?? null,
+      expires_at:              activeLink.expires_at ?? null,
+      model_discovery_verified: activeLink.model_discovery_verified ?? false,
+      discovered_models:       activeLink.discovered_models ?? null,
+      discovery_timestamp:     activeLink.discovery_timestamp ?? null,
+      last_refreshed_at:       activeLink.last_refreshed_at ?? null,
+      fallback_reason:         activeLink.fallback_reason ?? null,
+      test_generation_snippet:  activeLink.test_generation_snippet ?? null,
     });
 
   } catch (err: any) {
