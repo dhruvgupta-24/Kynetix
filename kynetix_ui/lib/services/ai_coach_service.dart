@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
 import '../screens/onboarding_screen.dart' show currentUserProfile;
+import '../services/health_service.dart' show WeightContext;
 
 // ─── AiCoachResponse ──────────────────────────────────────────────────────────
 
@@ -137,6 +138,7 @@ class AiCoachService {
     String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
     double?          targetCaloriesOverride, // active manual override for this day
     List<Map<String, String>>? conversationHistory, // prior turns for multi-turn context
+    WeightContext?   weightContext, // compact weight summary for Kyno coaching
   }) async* {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
@@ -170,6 +172,16 @@ class AiCoachService {
     // Portion anchor — edge function appends to system prompt when present.
     final portionHint = _portionAnchorHint();
     if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
+
+    // Weight context — compact summary only, never raw history.
+    // The edge function appends toPromptString() to its system prompt.
+    // low_confidence_weight signals the edge function to soften weight claims.
+    if (weightContext != null) {
+      body['weight_context'] = weightContext.toPromptString();
+      if (weightContext.quality.confidenceLabel == 'low') {
+        body['low_confidence_weight'] = true;
+      }
+    }
 
     debugPrint('[AiCoachService] ↔ streaming → ai-meal-coach');
 

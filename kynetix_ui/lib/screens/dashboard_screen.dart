@@ -29,6 +29,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _syncing     = false;
   bool _hcAvailable = false;
 
+  /// Compact weight summary derived from latest Health Connect data.
+  /// Null when no weight readings are available.
+  WeightContext? get _weightContext =>
+      _weightHistory != null && _weightHistory!.isNotEmpty
+          ? WeightContext.fromHistory(_weightHistory!)
+          : null;
+
   @override
   void initState() {
     super.initState();
@@ -183,7 +190,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _openDay(DateTime date) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => DayDetailScreen(date: date, health: _syncResult),
+        builder: (_) => DayDetailScreen(
+          date:          date,
+          health:        _syncResult,
+          weightContext: _weightContext,
+        ),
       ),
     );
     setState(() {});   // refresh rings after returning
@@ -215,6 +226,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onSync:     _doSync,
               ),
             ),
+            // Weight summary chip — shown when data is available (above full chart).
+            if (_weightHistory != null && _weightHistory!.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _WeightSummaryChip(
+                  weightContext: _weightContext!,
+                ),
+              ),
             // Weight trend card — shown below Activity Sync once data is available.
             SliverToBoxAdapter(
               child: _WeightTrendCard(
@@ -1563,6 +1581,88 @@ class _WorkoutTargetCard extends StatelessWidget {
                       fontSize: 12, fontWeight: FontWeight.w700)),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Weight Summary Chip ─────────────────────────────────────────────────────
+//
+// Compact single-line pill above the full trend chart.
+// Shows: current weight   ·   7d delta
+// Only rendered when weightContext is non-null (controlled by caller).
+
+class _WeightSummaryChip extends StatelessWidget {
+  final WeightContext weightContext;
+  const _WeightSummaryChip({required this.weightContext});
+
+  @override
+  Widget build(BuildContext context) {
+    final ctx     = weightContext;
+    final kgLabel = ctx.latestWeightKg != null
+        ? '${ctx.latestWeightKg!.toStringAsFixed(1)} kg'
+        : '—';
+
+    // 7-day delta label + colour
+    Widget deltaWidget;
+    if (ctx.delta7dKg != null) {
+      final d       = ctx.delta7dKg!;
+      final abs     = d.abs();
+      final sign    = d >= 0 ? '+' : '−';
+      final neutral = abs < 0.1;
+      final color   = neutral
+          ? const Color(0xFF9CA3AF)
+          : (d < 0 ? const Color(0xFF52B788) : const Color(0xFFEF4444));
+      final icon    = neutral
+          ? Icons.remove_rounded
+          : (d < 0 ? Icons.trending_down_rounded : Icons.trending_up_rounded);
+      deltaWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 3),
+          Text('$sign${abs.toStringAsFixed(1)} kg  7d',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: color,
+                  fontWeight: FontWeight.w600)),
+        ],
+      );
+    } else {
+      deltaWidget = const Text('7d: —',
+          style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Row(
+        children: [
+          const Icon(Icons.monitor_weight_outlined,
+              size: 14, color: Color(0xFF9CA3AF)),
+          const SizedBox(width: 6),
+          Text(kgLabel,
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(width: 10),
+          deltaWidget,
+          const Spacer(),
+          // Confidence badge — only shown for low quality data
+          if (ctx.quality.confidenceLabel == 'low')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text('sparse data',
+                  style: TextStyle(
+                      fontSize: 9,
+                      color: Color(0xFFF59E0B),
+                      fontWeight: FontWeight.w600)),
+            ),
         ],
       ),
     );

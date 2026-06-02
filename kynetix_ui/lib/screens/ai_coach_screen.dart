@@ -4,6 +4,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/app_theme.dart';
 import '../services/ai_coach_service.dart';
+import '../services/health_service.dart' show WeightContext;
 
 // ─── Design constants (kept for MarkdownText which can't use KColor in const) ─
 const _kCard      = KColor.card;
@@ -47,6 +48,7 @@ class AiCoachScreen extends StatefulWidget {
   final bool?   isGymDay;   // real-time gym state from DayDetailScreen
   final String? workoutType; // e.g. 'Push', 'Pull'
   final double? targetCaloriesOverride; // active manual calorie override for this day
+  final WeightContext? weightContext;   // compact weight summary from Health Connect
 
   const AiCoachScreen({
     super.key,
@@ -54,6 +56,7 @@ class AiCoachScreen extends StatefulWidget {
     this.isGymDay,
     this.workoutType,
     this.targetCaloriesOverride,
+    this.weightContext,
   });
 
   @override
@@ -154,6 +157,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         workoutType:            widget.workoutType,
         targetCaloriesOverride: widget.targetCaloriesOverride,
         conversationHistory:    history,
+        weightContext:          widget.weightContext,
       );
 
       bool firstChunk = true;

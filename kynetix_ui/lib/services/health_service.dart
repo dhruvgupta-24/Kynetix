@@ -15,6 +15,213 @@ class WeightReading {
   });
 }
 
+// ─── WeightQualityReport ─────────────────────────────────────────────
+
+/// Data-quality assessment for a set of [WeightReading]s.
+///
+/// Used by Kyno to decide how confidently it can reason about weight trends.
+/// If quality is poor, Kyno should avoid strong weight-based recommendations.
+class WeightQualityReport {
+  /// Total deduplicated readings in the 90-day window.
+  final int totalReadings;
+
+  /// Readings within the last 7 days.
+  final int readingsLast7d;
+
+  /// Readings within the last 30 days.
+  final int readingsLast30d;
+
+  /// Largest gap between consecutive readings (null when < 2 readings).
+  final Duration? largestGapBetweenReadings;
+
+  /// Age of the most recent reading from now.
+  final Duration staleness;
+
+  /// Whether the most recent reading is older than 7 days.
+  bool get isStale => staleness.inDays > 7;
+
+  /// True when there are at least 2 readings within 30 days — minimum
+  /// needed for a meaningful trend.
+  bool get hasSufficientTrendData => readingsLast30d >= 2;
+
+  /// Qualitative confidence label for prompt injection.
+  /// high   → ≥4 readings in 30d, not stale, gap < 14d
+  /// medium → ≥2 readings in 30d but sparse or mildly stale
+  /// low    → insufficient or stale data
+  String get confidenceLabel {
+    if (!hasSufficientTrendData || isStale) return 'low';
+    if (readingsLast30d >= 4 &&
+        (largestGapBetweenReadings == null ||
+            largestGapBetweenReadings!.inDays < 14)) {
+      return 'high';
+    }
+    return 'medium';
+  }
+
+  const WeightQualityReport({
+    required this.totalReadings,
+    required this.readingsLast7d,
+    required this.readingsLast30d,
+    required this.largestGapBetweenReadings,
+    required this.staleness,
+  });
+}
+
+// ─── WeightContext ────────────────────────────────────────────────────
+
+/// Compact weight summary passed to Kyno.
+///
+/// Contains only the 4 scalar fields needed for coaching reasoning plus a
+/// quality report that gates how confidently the AI should rely on the data.
+/// Raw weight history is NEVER serialised into prompts.
+class WeightContext {
+  final double?            latestWeightKg;
+  final double?            delta7dKg;
+  final double?            delta30dKg;
+
+  /// 'gaining' | 'losing' | 'stable' | 'unknown'
+  final String             trendDirection;
+
+  final WeightQualityReport quality;
+
+  const WeightContext({
+    required this.latestWeightKg,
+    required this.delta7dKg,
+    required this.delta30dKg,
+    required this.trendDirection,
+    required this.quality,
+  });
+
+  // ── Factory ─────────────────────────────────────────────────────────
+
+  /// Builds a [WeightContext] from a list of deduplicated readings
+  /// (most-recent-first, as returned by [HealthService.syncWeight]).
+  ///
+  /// Returns null when the list is empty — the caller should omit the
+  /// weight block from the prompt entirely.
+  static WeightContext? fromHistory(List<WeightReading> history) {
+    if (history.isEmpty) return null;
+
+    final now    = DateTime.now();
+    final latest = history.first;
+
+    // ── Deltas ──────────────────────────────────────────────────────
+    double? delta7d;
+    double? delta30d;
+
+    if (history.length >= 2) {
+      final cut7d  = latest.recordedAt.subtract(const Duration(days: 8));
+      final cut30d = latest.recordedAt.subtract(const Duration(days: 31));
+
+      // First reading OLDER than the cutoff is the reference point.
+      final ref7d  = history.firstWhere(
+        (r) => r.recordedAt.isBefore(cut7d),
+        orElse: () => history.last,
+      );
+      final ref30d = history.firstWhere(
+        (r) => r.recordedAt.isBefore(cut30d),
+        orElse: () => history.last,
+      );
+
+      if (ref7d  != history.first) delta7d  = latest.kg - ref7d.kg;
+      if (ref30d != history.first) delta30d = latest.kg - ref30d.kg;
+    }
+
+    // ── Trend direction ─────────────────────────────────────────────
+    // Prefer the 7-day delta for recency; fall back to 30-day.
+    final primaryDelta = delta7d ?? delta30d;
+    final trendDirection = switch (primaryDelta) {
+      null                          => 'unknown',
+      double d when d < -0.3        => 'losing',
+      double d when d >  0.3        => 'gaining',
+      _                             => 'stable',
+    };
+
+    // ── Quality report ──────────────────────────────────────────────
+    final r7d  = history.where(
+        (r) => r.recordedAt.isAfter(now.subtract(const Duration(days: 7)))).length;
+    final r30d = history.where(
+        (r) => r.recordedAt.isAfter(now.subtract(const Duration(days: 30)))).length;
+
+    Duration? largestGap;
+    for (var i = 0; i < history.length - 1; i++) {
+      final gap = history[i].recordedAt.difference(history[i + 1].recordedAt).abs();
+      if (largestGap == null || gap > largestGap) largestGap = gap;
+    }
+
+    final quality = WeightQualityReport(
+      totalReadings:            history.length,
+      readingsLast7d:           r7d,
+      readingsLast30d:          r30d,
+      largestGapBetweenReadings: largestGap,
+      staleness:                now.difference(latest.recordedAt),
+    );
+
+    return WeightContext(
+      latestWeightKg: latest.kg,
+      delta7dKg:      delta7d,
+      delta30dKg:     delta30d,
+      trendDirection: trendDirection,
+      quality:        quality,
+    );
+  }
+
+  // ── Compact prompt string ────────────────────────────────────────────
+
+  /// Produces a short, multi-line block for injection into the Kyno system
+  /// prompt. Raw history is never included — only computed scalars.
+  ///
+  /// Example output:
+  /// ```
+  /// WEIGHT CONTEXT (confidence: medium)
+  /// - Current weight: 74.5 kg
+  /// - 7-day change: −0.8 kg (losing)
+  /// - 30-day change: −1.6 kg
+  /// - Data: 6 readings over 30d, latest 2d ago
+  /// NOTE: Weight data is sparse. Avoid strong weight-based assertions.
+  /// ```
+  String toPromptString() {
+    final q = quality;
+    final buf = StringBuffer();
+
+    buf.writeln('WEIGHT CONTEXT (confidence: ${q.confidenceLabel})');
+    if (latestWeightKg != null) {
+      buf.writeln('- Current weight: ${latestWeightKg!.toStringAsFixed(1)} kg');
+    }
+    if (delta7dKg != null) {
+      final sign = delta7dKg! >= 0 ? '+' : '';
+      buf.writeln('- 7-day change: $sign${delta7dKg!.toStringAsFixed(1)} kg ($trendDirection)');
+    } else {
+      buf.writeln('- 7-day change: insufficient data ($trendDirection)');
+    }
+    if (delta30dKg != null) {
+      final sign = delta30dKg! >= 0 ? '+' : '';
+      buf.writeln('- 30-day change: $sign${delta30dKg!.toStringAsFixed(1)} kg');
+    }
+
+    final stalenessLabel = q.staleness.inDays == 0
+        ? 'today'
+        : '${q.staleness.inDays}d ago';
+    buf.writeln(
+      '- Data: ${q.readingsLast30d} readings over 30d, latest $stalenessLabel',
+    );
+
+    if (q.confidenceLabel == 'low') {
+      buf.write(
+        'NOTE: Weight data is sparse or stale. '
+        'Avoid strong weight-based recommendations.',
+      );
+    } else if (q.confidenceLabel == 'medium') {
+      buf.write(
+        'NOTE: Weight data is moderate quality. '
+        'Use trend direction as a signal, not a precise measure.',
+      );
+    }
+
+    return buf.toString().trim();
+  }
+}
+
 // ─── Activity tiers ───────────────────────────────────────────────────────────
 
 enum ActivityTier {

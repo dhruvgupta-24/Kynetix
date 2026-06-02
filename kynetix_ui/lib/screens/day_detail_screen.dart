@@ -20,8 +20,14 @@ import 'ai_coach_screen.dart';
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
   final HealthSyncResult? health; // passed from dashboard for engine
+  final WeightContext?    weightContext; // compact weight summary for Kyno
 
-  const DayDetailScreen({super.key, required this.date, this.health});
+  const DayDetailScreen({
+    super.key,
+    required this.date,
+    this.health,
+    this.weightContext,
+  });
 
   @override
   State<DayDetailScreen> createState() => _DayDetailScreenState();
@@ -481,6 +487,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               isGymDay:               target?.isTrainingDay,
               workoutType:            target?.isTrainingDay == true ? target?.label : null,
               targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
+              weightContext:          widget.weightContext,
             ),
           ),
         ),
