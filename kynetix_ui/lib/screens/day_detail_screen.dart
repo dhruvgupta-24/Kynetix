@@ -34,21 +34,29 @@ class DayDetailScreen extends StatefulWidget {
 }
 
 class _DayDetailScreenState extends State<DayDetailScreen> {
-  late DayLog _log;
+  late DateTime _currentDate;
+  late final PageController _dayPageController;
+
+  static final DateTime _todayMidnight = () {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }();
+  static const int _todayPageIndex = 10000;
+
+  int _dateToPageIndex(DateTime date) {
+    final dateMidnight = DateTime(date.year, date.month, date.day);
+    final diffDays = _todayMidnight.difference(dateMidnight).inDays;
+    return _todayPageIndex - diffDays;
+  }
+
+  DateTime _pageIndexToDate(int index) {
+    final diffDays = _todayPageIndex - index;
+    return _todayMidnight.subtract(Duration(days: diffDays));
+  }
 
   static const _months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
   ];
 
   static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -56,7 +64,195 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _currentDate = widget.date;
+    _dayPageController = PageController(initialPage: _dateToPageIndex(widget.date));
+  }
+
+  @override
+  void dispose() {
+    _dayPageController.dispose();
+    super.dispose();
+  }
+
+  String get _dateLabel {
+    final d = _currentDate;
+    final wd = _weekdays[d.weekday - 1];
+    return '$wd, ${d.day} ${_months[d.month - 1]} ${d.year}';
+  }
+
+  bool get _isToday {
+    final now = DateTime.now();
+    return _currentDate.year == now.year &&
+        _currentDate.month == now.month &&
+        _currentDate.day == now.day;
+  }
+
+  String get _dateKey {
+    final d = _currentDate;
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  void _navigateToPrevDay() {
+    _dayPageController.previousPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _navigateToNextDay() {
+    if (_isToday) return;
+    _dayPageController.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final log = logFor(_currentDate);
+    final profile = currentUserProfile;
+
+    final session = WorkoutService.instance.sessionFor(_currentDate);
+    final splitDay = WorkoutService.instance.splitDayFor(_currentDate);
+    final gymDay = log.gymDay;
+    final bool isGymDay = gymDay != null
+        ? (gymDay.didGym || (session?.isEmpty == false))
+        : ((splitDay != null && !splitDay.isRestDay) || (session?.isEmpty == false));
+
+    final String? workoutTypeName;
+    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+      workoutTypeName = session.splitDayName;
+    } else if (gymDay?.workoutType != null) {
+      workoutTypeName = gymDay!.workoutType!.displayName;
+    } else if (gymDay?.splitDayName != null) {
+      workoutTypeName = gymDay!.splitDayName;
+    } else if (splitDay != null && !splitDay.isRestDay) {
+      workoutTypeName = splitDay.name;
+    } else {
+      workoutTypeName = null;
+    }
+
+    final target = profile != null
+        ? NutritionTargetEngine().dayTarget(
+            profile,
+            isGymDay: isGymDay,
+            health: widget.health,
+            session: session,
+            workoutTypeName: workoutTypeName,
+            targetCaloriesOverride: log.gymDay?.targetCaloriesOverride,
+            carryForwardAdjustment: log.carryForwardAdjustment,
+          )
+        : null;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF13131F),
+      floatingActionButton: _AiCoachFab(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => AiCoachScreen(
+              dateKey:                _dateKey,
+              isGymDay:               target?.isTrainingDay,
+              workoutType:            target?.isTrainingDay == true ? target?.label : null,
+              targetCaloriesOverride: log.gymDay?.targetCaloriesOverride,
+              weightContext:          widget.weightContext,
+            ),
+          ),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF13131F),
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _isToday ? 'Today' : _dateLabel,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (!_isToday)
+              Text(
+                _dateLabel,
+                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white),
+            tooltip: 'Previous day',
+            onPressed: _navigateToPrevDay,
+          ),
+          if (!_isToday)
+            IconButton(
+              icon: const Icon(Icons.chevron_right_rounded, color: Colors.white),
+              tooltip: 'Next day',
+              onPressed: _navigateToNextDay,
+            ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _dayPageController,
+        itemCount: _todayPageIndex + 1,
+        onPageChanged: (index) {
+          kHapticSelect();
+          setState(() {
+            _currentDate = _pageIndexToDate(index);
+          });
+        },
+        itemBuilder: (context, index) {
+          final date = _pageIndexToDate(index);
+          return _DayDetailContent(
+            date: date,
+            health: widget.health,
+            weightContext: widget.weightContext,
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── DayDetailContent ────────────────────────────────────────────────────────
+
+class _DayDetailContent extends StatefulWidget {
+  final DateTime date;
+  final HealthSyncResult? health;
+  final WeightContext? weightContext;
+
+  const _DayDetailContent({
+    required this.date,
+    this.health,
+    this.weightContext,
+  });
+
+  @override
+  State<_DayDetailContent> createState() => _DayDetailContentState();
+}
+
+class _DayDetailContentState extends State<_DayDetailContent> {
+  late DayLog _log;
+
+  @override
+  void initState() {
+    super.initState();
     _log = logFor(widget.date);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DayDetailContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.date != widget.date) {
+      _log = logFor(widget.date);
+    }
   }
 
   void _refresh() {
@@ -91,9 +287,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     if (entry != null) _refresh();
   }
 
-
-
-  /// The most time-appropriate meal section right now.
   MealSection get _currentSection {
     final h = DateTime.now().hour;
     if (h < 11) return MealSection.breakfast;
@@ -103,7 +296,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     return MealSection.lateNight;
   }
 
-  /// Directly adds a quick-add meal entry without navigating to AddMealScreen.
   void _quickAddMeal({
     required String name,
     required double calories,
@@ -199,7 +391,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     );
     if (!mounted) return;
     if (updated is DeleteSentinel) {
-      // User confirmed deletion inside the edit flow — remove from log and sync.
       _log.remove(entry.section, entry);
       _refresh();
     } else if (updated != null) {
@@ -256,7 +447,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                       if (currentOverride != null) ...[
                         Expanded(
                           child: TextButton(
-                            onPressed: () => Navigator.pop(ctx, -1.0), // -1 means clear
+                            onPressed: () => Navigator.pop(ctx, -1.0),
                             child: const Text('Clear Override', style: TextStyle(color: Color(0xFFF87171))),
                           ),
                         ),
@@ -303,11 +494,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     _refresh();
   }
 
-  // ── Meal deletion with undo ───────────────────────────────────────────────
-
-  /// Removes [entry] from [section] immediately and shows an Undo snackbar
-  /// for 4 seconds. If the user taps Undo, the entry is re-inserted.
-  /// Only if the snackbar expires untapped is the deletion considered final.
   void _handleDeleteWithUndo(MealSection section, MealEntry entry) {
     _log.remove(section, entry);
     _refresh();
@@ -367,61 +553,18 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       );
   }
 
-  String get _dateLabel {
-    final d = widget.date;
-    final wd = _weekdays[d.weekday - 1];
-    return '$wd, ${d.day} ${_months[d.month - 1]} ${d.year}';
-  }
-
-  bool get _isToday {
-    final now = DateTime.now();
-    return widget.date.year == now.year &&
-        widget.date.month == now.month &&
-        widget.date.day == now.day;
-  }
-
-  /// Date key in YYYY-MM-DD format matching cloud_sync_service / day_logs table
-  String get _dateKey {
-    final d = widget.date;
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  }
-
-  /// Engine-computed target for this day.
-  /// Recomputes on every rebuild so gym toggle takes effect instantly.
-  ///
-  /// Priority order:
-  ///   1. Actual logged WorkoutSession (highest truth — real volume/sets)
-  ///   2. log.gymDay (user manually toggled / type-selected today)
-  ///   3. WorkoutService split config for this date (auto-prefill)
-  ///   4. Rest day fallback
   DayTarget? get _dayTarget {
     final profile = currentUserProfile;
     if (profile == null) return null;
 
-    // Actual logged session — always highest priority.
     final session = WorkoutService.instance.sessionFor(widget.date);
-
-    // Configured split for this weekday.
     final splitDay = WorkoutService.instance.splitDayFor(widget.date);
-    final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-
-    // log.gymDay captures the user's current manual choice.
     final gymDay = _log.gymDay;
 
-    // isGymDay: true if session logged, user toggled yes, OR split says training.
-    // If the user explicitly toggled No (gymDay.didGym == false && gymDay != null),
-    // that is a deliberate override — honour it.
-    final bool isGymDay;
-    if (gymDay != null) {
-      // User has explicitly set a state — respect it.
-      isGymDay = gymDay.didGym || (session?.isEmpty == false);
-    } else {
-      // No user choice yet — use split default.
-      isGymDay = splitIsTraining || (session?.isEmpty == false);
-    }
+    final bool isGymDay = gymDay != null
+        ? (gymDay.didGym || (session?.isEmpty == false))
+        : ((splitDay != null && !splitDay.isRestDay) || (session?.isEmpty == false));
 
-    // Best available workout type name:
-    //   session name > user-chosen type > split day name
     final String? workoutTypeName;
     if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
       workoutTypeName = session.splitDayName;
@@ -448,8 +591,12 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = currentUserProfile;
     final target = _dayTarget;
+    final dayStatus = target != null
+        ? DayStatusEngine.classify(_log, target)
+        : null;
+
+    final profile = currentUserProfile;
     final todayWorkout = WorkoutService.instance.sessionFor(widget.date);
     final insights = target != null
         ? CoachService.instance.insightsForDay(
@@ -460,134 +607,52 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           )
         : const <CoachInsight>[];
 
-    final dayStatus = target != null
-        ? DayStatusEngine.classify(_log, target)
-        : null;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+      children: [
+        _DaySummaryBanner(
+          log: _log,
+          target: target,
+          dayStatus: dayStatus,
+          onEditTarget: _editDailyTarget,
+        ),
+        const SizedBox(height: 12),
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
-      floatingActionButton: _AiCoachFab(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => AiCoachScreen(
-              dateKey:                _dateKey,
-              isGymDay:               target?.isTrainingDay,
-              workoutType:            target?.isTrainingDay == true ? target?.label : null,
-              targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
-              weightContext:          widget.weightContext,
-            ),
-          ),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _isToday ? 'Today' : _dateLabel,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            if (!_isToday)
-              Text(
-                _dateLabel,
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-              ),
-          ],
-        ),
-        // Navigation arrows for accessibility (non-swipe)
-        actions: [
-          if (!_isToday)
-            IconButton(
-              icon: const Icon(Icons.chevron_right_rounded, color: Colors.white),
-              tooltip: 'Next day',
-              onPressed: _navigateToNextDay,
-            ),
-          IconButton(
-            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white),
-            tooltip: 'Previous day',
-            onPressed: _navigateToPrevDay,
-          ),
+        // ── Coach insights ───────────────────────────────────────
+        if (insights.isNotEmpty) ...[
+          _CoachInsightCard(insights: insights),
+          const SizedBox(height: 12),
         ],
-      ),
-      // ── Horizontal swipe → previous / next day ──────────────────────────────
-      //
-      // GestureDetector is placed outside the ListView (which is vertical only)
-      // so horizontal detection is unambiguous. Velocity threshold 400 px/s
-      // avoids false positives from Dismissible end-to-start swipes.
-      // Guard: if a text field has keyboard focus, ignore the gesture so the
-      // user can type without triggering navigation.
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragEnd: (details) {
-          // Do not navigate while keyboard is up (user is typing).
-          final focusedChild = FocusScope.of(context).focusedChild;
-          if (focusedChild != null && focusedChild.hasFocus) return;
-          final vx = details.velocity.pixelsPerSecond.dx;
-          if (vx > 400) {
-            _navigateToPrevDay();
-          } else if (vx < -400) {
-            _navigateToNextDay();
-          }
-        },
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-          children: [
-            _DaySummaryBanner(
-              log: _log,
-              target: target,
-              dayStatus: dayStatus,
-              onEditTarget: _editDailyTarget,
-            ),
-            const SizedBox(height: 12),
 
-            // ── Coach insights ───────────────────────────────────────
-            if (insights.isNotEmpty) ...[
-              _CoachInsightCard(insights: insights),
-              const SizedBox(height: 12),
-            ],
-
-            DailyNutritionQualityCard(
-              log: _log,
-              targetCal: target?.calories ?? 2000.0,
-              targetPro: target?.protein ?? 130.0,
-            ),
-            AdditionalMacrosCard(
-              log: _log,
-              targetCal: target?.calories ?? 2000.0,
-              targetPro: target?.protein ?? 130.0,
-            ),
-            const SizedBox(height: 12),
-
-            // ── Quick Add ───────────────────────────────────────────
-            _QuickAddCard(onAdd: _quickAddMeal),
-            const SizedBox(height: 12),
-
-            // ── Gym tracking ──────────────────────────────────────────
-            _GymCard(log: _log, date: widget.date, onChanged: _refresh),
-            const SizedBox(height: 4),
-            ...MealSection.values.map(
-              (section) => _MealSectionCard(
-                section: section,
-                log: _log,
-                onAdd: () => _openAddMeal(section),
-                onEdit: _openEditMeal,
-                onDelete: (entry) => _handleDeleteWithUndo(section, entry),
-              ),
-            ),
-          ],
+        DailyNutritionQualityCard(
+          log: _log,
+          targetCal: target?.calories ?? 2000.0,
+          targetPro: target?.protein ?? 130.0,
         ),
-      ),
+        AdditionalMacrosCard(
+          log: _log,
+          targetCal: target?.calories ?? 2000.0,
+          targetPro: target?.protein ?? 130.0,
+        ),
+        const SizedBox(height: 12),
+
+        // ── Quick Add ───────────────────────────────────────────
+        _QuickAddCard(onAdd: _quickAddMeal),
+        const SizedBox(height: 12),
+
+        // ── Gym tracking ──────────────────────────────────────────
+        _GymCard(log: _log, date: widget.date, onChanged: _refresh),
+        const SizedBox(height: 4),
+        ...MealSection.values.map(
+          (section) => _MealSectionCard(
+            section: section,
+            log: _log,
+            onAdd: () => _openAddMeal(section),
+            onEdit: _openEditMeal,
+            onDelete: (entry) => _handleDeleteWithUndo(section, entry),
+          ),
+        ),
+      ],
     );
   }
 

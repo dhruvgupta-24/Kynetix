@@ -29,6 +29,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _focusedMonth = DateTime.now();
   DateTime _selectedDate = DateTime.now();
 
+  static final DateTime _baseMonth = DateTime(2024, 1, 1);
+  late final PageController _calendarPageController;
+
+  int _monthIndex(DateTime date) {
+    return (date.year - _baseMonth.year) * 12 + date.month - _baseMonth.month;
+  }
+
+  DateTime _monthFromIndex(int index) {
+    return DateTime(_baseMonth.year, _baseMonth.month + index, 1);
+  }
+
   // ── Health Connect state ────────────────────────────────────────────────────
   HealthSyncResult?    _syncResult;
   List<WeightReading>? _weightHistory;  // 90-day weight from Health Connect
@@ -45,6 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _calendarPageController = PageController(initialPage: _monthIndex(_focusedMonth));
     // Show a loading indicator if user already connected
     if (currentUserProfile?.healthSyncEnabled == true) {
       _syncing = true;
@@ -55,6 +67,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkCalorieCarryForward();
     });
+  }
+
+  @override
+  void dispose() {
+    _calendarPageController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkCalorieCarryForward() async {
@@ -361,11 +379,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double get _remainingCalories => (_targetCalories - _consumedCalories).clamp(0, double.infinity);
   double get _remainingProtein  => (_targetProtein  - _consumedProtein ).clamp(0, double.infinity);
 
-  void _prevMonth() => setState(() =>
-      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month - 1));
+  void _prevMonth() {
+    _calendarPageController.previousPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
-  void _nextMonth() => setState(() =>
-      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month + 1));
+  void _nextMonth() {
+    _calendarPageController.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
 
   Future<void> _openDay(DateTime date) async {
     await Navigator.of(context).push(
@@ -504,11 +530,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ── Calendar ─────────────────────────────────────────────────────────────────
 
   Widget _buildCalendar() {
-    // Compute which days have nutrition data for the focused month.
-    // "completed" = ≥88% of the profile's avg daily calorie target hit.
-    // "logged"    = any meals recorded but target not fully met.
-    // (We use avg daily target here since we don't know per-day gym state for
-    //  historic dates without expensive lookups. 88% is a generous threshold.)
     final avgTarget = _weeklyPlan.avgDailyCalories;
     final completedDayKeys = <String>{};
     final loggedDayKeys    = <String>{};
@@ -523,43 +544,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
-    // Swipe left → next month, swipe right → prev month.
-    // Velocity threshold: 300 px/s avoids accidental triggers during taps.
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (details) {
-        final vx = details.velocity.pixelsPerSecond.dx;
-        if (vx < -300) {
-          setState(() => _focusedMonth =
-              DateTime(_focusedMonth.year, _focusedMonth.month + 1));
-        } else if (vx > 300) {
-          setState(() => _focusedMonth =
-              DateTime(_focusedMonth.year, _focusedMonth.month - 1));
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-        child: _Card(
-          child: Column(
-            children: [
-              _CalendarHeader(
-                month: _focusedMonth,
-                onPrev: _prevMonth,
-                onNext: _nextMonth,
-              ),
-              const SizedBox(height: 12),
-              _CalendarGrid(
-                focusedMonth:     _focusedMonth,
-                selectedDate:     _selectedDate,
-                completedDayKeys: completedDayKeys,
-                loggedDayKeys:    loggedDayKeys,
-                onSelect: (d) {
-                  setState(() => _selectedDate = d);
-                  _openDay(d);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+      child: _Card(
+        child: Column(
+          children: [
+            _CalendarHeader(
+              month: _focusedMonth,
+              onPrev: _prevMonth,
+              onNext: _nextMonth,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 265,
+              child: PageView.builder(
+                controller: _calendarPageController,
+                onPageChanged: (index) {
+                  kHapticSelect();
+                  setState(() {
+                    _focusedMonth = _monthFromIndex(index);
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final month = _monthFromIndex(index);
+                  return _CalendarGrid(
+                    focusedMonth:     month,
+                    selectedDate:     _selectedDate,
+                    completedDayKeys: completedDayKeys,
+                    loggedDayKeys:    loggedDayKeys,
+                    onSelect: (d) {
+                      setState(() => _selectedDate = d);
+                      _openDay(d);
+                    },
+                  );
                 },
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -921,12 +942,20 @@ class _CalendarHeader extends StatelessWidget {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(),
         ),
-        Text(
-          '${_months[month.month - 1]} ${month.year}',
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: child,
+          ),
+          child: Text(
+            '${_months[month.month - 1]} ${month.year}',
+            key: ValueKey(month),
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
           ),
         ),
         IconButton(
@@ -1428,6 +1457,12 @@ class _ActivitySyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (syncing) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+        child: KCardShimmer(height: 110),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Container(
@@ -1473,37 +1508,6 @@ class _ActivitySyncCard extends StatelessWidget {
             ),
           ),
         ],
-      );
-    }
-
-    // ── Syncing Shimmer ───────────────────────────────────────────────────────
-    if (syncing) {
-      return KShimmer(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 16, height: 16,
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 8),
-                Container(width: 120, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(child: Container(height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)))),
-                const SizedBox(width: 12),
-                Expanded(child: Container(height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)))),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(width: double.infinity, height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10))),
-          ],
-        ),
       );
     }
 
@@ -1949,15 +1953,43 @@ class _WeightTrendCard extends StatefulWidget {
   State<_WeightTrendCard> createState() => _WeightTrendCardState();
 }
 
-class _WeightTrendCardState extends State<_WeightTrendCard> {
+class _WeightTrendCardState extends State<_WeightTrendCard>
+    with SingleTickerProviderStateMixin {
   String _range = '30D';
   int? _hoveredIndex;
   Timer? _tooltipTimer;
+  late final AnimationController _entranceController;
+  late final Animation<double> _entranceAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 750),
+    );
+    _entranceAnimation = CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOutBack,
+    );
+    _entranceController.forward();
+  }
 
   @override
   void dispose() {
+    _entranceController.dispose();
     _tooltipTimer?.cancel();
     super.dispose();
+  }
+
+  void _setRange(String r) {
+    kHaptic();
+    setState(() {
+      _range = r;
+      _hoveredIndex = null;
+    });
+    _entranceController.reset();
+    _entranceController.forward();
   }
 
   void _handleTouch(Offset localPos, double width, int pointCount) {
@@ -1987,22 +2019,9 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
   Widget build(BuildContext context) {
     final history = widget.weightHistory;
     if (widget.syncing && (history == null || history.isEmpty)) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        child: _Card(
-          child: KShimmer(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(width: 80, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
-                const SizedBox(height: 8),
-                Container(width: 120, height: 24, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
-                const SizedBox(height: 16),
-                Container(width: double.infinity, height: 120, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12))),
-              ],
-            ),
-          ),
-        ),
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: KChartShimmer(height: 160),
       );
     }
 
@@ -2164,13 +2183,7 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
                     return Padding(
                       padding: const EdgeInsets.only(left: 4),
                       child: GestureDetector(
-                        onTap: () {
-                          kHaptic();
-                          setState(() {
-                            _range = r;
-                            _hoveredIndex = null;
-                          });
-                        },
+                        onTap: () => _setRange(r),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
@@ -2244,93 +2257,104 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
                         style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
                       ),
                     )
-                  : LayoutBuilder(
-                      builder: (context, constraints) {
-                        final width = constraints.maxWidth;
-                        final height = constraints.maxHeight;
+                  : AnimatedBuilder(
+                      animation: _entranceAnimation,
+                      builder: (context, child) {
+                        return LayoutBuilder(
+                          builder: (context, constraints) {
+                            final width = constraints.maxWidth;
+                            final height = constraints.maxHeight;
 
-                        final weights = chartData.map((r) => r.kg).toList();
-                        final minWVal = weights.reduce((a, b) => a < b ? a : b);
-                        final maxWVal = weights.reduce((a, b) => a > b ? a : b);
-                        final rangeVal = (maxWVal - minWVal).clamp(0.5, double.infinity);
-                        final paddingVal = rangeVal * 0.2;
-                        
-                        double getY(double kg) {
-                          final norm = (kg - (minWVal - paddingVal)) / (rangeVal + paddingVal * 2);
-                          return height - norm * height;
-                        }
+                            final weights = chartData.map((r) => r.kg).toList();
+                            final minWVal = weights.reduce((a, b) => a < b ? a : b);
+                            final maxWVal = weights.reduce((a, b) => a > b ? a : b);
+                            final avgWVal = weights.isNotEmpty
+                                ? weights.reduce((a, b) => a + b) / weights.length
+                                : 0.0;
+                            final rangeVal = (maxWVal - minWVal).clamp(0.5, double.infinity);
+                            final paddingVal = rangeVal * 0.2;
+                            
+                            double getY(double kg) {
+                              final double animValue = _entranceAnimation.value;
+                              // Interpolate coordinates from average weight (flat line) to target coordinates
+                              final double currentKg = avgWVal + (kg - avgWVal) * animValue;
+                              final norm = (currentKg - (minWVal - paddingVal)) / (rangeVal + paddingVal * 2);
+                              return height - norm * height;
+                            }
 
-                        Widget? tooltipWidget;
-                        if (_hoveredIndex != null && _hoveredIndex! < chartData.length) {
-                          final reading = chartData[_hoveredIndex!];
-                          final x = _hoveredIndex! / (chartData.length - 1) * width;
-                          final y = getY(reading.kg);
+                            Widget? tooltipWidget;
+                            if (_hoveredIndex != null && _hoveredIndex! < chartData.length) {
+                              final reading = chartData[_hoveredIndex!];
+                              final x = _hoveredIndex! / (chartData.length - 1) * width;
+                              final y = getY(reading.kg);
 
-                          final dateStr = '${reading.recordedAt.month}/${reading.recordedAt.day}';
-                          tooltipWidget = Positioned(
-                            left: (x - 50).clamp(0.0, width - 100.0),
-                            top: (y - 45).clamp(0.0, height - 20.0),
-                            child: Container(
-                              width: 100,
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF222232),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFF52B788), width: 1),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.3),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
-                                  )
-                                ],
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '${reading.kg.toStringAsFixed(1)} kg',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                              final dateStr = '${reading.recordedAt.month}/${reading.recordedAt.day}';
+                              tooltipWidget = Positioned(
+                                left: (x - 50).clamp(0.0, width - 100.0),
+                                top: (y - 45).clamp(0.0, height - 20.0),
+                                child: Container(
+                                  width: 100,
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF222232),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFF52B788), width: 1),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ],
                                   ),
-                                  Text(
-                                    dateStr,
-                                    style: const TextStyle(
-                                      color: Color(0xFF9CA3AF),
-                                      fontSize: 9,
-                                    ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '${reading.kg.toStringAsFixed(1)} kg',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        dateStr,
+                                        style: const TextStyle(
+                                          color: Color(0xFF9CA3AF),
+                                          fontSize: 9,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-
-                        return GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onPanStart: (details) => _handleTouch(details.localPosition, width, chartData.length),
-                          onPanUpdate: (details) => _handleTouch(details.localPosition, width, chartData.length),
-                          onPanEnd: (_) => _clearTouch(),
-                          onPanCancel: () => _clearTouch(),
-                          onTapDown: (details) => _handleTouch(details.localPosition, width, chartData.length),
-                          onTapUp: (_) => _clearTouch(),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              CustomPaint(
-                                size: Size.infinite,
-                                painter: _WeightChartPainter(
-                                  readings: chartData,
-                                  hoveredIndex: _hoveredIndex,
-                                  getY: getY,
                                 ),
+                              );
+                            }
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                              onPanUpdate: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                              onPanEnd: (_) => _clearTouch(),
+                              onPanCancel: () => _clearTouch(),
+                              onTapDown: (details) => _handleTouch(details.localPosition, width, chartData.length),
+                              onTapUp: (_) => _clearTouch(),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  CustomPaint(
+                                    size: Size.infinite,
+                                    painter: _WeightChartPainter(
+                                      readings: chartData,
+                                      hoveredIndex: _hoveredIndex,
+                                      getY: getY,
+                                    ),
+                                  ),
+                                  if (tooltipWidget != null) tooltipWidget,
+                                ],
                               ),
-                              if (tooltipWidget != null) tooltipWidget,
-                            ],
-                          ),
+                            );
+                          },
                         );
                       },
                     ),
@@ -2515,7 +2539,9 @@ class _WeightChartPainter extends CustomPainter {
         startY += 8.0;
       }
 
-      canvas.drawCircle(hoveredPt, 7.5, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.25)..style = PaintingStyle.fill);
+      // Glowing pulsing rings around touch target
+      canvas.drawCircle(hoveredPt, 14.0, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.15)..style = PaintingStyle.fill);
+      canvas.drawCircle(hoveredPt, 8.5, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.3)..style = PaintingStyle.fill);
       canvas.drawCircle(hoveredPt, 5.0, Paint()..color = const Color(0xFF13131F)..style = PaintingStyle.fill);
       canvas.drawCircle(hoveredPt, 3.5, Paint()..color = const Color(0xFF52B788)..style = PaintingStyle.fill);
     } else {
@@ -2526,7 +2552,13 @@ class _WeightChartPainter extends CustomPainter {
         ..color = const Color(0xFF1C1C2E)
         ..style = PaintingStyle.fill;
 
-      for (final pt in points) {
+      for (int i = 0; i < points.length; i++) {
+        final pt = points[i];
+        if (i == points.length - 1) {
+          // Pulse the latest point
+          canvas.drawCircle(pt, 12.0, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.12)..style = PaintingStyle.fill);
+          canvas.drawCircle(pt, 7.0, Paint()..color = const Color(0xFF52B788).withValues(alpha: 0.25)..style = PaintingStyle.fill);
+        }
         canvas.drawCircle(pt, 5.5, rimPaint);
         canvas.drawCircle(pt, 3.5, dotPaint);
       }

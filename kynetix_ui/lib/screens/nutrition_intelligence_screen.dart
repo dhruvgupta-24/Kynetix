@@ -222,73 +222,115 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
 
   Widget _buildPatternCard(LearnedPatternEntry entry) {
     final color = entry.scalar < 1.0 ? KColor.protein : KColor.calorie;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: KCard(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildRoleBadge(entry.key.targetRole),
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded, size: 16, color: KColor.textMuted),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => _resetPattern(entry),
-                  tooltip: 'Reset pattern',
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              entry.explanation,
-              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('SCALAR', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${entry.scalar.toStringAsFixed(2)}×',
-                      style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800),
+    return Dismissible(
+      key: Key('pattern_${entry.key.targetRole?.name ?? "none"}_${entry.key.contextRole?.name ?? "none"}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: KColor.danger.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: const Icon(Icons.refresh_rounded, color: KColor.danger),
+      ),
+      confirmDismiss: (_) async {
+        await _resetPattern(entry);
+        return false;
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: KCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildRoleBadge(entry.key.targetRole),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded, size: 16, color: KColor.textMuted),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _resetPattern(entry),
+                    tooltip: 'Reset pattern',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                entry.explanation,
+                style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('SCALAR', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              '${entry.scalar.toStringAsFixed(2)}×',
+                              style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(2),
+                                child: LinearProgressIndicator(
+                                  value: (entry.scalar / 2.0).clamp(0.0, 1.0),
+                                  backgroundColor: KColor.border,
+                                  valueColor: AlwaysStoppedAnimation<Color>(color),
+                                  minHeight: 4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(width: 24),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('CONFIDENCE', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${(entry.confidence * 100).toInt()}%',
-                      style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(width: 24),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('CONFIDENCE', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              '${(entry.confidence * 100).toInt()}%',
+                              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(2),
+                                child: LinearProgressIndicator(
+                                  value: entry.confidence.clamp(0.0, 1.0),
+                                  backgroundColor: KColor.border,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(KColor.protein),
+                                  minHeight: 4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(width: 24),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('UPDATED', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${DateTime.now().difference(entry.lastUpdated).inDays}d ago',
-                      style: const TextStyle(fontSize: 12, color: KColor.textSecondary, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -299,67 +341,81 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     final fat = override.fatPerUnit != null ? (override.fatPerUnit! * override.referenceQuantity) : null;
     final fiber = override.fiberPerUnit != null ? (override.fiberPerUnit! * override.referenceQuantity) : null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: KCard(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    override.canonicalMeal,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+    return Dismissible(
+      key: Key('override_${override.canonicalMeal}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: KColor.danger.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: const Icon(Icons.delete_outline_rounded, color: KColor.danger),
+      ),
+      confirmDismiss: (_) async {
+        await _deleteOverride(override);
+        return false;
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: KCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      override.canonicalMeal,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
-                ),
-                Row(
-                  children: [
-                    _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline_rounded, size: 16, color: KColor.danger),
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () => _deleteOverride(override),
-                      tooltip: 'Delete food memory',
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '1 unit = ${override.referenceQuantity == override.referenceQuantity.truncate() ? override.referenceQuantity.toInt().toString() : override.referenceQuantity} ${override.referenceUnit}',
-              style: const TextStyle(color: KColor.textSecondary, fontSize: 11),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _buildMiniMacro('CAL', '${(override.caloriesPerUnit * override.referenceQuantity).toInt()}', KColor.calorie),
-                const SizedBox(width: 16),
-                _buildMiniMacro('PRO', '${(override.proteinPerUnit * override.referenceQuantity).toStringAsFixed(1)}g', KColor.protein),
-                const SizedBox(width: 16),
-                if (carbs != null) ...[
-                  _buildMiniMacro('CARB', '${carbs.toStringAsFixed(0)}g', KColor.blue),
-                  const SizedBox(width: 16),
+                  Row(
+                    children: [
+                      _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, size: 16, color: KColor.danger),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _deleteOverride(override),
+                        tooltip: 'Delete food memory',
+                      ),
+                    ],
+                  ),
                 ],
-                if (fat != null) ...[
-                  _buildMiniMacro('FAT', '${fat.toStringAsFixed(0)}g', KColor.amber),
-                  const SizedBox(width: 16),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '1 unit = ${override.referenceQuantity == override.referenceQuantity.truncate() ? override.referenceQuantity.toInt().toString() : override.referenceQuantity} ${override.referenceUnit}',
+                style: const TextStyle(color: KColor.textSecondary, fontSize: 11),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 16,
+                runSpacing: 10,
+                children: [
+                  _buildMiniMacro('CAL', '${(override.caloriesPerUnit * override.referenceQuantity).toInt()}', KColor.calorie),
+                  _buildMiniMacro('PRO', '${(override.proteinPerUnit * override.referenceQuantity).toStringAsFixed(1)}g', KColor.protein),
+                  if (carbs != null)
+                    _buildMiniMacro('CARB', '${carbs.toStringAsFixed(0)}g', KColor.blue),
+                  if (fat != null)
+                    _buildMiniMacro('FAT', '${fat.toStringAsFixed(0)}g', KColor.amber),
+                  if (fiber != null)
+                    _buildMiniMacro('FIB', '${fiber.toStringAsFixed(1)}g', const Color(0xFFA78BFA)),
                 ],
-                if (fiber != null)
-                  _buildMiniMacro('FIB', '${fiber.toStringAsFixed(1)}g', const Color(0xFFA78BFA)),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -421,12 +477,36 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: KColor.border, width: 0.5),
       ),
-      child: Row(
-        children: [
-          _buildTabButton(0, 'All'),
-          _buildTabButton(1, 'Customized'),
-          _buildTabButton(2, 'Learned Patterns'),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = (constraints.maxWidth) / 3;
+          return Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                left: _selectedTab * tabWidth,
+                width: tabWidth,
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: KColor.cardHigh,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 0.5),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  _buildTabButton(0, 'All'),
+                  _buildTabButton(1, 'Customized'),
+                  _buildTabButton(2, 'Learned'),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -435,27 +515,25 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     final isSelected = _selectedTab == index;
     return Expanded(
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () {
           kHapticSelect();
           setState(() {
             _selectedTab = index;
           });
         },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+        child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? KColor.cardHigh : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
             style: TextStyle(
               color: isSelected ? Colors.white : KColor.textSecondary,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
               fontSize: 12,
+              fontFamily: 'Inter',
             ),
+            child: Text(label),
           ),
         ),
       ),

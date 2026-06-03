@@ -509,6 +509,22 @@ class _GradientCircularProgressPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
+    // Soft glow shadow under progress arc
+    final glowPaint = Paint()
+      ..shader = sweepGradient.createShader(rect)
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+
+    canvas.drawArc(
+      rect,
+      -3.14159 / 2,
+      2 * 3.14159 * progress.clamp(0.0, 1.0),
+      false,
+      glowPaint,
+    );
+
     canvas.drawArc(
       rect,
       -3.14159 / 2,
@@ -866,3 +882,499 @@ class _KLoadingDotsState extends State<KLoadingDots>
     );
   }
 }
+
+// ─── KEmptyState ─────────────────────────────────────────────────────────────
+
+enum KEmptyStateType { nutrition, workout, general }
+
+class KEmptyState extends StatelessWidget {
+  final KEmptyStateType type;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const KEmptyState({
+    super.key,
+    required this.type,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CustomPaint(
+              size: const Size(120, 100),
+              painter: _KEmptyStateVectorPainter(type: type),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              style: KText.h2.copyWith(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
+              textAlign: TextAlign.center,
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 24),
+              KButton(
+                label: actionLabel!,
+                onTap: onAction,
+                width: 200,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _KEmptyStateVectorPainter extends CustomPainter {
+  final KEmptyStateType type;
+
+  _KEmptyStateVectorPainter({required this.type});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = KColor.green.withValues(alpha: 0.15)
+      ..style = PaintingStyle.fill;
+
+    final strokePaint = Paint()
+      ..color = KColor.green.withValues(alpha: 0.7)
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final dashedPaint = Paint()
+      ..color = KColor.textMuted.withValues(alpha: 0.3)
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final double radius = size.height / 2;
+
+    for (double i = 0; i < 360; i += 15) {
+      final double radians = i * 3.14159 / 180;
+      final double nextRadians = (i + 8) * 3.14159 / 180;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        radians,
+        nextRadians - radians,
+        false,
+        dashedPaint,
+      );
+    }
+
+    if (type == KEmptyStateType.nutrition) {
+      final plateRect = Rect.fromCircle(center: center, radius: radius * 0.6);
+      canvas.drawOval(plateRect, paint);
+      canvas.drawOval(plateRect, strokePaint);
+
+      final innerRect = Rect.fromCircle(center: center, radius: radius * 0.4);
+      canvas.drawOval(innerRect, strokePaint..strokeWidth = 1.0);
+
+      strokePaint.strokeWidth = 2.0;
+      final forkX = center.dx - radius * 0.9;
+      canvas.drawLine(Offset(forkX, center.dy - 12), Offset(forkX, center.dy + 16), strokePaint);
+      canvas.drawLine(Offset(forkX - 4, center.dy - 12), Offset(forkX - 4, center.dy - 2), strokePaint);
+      canvas.drawLine(Offset(forkX + 4, center.dy - 12), Offset(forkX + 4, center.dy - 2), strokePaint);
+      canvas.drawLine(Offset(forkX - 4, center.dy - 2), Offset(forkX + 4, center.dy - 2), strokePaint);
+
+      final knifeX = center.dx + radius * 0.9;
+      canvas.drawLine(Offset(knifeX, center.dy - 12), Offset(knifeX, center.dy + 16), strokePaint);
+      final knifePath = Path()
+        ..moveTo(knifeX, center.dy - 12)
+        ..lineTo(knifeX + 5, center.dy - 12)
+        ..quadraticBezierTo(knifeX + 7, center.dy - 6, knifeX, center.dy)
+        ..close();
+      canvas.drawPath(knifePath, strokePaint..style = PaintingStyle.fill);
+      strokePaint.style = PaintingStyle.stroke;
+    } else if (type == KEmptyStateType.workout) {
+      final barWidth = radius * 1.1;
+      canvas.drawLine(
+        Offset(center.dx - barWidth / 2, center.dy),
+        Offset(center.dx + barWidth / 2, center.dy),
+        strokePaint..strokeWidth = 4.0,
+      );
+
+      strokePaint.strokeWidth = 2.0;
+      final leftX = center.dx - barWidth / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(leftX - 4, center.dy), width: 8, height: 32),
+          const Radius.circular(2),
+        ),
+        paint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(leftX - 4, center.dy), width: 8, height: 32),
+          const Radius.circular(2),
+        ),
+        strokePaint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(leftX - 10, center.dy), width: 4, height: 20),
+          const Radius.circular(1),
+        ),
+        strokePaint,
+      );
+
+      final rightX = center.dx + barWidth / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(rightX + 4, center.dy), width: 8, height: 32),
+          const Radius.circular(2),
+        ),
+        paint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(rightX + 4, center.dy), width: 8, height: 32),
+          const Radius.circular(2),
+        ),
+        strokePaint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(rightX + 10, center.dy), width: 4, height: 20),
+          const Radius.circular(1),
+        ),
+        strokePaint,
+      );
+    } else {
+      final boxRect = Rect.fromCenter(center: center, width: 40, height: 44);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(boxRect, const Radius.circular(6)),
+        paint,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(boxRect, const Radius.circular(6)),
+        strokePaint..strokeWidth = 2.0,
+      );
+
+      canvas.drawLine(Offset(center.dx - 10, center.dy - 26), Offset(center.dx - 10, center.dy - 18), strokePaint);
+      canvas.drawLine(Offset(center.dx + 10, center.dy - 26), Offset(center.dx + 10, center.dy - 18), strokePaint);
+
+      canvas.drawLine(Offset(center.dx - 12, center.dy - 8), Offset(center.dx + 12, center.dy - 8), strokePaint..strokeWidth = 1.5);
+      canvas.drawLine(Offset(center.dx - 12, center.dy), Offset(center.dx + 12, center.dy), strokePaint);
+      canvas.drawLine(Offset(center.dx - 12, center.dy + 8), Offset(center.dx + 12, center.dy + 8), strokePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _KEmptyStateVectorPainter oldDelegate) => oldDelegate.type != type;
+}
+
+// ─── KErrorCard ──────────────────────────────────────────────────────────────
+
+class KErrorCard extends StatefulWidget {
+  final String title;
+  final String message;
+  final VoidCallback? onRetry;
+
+  const KErrorCard({
+    super.key,
+    required this.title,
+    required this.message,
+    this.onRetry,
+  });
+
+  @override
+  State<KErrorCard> createState() => _KErrorCardState();
+}
+
+class _KErrorCardState extends State<KErrorCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shakeController;
+  late final Animation<double> _shakeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _shakeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 8.0), weight: 1),
+      TweenSequenceItem(tween: Tween<double>(begin: 8.0, end: -8.0), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: -8.0, end: 6.0), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: 6.0, end: -4.0), weight: 2),
+      TweenSequenceItem(tween: Tween<double>(begin: -4.0, end: 0.0), weight: 1),
+    ]).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeIn));
+
+    _shakeController.forward();
+  }
+
+  @override
+  void dispose() {
+    _shakeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _shakeAnimation,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(_shakeAnimation.value, 0),
+          child: child,
+        );
+      },
+      child: KCard(
+        color: KColor.danger.withValues(alpha: 0.08),
+        border: Border.all(color: KColor.danger.withValues(alpha: 0.3), width: 1.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              color: KColor.danger,
+              size: 24,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.title,
+                    style: KText.h3.copyWith(color: Colors.white),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.message,
+                    style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
+                  ),
+                  if (widget.onRetry != null) ...[
+                    const SizedBox(height: 12),
+                    GestureDetector(
+                      onTap: widget.onRetry,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.refresh_rounded, color: KColor.blue, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Retry Request',
+                            style: KText.caption.copyWith(
+                              color: KColor.blue,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── KSuccessBanner ───────────────────────────────────────────────────────────
+
+class KSuccessBanner extends StatelessWidget {
+  final String message;
+
+  const KSuccessBanner({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: KColor.success.withValues(alpha: 0.15),
+        borderRadius: KRadius.md,
+        border: Border.all(color: KColor.success.withValues(alpha: 0.4), width: 1.0),
+        boxShadow: KShadow.glow(KColor.success),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle_rounded, color: KColor.success, size: 18),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              message,
+              style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── KCardShimmer ────────────────────────────────────────────────────────────
+
+class KCardShimmer extends StatelessWidget {
+  final double height;
+  const KCardShimmer({super.key, this.height = 100});
+
+  @override
+  Widget build(BuildContext context) {
+    return KCard(
+      child: SizedBox(
+        height: height,
+        child: KShimmer(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 120,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: 200,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── KChartShimmer ───────────────────────────────────────────────────────────
+
+class KChartShimmer extends StatelessWidget {
+  final double height;
+  const KChartShimmer({super.key, this.height = 140});
+
+  @override
+  Widget build(BuildContext context) {
+    return KCard(
+      child: SizedBox(
+        height: height,
+        child: KShimmer(
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(width: 80, height: 16, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+                  Container(width: 40, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+                ],
+              ),
+              const Spacer(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(7, (index) {
+                  final barHeight = (index % 3 == 0) ? 60.0 : (index % 2 == 0 ? 100.0 : 40.0);
+                  return Container(
+                    width: 20,
+                    height: barHeight,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── KMessageShimmer ──────────────────────────────────────────────────────────
+
+class KMessageShimmer extends StatelessWidget {
+  const KMessageShimmer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+      child: KShimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 200,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                width: 140,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

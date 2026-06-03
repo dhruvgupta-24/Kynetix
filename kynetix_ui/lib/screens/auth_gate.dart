@@ -47,13 +47,17 @@ class _LoggedInGate extends StatefulWidget {
 }
 
 class _LoggedInGateState extends State<_LoggedInGate> {
-  bool? _hasProfile;
+  late bool? _hasProfile = (PersistenceService.isOnboardingDone && currentUserProfile != null) ? true : null;
   String? _fatalError;
 
   @override
   void initState() {
     super.initState();
-    _checkProfile();
+    if (_hasProfile == true) {
+      _startBackgroundSync();
+    } else {
+      _checkProfile();
+    }
   }
 
   Future<void> _checkProfile() async {

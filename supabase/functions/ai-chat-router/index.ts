@@ -37,10 +37,9 @@ const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
 // The account is on OpenRouter free tier — paid models return 402.
 // Free-tier (:free) models are tried in order; first success wins.
 const OPENROUTER_VISION_MODELS = [
-  'google/gemma-4-31b-it:free',          // Google Gemma 4 31B — free, multimodal (valid ID)
-  'google/gemma-4-26b-a4b-it:free',      // Google Gemma 4 26B MoE — free, multimodal
+  'google/gemini-2.5-pro',               // Premium Google Gemini 2.5 Pro
+  'google/gemini-2.5-flash',             // Premium Google Gemini 2.5 Flash
   'nvidia/nemotron-nano-12b-v2-vl:free', // NVIDIA Nemotron VL — free, multimodal
-  'moonshotai/kimi-k2.6:free',           // Kimi K2 — free, multimodal
 ];
 
 function hasImage(messages: any[]): boolean {
@@ -462,9 +461,16 @@ async function getUserChatGptProvider(
 
 // ── Update last_provider_used after a successful call ─────────────────────────
 async function trackUsage(supabaseAdmin: any, userId: string, provider: string): Promise<void> {
+  const updateData: any = { 
+    last_provider_used: provider, 
+    last_used_at: new Date().toISOString() 
+  };
+  if (provider === 'user_chatgpt') {
+    updateData.fallback_reason = null;
+  }
   await supabaseAdmin
     .from('user_openai_links')
-    .update({ last_provider_used: provider, last_used_at: new Date().toISOString() })
+    .update(updateData)
     .eq('user_id', userId);
 }
 

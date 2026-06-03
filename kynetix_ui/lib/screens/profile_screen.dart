@@ -12,6 +12,8 @@ import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+enum ProviderHealth { operational, degraded, setupRequired }
+
 // ─── Profile Screen ────────────────────────────────────────────────────────────
 
 class ProfileScreen extends StatefulWidget {
@@ -797,45 +799,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  ProviderHealth get _providerHealth {
+    final s = _aiStatus ?? ChatGptLinkStatus.disconnected;
+    if (!s.isConnected) {
+      return ProviderHealth.setupRequired;
+    }
+    if (s.fallbackReason != null) {
+      return ProviderHealth.degraded;
+    }
+    return ProviderHealth.operational;
+  }
+
   Widget _buildAiStatusBody() {
     final s = _aiStatus ?? ChatGptLinkStatus.disconnected;
     final isConnected = s.isConnected;
-    final isActiveChatGPT = s.activeProvider == 'user_chatgpt';
+    final health = _providerHealth;
     
-    final providerColor = isActiveChatGPT
-        ? const Color(0xFF52B788)
-        : const Color(0xFF60A5FA);
-    final providerLabel = isActiveChatGPT ? 'ChatGPT (Personal)' : 'OpenRouter (Shared)';
-    final providerIcon = isActiveChatGPT
-        ? Icons.account_circle_rounded
-        : Icons.cloud_queue_rounded;
+    Color statusColor;
+    String statusLabel;
+    switch (health) {
+      case ProviderHealth.operational:
+        statusColor = const Color(0xFF52B788); // Green
+        statusLabel = 'Operational';
+        break;
+      case ProviderHealth.degraded:
+        statusColor = const Color(0xFFFFB347); // Amber
+        statusLabel = 'Degraded (Shared Fallback)';
+        break;
+      case ProviderHealth.setupRequired:
+        statusColor = const Color(0xFF9CA3AF); // Gray
+        statusLabel = 'Setup Required';
+        break;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Provider row ──────────────────────────────────────────────────────
+        // ── Status and Connect Row ──────────────────────────────────────────
         Row(
           children: [
             Container(
               width: 8, height: 8,
               decoration: BoxDecoration(
-                color: providerColor,
+                color: statusColor,
                 shape: BoxShape.circle,
               ),
             ),
             const SizedBox(width: 8),
-            Icon(providerIcon, size: 14, color: providerColor),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                providerLabel,
-                style: TextStyle(
-                  color: providerColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
+            Text(
+              statusLabel,
+              style: TextStyle(
+                color: statusColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
               ),
             ),
+            const Spacer(),
             // Connect / Disconnect button
             GestureDetector(
               onTap: _aiDisconnecting
@@ -854,9 +873,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                 decoration: BoxDecoration(
-                  color: providerColor.withValues(alpha: 0.12),
+                  color: isConnected ? const Color(0xFFEF4444).withValues(alpha: 0.12) : const Color(0xFF52B788).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: providerColor.withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: isConnected ? const Color(0xFFEF4444).withValues(alpha: 0.4) : const Color(0xFF52B788).withValues(alpha: 0.4)
+                  ),
                 ),
                 child: _aiDisconnecting
                     ? const SizedBox(
@@ -870,7 +891,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: providerColor,
+                          color: isConnected ? const Color(0xFFEF4444) : const Color(0xFF52B788),
                         ),
                       ),
               ),
@@ -880,71 +901,105 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 12),
         const Divider(color: Color(0xFF2E2E3E), height: 1),
+        const SizedBox(height: 8),
+
+        // Descriptive prompt / subtitle
+        Text(
+          isConnected
+              ? (health == ProviderHealth.operational
+                  ? 'Your personal ChatGPT account is linked and active. Meals are analyzed using your own premium model credits.'
+                  : 'Your personal ChatGPT account is linked but fell back to our shared high-speed OpenRouter pool due to API error.')
+              : 'Meals are analyzed using our shared OpenRouter pool. Connect your ChatGPT account to use your own premium API credits.',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.white.withValues(alpha: 0.5),
+            height: 1.5,
+          ),
+        ),
+
         const SizedBox(height: 12),
-
-        // ── Model & Provider rows ─────────────────────────────────────────────
-        _InfoRow(
-          icon: Icons.sync_rounded,
-          label: 'Connection Status',
-          value: isConnected ? 'Connected' : 'Disconnected',
-        ),
-        _InfoRow(
-          icon: Icons.cloud_queue_rounded,
-          label: 'Active Provider',
-          value: _providerDisplayName(s.activeProvider),
-        ),
-        _InfoRow(
-          icon: Icons.psychology_rounded,
-          label: 'Selected Model',
-          value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
-        ),
-        if (isConnected) ...[
-          _InfoRow(
-            icon: Icons.refresh_rounded,
-            label: 'Last Token Refresh',
-            value: _relativeTime(s.lastRefreshedAt),
+        
+        // Expandable drawer for Technical Details
+        Theme(
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
           ),
-          _InfoRow(
-            icon: Icons.assignment_turned_in_rounded,
-            label: 'Last Test Gen',
-            value: s.testGenerationSnippet != null ? '"${s.testGenerationSnippet}"' : '—',
-          ),
-          _InfoRow(
-            icon: Icons.schedule_rounded,
-            label: 'Connected',
-            value: _relativeTime(s.connectedAt),
-          ),
-        ],
-        _InfoRow(
-          icon: Icons.access_time_rounded,
-          label: 'Last Used',
-          value: _relativeTime(s.lastUsedAt),
-        ),
-        if (s.fallbackReason != null) ...[
-          _InfoRow(
-            icon: Icons.warning_amber_rounded,
-            label: 'Fallback Reason',
-            value: _fallbackReasonDisplayName(s.fallbackReason),
-          ),
-        ],
-        _InfoRow(
-          icon: Icons.verified_rounded,
-          label: 'Model Verified',
-          value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
-          isLast: true,
-        ),
-
-        if (!isConnected) ...[
-          const SizedBox(height: 10),
-          Text(
-            'Connect your ChatGPT account to use your own AI credits and access newer models.',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.white.withValues(alpha: 0.35),
-              height: 1.5,
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, size: 14, color: KColor.textMuted),
+                const SizedBox(width: 6),
+                Text(
+                  'Diagnostic Logs',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
             ),
+            iconColor: Colors.white.withValues(alpha: 0.6),
+            collapsedIconColor: Colors.white.withValues(alpha: 0.4),
+            children: [
+              const SizedBox(height: 8),
+              _InfoRow(
+                icon: Icons.sync_rounded,
+                label: 'Connection Status',
+                value: isConnected ? 'Connected' : 'Disconnected',
+              ),
+              _InfoRow(
+                icon: Icons.cloud_queue_rounded,
+                label: 'Active Provider',
+                value: _providerDisplayName(s.activeProvider),
+              ),
+              _InfoRow(
+                icon: Icons.psychology_rounded,
+                label: 'Selected Model',
+                value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
+              ),
+              if (isConnected) ...[
+                _InfoRow(
+                  icon: Icons.refresh_rounded,
+                  label: 'Last Token Refresh',
+                  value: _relativeTime(s.lastRefreshedAt),
+                ),
+                _InfoRow(
+                  icon: Icons.assignment_turned_in_rounded,
+                  label: 'Last Test Gen',
+                  value: s.testGenerationSnippet != null ? '"${s.testGenerationSnippet}"' : '—',
+                ),
+                _InfoRow(
+                  icon: Icons.schedule_rounded,
+                  label: 'Connected',
+                  value: _relativeTime(s.connectedAt),
+                ),
+              ],
+              _InfoRow(
+                icon: Icons.access_time_rounded,
+                label: 'Last Used',
+                value: _relativeTime(s.lastUsedAt),
+              ),
+              if (s.fallbackReason != null) ...[
+                _InfoRow(
+                  icon: Icons.warning_amber_rounded,
+                  label: 'Fallback Reason',
+                  value: _fallbackReasonDisplayName(s.fallbackReason),
+                ),
+              ],
+              _InfoRow(
+                icon: Icons.verified_rounded,
+                label: 'Model Verified',
+                value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
+                isLast: true,
+              ),
+            ],
           ),
-        ],
+        ),
       ],
     );
   }

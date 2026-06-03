@@ -14,6 +14,7 @@ import 'services/workout_service.dart';
 import 'config/supabase_secrets.dart';
 
 Future<void> main() async {
+  final stopwatch = Stopwatch()..start();
   WidgetsFlutterBinding.ensureInitialized();
 
   // Immersive dark status bar
@@ -26,15 +27,22 @@ Future<void> main() async {
     ),
   );
 
+  final setupBindingTime = stopwatch.elapsedMilliseconds;
+  debugPrint('[Startup Profile] Flutter binding setup took: ${setupBindingTime} ms');
+
   // Initialize Supabase Auth & Backend Connection
   await Supabase.initialize(
     url: SupabaseSecrets.url,
     anonKey: SupabaseSecrets.anonKey,
   );
 
+  final supabaseInitTime = stopwatch.elapsedMilliseconds - setupBindingTime;
+  debugPrint('[Startup Profile] Supabase client initialization took: ${supabaseInitTime} ms');
+
   final startupSession = Supabase.instance.client.auth.currentSession;
   debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
 
+  final serviceStart = stopwatch.elapsedMilliseconds;
   await Future.wait([
     Health().configure(),
     MealMemory.instance.init(),
@@ -42,6 +50,10 @@ Future<void> main() async {
     PersistenceService.load(),
     WorkoutService.instance.init(),
   ]);
+
+  final servicesTime = stopwatch.elapsedMilliseconds - serviceStart;
+  debugPrint('[Startup Profile] Concurrently loaded independent services (Health, Memory, Local cache, Workouts) in: ${servicesTime} ms');
+  debugPrint('[Startup Profile] Total main initialization took: ${stopwatch.elapsedMilliseconds} ms');
 
   runApp(const KynetixApp());
 }

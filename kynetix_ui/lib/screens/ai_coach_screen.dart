@@ -79,6 +79,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   final ValueNotifier<String> _streamingTextNotifier = ValueNotifier<String>('');
   List<Uint8List> _pendingImages = [];
   bool        _isInputFocused = false;
+  bool        _initialBuildCompleted = false;
 
   @override
   void initState() {
@@ -88,6 +89,13 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       setState(() {
         _isInputFocused = _inputFocusNode.hasFocus;
       });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _initialBuildCompleted = true;
+        });
+      }
     });
   }
 
@@ -424,6 +432,8 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           if (_isStreaming) {
             return _AnimatedChatEntry(
               key: const ValueKey('streaming'),
+              index: i,
+              animateImmediately: true,
               child: _ChatBubble(
                 role: _Role.assistant,
                 textListenable: _streamingTextNotifier,
@@ -437,6 +447,8 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         final msg = _messages[i];
         return _AnimatedChatEntry(
           key: ValueKey(i),
+          index: i,
+          animateImmediately: _initialBuildCompleted,
           child: _ChatBubble(
             message: msg,
             role: msg.role,
@@ -521,57 +533,121 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _IconBtn(
-            icon: Icons.add_photo_alternate_rounded,
-            color: _pendingImages.isNotEmpty ? _kGreen : _kMuted,
-            onTap: disabled ? () {} : _pickImage,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              constraints: const BoxConstraints(maxHeight: 120),
-              decoration: BoxDecoration(
-                color: KColor.card,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: _isInputFocused ? KColor.green : KColor.border,
-                  width: _isInputFocused ? 1.5 : 0.5,
+          if (disabled)
+            const _PulsingProgressBar(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: disabled ? 0.4 : 1.0,
+                  child: _IconBtn(
+                    icon: Icons.add_photo_alternate_rounded,
+                    color: _pendingImages.isNotEmpty ? _kGreen : _kMuted,
+                    onTap: disabled ? () {} : _pickImage,
+                  ),
                 ),
-                boxShadow: _isInputFocused ? KShadow.glow(KColor.green) : null,
-              ),
-              child: TextField(
-                controller: _controller,
-                focusNode: _inputFocusNode,
-                enabled: !disabled,
-                autofocus: true,
-                style: TextStyle(
-                  color: disabled ? KColor.textDisabled : Colors.white,
-                  fontSize: 15,
-                  height: 1.45,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    decoration: BoxDecoration(
+                      color: KColor.card,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _isInputFocused
+                            ? KColor.green
+                            : (disabled ? KColor.border.withValues(alpha: 0.2) : KColor.border),
+                        width: _isInputFocused ? 1.5 : 0.5,
+                      ),
+                      boxShadow: _isInputFocused ? KShadow.glow(KColor.green) : null,
+                    ),
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _inputFocusNode,
+                      enabled: !disabled,
+                      autofocus: true,
+                      style: TextStyle(
+                        color: disabled ? KColor.textDisabled : Colors.white,
+                        fontSize: 15,
+                        height: 1.45,
+                      ),
+                      maxLines:   null,
+                      minLines:   1,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        hintText:       'Ask anything about your nutrition…',
+                        hintStyle:      TextStyle(color: _kMuted, fontSize: 14),
+                        border:         InputBorder.none,
+                        enabledBorder:  InputBorder.none,
+                        focusedBorder:  InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                      ),
+                      onSubmitted: (_) => _send(),
+                    ),
+                  ),
                 ),
-                maxLines:   null,
-                minLines:   1,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText:       'Ask anything about your nutrition…',
-                  hintStyle:      TextStyle(color: _kMuted, fontSize: 14),
-                  border:         InputBorder.none,
-                  enabledBorder:  InputBorder.none,
-                  focusedBorder:  InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                ),
-                onSubmitted: (_) => _send(),
-              ),
+                const SizedBox(width: 8),
+                _SendBtn(loading: disabled, onTap: _send),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          _SendBtn(loading: disabled, onTap: _send),
         ],
+      ),
+    );
+  }
+}
+
+// ─── _PulsingProgressBar — neon green progress bar pulsing back and forth ─────
+
+class _PulsingProgressBar extends StatefulWidget {
+  const _PulsingProgressBar();
+
+  @override
+  State<_PulsingProgressBar> createState() => _PulsingProgressBarState();
+}
+
+class _PulsingProgressBarState extends State<_PulsingProgressBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.2, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: Container(
+        height: 2,
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF52B788), Color(0xFF2D6A4F), Color(0xFF52B788)],
+          ),
+        ),
       ),
     );
   }
@@ -581,7 +657,14 @@ class _AiCoachScreenState extends State<AiCoachScreen>
 
 class _AnimatedChatEntry extends StatefulWidget {
   final Widget child;
-  const _AnimatedChatEntry({super.key, required this.child});
+  final int index;
+  final bool animateImmediately;
+  const _AnimatedChatEntry({
+    super.key,
+    required this.child,
+    required this.index,
+    this.animateImmediately = false,
+  });
 
   @override
   State<_AnimatedChatEntry> createState() => _AnimatedChatEntryState();
@@ -597,12 +680,23 @@ class _AnimatedChatEntryState extends State<_AnimatedChatEntry>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 300),
-    )..forward();
+      vsync: this, duration: const Duration(milliseconds: 350),
+    );
     _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _slide = Tween<Offset>(
-      begin: const Offset(0, 0.12), end: Offset.zero,
+      begin: const Offset(0, 0.15), end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    if (widget.animateImmediately) {
+      _ctrl.forward();
+    } else {
+      final delayMs = (widget.index * 60).clamp(0, 600);
+      Future.delayed(Duration(milliseconds: delayMs), () {
+        if (mounted) {
+          _ctrl.forward();
+        }
+      });
+    }
   }
 
   @override
@@ -773,15 +867,35 @@ class _MarkdownText extends StatelessWidget {
     return MarkdownBody(
       data: text,
       styleSheet: MarkdownStyleSheet(
-        p: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
-        strong: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontWeight: FontWeight.w700),
-        em: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6, fontStyle: FontStyle.italic),
-        code: const TextStyle(color: Color(0xFF52B788), fontSize: 13, height: 1.6, fontFamily: 'monospace'),
-        h1: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, height: 1.4),
-        h2: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.4),
-        h3: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700, height: 1.4),
-        listBullet: const TextStyle(color: Color(0xFF52B788), fontSize: 14, fontWeight: FontWeight.w700, height: 1.6),
+        p: const TextStyle(color: Colors.white, fontSize: 14, height: 1.65),
+        strong: const TextStyle(color: Colors.white, fontSize: 14, height: 1.65, fontWeight: FontWeight.w800),
+        em: const TextStyle(color: Colors.white, fontSize: 14, height: 1.65, fontStyle: FontStyle.italic),
+        code: const TextStyle(
+          color: Color(0xFF52B788), 
+          fontSize: 13, 
+          height: 1.6, 
+          fontFamily: 'monospace',
+          backgroundColor: Color(0xFF1E1E2C),
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: const Color(0xFF1E1E2C),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: KColor.border, width: 0.5),
+        ),
+        h1: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800, height: 1.5),
+        h2: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800, height: 1.5),
+        h3: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700, height: 1.5),
+        listBullet: const TextStyle(color: Color(0xFF52B788), fontSize: 14, fontWeight: FontWeight.w700, height: 1.65),
         blockquote: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.6, fontStyle: FontStyle.italic),
+        blockquoteDecoration: BoxDecoration(
+          color: const Color(0xFF1E1E2C),
+          border: const Border(left: BorderSide(color: Color(0xFF52B788), width: 3)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        tableHead: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+        tableBody: const TextStyle(color: Colors.white70, fontSize: 13),
+        tableBorder: TableBorder.all(color: KColor.border, width: 0.5),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       ),
     );
   }

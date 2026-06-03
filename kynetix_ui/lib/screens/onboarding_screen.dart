@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dashboard_screen.dart';
+import '../config/app_theme.dart';
 import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
+import '../services/nutrition_target_engine.dart';
 
 // ─── User profile model ───────────────────────────────────────────────────────
 
@@ -330,7 +332,7 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  static const _totalSteps = 4;
+  static const _totalSteps = 5;
 
   final _pageController = PageController();
   int _currentStep = 0;
@@ -356,6 +358,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final _step1Key = GlobalKey<FormState>();
   final _step2Key = GlobalKey<FormState>();
+
+  UserProfile _buildTemporaryProfile() {
+    final opt = _workoutOptions[_workoutIdx];
+    return UserProfile(
+      name:           _nameCtrl.text.trim(),
+      age:            int.tryParse(_ageCtrl.text.trim()) ?? 25,
+      gender:         _gender,
+      height:         _resolvedHeightCm(),
+      weight:         double.tryParse(_weightCtrl.text.trim()) ?? 70.0,
+      workoutDaysMin: opt.daysMin,
+      workoutDaysMax: opt.daysMax,
+      goal:           _goal,
+      portionAnchor:  _portionAnchor,
+    );
+  }
+
+  WeeklyTargetPlan _calculateTargets() {
+    final tempProfile = _buildTemporaryProfile();
+    return NutritionTargetEngine().weeklyPlan(tempProfile);
+  }
 
   @override
   void dispose() {
@@ -536,7 +558,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       _StepEatingStyle(
                         selected: _portionAnchor,
                         onSelect: (v) => setState(() => _portionAnchor = v),
-                        onSkip:   _submit,
+                        onSkip: () {
+                          setState(() => _portionAnchor = null);
+                          _nextStep();
+                        },
+                      ),
+                      _StepSummary(
+                        plan: _calculateTargets(),
                       ),
                     ],
                   ),
@@ -564,18 +592,17 @@ class _Header extends StatelessWidget {
 
   const _Header({required this.currentStep, required this.totalSteps});
 
-  static const _titles    = ['About You',        'Your Body',              'Your Goals',             'Eating Style'];
+  static const _titles    = ['About You',        'Your Body',              'Your Goals',             'Eating Style',           'Your Targets'];
   static const _subtitles = [
     'Tell us a little about yourself',
     'Help us estimate your needs',
     'What do you want to achieve?',
     'How do you eat roti or rice?',
+    'Here are your daily target goals',
   ];
 
   @override
   Widget build(BuildContext context) {
-    final progress = (currentStep + 1) / totalSteps;
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
       child: Column(
@@ -623,18 +650,28 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: progress),
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeOutCubic,
-            builder: (_, value, child) => ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: value, minHeight: 5,
-                backgroundColor: const Color(0xFF2E2E3E),
-                valueColor: const AlwaysStoppedAnimation(Color(0xFF52B788)),
-              ),
-            ),
+          Row(
+            children: List.generate(totalSteps, (i) {
+              final active = currentStep == i;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOutCubic,
+                margin: const EdgeInsets.only(right: 6),
+                height: 5,
+                width: active ? 24 : 8,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  color: active ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
+                  boxShadow: active ? [
+                    BoxShadow(
+                      color: const Color(0xFF52B788).withValues(alpha: 0.3),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    )
+                  ] : null,
+                ),
+              );
+            }),
           ),
           const SizedBox(height: 28),
         ],
@@ -725,25 +762,22 @@ class _StepPersonal extends StatelessWidget {
           children: [
             _FieldLabel('Name'),
             const SizedBox(height: 8),
-            TextFormField(
+            OnboardingTextField(
               controller: nameCtrl,
-              textCapitalization: TextCapitalization.words,
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              decoration:
-                  const InputDecoration(hintText: 'e.g. Dhruv'),
+              hint: 'e.g. Dhruv',
+              capitalization: TextCapitalization.words,
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Name is required' : null,
             ),
             const SizedBox(height: 22),
             _FieldLabel('Age'),
             const SizedBox(height: 8),
-            TextFormField(
+            OnboardingTextField(
               controller: ageCtrl,
+              hint: 'e.g. 20',
+              suffix: 'years',
               keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              decoration: const InputDecoration(
-                  hintText: 'e.g. 20', suffixText: 'years'),
+              formatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) {
                 final n = int.tryParse(v ?? '');
                 if (n == null || n < 10 || n > 100) return 'Enter a valid age';
@@ -817,13 +851,11 @@ class _StepBody extends StatelessWidget {
             // ── Weight ──────────────────────────────────────────
             _FieldLabel('Weight'),
             const SizedBox(height: 8),
-            TextFormField(
+            OnboardingTextField(
               controller: weightCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              decoration: const InputDecoration(
-                  hintText: 'e.g. 65', suffixText: 'kg'),
+              hint: 'e.g. 65',
+              suffix: 'kg',
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               validator: (v) {
                 final n = double.tryParse(v ?? '');
                 if (n == null || n < 20 || n > 300) return 'Enter a valid weight';
@@ -844,12 +876,11 @@ class _CmHeightField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextFormField(
+    return OnboardingTextField(
       controller: ctrl,
+      hint: 'e.g. 170',
+      suffix: 'cm',
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      style: const TextStyle(color: Colors.white, fontSize: 15),
-      decoration:
-          const InputDecoration(hintText: 'e.g. 170', suffixText: 'cm'),
       validator: (v) {
         final n = double.tryParse(v ?? '');
         if (n == null || n < 100 || n > 250) return 'Enter a valid height';
@@ -870,12 +901,11 @@ class _FtInHeightFields extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: TextFormField(
+          child: OnboardingTextField(
             controller: ftCtrl,
+            hint: 'e.g. 5',
+            suffix: 'ft',
             keyboardType: TextInputType.number,
-            style: const TextStyle(color: Colors.white, fontSize: 15),
-            decoration:
-                const InputDecoration(hintText: 'e.g. 5', suffixText: 'ft'),
             validator: (v) {
               final n = double.tryParse(v ?? '');
               if (n == null || n < 3 || n > 8) return 'Invalid';
@@ -885,12 +915,11 @@ class _FtInHeightFields extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: TextFormField(
+          child: OnboardingTextField(
             controller: inCtrl,
+            hint: 'e.g. 10',
+            suffix: 'in',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(color: Colors.white, fontSize: 15),
-            decoration: const InputDecoration(
-                hintText: 'e.g. 10', suffixText: 'in'),
             validator: (v) {
               final n = double.tryParse(v ?? '');
               if (n == null || n < 0 || n >= 12) return 'Invalid';
@@ -899,6 +928,101 @@ class _FtInHeightFields extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── OnboardingTextField — premium active border glows ─────────────────────────
+
+class OnboardingTextField extends StatefulWidget {
+  final TextEditingController controller;
+  final String hint;
+  final String? suffix;
+  final TextInputType keyboardType;
+  final List<TextInputFormatter>? formatters;
+  final String? Function(String?)? validator;
+  final TextCapitalization capitalization;
+
+  const OnboardingTextField({
+    super.key,
+    required this.controller,
+    required this.hint,
+    this.suffix,
+    this.keyboardType = TextInputType.text,
+    this.formatters,
+    this.validator,
+    this.capitalization = TextCapitalization.none,
+  });
+
+  @override
+  State<OnboardingTextField> createState() => _OnboardingTextFieldState();
+}
+
+class _OnboardingTextFieldState extends State<OnboardingTextField> {
+  final _focusNode = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(() {
+      setState(() => _focused = _focusNode.hasFocus);
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: _focused ? KShadow.glow(const Color(0xFF52B788)) : null,
+      ),
+      child: TextFormField(
+        controller: widget.controller,
+        focusNode: _focusNode,
+        keyboardType: widget.keyboardType,
+        inputFormatters: widget.formatters,
+        validator: widget.validator,
+        textCapitalization: widget.capitalization,
+        style: const TextStyle(color: Colors.white, fontSize: 15),
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          hintStyle: const TextStyle(color: Color(0xFF4B5563), fontSize: 14),
+          suffixText: widget.suffix,
+          suffixStyle: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+          filled: true,
+          fillColor: const Color(0xFF13131F),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFF2E2E3E), width: 1),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFF2E2E3E), width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
+          ),
+          errorStyle: const TextStyle(color: Color(0xFFEF4444), fontSize: 11),
+        ),
+      ),
     );
   }
 }
@@ -1332,6 +1456,181 @@ class _PortionOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─── Step 5: Summary targets screen with Count-Up animation ────────────────
+
+class _StepSummary extends StatelessWidget {
+  final WeeklyTargetPlan plan;
+
+  const _StepSummary({required this.plan});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Calibrating Complete',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Based on your body composition and goals, your primary targets are ready.',
+            style: TextStyle(
+              fontSize: 14,
+              color: Color(0xFF9CA3AF),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Calorie card
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: KColor.card,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: KColor.border, width: 0.5),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: KColor.calorie.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.local_fire_department_rounded, color: KColor.calorie, size: 22),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'DAILY TARGET CALORIES',
+                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                      const SizedBox(height: 4),
+                      KAnimatedCount(
+                        value: plan.avgDailyCalories,
+                        style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800),
+                        suffix: ' kcal',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Protein card
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: KColor.card,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: KColor.border, width: 0.5),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: KColor.protein.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.egg_outlined, color: KColor.protein, size: 22),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'DAILY PROTEIN TARGET',
+                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                      const SizedBox(height: 4),
+                      KAnimatedCount(
+                        value: plan.avgDailyProtein,
+                        style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800),
+                        suffix: ' g',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 24),
+
+          // Detailed targets list
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF13131F),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+            ),
+            child: Column(
+              children: [
+                _TargetRow(
+                  label: 'Training Day Target',
+                  value: '${plan.trainingDayCalories.toStringAsFixed(0)} kcal',
+                ),
+                const Divider(color: Color(0xFF2E2E3E), height: 24),
+                _TargetRow(
+                  label: 'Rest Day Target',
+                  value: '${plan.restDayCalories.toStringAsFixed(0)} kcal',
+                ),
+                const Divider(color: Color(0xFF2E2E3E), height: 24),
+                _TargetRow(
+                  label: 'Maintenance baseline',
+                  value: '${plan.maintenanceCalories.toStringAsFixed(0)} kcal',
+                  isLast: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TargetRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isLast;
+
+  const _TargetRow({required this.label, required this.value, this.isLast = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, fontWeight: FontWeight.w500),
+        ),
+        Text(
+          value,
+          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+      ],
     );
   }
 }
