@@ -1590,9 +1590,9 @@ class _EntryTile extends StatelessWidget {
         ),
       ),
       child: InkWell(
-        onTap: onTap,
+        onTap: () => _showMealDetailSheet(context, entry, onTap),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1612,12 +1612,12 @@ class _EntryTile extends StatelessWidget {
                     Text(
                       entry.finalSavedInput,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: 13.5,
                         color: Colors.white70,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Row(
                       children: [
                         _MacroBadge(
@@ -1654,99 +1654,16 @@ class _EntryTile extends StatelessWidget {
                         ],
                       ],
                     ),
-                    if (calMid >= 100 &&
-                        (entry.result.mealQualityPositive != null ||
-                            entry.result.mealQualityImprovement != null ||
-                            entry.result.mealQualityExplanation != null)) ...[
-                      const SizedBox(height: 6),
-                      if (entry.result.mealQualityExplanation != null &&
-                          entry.result.mealQualityExplanation!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4.0),
-                          child: Text(
-                            entry.result.mealQualityExplanation!,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF9CA3AF),
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      if (entry.result.mealQualityPositive != null &&
-                          entry.result.mealQualityPositive!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Padding(
-                                padding: EdgeInsets.only(top: 2.0),
-                                child: Icon(Icons.add_circle_outline_rounded,
-                                    color: Color(0xFF52B788), size: 10),
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  entry.result.mealQualityPositive!,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF9CA3AF),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (entry.result.mealQualityImprovement != null &&
-                          entry.result.mealQualityImprovement!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Padding(
-                                padding: EdgeInsets.only(top: 2.0),
-                                child: Icon(Icons.arrow_upward_rounded,
-                                    color: Color(0xFFFFB347), size: 10),
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  entry.result.mealQualityImprovement!,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF9CA3AF),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${entry.addedAt.hour.toString().padLeft(2, '0')}:'
-                    '${entry.addedAt.minute.toString().padLeft(2, '0')}',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF4B5563),
-                    ),
-                  ),
-                  if (onTap != null)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Icon(
-                        Icons.edit_rounded,
-                        size: 13,
-                        color: Color(0xFF6B7280),
-                      ),
-                    ),
-                ],
+              Text(
+                '${entry.addedAt.hour.toString().padLeft(2, '0')}:'
+                '${entry.addedAt.minute.toString().padLeft(2, '0')}',
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  color: Color(0xFF4B5563),
+                ),
               ),
             ],
           ),
@@ -1754,6 +1671,300 @@ class _EntryTile extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? onEditClick) {
+  final carbs = entry.result.carbohydrates;
+  final fat = entry.result.fat;
+  final fiber = entry.result.fiber;
+  final sugar = entry.result.sugar;
+  final satFat = entry.result.saturatedFat;
+  final sodium = entry.result.sodium;
+  final score = entry.result.mealQualityScore;
+  final userWarnings = entry.result.userFacingWarnings;
+
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF13131F),
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2E2E3E),
+                  borderRadius: BorderRadius.circular(2.25),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.finalSavedInput,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Logged at ${entry.addedAt.hour.toString().padLeft(2, '0')}:${entry.addedAt.minute.toString().padLeft(2, '0')} · ${entry.section.displayName}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Color(0xFF6B7280), size: 20),
+                  onPressed: () => Navigator.pop(ctx),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E1E2C),
+                    padding: const EdgeInsets.all(8),
+                    minimumSize: Size.zero,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (score != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E2C),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: (score >= 80
+                            ? const Color(0xFF52B788)
+                            : (score >= 60
+                                ? const Color(0xFFFFB347)
+                                : const Color(0xFFEF4444))).withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: score >= 80
+                              ? const Color(0xFF52B788)
+                              : (score >= 60
+                                  ? const Color(0xFFFFB347)
+                                  : const Color(0xFFEF4444)),
+                          width: 2.2,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '$score',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: score >= 80
+                              ? const Color(0xFF52B788)
+                              : (score >= 60
+                                  ? const Color(0xFFFFB347)
+                                  : const Color(0xFFEF4444)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Meal Quality Rating',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (entry.result.mealQualityExplanation != null &&
+                              entry.result.mealQualityExplanation!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              entry.result.mealQualityExplanation!,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF9CA3AF),
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+            const Text(
+              'MACRONUTRIENTS',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF6B7280),
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Builder(builder: (c) {
+              final cards = <Widget>[
+                _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), const Color(0xFFFF6B35)),
+                _buildGridMacroCell('Protein', _macroLabel(entry.result.protein.min, entry.result.protein.max, 'g'), const Color(0xFF52B788)),
+                if (carbs != null && (carbs.max > 0 || carbs.min > 0))
+                  _buildGridMacroCell('Carbs', _macroLabel(carbs.min, carbs.max, 'g'), const Color(0xFF60A5FA)),
+                if (fat != null && (fat.max > 0 || fat.min > 0))
+                  _buildGridMacroCell('Fat', _macroLabel(fat.min, fat.max, 'g'), const Color(0xFFFBBF24)),
+                if (fiber != null && (fiber.max > 0 || fiber.min > 0))
+                  _buildGridMacroCell('Fiber', _macroLabel(fiber.min, fiber.max, 'g'), const Color(0xFFA78BFA)),
+                if (sugar != null && (sugar.max > 0 || sugar.min > 0))
+                  _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), const Color(0xFFF472B6)),
+                if (satFat != null && (satFat.max > 0 || satFat.min > 0))
+                  _buildGridMacroCell('Sat. Fat', _macroLabel(satFat.min, satFat.max, 'g'), const Color(0xFFFB7185)),
+                if (sodium != null && (sodium.max > 0 || sodium.min > 0))
+                  _buildGridMacroCell('Sodium', _macroLabel(sodium.min, sodium.max, 'mg'), const Color(0xFF9CA3AF)),
+              ];
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  childAspectRatio: 2.8,
+                ),
+                itemCount: cards.length,
+                itemBuilder: (context, index) => cards[index],
+              );
+            }),
+            if (userWarnings.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text(
+                'MEAL CALIBRATION REMINDERS',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF6B7280),
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...userWarnings.map((w) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2.0),
+                      child: Icon(Icons.info_outline_rounded,
+                          color: Color(0xFFFFB347), size: 12),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        w,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFFFFB347),
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+            ],
+            if (onEditClick != null) ...[
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    onEditClick();
+                  },
+                  icon: const Icon(Icons.edit_rounded, size: 16, color: Colors.white),
+                  label: const Text(
+                    'Edit or Adjust Entry',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Widget _buildGridMacroCell(String name, String value, Color color) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: const Color(0xFF1E1E2C),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          name,
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.85),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _MacroBadge extends StatelessWidget {

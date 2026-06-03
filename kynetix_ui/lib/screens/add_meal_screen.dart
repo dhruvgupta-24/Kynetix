@@ -163,12 +163,46 @@ class _AddMealScreenState extends State<AddMealScreen>
       }
     }
 
+    double carbMin = 0, carbMax = 0;
+    double fatMin = 0, fatMax = 0;
+    double fiberMin = 0, fiberMax = 0;
+    double sugarMin = 0, sugarMax = 0;
+    double satMin = 0, satMax = 0;
+    double sodMin = 0, sodMax = 0;
+
+    for (final item in vals.items) {
+      carbMin += item.carbohydrates?.min ?? 0;
+      carbMax += item.carbohydrates?.max ?? 0;
+      fatMin += item.fat?.min ?? 0;
+      fatMax += item.fat?.max ?? 0;
+      fiberMin += item.fiber?.min ?? 0;
+      fiberMax += item.fiber?.max ?? 0;
+      sugarMin += item.sugar?.min ?? 0;
+      sugarMax += item.sugar?.max ?? 0;
+      satMin += item.saturatedFat?.min ?? 0;
+      satMax += item.saturatedFat?.max ?? 0;
+      sodMin += item.sodium?.min ?? 0;
+      sodMax += item.sodium?.max ?? 0;
+    }
+
+    final score = NutritionResult.calculateLocalQualityScore(vals.cal, vals.pro, mealName);
+
     setState(() {
       _result = NutritionResult(
         canonicalMeal: mealName,
         items: vals.items,
         calories: NutrientRange(min: vals.cal, max: vals.cal),
         protein: NutrientRange(min: vals.pro, max: vals.pro),
+        carbohydrates: NutrientRange(min: carbMin, max: carbMax),
+        fat: NutrientRange(min: fatMin, max: fatMax),
+        fiber: NutrientRange(min: fiberMin, max: fiberMax),
+        sugar: sugarMin > 0 || sugarMax > 0 ? NutrientRange(min: sugarMin, max: sugarMax) : null,
+        saturatedFat: satMin > 0 || satMax > 0 ? NutrientRange(min: satMin, max: satMax) : null,
+        sodium: sodMin > 0 || sodMax > 0 ? NutrientRange(min: sodMin, max: sodMax) : null,
+        mealQualityScore: score,
+        mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
+        mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
+        mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
         confidence: 0.99,
         warnings: const [],
         source: 'user_override',
@@ -965,6 +999,32 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
       totalCal += cVal;
       totalPro += pVal;
       
+      final double scale = calMid > 0 ? (cVal / calMid) : 1.0;
+      
+      final carbs = item.carbohydrates != null
+          ? NutrientRange(min: double.parse((item.carbohydrates!.min * scale).toStringAsFixed(1)), max: double.parse((item.carbohydrates!.max * scale).toStringAsFixed(1)))
+          : NutritionResult.estimateCarbsLocally(cVal, pVal, item.name);
+
+      final fat = item.fat != null
+          ? NutrientRange(min: double.parse((item.fat!.min * scale).toStringAsFixed(1)), max: double.parse((item.fat!.max * scale).toStringAsFixed(1)))
+          : NutritionResult.estimateFatLocally(cVal, pVal, item.name);
+
+      final fiber = item.fiber != null
+          ? NutrientRange(min: double.parse((item.fiber!.min * scale).toStringAsFixed(1)), max: double.parse((item.fiber!.max * scale).toStringAsFixed(1)))
+          : NutritionResult.estimateFiberLocally(cVal, item.name);
+
+      final sugar = item.sugar != null
+          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)), max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
+          : null;
+
+      final saturatedFat = item.saturatedFat != null
+          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)), max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
+          : null;
+
+      final sodium = item.sodium != null
+          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)), max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
+          : null;
+
       updatedItems.add(NutritionItem(
         name: item.name,
         quantity: item.quantity,
@@ -973,6 +1033,12 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
         mode: item.mode,
         calories: NutrientRange(min: cVal, max: cVal),
         protein: NutrientRange(min: pVal, max: pVal),
+        carbohydrates: carbs,
+        fat: fat,
+        fiber: fiber,
+        sugar: sugar,
+        saturatedFat: saturatedFat,
+        sodium: sodium,
       ));
     }
     Navigator.of(context).pop(_FixValues(updatedItems, totalCal, totalPro));

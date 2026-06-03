@@ -75,21 +75,35 @@ class NutritionItem {
         if (sodium != null) 'sodium': {'min': sodium!.min, 'max': sodium!.max},
       };
 
-  factory NutritionItem.fromJson(Map<String, dynamic> j) => NutritionItem(
-        name:      j['name']     as String? ?? '',
-        quantity:  (j['quantity'] as num?)?.toDouble() ?? 1.0,
-        unit:      j['unit']     as String? ?? 'serving',
-        estimated: j['estimated'] as bool? ?? false,
-        mode:      EstimationMode.fromString(j['estimationMode'] as String? ?? ''),
-        calories:  _range(j['calories']),
-        protein:   _range(j['protein']),
-        carbohydrates: j['carbohydrates'] != null ? _range(j['carbohydrates']) : null,
-        fat:           j['fat'] != null ? _range(j['fat']) : null,
-        fiber:         j['fiber'] != null ? _range(j['fiber']) : null,
-        sugar:         j['sugar'] != null ? _range(j['sugar']) : null,
-        saturatedFat:  j['saturatedFat'] != null ? _range(j['saturatedFat']) : null,
-        sodium:        j['sodium'] != null ? _range(j['sodium']) : null,
-      );
+  factory NutritionItem.fromJson(Map<String, dynamic> j) {
+    final name = j['name'] as String? ?? '';
+    final calories = _range(j['calories']);
+    final protein = _range(j['protein']);
+    final calMid = (calories.min + calories.max) / 2;
+    final proMid = (protein.min + protein.max) / 2;
+
+    return NutritionItem(
+      name:      name,
+      quantity:  (j['quantity'] as num?)?.toDouble() ?? 1.0,
+      unit:      j['unit']     as String? ?? 'serving',
+      estimated: j['estimated'] as bool? ?? false,
+      mode:      EstimationMode.fromString(j['estimationMode'] as String? ?? ''),
+      calories:  calories,
+      protein:   protein,
+      carbohydrates: j['carbohydrates'] != null
+          ? _range(j['carbohydrates'])
+          : NutritionResult.estimateCarbsLocally(calMid, proMid, name),
+      fat: j['fat'] != null
+          ? _range(j['fat'])
+          : NutritionResult.estimateFatLocally(calMid, proMid, name),
+      fiber: j['fiber'] != null
+          ? _range(j['fiber'])
+          : NutritionResult.estimateFiberLocally(calMid, name),
+      sugar: j['sugar'] != null ? _range(j['sugar']) : null,
+      saturatedFat:  j['saturatedFat'] != null ? _range(j['saturatedFat']) : null,
+      sodium:        j['sodium'] != null ? _range(j['sodium']) : null,
+    );
+  }
 
   static NutrientRange _range(dynamic raw) {
     if (raw is Map<String, dynamic>) {
@@ -553,19 +567,51 @@ class NutritionResult {
   factory NutritionResult.fromJson(Map<String, dynamic> j) {
     final cal = j['calories'] as Map<String, dynamic>? ?? {};
     final pro = j['protein']  as Map<String, dynamic>? ?? {};
+    final calories = NutrientRange(
+      min: (cal['min'] as num?)?.toDouble() ?? 0,
+      max: (cal['max'] as num?)?.toDouble() ?? 0,
+    );
+    final protein = NutrientRange(
+      min: (pro['min'] as num?)?.toDouble() ?? 0,
+      max: (pro['max'] as num?)?.toDouble() ?? 0,
+    );
+
+    final items = (j['items'] as List<dynamic>? ?? [])
+        .map((e) => NutritionItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+
+    double carbMin = 0, carbMax = 0;
+    double fatMin = 0, fatMax = 0;
+    double fiberMin = 0, fiberMax = 0;
+    double sugarMin = 0, sugarMax = 0;
+    double satMin = 0, satMax = 0;
+    double sodMin = 0, sodMax = 0;
+
+    for (final item in items) {
+      carbMin += item.carbohydrates?.min ?? 0;
+      carbMax += item.carbohydrates?.max ?? 0;
+      fatMin += item.fat?.min ?? 0;
+      fatMax += item.fat?.max ?? 0;
+      fiberMin += item.fiber?.min ?? 0;
+      fiberMax += item.fiber?.max ?? 0;
+      sugarMin += item.sugar?.min ?? 0;
+      sugarMax += item.sugar?.max ?? 0;
+      satMin += item.saturatedFat?.min ?? 0;
+      satMax += item.saturatedFat?.max ?? 0;
+      sodMin += item.sodium?.min ?? 0;
+      sodMax += item.sodium?.max ?? 0;
+    }
+
+    final canonicalMeal = j['canonicalMeal'] as String? ?? '';
+    final calMid = (calories.min + calories.max) / 2;
+    final proMid = (protein.min + protein.max) / 2;
+    final score = j['mealQualityScore'] as int? ?? NutritionResult.calculateLocalQualityScore(calMid, proMid, canonicalMeal);
+
     return NutritionResult(
-      canonicalMeal:  j['canonicalMeal'] as String? ?? '',
-      items: (j['items'] as List<dynamic>? ?? [])
-          .map((e) => NutritionItem.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      calories:   NutrientRange(
-        min: (cal['min'] as num?)?.toDouble() ?? 0,
-        max: (cal['max'] as num?)?.toDouble() ?? 0,
-      ),
-      protein:    NutrientRange(
-        min: (pro['min'] as num?)?.toDouble() ?? 0,
-        max: (pro['max'] as num?)?.toDouble() ?? 0,
-      ),
+      canonicalMeal:  canonicalMeal,
+      items:          items,
+      calories:       calories,
+      protein:        protein,
       confidence:     (j['confidence'] as num?)?.toDouble() ?? 0,
       warnings:       List<String>.from(j['warnings'] as List<dynamic>? ?? []),
       coachSummary:   j['coachSummary'] as String?,
@@ -577,16 +623,16 @@ class NutritionResult {
       createdAt:      DateTime.tryParse(j['createdAt'] as String? ?? '') ??
                       DateTime.now(),
       fallbackReason: j['fallbackReason'] as String?,
-      carbohydrates:  j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : null,
-      fat:            j['fat'] != null ? NutritionItem._range(j['fat']) : null,
-      fiber:          j['fiber'] != null ? NutritionItem._range(j['fiber']) : null,
-      sugar:          j['sugar'] != null ? NutritionItem._range(j['sugar']) : null,
-      saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : null,
-      sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : null,
-      mealQualityScore: j['mealQualityScore'] as int?,
-      mealQualityExplanation: j['mealQualityExplanation'] as String?,
-      mealQualityPositive: j['mealQualityPositive'] as String?,
-      mealQualityImprovement: j['mealQualityImprovement'] as String?,
+      carbohydrates:  j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : NutrientRange(min: carbMin, max: carbMax),
+      fat:            j['fat'] != null ? NutritionItem._range(j['fat']) : NutrientRange(min: fatMin, max: fatMax),
+      fiber:          j['fiber'] != null ? NutritionItem._range(j['fiber']) : NutrientRange(min: fiberMin, max: fiberMax),
+      sugar:          j['sugar'] != null ? NutritionItem._range(j['sugar']) : NutrientRange(min: sugarMin, max: sugarMax),
+      saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : NutrientRange(min: satMin, max: satMax),
+      sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : NutrientRange(min: sodMin, max: sodMax),
+      mealQualityScore: score,
+      mealQualityExplanation: j['mealQualityExplanation'] as String? ?? NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
+      mealQualityPositive: j['mealQualityPositive'] as String? ?? NutritionResult.getLocalQualityPositive(score, canonicalMeal),
+      mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
     ).normalizedUncertainty();
   }
 
