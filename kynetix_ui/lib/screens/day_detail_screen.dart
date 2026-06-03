@@ -139,6 +139,9 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     MealSection? section,
   }) {
     final sec = section ?? _currentSection;
+    final carbs = NutritionResult.estimateCarbsLocally(calories, protein, name);
+    final fat = NutritionResult.estimateFatLocally(calories, protein, name);
+    final fiber = NutritionResult.estimateFiberLocally(calories, name);
     final entry = MealEntry(
       rawInput:        name,
       finalSavedInput: name,
@@ -157,10 +160,16 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             mode:      EstimationMode.packagedKnown,
             calories:  NutrientRange(min: calories, max: calories),
             protein:   NutrientRange(min: protein,  max: protein),
+            carbohydrates: carbs,
+            fat:           fat,
+            fiber:         fiber,
           ),
         ],
         calories:   NutrientRange(min: calories, max: calories),
         protein:    NutrientRange(min: protein,  max: protein),
+        carbohydrates: carbs,
+        fat:           fat,
+        fiber:         fiber,
         confidence: 1.0,
         warnings:   const [],
         source:     'quick_add',

@@ -124,6 +124,9 @@ class PersonalNutritionMemory {
     required String label,
     required double kcal,
     required double protein,
+    double? carbohydrates,
+    double? fat,
+    double? fiber,
     List<String> keywords = const [],
   }) async {
     final key = _normalize(rawInput);
@@ -131,6 +134,9 @@ class PersonalNutritionMemory {
       label:    label,
       kcal:     kcal,
       protein:  protein,
+      carbohydrates: carbohydrates,
+      fat:      fat,
+      fiber:    fiber,
       keywords: keywords,
     );
     await _persist();
@@ -248,9 +254,22 @@ class PersonalNutritionMemory {
     required double kcal,
     required double protein,
     required String source,
+    double? carbohydrates,
+    double? fat,
+    double? fiber,
   }) {
     final cal = NutrientRange(min: kcal, max: kcal);
     final pro = NutrientRange(min: protein, max: protein);
+    final carbs = carbohydrates != null
+        ? NutrientRange(min: carbohydrates, max: carbohydrates)
+        : NutritionResult.estimateCarbsLocally(kcal, protein, label);
+    final f = fat != null
+        ? NutrientRange(min: fat, max: fat)
+        : NutritionResult.estimateFatLocally(kcal, protein, label);
+    final fib = fiber != null
+        ? NutrientRange(min: fiber, max: fiber)
+        : NutritionResult.estimateFiberLocally(kcal, label);
+
     return NutritionResult(
       canonicalMeal: label,
       items: [
@@ -262,10 +281,16 @@ class PersonalNutritionMemory {
           mode: EstimationMode.packagedKnown,
           calories: cal,
           protein: pro,
+          carbohydrates: carbs,
+          fat: f,
+          fiber: fib,
         ),
       ],
       calories: cal,
       protein: pro,
+      carbohydrates: carbs,
+      fat: f,
+      fiber: fib,
       confidence: 0.97,
       warnings: const [],
       source: source,
@@ -280,23 +305,39 @@ class _PersonalEntry {
   final String       label;
   final double       kcal;
   final double       protein;
+  final double?      carbohydrates;
+  final double?      fat;
+  final double?      fiber;
   final List<String> keywords; // all must match for fuzzy lookup
 
   const _PersonalEntry({
     required this.label,
     required this.kcal,
     required this.protein,
+    this.carbohydrates,
+    this.fat,
+    this.fiber,
     this.keywords = const [],
   });
 
   NutritionResult toResult({required String source}) =>
       PersonalNutritionMemory._makeResult(
-        label: label, kcal: kcal, protein: protein, source: source);
+        label: label,
+        kcal: kcal,
+        protein: protein,
+        source: source,
+        carbohydrates: carbohydrates,
+        fat: fat,
+        fiber: fiber,
+      );
 
   Map<String, dynamic> toJson() => {
     'label':    label,
     'kcal':     kcal,
     'protein':  protein,
+    if (carbohydrates != null) 'carbohydrates': carbohydrates,
+    if (fat != null) 'fat': fat,
+    if (fiber != null) 'fiber': fiber,
     'keywords': keywords,
   };
 
@@ -304,6 +345,9 @@ class _PersonalEntry {
     label:    j['label']   as String? ?? '',
     kcal:     (j['kcal']   as num?)?.toDouble() ?? 0,
     protein:  (j['protein'] as num?)?.toDouble() ?? 0,
+    carbohydrates: (j['carbohydrates'] as num?)?.toDouble(),
+    fat:      (j['fat'] as num?)?.toDouble(),
+    fiber:    (j['fiber'] as num?)?.toDouble(),
     keywords: List<String>.from(j['keywords'] as List? ?? []),
   );
 }

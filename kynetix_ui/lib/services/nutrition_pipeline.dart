@@ -512,6 +512,8 @@ class NutritionPipeline {
 
   NutritionItem _pullBestItem(NutritionResult result, ParsedFoodItem parsed) {
     if (result.items.isEmpty) {
+      final calMid = result.calories.mid;
+      final proMid = result.protein.mid;
       return NutritionItem(
         name: parsed.normalizedName,
         quantity: parsed.quantity,
@@ -520,9 +522,9 @@ class NutritionPipeline {
         mode: EstimationMode.directQuantity,
         calories: result.calories,
         protein: result.protein,
-        carbohydrates: result.carbohydrates,
-        fat: result.fat,
-        fiber: result.fiber,
+        carbohydrates: result.carbohydrates ?? NutritionResult.estimateCarbsLocally(calMid, proMid, parsed.normalizedName),
+        fat: result.fat ?? NutritionResult.estimateFatLocally(calMid, proMid, parsed.normalizedName),
+        fiber: result.fiber ?? NutritionResult.estimateFiberLocally(calMid, parsed.normalizedName),
         sugar: result.sugar,
         saturatedFat: result.saturatedFat,
         sodium: result.sodium,
@@ -561,6 +563,12 @@ class NutritionPipeline {
       }
     }
 
+    final double midC = (cMin + cMax) / 2;
+    final double midP = (pMin + pMax) / 2;
+    final fallbackCarbs = result.carbohydrates ?? NutritionResult.estimateCarbsLocally(midC, midP, parsed.normalizedName);
+    final fallbackFat = result.fat ?? NutritionResult.estimateFatLocally(midC, midP, parsed.normalizedName);
+    final fallbackFiber = result.fiber ?? NutritionResult.estimateFiberLocally(midC, parsed.normalizedName);
+
     return NutritionItem(
       name: parsed.normalizedName,
       quantity: parsed.quantity,
@@ -569,9 +577,9 @@ class NutritionPipeline {
       mode: result.items.first.mode,
       calories: NutrientRange(min: cMin, max: cMax),
       protein: NutrientRange(min: pMin, max: pMax),
-      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : null,
-      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : null,
-      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : null,
+      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : fallbackCarbs,
+      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : fallbackFat,
+      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : fallbackFiber,
       sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
       saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
       sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,

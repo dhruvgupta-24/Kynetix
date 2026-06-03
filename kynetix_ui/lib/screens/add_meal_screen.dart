@@ -141,10 +141,16 @@ class _AddMealScreenState extends State<AddMealScreen>
         final qty = (item?.quantity ?? 1.0).clamp(1.0, double.infinity);
         final calPerUnit  = vals.cal / qty;
         final proPerUnit  = vals.pro / qty;
+        final carbPerUnit = ((item?.carbohydrates?.min ?? 0) + (item?.carbohydrates?.max ?? 0)) / 2 / qty;
+        final fatPerUnit  = ((item?.fat?.min ?? 0) + (item?.fat?.max ?? 0)) / 2 / qty;
+        final fibPerUnit  = ((item?.fiber?.min ?? 0) + (item?.fiber?.max ?? 0)) / 2 / qty;
         await UserNutritionMemory.instance.saveOverride(
           item?.name ?? mealName,
           calPerUnit,
           proPerUnit,
+          carbohydratesPerUnit: carbPerUnit,
+          fatPerUnit: fatPerUnit,
+          fiberPerUnit: fibPerUnit,
           referenceQuantity: qty,
           referenceUnit: item?.unit ?? 'serving',
         );
@@ -152,10 +158,16 @@ class _AddMealScreenState extends State<AddMealScreen>
         // Multi-item: save each atomic item at its own per-unit-1 rate.
         for (final item in vals.items) {
           final qty = item.quantity.clamp(1.0, double.infinity);
+          final carbPerUnit = ((item.carbohydrates?.min ?? 0) + (item.carbohydrates?.max ?? 0)) / 2 / qty;
+          final fatPerUnit  = ((item.fat?.min ?? 0) + (item.fat?.max ?? 0)) / 2 / qty;
+          final fibPerUnit  = ((item.fiber?.min ?? 0) + (item.fiber?.max ?? 0)) / 2 / qty;
           await UserNutritionMemory.instance.saveOverride(
             item.name,
             item.calories.max / qty,
             item.protein.max / qty,
+            carbohydratesPerUnit: carbPerUnit,
+            fatPerUnit: fatPerUnit,
+            fiberPerUnit: fibPerUnit,
             referenceQuantity: qty,
             referenceUnit: item.unit,
           );

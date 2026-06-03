@@ -22,6 +22,9 @@ class UserMealOverride {
   final String canonicalMeal;      // normalized food name
   final double caloriesPerUnit;    // kcal per 1 referenceUnit
   final double proteinPerUnit;     // g protein per 1 referenceUnit
+  final double? carbohydratesPerUnit; // g carbs per 1 referenceUnit
+  final double? fatPerUnit;           // g fat per 1 referenceUnit
+  final double? fiberPerUnit;         // g fiber per 1 referenceUnit
   final double referenceQuantity;  // quantity used when this was recorded
   final String referenceUnit;      // canonical unit (g / ml / scoop / …)
   final List<String> originalTokens;
@@ -30,6 +33,9 @@ class UserMealOverride {
     required this.canonicalMeal,
     required this.caloriesPerUnit,
     required this.proteinPerUnit,
+    this.carbohydratesPerUnit,
+    this.fatPerUnit,
+    this.fiberPerUnit,
     this.referenceQuantity = 1.0,
     this.referenceUnit     = 'serving',
     List<String>? originalTokens,
@@ -41,6 +47,9 @@ class UserMealOverride {
         'canonicalMeal':     canonicalMeal,
         'caloriesPerUnit':   caloriesPerUnit,
         'proteinPerUnit':    proteinPerUnit,
+        if (carbohydratesPerUnit != null) 'carbohydratesPerUnit': carbohydratesPerUnit,
+        if (fatPerUnit != null) 'fatPerUnit': fatPerUnit,
+        if (fiberPerUnit != null) 'fiberPerUnit': fiberPerUnit,
         'referenceQuantity': referenceQuantity,
         'referenceUnit':     referenceUnit,
         'originalTokens':    originalTokens,
@@ -58,6 +67,9 @@ class UserMealOverride {
     final pro = (json['proteinPerUnit'] as num?)?.toDouble()
         ?? (json['protein'] as num?)?.toDouble()
         ?? 0.0;
+    final carbs = (json['carbohydratesPerUnit'] as num?)?.toDouble();
+    final fat = (json['fatPerUnit'] as num?)?.toDouble();
+    final fiber = (json['fiberPerUnit'] as num?)?.toDouble();
 
     // Normalize the unit on read so old entries (that may have stored 'kg')
     // are transparently upgraded to 'g'.
@@ -72,12 +84,18 @@ class UserMealOverride {
     // its multiplier (kg→g: 1 kg unit → 1000 g units, so kcal/unit ÷ 1000).
     double finalCal = cal;
     double finalPro = pro;
+    double? finalCarbs = carbs;
+    double? finalFat = fat;
+    double? finalFiber = fiber;
     if (rawUnit != normUnit) {
       // e.g. stored kcal/kg → kcal/g: divide by 1000
       final mult = UnitNormalizer.normalizeQuantity(1.0, rawUnit); // grams per old unit
       if (mult > 0) {
         finalCal = cal / mult;
         finalPro = pro / mult;
+        if (finalCarbs != null) finalCarbs = finalCarbs / mult;
+        if (finalFat != null) finalFat = finalFat / mult;
+        if (finalFiber != null) finalFiber = finalFiber / mult;
       }
     }
 
@@ -89,6 +107,9 @@ class UserMealOverride {
       canonicalMeal:     normMeal,
       caloriesPerUnit:   finalCal,
       proteinPerUnit:    finalPro,
+      carbohydratesPerUnit: finalCarbs,
+      fatPerUnit:        finalFat,
+      fiberPerUnit:      finalFiber,
       referenceQuantity: (json['referenceQuantity'] as num?)?.toDouble() ?? 1.0,
       referenceUnit:     normUnit,
       originalTokens:    List<String>.from(json['originalTokens'] ?? []),
@@ -156,6 +177,9 @@ class UserNutritionMemory {
     String rawMealName,
     double caloriesPerUnit,
     double proteinPerUnit, {
+    double? carbohydratesPerUnit,
+    double? fatPerUnit,
+    double? fiberPerUnit,
     double referenceQuantity = 1.0,
     String referenceUnit     = defaultServingUnit,
   }) async {
@@ -169,11 +193,17 @@ class UserNutritionMemory {
     // so it's really 0.002 kcal/g.  The multiplier is (1 g / 1000 g per kg).
     double finalCal = caloriesPerUnit;
     double finalPro = proteinPerUnit;
+    double? finalCarbs = carbohydratesPerUnit;
+    double? finalFat = fatPerUnit;
+    double? finalFiber = fiberPerUnit;
     if (referenceUnit.trim().toLowerCase() != normUnit) {
       final mult = UnitNormalizer.normalizeQuantity(1.0, referenceUnit);
       if (mult > 0) {
         finalCal = caloriesPerUnit / mult;
         finalPro = proteinPerUnit  / mult;
+        if (finalCarbs != null) finalCarbs = finalCarbs / mult;
+        if (finalFat != null) finalFat = finalFat / mult;
+        if (finalFiber != null) finalFiber = finalFiber / mult;
       }
     }
 
@@ -181,6 +211,9 @@ class UserNutritionMemory {
       canonicalMeal:     normName,
       caloriesPerUnit:   finalCal,
       proteinPerUnit:    finalPro,
+      carbohydratesPerUnit: finalCarbs,
+      fatPerUnit:        finalFat,
+      fiberPerUnit:      finalFiber,
       referenceQuantity: normQty,
       referenceUnit:     normUnit,
     );
@@ -274,6 +307,15 @@ class UserNutritionMemory {
             min: bestMatch.caloriesPerUnit, max: bestMatch.caloriesPerUnit),
         protein:       NutrientRange(
             min: bestMatch.proteinPerUnit, max: bestMatch.proteinPerUnit),
+        carbohydrates: bestMatch.carbohydratesPerUnit != null
+            ? NutrientRange(min: bestMatch.carbohydratesPerUnit!, max: bestMatch.carbohydratesPerUnit!)
+            : null,
+        fat: bestMatch.fatPerUnit != null
+            ? NutrientRange(min: bestMatch.fatPerUnit!, max: bestMatch.fatPerUnit!)
+            : null,
+        fiber: bestMatch.fiberPerUnit != null
+            ? NutrientRange(min: bestMatch.fiberPerUnit!, max: bestMatch.fiberPerUnit!)
+            : null,
         confidence:    0.99,
         warnings:      [],
         source:        'user_override',

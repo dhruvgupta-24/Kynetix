@@ -2800,14 +2800,21 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
           ],
         ),
         const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: pct,
-            minHeight: 6,
-            backgroundColor: const Color(0xFF2E2E3E),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-          ),
+        TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.0, end: pct),
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: value,
+                minHeight: 6,
+                backgroundColor: const Color(0xFF2E2E3E),
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
+            );
+          },
         ),
       ],
     );

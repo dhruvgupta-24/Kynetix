@@ -91,10 +91,16 @@ class CloudSyncService {
           final proPerUnit = (row['protein_per_unit'] as num?)?.toDouble()
               ?? (row['protein'] as num?)?.toDouble()
               ?? 0.0;
+          final carbPerUnit = (row['carbohydrates_per_unit'] as num?)?.toDouble();
+          final fatPerUnit = (row['fat_per_unit'] as num?)?.toDouble();
+          final fiberPerUnit = (row['fiber_per_unit'] as num?)?.toDouble();
           cloudOverrides.add(UserMealOverride(
             canonicalMeal:     row['canonical_meal'] as String,
             caloriesPerUnit:   calPerUnit,
             proteinPerUnit:    proPerUnit,
+            carbohydratesPerUnit: carbPerUnit,
+            fatPerUnit:        fatPerUnit,
+            fiberPerUnit:      fiberPerUnit,
             referenceQuantity: (row['reference_quantity'] as num?)?.toDouble() ?? 1.0,
             referenceUnit:     row['reference_unit'] as String? ?? 'serving',
           ));
@@ -183,6 +189,9 @@ class CloudSyncService {
         // New schema columns
         'calories_per_unit': memory.caloriesPerUnit,
         'protein_per_unit':  memory.proteinPerUnit,
+        if (memory.carbohydratesPerUnit != null) 'carbohydrates_per_unit': memory.carbohydratesPerUnit,
+        if (memory.fatPerUnit != null) 'fat_per_unit': memory.fatPerUnit,
+        if (memory.fiberPerUnit != null) 'fiber_per_unit': memory.fiberPerUnit,
         'reference_quantity':memory.referenceQuantity,
         'reference_unit':    memory.referenceUnit,
         // Legacy aliases for backward compat with existing rows/clients
