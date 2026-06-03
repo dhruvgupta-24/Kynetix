@@ -23,16 +23,6 @@
             android:textSize="13sp"
             android:textStyle="bold"
             android:letterSpacing="0.1" />
-
-        <TextView
-            android:id="@+id/widget_timestamp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
-            android:text="Updated --:--"
-            android:textColor="#9CA3AF"
-            android:textSize="10sp" />
     </RelativeLayout>
 
     <!-- Main Content Container: holds concentric rings in the center -->

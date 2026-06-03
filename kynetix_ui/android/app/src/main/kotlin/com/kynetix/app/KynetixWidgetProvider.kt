@@ -88,9 +88,6 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                         views.setViewVisibility(R.id.widget_header_layout, View.GONE)
                         views.setViewVisibility(R.id.widget_details_layout, View.GONE)
                     }
-                    if (layoutResId == R.layout.kynetix_widget_2x2 || layoutResId == R.layout.kynetix_widget_4x2) {
-                        views.setViewVisibility(R.id.widget_timestamp_layout, View.GONE)
-                    }
                     appWidgetManager.updateAppWidget(appWidgetId, views)
                     return
                 }
@@ -139,7 +136,6 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                 // Bind view elements based on layout size
                 if (layoutResId == R.layout.kynetix_widget_2x2) {
                     views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
-                    views.setViewVisibility(R.id.widget_timestamp_layout, View.VISIBLE)
                     views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
 
                     val bitmap = drawConcentricRings(calRatio, proRatio, caloriesConsumed > cleanCaloriesTarget, proteinConsumed > cleanProteinTarget, isLarge = false)
@@ -147,11 +143,9 @@ class KynetixWidgetProvider : AppWidgetProvider() {
 
                     views.setTextViewText(R.id.widget_calories_value, "${finalCaloriesRemaining.toInt()}")
                     views.setTextViewText(R.id.widget_protein_value, "${finalProteinRemaining.toInt()}g")
-                    views.setTextViewText(R.id.widget_timestamp, "Updated $lastUpdateTime")
                 } 
                 else if (layoutResId == R.layout.kynetix_widget_4x2) {
                     views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
-                    views.setViewVisibility(R.id.widget_timestamp_layout, View.VISIBLE)
                     views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
 
                     val calBitmap = drawSingleRing(calRatio, caloriesConsumed > cleanCaloriesTarget, "#FF6B35")
@@ -167,8 +161,6 @@ class KynetixWidgetProvider : AppWidgetProvider() {
 
                     views.setTextViewText(R.id.widget_protein_remaining, "${finalProteinRemaining.toInt()}g left")
                     views.setTextViewText(R.id.widget_protein_consumed_target, "${proteinConsumed.toInt()} / ${cleanProteinTarget.toInt()} consumed")
-
-                    views.setTextViewText(R.id.widget_timestamp, "Updated $lastUpdateTime")
                 } 
                 else { // 4x4
                     views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
@@ -185,8 +177,6 @@ class KynetixWidgetProvider : AppWidgetProvider() {
 
                     views.setTextViewText(R.id.widget_protein_remaining, "${finalProteinRemaining.toInt()}g remaining")
                     views.setTextViewText(R.id.widget_protein_consumed_target, "${proteinConsumed.toInt()} / ${cleanProteinTarget.toInt()} g")
-
-                    views.setTextViewText(R.id.widget_timestamp, "Updated $lastUpdateTime")
                 }
 
                 appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -210,9 +200,6 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                     if (fallbackResId != R.layout.kynetix_widget_2x2) {
                         fallbackViews.setViewVisibility(R.id.widget_header_layout, View.GONE)
                         fallbackViews.setViewVisibility(R.id.widget_details_layout, View.GONE)
-                    }
-                    if (fallbackResId == R.layout.kynetix_widget_2x2 || fallbackResId == R.layout.kynetix_widget_4x2) {
-                        fallbackViews.setViewVisibility(R.id.widget_timestamp_layout, View.GONE)
                     }
                     appWidgetManager.updateAppWidget(appWidgetId, fallbackViews)
                 } catch (ex: Exception) {

@@ -287,6 +287,101 @@ class DayLog {
   double get totalCaloriesMid => (totalCaloriesMin + totalCaloriesMax) / 2;
   double get totalProteinMid  => (totalProteinMin  + totalProteinMax)  / 2;
 
+  // Secondary & optional macro aggregation
+  double get totalCarbsMin => _all.fold(0, (s, e) => s + (e.result.carbohydrates?.min ?? 0));
+  double get totalCarbsMax => _all.fold(0, (s, e) => s + (e.result.carbohydrates?.max ?? 0));
+  double get totalCarbsMid => (totalCarbsMin + totalCarbsMax) / 2;
+
+  double get totalFatMin => _all.fold(0, (s, e) => s + (e.result.fat?.min ?? 0));
+  double get totalFatMax => _all.fold(0, (s, e) => s + (e.result.fat?.max ?? 0));
+  double get totalFatMid => (totalFatMin + totalFatMax) / 2;
+
+  double get totalFiberMin => _all.fold(0, (s, e) => s + (e.result.fiber?.min ?? 0));
+  double get totalFiberMax => _all.fold(0, (s, e) => s + (e.result.fiber?.max ?? 0));
+  double get totalFiberMid => (totalFiberMin + totalFiberMax) / 2;
+
+  double get totalSugarMin => _all.fold(0, (s, e) => s + (e.result.sugar?.min ?? 0));
+  double get totalSugarMax => _all.fold(0, (s, e) => s + (e.result.sugar?.max ?? 0));
+  double get totalSugarMid => (totalSugarMin + totalSugarMax) / 2;
+
+  double get totalSaturatedFatMin => _all.fold(0, (s, e) => s + (e.result.saturatedFat?.min ?? 0));
+  double get totalSaturatedFatMax => _all.fold(0, (s, e) => s + (e.result.saturatedFat?.max ?? 0));
+  double get totalSaturatedFatMid => (totalSaturatedFatMin + totalSaturatedFatMax) / 2;
+
+  double get totalSodiumMin => _all.fold(0, (s, e) => s + (e.result.sodium?.min ?? 0));
+  double get totalSodiumMax => _all.fold(0, (s, e) => s + (e.result.sodium?.max ?? 0));
+  double get totalSodiumMid => (totalSodiumMin + totalSodiumMax) / 2;
+
+  int? get dailyNutritionScore {
+    final entriesWithScore = _all.where((e) => e.result.mealQualityScore != null).toList();
+    if (entriesWithScore.isEmpty) return null;
+
+    double weightedSum = 0;
+    double totalCaloriesWithScore = 0;
+
+    for (final e in entriesWithScore) {
+      final score = e.result.mealQualityScore!;
+      final cals = e.calMid;
+      weightedSum += score * cals;
+      totalCaloriesWithScore += cals;
+    }
+
+    if (totalCaloriesWithScore > 0) {
+      return (weightedSum / totalCaloriesWithScore).round().clamp(0, 100);
+    }
+
+    final sumScores = entriesWithScore.fold<double>(0.0, (s, e) => s + e.result.mealQualityScore!);
+    return (sumScores / entriesWithScore.length).round().clamp(0, 100);
+  }
+
+  List<String> getDailyNutritionInsights(double targetCal, double targetPro, double targetFib) {
+    final insights = <String>[];
+    if (isEmpty) return ['No meals logged today yet. Log some meals to get insights.'];
+
+    final calMidVal = totalCaloriesMid;
+    final proMidVal = totalProteinMid;
+    final fibMidVal = totalFiberMid;
+
+    final calPct = targetCal > 0 ? (calMidVal / targetCal * 100) : 0.0;
+    final proPct = targetPro > 0 ? (proMidVal / targetPro * 100) : 0.0;
+    final fibPct = targetFib > 0 ? (fibMidVal / targetFib * 100) : 0.0;
+
+    // Calorie insight
+    if (calPct > 105) {
+      insights.add('Calories slightly above target (${calPct.toStringAsFixed(0)}%). Consider lighter snacks.');
+    } else if (calPct >= 90) {
+      insights.add('Excellent calorie control today!');
+    } else if (calPct < 70) {
+      insights.add('Calories are low (${calPct.toStringAsFixed(0)}%). Ensure you fuel properly.');
+    }
+
+    // Protein insight
+    if (proPct >= 90) {
+      insights.add('Fantastic job on protein! You hit ${proPct.toStringAsFixed(0)}% of your target.');
+    } else if (proPct < 70) {
+      insights.add('Protein is low (${proPct.toStringAsFixed(0)}%). Add lean protein sources.');
+    }
+
+    // Fiber insight
+    if (fibPct >= 90) {
+      insights.add('Superb fiber intake! You reached ${fibPct.toStringAsFixed(0)}% of your target.');
+    } else if (fibPct < 60) {
+      insights.add('Fiber is low (${fibPct.toStringAsFixed(0)}%). Boost with oats, fruit, or veggies.');
+    }
+
+    // Quality score insight
+    final dailyScore = dailyNutritionScore;
+    if (dailyScore != null) {
+      if (dailyScore >= 80) {
+        insights.add('Great food quality ($dailyScore/100)! You are nourishing your body with high-grade fuel.');
+      } else if (dailyScore < 60) {
+        insights.add('Food quality score is moderate ($dailyScore/100). Focus on more whole foods.');
+      }
+    }
+
+    return insights;
+  }
+
   List<MealEntry> get _all =>
       _sections.values.expand((e) => e).toList();
 

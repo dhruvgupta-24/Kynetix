@@ -21,12 +21,12 @@ enum _Role { user, assistant }
 class _ChatMessage {
   final _Role      role;
   final String     text;
-  final Uint8List? imageBytes;
+  final List<Uint8List>? imagesBytes;
 
   const _ChatMessage({
     required this.role,
     required this.text,
-    this.imageBytes,
+    this.imagesBytes,
   });
 }
 
@@ -75,7 +75,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   bool        _loading      = false;
   bool        _isStreaming  = false;
   String      _streamingText = '';
-  Uint8List?  _pendingImg;
+  List<Uint8List> _pendingImages = [];
 
   @override
   void initState() {
@@ -111,27 +111,69 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   }
 
   Future<void> _pickImage() async {
-    final xFile = await _imagePicker.pickImage(
-      source:      ImageSource.gallery,
-      imageQuality: 75,
-      maxWidth:    1024,
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: Colors.white),
+              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: Colors.white),
+              title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
     );
-    if (xFile == null) return;
-    final bytes = await xFile.readAsBytes();
-    setState(() => _pendingImg = bytes);
+
+    if (source == null) return;
+
+    if (source == ImageSource.camera) {
+      final xFile = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 75,
+        maxWidth: 1024,
+      );
+      if (xFile == null) return;
+      final bytes = await xFile.readAsBytes();
+      setState(() {
+        _pendingImages.add(bytes);
+      });
+    } else {
+      final List<XFile> xFiles = await _imagePicker.pickMultiImage(
+        imageQuality: 75,
+        maxWidth: 1024,
+      );
+      if (xFiles.isEmpty) return;
+      for (final xFile in xFiles) {
+        final bytes = await xFile.readAsBytes();
+        setState(() {
+          _pendingImages.add(bytes);
+        });
+      }
+    }
   }
 
   Future<void> _send([String? overrideText]) async {
     final text = (overrideText ?? _controller.text).trim();
-    if ((text.isEmpty && _pendingImg == null) || _loading || _isStreaming) return;
+    if ((text.isEmpty && _pendingImages.isEmpty) || _loading || _isStreaming) return;
 
-    final imageBytes = _pendingImg;
+    final imageList = List<Uint8List>.from(_pendingImages);
     setState(() {
-      _messages.add(_ChatMessage(role: _Role.user, text: text, imageBytes: imageBytes));
+      _messages.add(_ChatMessage(role: _Role.user, text: text, imagesBytes: imageList));
       _loading       = true;
       _isStreaming   = false;
       _streamingText = '';
-      _pendingImg    = null;
+      _pendingImages.clear();
     });
     _controller.clear();
     _scrollToBottom();
@@ -151,7 +193,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
 
       final stream = AiCoachService.instance.streamMessage(
         message:                text,
-        imageBytes:             imageBytes,
+        imagesBytes:            imageList,
         dateKey:                widget.dateKey,
         isGymDay:               widget.isGymDay,
         workoutType:            widget.workoutType,
@@ -214,7 +256,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
                 ? _buildEmptyState()
                 : _buildMessageList(),
           ),
-          if (_pendingImg != null) _buildImagePreview(),
+          if (_pendingImages.isNotEmpty) _buildImagePreview(),
           _buildInputBar(),
         ],
       ),
@@ -391,20 +433,56 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   Widget _buildImagePreview() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-      height: 72,
+      height: 80,
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.memory(_pendingImg!, width: 72, height: 72, fit: BoxFit.cover),
-          ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text('Image ready to send', style: TextStyle(color: _kLight, fontSize: 13)),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, color: _kMuted, size: 20),
-            onPressed: () => setState(() => _pendingImg = null),
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _pendingImages.length,
+              itemBuilder: (context, index) {
+                final bytes = _pendingImages[index];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.memory(
+                          bytes,
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _pendingImages.removeAt(index);
+                            });
+                          },
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(4),
+                            child: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -431,7 +509,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         children: [
           _IconBtn(
             icon: Icons.add_photo_alternate_rounded,
-            color: _pendingImg != null ? _kGreen : _kMuted,
+            color: _pendingImages.isNotEmpty ? _kGreen : _kMuted,
             onTap: _pickImage,
           ),
           const SizedBox(width: 8),
@@ -547,16 +625,23 @@ class _ChatBubble extends StatelessWidget {
               crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 // Image preview (user side only)
-                if (message.imageBytes != null)
+                if (message.imagesBytes != null && message.imagesBytes!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.memory(
-                        message.imageBytes!,
-                        width: 180, height: 180,
-                        fit: BoxFit.cover,
-                      ),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: message.imagesBytes!.map((bytes) {
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.memory(
+                            bytes,
+                            width: message.imagesBytes!.length == 1 ? 180 : 120,
+                            height: message.imagesBytes!.length == 1 ? 180 : 120,
+                            fit: BoxFit.cover,
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ),
                 // Bubble

@@ -36,6 +36,12 @@ class NutritionItem {
   final EstimationMode mode;
   final NutrientRange  calories;
   final NutrientRange  protein;
+  final NutrientRange? carbohydrates;
+  final NutrientRange? fat;
+  final NutrientRange? fiber;
+  final NutrientRange? sugar;
+  final NutrientRange? saturatedFat;
+  final NutrientRange? sodium;
 
   const NutritionItem({
     required this.name,
@@ -45,6 +51,12 @@ class NutritionItem {
     required this.mode,
     required this.calories,
     required this.protein,
+    this.carbohydrates,
+    this.fat,
+    this.fiber,
+    this.sugar,
+    this.saturatedFat,
+    this.sodium,
   });
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +67,12 @@ class NutritionItem {
         'estimationMode': mode.toJson(),
         'calories':       {'min': calories.min, 'max': calories.max},
         'protein':        {'min': protein.min,  'max': protein.max},
+        if (carbohydrates != null) 'carbohydrates': {'min': carbohydrates!.min, 'max': carbohydrates!.max},
+        if (fat != null) 'fat': {'min': fat!.min, 'max': fat!.max},
+        if (fiber != null) 'fiber': {'min': fiber!.min, 'max': fiber!.max},
+        if (sugar != null) 'sugar': {'min': sugar!.min, 'max': sugar!.max},
+        if (saturatedFat != null) 'saturatedFat': {'min': saturatedFat!.min, 'max': saturatedFat!.max},
+        if (sodium != null) 'sodium': {'min': sodium!.min, 'max': sodium!.max},
       };
 
   factory NutritionItem.fromJson(Map<String, dynamic> j) => NutritionItem(
@@ -65,6 +83,12 @@ class NutritionItem {
         mode:      EstimationMode.fromString(j['estimationMode'] as String? ?? ''),
         calories:  _range(j['calories']),
         protein:   _range(j['protein']),
+        carbohydrates: j['carbohydrates'] != null ? _range(j['carbohydrates']) : null,
+        fat:           j['fat'] != null ? _range(j['fat']) : null,
+        fiber:         j['fiber'] != null ? _range(j['fiber']) : null,
+        sugar:         j['sugar'] != null ? _range(j['sugar']) : null,
+        saturatedFat:  j['saturatedFat'] != null ? _range(j['saturatedFat']) : null,
+        sodium:        j['sodium'] != null ? _range(j['sodium']) : null,
       );
 
   static NutrientRange _range(dynamic raw) {
@@ -85,6 +109,12 @@ class NutritionItem {
         mode: mode,
         calories: _normalizeRange(calories),
         protein: _normalizeRange(protein),
+        carbohydrates: carbohydrates != null ? _normalizeRange(carbohydrates!) : null,
+        fat: fat != null ? _normalizeRange(fat!) : null,
+        fiber: fiber != null ? _normalizeRange(fiber!) : null,
+        sugar: sugar != null ? _normalizeRange(sugar!) : null,
+        saturatedFat: saturatedFat != null ? _normalizeRange(saturatedFat!) : null,
+        sodium: sodium != null ? _normalizeRange(sodium!) : null,
       );
 
   static NutrientRange _normalizeRange(NutrientRange r) {
@@ -104,6 +134,18 @@ class NutritionResult {
   final List<NutritionItem> items;
   final NutrientRange       calories;
   final NutrientRange       protein;
+  final NutrientRange?       carbohydrates;
+  final NutrientRange?       fat;
+  final NutrientRange?       fiber;
+  final NutrientRange?       sugar;
+  final NutrientRange?       saturatedFat;
+  final NutrientRange?       sodium;
+
+  final int?                 mealQualityScore;
+  final String?              mealQualityExplanation;
+  final String?              mealQualityPositive;
+  final String?              mealQualityImprovement;
+
   final double              confidence;
   final List<String>        warnings;
   final String?             coachSummary;
@@ -132,9 +174,32 @@ class NutritionResult {
     required this.source,
     required this.createdAt,
     this.fallbackReason,
+    this.carbohydrates,
+    this.fat,
+    this.fiber,
+    this.sugar,
+    this.saturatedFat,
+    this.sodium,
+    this.mealQualityScore,
+    this.mealQualityExplanation,
+    this.mealQualityPositive,
+    this.mealQualityImprovement,
   });
 
-  NutritionResult copyWith({String? source, String? fallbackReason}) => NutritionResult(
+  NutritionResult copyWith({
+    String? source,
+    String? fallbackReason,
+    NutrientRange? carbohydrates,
+    NutrientRange? fat,
+    NutrientRange? fiber,
+    NutrientRange? sugar,
+    NutrientRange? saturatedFat,
+    NutrientRange? sodium,
+    int? mealQualityScore,
+    String? mealQualityExplanation,
+    String? mealQualityPositive,
+    String? mealQualityImprovement,
+  }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
         calories:       calories,
@@ -149,6 +214,16 @@ class NutritionResult {
         source:         source ?? this.source,
         createdAt:      createdAt,
         fallbackReason: fallbackReason ?? this.fallbackReason,
+        carbohydrates:  carbohydrates ?? this.carbohydrates,
+        fat:            fat ?? this.fat,
+        fiber:          fiber ?? this.fiber,
+        sugar:          sugar ?? this.sugar,
+        saturatedFat:   saturatedFat ?? this.saturatedFat,
+        sodium:         sodium ?? this.sodium,
+        mealQualityScore: mealQualityScore ?? this.mealQualityScore,
+        mealQualityExplanation: mealQualityExplanation ?? this.mealQualityExplanation,
+        mealQualityPositive: mealQualityPositive ?? this.mealQualityPositive,
+        mealQualityImprovement: mealQualityImprovement ?? this.mealQualityImprovement,
       );
 
   /// Guardrails-specific copy — replaces macros + warnings without touching items.
@@ -156,6 +231,12 @@ class NutritionResult {
     required NutrientRange calories,
     required NutrientRange protein,
     required List<String>  warnings,
+    NutrientRange? carbohydrates,
+    NutrientRange? fat,
+    NutrientRange? fiber,
+    NutrientRange? sugar,
+    NutrientRange? saturatedFat,
+    NutrientRange? sodium,
   }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
@@ -171,6 +252,16 @@ class NutritionResult {
         source:         source,
         createdAt:      createdAt,
         fallbackReason: fallbackReason,
+        carbohydrates:  carbohydrates ?? this.carbohydrates,
+        fat:            fat ?? this.fat,
+        fiber:          fiber ?? this.fiber,
+        sugar:          sugar ?? this.sugar,
+        saturatedFat:   saturatedFat ?? this.saturatedFat,
+        sodium:         sodium ?? this.sodium,
+        mealQualityScore: mealQualityScore,
+        mealQualityExplanation: mealQualityExplanation,
+        mealQualityPositive: mealQualityPositive,
+        mealQualityImprovement: mealQualityImprovement,
       );
 
   NutritionResult normalizedUncertainty() => NutritionResult(
@@ -188,6 +279,16 @@ class NutritionResult {
         source: source,
         createdAt: createdAt,
         fallbackReason: fallbackReason,
+        carbohydrates: carbohydrates != null ? NutritionItem._normalizeRange(carbohydrates!) : null,
+        fat: fat != null ? NutritionItem._normalizeRange(fat!) : null,
+        fiber: fiber != null ? NutritionItem._normalizeRange(fiber!) : null,
+        sugar: sugar != null ? NutritionItem._normalizeRange(sugar!) : null,
+        saturatedFat: saturatedFat != null ? NutritionItem._normalizeRange(saturatedFat!) : null,
+        sodium: sodium != null ? NutritionItem._normalizeRange(sodium!) : null,
+        mealQualityScore: mealQualityScore,
+        mealQualityExplanation: mealQualityExplanation,
+        mealQualityPositive: mealQualityPositive,
+        mealQualityImprovement: mealQualityImprovement,
       );
 
   double get primaryCaloriesEstimate => ((calories.min + calories.max) / 2);
@@ -256,31 +357,169 @@ class NutritionResult {
         warnings:   warnings,
       );
 
+  // ── Local Fallback Estimations ───────────────────────────────────────────
+
+  static NutrientRange _estimateCarbsLocally(double cal, double pro, String text) {
+    final lowerText = text.toLowerCase();
+    double ratio = 0.55; // default 55% of remaining calories to carbs
+    if (lowerText.contains('rice') || lowerText.contains('roti') || lowerText.contains('bread') || lowerText.contains('banana') || lowerText.contains('oats')) {
+      ratio = 0.75;
+    } else if (lowerText.contains('paneer') || lowerText.contains('oil') || lowerText.contains('butter') || lowerText.contains('avocado')) {
+      ratio = 0.30;
+    }
+    final remainingCal = (cal - pro * 4).clamp(0.0, double.infinity);
+    final carbsGrams = (remainingCal * ratio / 4).clamp(0.0, double.infinity);
+    return NutrientRange(min: double.parse((carbsGrams * 0.9).toStringAsFixed(1)), max: double.parse((carbsGrams * 1.1).toStringAsFixed(1)));
+  }
+
+  static NutrientRange _estimateFatLocally(double cal, double pro, String text) {
+    final lowerText = text.toLowerCase();
+    double ratio = 0.45; // default 45% of remaining calories to fat
+    if (lowerText.contains('rice') || lowerText.contains('roti') || lowerText.contains('bread') || lowerText.contains('banana') || lowerText.contains('oats')) {
+      ratio = 0.25;
+    } else if (lowerText.contains('paneer') || lowerText.contains('oil') || lowerText.contains('butter') || lowerText.contains('avocado') || lowerText.contains('cheese')) {
+      ratio = 0.70;
+    }
+    final remainingCal = (cal - pro * 4).clamp(0.0, double.infinity);
+    final fatGrams = (remainingCal * ratio / 9).clamp(0.0, double.infinity);
+    return NutrientRange(min: double.parse((fatGrams * 0.9).toStringAsFixed(1)), max: double.parse((fatGrams * 1.1).toStringAsFixed(1)));
+  }
+
+  static NutrientRange _estimateFiberLocally(double cal, String text) {
+    final lowerText = text.toLowerCase();
+    double fiberGrams = 1.5;
+    if (lowerText.contains('salad') || lowerText.contains('broccoli') || lowerText.contains('vegetable') || lowerText.contains('greens')) {
+      fiberGrams = 6.0;
+    } else if (lowerText.contains('oats') || lowerText.contains('apple') || lowerText.contains('lentils') || lowerText.contains('beans')) {
+      fiberGrams = 4.5;
+    } else if (cal > 500) {
+      fiberGrams = 3.0;
+    }
+    return NutrientRange(min: double.parse((fiberGrams * 0.8).toStringAsFixed(1)), max: double.parse((fiberGrams * 1.2).toStringAsFixed(1)));
+  }
+
+  static int _calculateLocalQualityScore(double cal, double pro, String text) {
+    final lowerText = text.toLowerCase();
+    double score = 70.0; // base score
+
+    if (cal > 0) {
+      final proteinCalRatio = (pro * 4) / cal;
+      if (proteinCalRatio >= 0.3) {
+        score += 15.0; // protein bonus
+      } else if (proteinCalRatio >= 0.2) {
+        score += 8.0;
+      }
+    }
+
+    if (lowerText.contains('salad') || lowerText.contains('vegetable') || lowerText.contains('broccoli') || lowerText.contains('spinach')) {
+      score += 10.0;
+    }
+    if (lowerText.contains('oats') || lowerText.contains('egg') || lowerText.contains('chicken breast') || lowerText.contains('fish')) {
+      score += 5.0;
+    }
+
+    if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('soda') || lowerText.contains('fries') || lowerText.contains('fried') || lowerText.contains('coke')) {
+      score -= 25.0;
+    } else if (lowerText.contains('sugar') || lowerText.contains('cookie') || lowerText.contains('chocolate') || lowerText.contains('cake') || lowerText.contains('donut')) {
+      score -= 15.0;
+    }
+
+    return score.clamp(0.0, 100.0).round();
+  }
+
+  static String _getLocalQualityExplanation(int score, String text) {
+    final lowerText = text.toLowerCase();
+    if (score >= 85) {
+      return 'Nutritious whole food choice with excellent protein density and clean ingredients.';
+    } else if (score >= 70) {
+      return 'Balanced meal with decent macronutrient profile, suitable for daily fuel.';
+    } else if (score >= 50) {
+      return 'Moderate nutrition score. Could be improved by adding fresh vegetables or high-quality lean protein.';
+    } else {
+      if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries')) {
+        return 'High in saturated fats and fast-digesting carbohydrates. Pair with a high-protein source next time.';
+      }
+      return 'Higher processed content or sugar level. Try to replace with whole grains or lean protein options.';
+    }
+  }
+
+  static String _getLocalQualityPositive(int score, String text) {
+    final lowerText = text.toLowerCase();
+    if (lowerText.contains('salad') || lowerText.contains('vegetable') || lowerText.contains('broccoli')) {
+      return 'Contains micronutrient-rich vegetables.';
+    }
+    if (lowerText.contains('egg') || lowerText.contains('chicken') || lowerText.contains('fish') || lowerText.contains('protein')) {
+      return 'High in high-quality protein to support muscle synthesis.';
+    }
+    if (lowerText.contains('oats') || lowerText.contains('apple') || lowerText.contains('beans')) {
+      return 'Includes complex carbohydrates and healthy dietary fiber.';
+    }
+    if (score >= 75) {
+      return 'Good macronutrient balance with clean fuel.';
+    }
+    return 'Quick energy source to fuel your immediate activities.';
+  }
+
+  static String _getLocalQualityImprovement(int score, String text) {
+    final lowerText = text.toLowerCase();
+    if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries') || lowerText.contains('fried')) {
+      return 'Reduce intake of deep-fried items to lower saturated fat consumption.';
+    }
+    if (lowerText.contains('sugar') || lowerText.contains('soda') || lowerText.contains('cookie') || lowerText.contains('chocolate')) {
+      return 'Limit added sugars to prevent glycemic spikes and crashes.';
+    }
+    if (!lowerText.contains('chicken') && !lowerText.contains('egg') && !lowerText.contains('fish') && !lowerText.contains('paneer') && !lowerText.contains('whey') && !lowerText.contains('tofu')) {
+      return 'Add a lean protein source (e.g. egg whites, chicken, tofu) to boost protein density.';
+    }
+    if (!lowerText.contains('salad') && !lowerText.contains('vegetable') && !lowerText.contains('broccoli')) {
+      return 'Incorporate some leafy green vegetables for crucial fiber and micronutrients.';
+    }
+    return 'Control portion size to align perfectly with your daily targets.';
+  }
+
   /// Build a NutritionResult from the legacy local fallback.
   factory NutritionResult.fromEstimationResult(
     EstimationResult r,
     String rawInput,
-  ) =>
-      NutritionResult(
-        canonicalMeal: rawInput,
-        items: r.items
-            .map((fi) => NutritionItem(
-                  name:      fi.name,
-                  quantity:  1,
-                  unit:      'serving',
-                  estimated: true,
-                  mode:      EstimationMode.contextualIntake,
-                  calories:  fi.calories,
-                  protein:   fi.protein,
-                ))
-            .toList(),
-        calories:   r.calories,
-        protein:    r.protein,
-        confidence: r.confidence,
-        warnings:   r.warnings,
-        source:     'local_fallback',
-        createdAt:  DateTime.now(),
-      );
+  ) {
+    final calVal = r.calories.mid;
+    final proVal = r.protein.mid;
+    final carbs = _estimateCarbsLocally(calVal, proVal, rawInput);
+    final fat = _estimateFatLocally(calVal, proVal, rawInput);
+    final fiber = _estimateFiberLocally(calVal, rawInput);
+    final score = _calculateLocalQualityScore(calVal, proVal, rawInput);
+    
+    return NutritionResult(
+      canonicalMeal: rawInput,
+      items: r.items
+          .map((fi) => NutritionItem(
+                name:      fi.name,
+                quantity:  1,
+                unit:      'serving',
+                estimated: true,
+                mode:      EstimationMode.contextualIntake,
+                calories:  fi.calories,
+                protein:   fi.protein,
+                carbohydrates: _estimateCarbsLocally(fi.calories.mid, fi.protein.mid, fi.name),
+                fat:           _estimateFatLocally(fi.calories.mid, fi.protein.mid, fi.name),
+                fiber:         _estimateFiberLocally(fi.calories.mid, fi.name),
+              ))
+          .toList(),
+      calories:   r.calories,
+      protein:    r.protein,
+      confidence: r.confidence,
+      warnings:   r.warnings,
+      source:     'local_fallback',
+      createdAt:  DateTime.now(),
+      carbohydrates: carbs,
+      fat:            fat,
+      fiber:          fiber,
+      mealQualityScore: score,
+      mealQualityExplanation: _getLocalQualityExplanation(score, rawInput),
+      mealQualityPositive: _getLocalQualityPositive(score, rawInput),
+      mealQualityImprovement: _getLocalQualityImprovement(score, rawInput),
+    );
+  }
 
   // ── JSON serialization (for SharedPreferences) ────────────────────────────
 
@@ -299,6 +538,16 @@ class NutritionResult {
         'source':        source,
         'createdAt':     createdAt.toIso8601String(),
         if (fallbackReason != null) 'fallbackReason': fallbackReason,
+        if (carbohydrates != null) 'carbohydrates': {'min': carbohydrates!.min, 'max': carbohydrates!.max},
+        if (fat != null) 'fat': {'min': fat!.min, 'max': fat!.max},
+        if (fiber != null) 'fiber': {'min': fiber!.min, 'max': fiber!.max},
+        if (sugar != null) 'sugar': {'min': sugar!.min, 'max': sugar!.max},
+        if (saturatedFat != null) 'saturatedFat': {'min': saturatedFat!.min, 'max': saturatedFat!.max},
+        if (sodium != null) 'sodium': {'min': sodium!.min, 'max': sodium!.max},
+        if (mealQualityScore != null) 'mealQualityScore': mealQualityScore,
+        if (mealQualityExplanation != null) 'mealQualityExplanation': mealQualityExplanation,
+        if (mealQualityPositive != null) 'mealQualityPositive': mealQualityPositive,
+        if (mealQualityImprovement != null) 'mealQualityImprovement': mealQualityImprovement,
       };
 
   factory NutritionResult.fromJson(Map<String, dynamic> j) {
@@ -328,6 +577,16 @@ class NutritionResult {
       createdAt:      DateTime.tryParse(j['createdAt'] as String? ?? '') ??
                       DateTime.now(),
       fallbackReason: j['fallbackReason'] as String?,
+      carbohydrates:  j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : null,
+      fat:            j['fat'] != null ? NutritionItem._range(j['fat']) : null,
+      fiber:          j['fiber'] != null ? NutritionItem._range(j['fiber']) : null,
+      sugar:          j['sugar'] != null ? NutritionItem._range(j['sugar']) : null,
+      saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : null,
+      sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : null,
+      mealQualityScore: j['mealQualityScore'] as int?,
+      mealQualityExplanation: j['mealQualityExplanation'] as String?,
+      mealQualityPositive: j['mealQualityPositive'] as String?,
+      mealQualityImprovement: j['mealQualityImprovement'] as String?,
     ).normalizedUncertainty();
   }
 

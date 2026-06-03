@@ -133,6 +133,16 @@ class AiNutritionService {
           newKey = 'riskFlags';
         } else if (k == 'estimation_mode') {
           newKey = 'estimationMode';
+        } else if (k == 'meal_quality_score') {
+          newKey = 'mealQualityScore';
+        } else if (k == 'meal_quality_explanation') {
+          newKey = 'mealQualityExplanation';
+        } else if (k == 'meal_quality_positive') {
+          newKey = 'mealQualityPositive';
+        } else if (k == 'meal_quality_improvement') {
+          newKey = 'mealQualityImprovement';
+        } else if (k == 'saturated_fat') {
+          newKey = 'saturatedFat';
         }
         
         if (v is Map<String, dynamic>) {
@@ -168,6 +178,12 @@ class AiNutritionService {
           final p = (itemMap['protein'] as num).toDouble();
           itemMap['protein'] = {'min': p, 'max': p};
         }
+        for (final key in ['carbohydrates', 'fat', 'fiber', 'sugar', 'saturatedFat', 'sodium']) {
+          if (itemMap[key] is num) {
+            final val = (itemMap[key] as num).toDouble();
+            itemMap[key] = {'min': val, 'max': val};
+          }
+        }
         return NutritionItem.fromJson(itemMap);
       }
       return NutritionItem.fromJson(const {});
@@ -181,6 +197,30 @@ class AiNutritionService {
     final sumPro = items.fold(
       (min: 0.0, max: 0.0),
       (a, i) => (min: a.min + i.protein.min,  max: a.max + i.protein.max),
+    );
+    final sumCarbs = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.carbohydrates?.min ?? 0), max: a.max + (i.carbohydrates?.max ?? 0)),
+    );
+    final sumFat = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.fat?.min ?? 0), max: a.max + (i.fat?.max ?? 0)),
+    );
+    final sumFiber = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.fiber?.min ?? 0), max: a.max + (i.fiber?.max ?? 0)),
+    );
+    final sumSugar = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.sugar?.min ?? 0), max: a.max + (i.sugar?.max ?? 0)),
+    );
+    final sumSatFat = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.saturatedFat?.min ?? 0), max: a.max + (i.saturatedFat?.max ?? 0)),
+    );
+    final sumSodium = items.fold(
+      (min: 0.0, max: 0.0),
+      (a, i) => (min: a.min + (i.sodium?.min ?? 0), max: a.max + (i.sodium?.max ?? 0)),
     );
 
     NutrientRange parseRange(dynamic raw, ({double min, double max}) sumDefault) {
@@ -210,6 +250,13 @@ class AiNutritionService {
         ? proTotal
         : NutrientRange(min: _r(sumPro.min), max: _r(sumPro.max));
 
+    final carbsTotal = json['carbohydrates'] != null ? parseRange(json['carbohydrates'], sumCarbs) : null;
+    final fatTotal = json['fat'] != null ? parseRange(json['fat'], sumFat) : null;
+    final fiberTotal = json['fiber'] != null ? parseRange(json['fiber'], sumFiber) : null;
+    final sugarTotal = json['sugar'] != null ? parseRange(json['sugar'], sumSugar) : null;
+    final satFatTotal = json['saturatedFat'] != null ? parseRange(json['saturatedFat'], sumSatFat) : null;
+    final sodiumTotal = json['sodium'] != null ? parseRange(json['sodium'], sumSodium) : null;
+
     debugPrint('[AI] ✅ parse success: '
         '${useCal.min.toInt()}–${useCal.max.toInt()} kcal  '
         '${usePro.min.toInt()}–${usePro.max.toInt()}g protein');
@@ -228,6 +275,16 @@ class AiNutritionService {
       riskFlags:     List<String>.from(json['riskFlags'] as List<dynamic>? ?? const []),
       source:        'ai',
       createdAt:     DateTime.now(),
+      carbohydrates: carbsTotal,
+      fat:            fatTotal,
+      fiber:          fiberTotal,
+      sugar:          sugarTotal,
+      saturatedFat:   satFatTotal,
+      sodium:         sodiumTotal,
+      mealQualityScore: json['mealQualityScore'] as int?,
+      mealQualityExplanation: json['mealQualityExplanation'] as String?,
+      mealQualityPositive: json['mealQualityPositive'] as String?,
+      mealQualityImprovement: json['mealQualityImprovement'] as String?,
     ).normalizedUncertainty();
   }
 
@@ -373,32 +430,48 @@ ACCURACY RULES (NON-NEGOTIABLE)
 11. Restaurant food → widen max error range significantly.
 12. Coaching text: ≤ 12 words. Practical. No jargon. No internal language.
 
-═══════════════════════════════════════════════════
-OUTPUT FORMAT — RETURN ONLY VALID JSON
-═══════════════════════════════════════════════════
-{
-  "canonicalMeal": "short readable meal name",
-  "mealCategory": "breakfast|lunch|snack|dinner|mixed|unknown",
-  "mealDensity": "light|moderate|dense|very_dense",
-  "riskFlags": ["hidden_oil", "restaurant_portion"],
-  "coachSummary": "short one-line practical meal-level note",
-  "bestNextFoods": ["1 scoop whey", "150g tofu"],
-  "items": [
-    {
-      "name": "string",
-      "quantity": 1.0,
-      "unit": "string",
-      "estimated": false,
-      "estimationMode": "direct_quantity",
-      "calories": {"min": 0, "max": 0},
-      "protein":  {"min": 0, "max": 0}
-    }
-  ],
-  "calories":   {"min": 0, "max": 0},
-  "protein":    {"min": 0, "max": 0},
-  "confidence": 0.0,
-  "warnings":   []
-}''';
+  ═══════════════════════════════════════════════════
+  OUTPUT FORMAT — RETURN ONLY VALID JSON
+  ═══════════════════════════════════════════════════
+  {
+    "canonicalMeal": "short readable meal name",
+    "mealCategory": "breakfast|lunch|snack|dinner|mixed|unknown",
+    "mealDensity": "light|moderate|dense|very_dense",
+    "riskFlags": ["hidden_oil", "restaurant_portion"],
+    "coachSummary": "short one-line practical meal-level note",
+    "bestNextFoods": ["1 scoop whey", "150g tofu"],
+    "items": [
+      {
+        "name": "string",
+        "quantity": 1.0,
+        "unit": "string",
+        "estimated": false,
+        "estimationMode": "direct_quantity",
+        "calories": {"min": 0, "max": 0},
+        "protein":  {"min": 0, "max": 0},
+        "carbohydrates": {"min": 0, "max": 0},
+        "fat":  {"min": 0, "max": 0},
+        "fiber":  {"min": 0, "max": 0},
+        "sugar":  {"min": 0, "max": 0},
+        "saturatedFat":  {"min": 0, "max": 0},
+        "sodium":  {"min": 0, "max": 0}
+      }
+    ],
+    "calories":   {"min": 0, "max": 0},
+    "protein":    {"min": 0, "max": 0},
+    "carbohydrates": {"min": 0, "max": 0},
+    "fat":  {"min": 0, "max": 0},
+    "fiber":  {"min": 0, "max": 0},
+    "sugar":  {"min": 0, "max": 0},
+    "saturatedFat":  {"min": 0, "max": 0},
+    "sodium":  {"min": 0, "max": 0},
+    "mealQualityScore": 0,
+    "mealQualityExplanation": "short text explanation of the quality score",
+    "mealQualityPositive": "top positive aspect of the meal",
+    "mealQualityImprovement": "top improvement recommendation for the meal",
+    "confidence": 0.0,
+    "warnings":   []
+  }''';
 
   String _userPrompt(String rawInput, {AiEscalationContext? context}) {
     final profile = currentUserProfile;

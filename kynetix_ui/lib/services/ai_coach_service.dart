@@ -72,7 +72,7 @@ class AiCoachService {
   /// The backend injects all meal/nutrition context automatically.
   Future<AiCoachResponse> sendMessage({
     required String message,
-    Uint8List?      imageBytes,
+    List<Uint8List>? imagesBytes,
     String?         dateKey,  // YYYYMMDD — defaults to today on backend if null
   }) async {
     final session = Supabase.instance.client.auth.currentSession;
@@ -94,9 +94,9 @@ class AiCoachService {
     }
 
     // Image encoding
-    if (imageBytes != null) {
-      body['image_base64'] = base64Encode(imageBytes);
-      debugPrint('[AiCoachService] attaching image ${imageBytes.length} bytes');
+    if (imagesBytes != null && imagesBytes.isNotEmpty) {
+      body['images_base64'] = imagesBytes.map((img) => base64Encode(img)).toList();
+      debugPrint('[AiCoachService] attaching ${imagesBytes.length} images');
     }
 
     // Pass portion anchor so the edge function can include it in the system prompt.
@@ -132,7 +132,7 @@ class AiCoachService {
   /// Yields each content delta as it arrives from the AI provider.
   Stream<String> streamMessage({
     required String  message,
-    Uint8List?       imageBytes,
+    List<Uint8List>? imagesBytes,
     String?          dateKey,
     bool?            isGymDay,     // client real-time value — overrides stale DB
     String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
@@ -148,8 +148,8 @@ class AiCoachService {
       'stream':  true,
       'date_key': _isoToday(dateKey),
     };
-    if (imageBytes != null) {
-      body['image_base64'] = base64Encode(imageBytes);
+    if (imagesBytes != null && imagesBytes.isNotEmpty) {
+      body['images_base64'] = imagesBytes.map((img) => base64Encode(img)).toList();
     }
     // Pass client gym state so edge function uses real-time data instead of stale DB
     if (isGymDay != null) {
