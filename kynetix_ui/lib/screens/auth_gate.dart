@@ -9,9 +9,9 @@ import 'app_shell.dart';
 import 'onboarding_screen.dart';
 
 class AuthGate extends StatelessWidget {
-  AuthGate({super.key});
+  const AuthGate({super.key});
 
-  final _authService = AuthService();
+  final _authService = const AuthService();
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +70,43 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       return;
     }
 
+    // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately
+    if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
+      debugPrint('[_LoggedInGate] Quick-pass active. Showing AppShell immediately, running background sync.');
+      if (mounted) {
+        setState(() {
+          _hasProfile = true;
+        });
+      }
+      _startBackgroundSync();
+      return;
+    }
+
+    _doFullSync();
+  }
+
+  Future<void> _startBackgroundSync() async {
+    try {
+      final remoteProfile = await ProfileService.instance.fetchProfile();
+      await CloudSyncService.instance.hydrateFromCloud();
+      if (remoteProfile != null) {
+        final mergedProfile = remoteProfile.copyWith(
+          healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
+          averageDailySteps: currentUserProfile?.averageDailySteps,
+          lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
+        );
+        await PersistenceService.saveProfile(mergedProfile);
+        currentUserProfile = mergedProfile;
+        if (mounted) {
+          setState(() {}); // refresh visual state
+        }
+      }
+    } catch (e) {
+      debugPrint('[_LoggedInGate] Background sync failed (non-blocking): $e');
+    }
+  }
+
+  Future<void> _doFullSync() async {
     debugPrint('[_LoggedInGate] Validating Supabase Profile...');
     try {
       // 1. ALWAYS Treat Supabase as the source of truth for identity
@@ -86,8 +123,6 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
           averageDailySteps: currentUserProfile?.averageDailySteps,
           lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
-          // If local has a different goal and was recently modified, we ideally want to keep it,
-          // but we will fix the actual upload of the goal so it won't be an issue.
         );
 
         // Hydrate local cache
@@ -101,8 +136,6 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     } catch (e) {
       debugPrint('[_LoggedInGate] Network/Fetch Exception triggering locally-cached execution failover: $e');
       // 2. Network offline fallback
-      // ONLY if there is existing clean local state AND we verified a session above.
-      // Session was already confirmed valid above, so this is safe to allow.
       if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
         debugPrint('[_LoggedInGate] Falling back to local cache. Session is live, just offline.');
         if (mounted) setState(() => _hasProfile = true);

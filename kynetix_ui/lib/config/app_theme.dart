@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // ─── KColor ───────────────────────────────────────────────────────────────────
 // All color tokens for the app. Import this everywhere instead of hardcoding.
@@ -8,7 +9,7 @@ abstract class KColor {
   // ── Backgrounds
   static const bg        = Color(0xFF0F0F1A); // page background
   static const surface   = Color(0xFF1A1A28); // cards, bars
-  static const card      = Color(0xFF1E1E2E); // elevated cards
+  static const card      = Color(0xFF1E1E2C); // elevated cards
   static const cardHigh  = Color(0xFF252535); // hovered / pressed cards
 
   // ── Borders
@@ -40,7 +41,7 @@ abstract class KColor {
 // Typography scale. Use these consistently.
 
 abstract class KText {
-  static const _base = TextStyle(fontFamily: 'Roboto', color: KColor.textPrimary);
+  static final _base = GoogleFonts.inter(color: KColor.textPrimary);
 
   static final display = _base.copyWith(
     fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5, height: 1.2,
@@ -434,3 +435,434 @@ PageRoute<T> slideUpRoute<T>({required WidgetBuilder builder}) {
 void kHaptic() => HapticFeedback.lightImpact();
 void kHapticMedium() => HapticFeedback.mediumImpact();
 void kHapticSelect() => HapticFeedback.selectionClick();
+
+// ─── KGradientCircularProgress ───────────────────────────────────────────────
+
+class KGradientCircularProgress extends StatelessWidget {
+  final double progress; // 0.0 to 1.0
+  final double strokeWidth;
+  final List<Color> colors;
+  final Color? trackColor;
+  final Widget? child;
+
+  const KGradientCircularProgress({
+    super.key,
+    required this.progress,
+    this.strokeWidth = 10,
+    required this.colors,
+    this.trackColor,
+    this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _GradientCircularProgressPainter(
+        progress: progress,
+        strokeWidth: strokeWidth,
+        colors: colors,
+        trackColor: trackColor ?? KColor.border,
+      ),
+      child: child != null ? Center(child: child) : null,
+    );
+  }
+}
+
+class _GradientCircularProgressPainter extends CustomPainter {
+  final double progress;
+  final double strokeWidth;
+  final List<Color> colors;
+  final Color trackColor;
+
+  _GradientCircularProgressPainter({
+    required this.progress,
+    required this.strokeWidth,
+    required this.colors,
+    required this.trackColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - strokeWidth) / 2;
+
+    // Track
+    final trackPaint = Paint()
+      ..color = trackColor
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+    canvas.drawCircle(center, radius, trackPaint);
+
+    if (progress <= 0) return;
+
+    // Sweep gradient progress
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final sweepGradient = SweepGradient(
+      colors: colors,
+      stops: List.generate(colors.length, (index) => index / (colors.length - 1)),
+      transform: const GradientRotation(-3.14159 / 2),
+    );
+
+    final progressPaint = Paint()
+      ..shader = sweepGradient.createShader(rect)
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawArc(
+      rect,
+      -3.14159 / 2,
+      2 * 3.14159 * progress.clamp(0.0, 1.0),
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _GradientCircularProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.strokeWidth != strokeWidth ||
+        oldDelegate.colors != colors ||
+        oldDelegate.trackColor != trackColor;
+  }
+}
+
+// ─── KShimmer ─────────────────────────────────────────────────────────────────
+
+class KShimmer extends StatefulWidget {
+  final Widget child;
+  final bool enabled;
+
+  const KShimmer({super.key, required this.child, this.enabled = true});
+
+  @override
+  State<KShimmer> createState() => _KShimmerState();
+}
+
+class _KShimmerState extends State<KShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) {
+            final double slide = _controller.value;
+            return LinearGradient(
+              begin: const Offset(-1.0, -0.3) as Alignment,
+              end: const Offset(1.0, 0.3) as Alignment,
+              colors: const [
+                Color(0xFF1E1E2C),
+                Color(0xFF2E2E3C),
+                Color(0xFF1E1E2C),
+              ],
+              stops: const [0.3, 0.5, 0.7],
+              transform: _ShimmerGradientTransform(slide),
+            ).createShader(bounds);
+          },
+          child: widget.child,
+        );
+      },
+      child: widget.child,
+    );
+  }
+}
+
+class _ShimmerGradientTransform extends GradientTransform {
+  final double percent;
+
+  const _ShimmerGradientTransform(this.percent);
+
+  @override
+  Matrix4? transform(Rect bounds, {TextDirection? textDirection}) {
+    return Matrix4.translationValues(bounds.width * (percent * 2 - 1), 0.0, 0.0);
+  }
+}
+
+class KShimmerBox extends StatelessWidget {
+  final double width;
+  final double height;
+  final BorderRadius? borderRadius;
+
+  const KShimmerBox({
+    super.key,
+    required this.width,
+    required this.height,
+    this.borderRadius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return KShimmer(
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: borderRadius ?? KRadius.md,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── KAnimatedCount ──────────────────────────────────────────────────────────
+
+class KAnimatedCount extends StatefulWidget {
+  final num value;
+  final TextStyle style;
+  final String suffix;
+  final String prefix;
+  final int decimalPlaces;
+
+  const KAnimatedCount({
+    super.key,
+    required this.value,
+    required this.style,
+    this.suffix = '',
+    this.prefix = '',
+    this.decimalPlaces = 0,
+  });
+
+  @override
+  State<KAnimatedCount> createState() => _KAnimatedCountState();
+}
+
+class _KAnimatedCountState extends State<KAnimatedCount>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late Animation<double> _animation;
+  double _oldValue = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _animation = Tween<double>(begin: 0.0, end: widget.value.toDouble()).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _controller.forward();
+    _oldValue = widget.value.toDouble();
+  }
+
+  @override
+  void didUpdateWidget(covariant KAnimatedCount oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _oldValue = oldWidget.value.toDouble();
+      _animation = Tween<double>(begin: _oldValue, end: widget.value.toDouble()).animate(
+        CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+      );
+      _controller.reset();
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        final current = _animation.value;
+        final text = widget.decimalPlaces == 0
+            ? current.round().toString()
+            : current.toStringAsFixed(widget.decimalPlaces);
+        return Text(
+          '${widget.prefix}$text${widget.suffix}',
+          style: widget.style,
+        );
+      },
+    );
+  }
+}
+
+// ─── KPulseLoader ────────────────────────────────────────────────────────────
+
+class KPulseLoader extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const KPulseLoader({
+    super.key,
+    this.size = 40.0,
+    this.color = KColor.green,
+  });
+
+  @override
+  State<KPulseLoader> createState() => _KPulseLoaderState();
+}
+
+class _KPulseLoaderState extends State<KPulseLoader>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: widget.size * (1.0 + _controller.value * 0.5),
+              height: widget.size * (1.0 + _controller.value * 0.5),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color.withValues(alpha: 0.4 * (1.0 - _controller.value)),
+              ),
+            ),
+            Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color,
+                boxShadow: KShadow.glow(widget.color),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.bolt,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ─── KLoadingDots ────────────────────────────────────────────────────────────
+
+class KLoadingDots extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const KLoadingDots({
+    super.key,
+    this.size = 6.0,
+    this.color = KColor.textSecondary,
+  });
+
+  @override
+  State<KLoadingDots> createState() => _KLoadingDotsState();
+}
+
+class _KLoadingDotsState extends State<KLoadingDots>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _controllers;
+  late final List<Animation<double>> _animations;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(3, (index) {
+      return AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 600),
+      );
+    });
+
+    _animations = _controllers.map((controller) {
+      return Tween<double>(begin: 0.0, end: -8.0).animate(
+        CurvedAnimation(
+          parent: controller,
+          curve: Curves.easeInOut,
+        ),
+      );
+    }).toList();
+
+    _startAnimations();
+  }
+
+  void _startAnimations() async {
+    for (int i = 0; i < 3; i++) {
+      if (!mounted) return;
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (!mounted) return;
+      _controllers[i].repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (var c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(3, (index) {
+        return AnimatedBuilder(
+          animation: _animations[index],
+          builder: (context, child) {
+            return Transform.translate(
+              offset: Offset(0, _animations[index].value),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2.0),
+                width: widget.size,
+                height: widget.size,
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            );
+          },
+        );
+      }),
+    );
+  }
+}

@@ -7,6 +7,8 @@ import '../config/supabase_client.dart';
 import '../services/persistence_service.dart';
 
 class AuthService {
+  const AuthService();
+
   User? get currentUser => supabase.auth.currentUser;
 
   Stream<AuthState> get authStateChanges => supabase.auth.onAuthStateChange;

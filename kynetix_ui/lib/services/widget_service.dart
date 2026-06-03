@@ -26,7 +26,10 @@ class WidgetService {
       // 2. Profile
       final profile = currentUserProfile;
       if (profile == null) {
-        debugPrint('[WidgetService] Profile not found, skipping widget update');
+        debugPrint('[WidgetService] Profile not found, clearing widget data');
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('widget_data_v1');
+        await _channel.invokeMethod('updateWidget');
         return;
       }
 
@@ -88,6 +91,23 @@ class WidgetService {
       };
 
       final prefs = await SharedPreferences.getInstance();
+      
+      // Throttle: check if previous values for the same day are identical
+      final oldJson = prefs.getString('widget_data_v1');
+      if (oldJson != null) {
+        try {
+          final oldMap = jsonDecode(oldJson) as Map<String, dynamic>;
+          if (oldMap['last_update_date'] == dateStr &&
+              oldMap['calories_consumed'] == consumedCalories &&
+              oldMap['calories_target'] == targetCalories &&
+              oldMap['protein_consumed'] == consumedProtein &&
+              oldMap['protein_target'] == targetProtein) {
+            debugPrint('[WidgetService] Widget data unchanged, skipping update');
+            return;
+          }
+        } catch (_) {}
+      }
+
       await prefs.setString('widget_data_v1', jsonEncode(payload));
 
       // Trigger native widget refresh

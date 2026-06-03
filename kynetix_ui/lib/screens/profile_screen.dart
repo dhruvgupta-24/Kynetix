@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
 import '../screens/nutrition_intelligence_screen.dart';
@@ -129,7 +130,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _editGoal() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
+      backgroundColor: KColor.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -140,17 +141,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Text(
-                    'Select Goal',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
+                const KSheetHeader('Select Goal'),
                 const SizedBox(height: 10),
                 ...[
                   kFatLoss,
@@ -165,14 +156,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: Text(
                       g,
                       style: TextStyle(
-                        color: isSel ? const Color(0xFF52B788) : Colors.white,
+                        color: isSel ? KColor.green : Colors.white,
                         fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
                     trailing: isSel
                         ? const Icon(
                             Icons.check_circle_rounded,
-                            color: Color(0xFF52B788),
+                            color: KColor.green,
                           )
                         : null,
                     onTap: () {
@@ -192,7 +183,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _editEatingStyle() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
+      backgroundColor: KColor.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -203,25 +194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Text(
-                    'Eating Style',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 24),
-                  child: Text(
-                    'How do you eat a meal with roti or rice?',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                  ),
-                ),
+                const KSheetHeader('Eating Style', subtitle: 'How do you eat a meal with roti or rice?'),
                 const SizedBox(height: 10),
                 ...PortionAnchor.values.map((anchor) {
                   final isSel = anchor == _profile.portionAnchor;
@@ -230,14 +203,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: Text(
                       anchor.displayLabel,
                       style: TextStyle(
-                        color: isSel ? const Color(0xFF52B788) : Colors.white,
+                        color: isSel ? KColor.green : Colors.white,
                         fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
                     trailing: isSel
                         ? const Icon(
                             Icons.check_circle_rounded,
-                            color: Color(0xFF52B788),
+                            color: KColor.green,
                           )
                         : null,
                     onTap: () {
@@ -253,7 +226,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     'Not specified',
                     style: TextStyle(
                       color: _profile.portionAnchor == null
-                          ? const Color(0xFF52B788)
+                          ? KColor.green
                           : Colors.white,
                       fontWeight: _profile.portionAnchor == null
                           ? FontWeight.w700
@@ -262,7 +235,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   trailing: _profile.portionAnchor == null
                       ? const Icon(Icons.check_circle_rounded,
-                          color: Color(0xFF52B788))
+                          color: KColor.green)
                       : null,
                   onTap: () {
                     Navigator.pop(ctx);
@@ -295,16 +268,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _editNumber(
-    String title,
-    String currentVal,
-    String suffix,
-    void Function(double) onSave,
-  ) {
-    final ctrl = TextEditingController(text: currentVal);
+  void _editBodyMetrics() {
+    final ageCtrl = TextEditingController(text: _profile.age.toString());
+    final heightCtrl = TextEditingController(text: _profile.height.toStringAsFixed(1));
+    final weightCtrl = TextEditingController(text: _profile.weight.toStringAsFixed(1));
+    final formKey = GlobalKey<FormState>();
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
+      backgroundColor: KColor.card,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -315,57 +287,129 @@ class _ProfileScreenState extends State<ProfileScreen> {
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
           child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Update $title',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
+            child: Form(
+              key: formKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const KSheetHeader('Body Metrics', subtitle: 'Update metrics for accurate daily calculations'),
+                    const SizedBox(height: 16),
+                    _buildFormInput(
+                      controller: ageCtrl,
+                      label: 'Age',
+                      suffix: 'years',
+                      keyboardType: TextInputType.number,
+                      formatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: (val) {
+                        if (val == null || val.isEmpty) return 'Age is required';
+                        final numVal = int.tryParse(val);
+                        if (numVal == null || numVal < 1 || numVal > 120) return 'Enter a valid age (1-120)';
+                        return null;
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: ctrl,
-                    autofocus: true,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                    const SizedBox(height: 16),
+                    _buildFormInput(
+                      controller: heightCtrl,
+                      label: 'Height',
+                      suffix: 'cm',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      formatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                      validator: (val) {
+                        if (val == null || val.isEmpty) return 'Height is required';
+                        final numVal = double.tryParse(val);
+                        if (numVal == null || numVal < 50 || numVal > 280) return 'Enter a valid height (50-280 cm)';
+                        return null;
+                      },
                     ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
-                    ],
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                    decoration: InputDecoration(
-                      suffixText: suffix,
-                      suffixStyle: const TextStyle(color: Color(0xFF6B7280)),
-                      hintText: title,
+                    const SizedBox(height: 16),
+                    _buildFormInput(
+                      controller: weightCtrl,
+                      label: 'Weight',
+                      suffix: 'kg',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      formatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                      validator: (val) {
+                        if (val == null || val.isEmpty) return 'Weight is required';
+                        final numVal = double.tryParse(val);
+                        if (numVal == null || numVal < 20 || numVal > 400) return 'Enter a valid weight (20-400 kg)';
+                        return null;
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        final val = double.tryParse(ctrl.text.trim());
-                        if (val != null) {
-                          onSave(val);
+                    const SizedBox(height: 24),
+                    KButton(
+                      label: 'Save Metrics',
+                      onTap: () {
+                        if (formKey.currentState?.validate() ?? false) {
+                          final age = int.parse(ageCtrl.text);
+                          final height = double.parse(heightCtrl.text);
+                          final weight = double.parse(weightCtrl.text);
+                          
+                          _saveProfile(_profile.copyWith(
+                            age: age,
+                            height: height,
+                            weight: weight,
+                          ));
                           Navigator.pop(ctx);
+                        } else {
+                          kHapticMedium();
                         }
                       },
-                      child: const Text('Save'),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildFormInput({
+    required TextEditingController controller,
+    required String label,
+    required String suffix,
+    required TextInputType keyboardType,
+    required List<TextInputFormatter> formatters,
+    required String? Function(String?) validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: KColor.textSecondary, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          inputFormatters: formatters,
+          validator: validator,
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+          decoration: InputDecoration(
+            suffixText: suffix,
+            suffixStyle: const TextStyle(color: KColor.textMuted, fontSize: 14),
+            filled: true,
+            fillColor: const Color(0xFF13131F),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            errorStyle: const TextStyle(color: KColor.danger, fontSize: 11),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: KColor.green, width: 1),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: KColor.danger, width: 1),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -513,36 +557,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             label: 'Age',
             value: '${_profile.age} years',
             isEditable: true,
-            onTap: () => _editNumber(
-              'Age',
-              _profile.age.toString(),
-              'years',
-              (v) => _saveProfile(_profile.copyWith(age: v.toInt())),
-            ),
+            onTap: _editBodyMetrics,
           ),
           _InfoRow(
             icon: Icons.height_rounded,
             label: 'Height',
             value: '${_profile.height.toStringAsFixed(1)} cm',
             isEditable: true,
-            onTap: () => _editNumber(
-              'Height',
-              _profile.height.toString(),
-              'cm',
-              (v) => _saveProfile(_profile.copyWith(height: v)),
-            ),
+            onTap: _editBodyMetrics,
           ),
           _InfoRow(
             icon: Icons.monitor_weight_outlined,
             label: 'Weight',
             value: '${_profile.weight.toStringAsFixed(1)} kg',
             isEditable: true,
-            onTap: () => _editNumber(
-              'Weight',
-              _profile.weight.toString(),
-              'kg',
-              (v) => _saveProfile(_profile.copyWith(weight: v)),
-            ),
+            onTap: _editBodyMetrics,
           ),
           _InfoRow(
             icon: Icons.calculate_outlined,
@@ -1487,10 +1516,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
+          backgroundColor: KColor.card,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF2E2E3E)),
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: KColor.border, width: 0.5),
           ),
           title: Text(
             'Edit $title',
@@ -1498,13 +1527,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           content: Form(
             key: formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Enter a value between ${minValue.toInt()} and ${maxValue.toInt()}.',
-                  style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                  style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -1512,15 +1542,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
                   decoration: InputDecoration(
                     labelText: title.contains('Protein') ? 'Protein (g)' : 'Calories (kcal)',
-                    labelStyle: const TextStyle(color: Color(0xFF4B5563)),
+                    labelStyle: const TextStyle(color: KColor.textMuted),
                     filled: true,
-                    fillColor: const Color(0xFF0F0F14),
+                    fillColor: const Color(0xFF13131F),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: KColor.green, width: 1),
                     ),
                   ),
                   validator: (value) {
@@ -1539,7 +1573,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+              child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -1547,12 +1581,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   final val = double.parse(ctrl.text.trim());
                   Navigator.pop(ctx);
                   _confirmValueChange(title, currentValue, val, onSave);
+                } else {
+                  kHapticMedium();
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF52B788),
-                foregroundColor: const Color(0xFF0F0F14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                backgroundColor: KColor.greenDark,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
@@ -1774,20 +1810,11 @@ class _Section extends StatelessWidget {
             padding: const EdgeInsets.only(left: 4, bottom: 8),
             child: Text(
               title!.toUpperCase(),
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF6B7280),
-                letterSpacing: 0.8,
-              ),
+              style: KText.label,
             ),
           ),
         ],
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E2C),
-            borderRadius: BorderRadius.circular(18),
-          ),
+        KCard(
           padding: const EdgeInsets.all(16),
           child: child,
         ),
@@ -1820,14 +1847,14 @@ class _InfoRow extends StatelessWidget {
     Widget content = Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: const Color(0xFF4B5563)),
+              Icon(icon, size: 16, color: KColor.textMuted),
               const SizedBox(width: 10),
               Text(
                 label,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                style: const TextStyle(fontSize: 13, color: KColor.textSecondary),
               ),
               const Spacer(),
               Text(
@@ -1843,20 +1870,23 @@ class _InfoRow extends StatelessWidget {
                 const Icon(
                   Icons.edit_rounded,
                   size: 12,
-                  color: Color(0xFF52B788),
+                  color: KColor.green,
                 ),
               ],
             ],
           ),
         ),
-        if (!isLast) const Divider(color: Color(0xFF2E2E3E), height: 1),
+        if (!isLast) const Divider(color: KColor.divider, height: 1),
       ],
     );
 
     if (isEditable && onTap != null) {
       content = GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
+        onTap: () {
+          kHapticSelect();
+          onTap!();
+        },
         child: content,
       );
     }

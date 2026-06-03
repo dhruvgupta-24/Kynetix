@@ -417,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SliverToBoxAdapter(
               child: _WeightTrendCard(
                 weightHistory: _weightHistory,
+                syncing: _syncing,
                 onRequestPermission: _doRequestWeightPermission,
               ),
             ),
@@ -1115,36 +1116,29 @@ class _RingStatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 76, height: 76,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: ratio),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (_, value, __) => CircularProgressIndicator(
-                    value: value,
-                    strokeWidth: 7,
-                    backgroundColor: KColor.border,
-                    valueColor: AlwaysStoppedAnimation(ringColor),
-                    strokeCap: StrokeCap.round,
-                  ),
-                ),
-              ),
-              TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: ratio),
-                duration: const Duration(milliseconds: 900),
-                curve: Curves.easeOutCubic,
-                builder: (_, value, __) => Text(
+          SizedBox(
+            width: 76, height: 76,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: ratio),
+              duration: const Duration(milliseconds: 900),
+              curve: Curves.easeOutCubic,
+              builder: (_, value, __) => KGradientCircularProgress(
+                progress: value,
+                strokeWidth: 7,
+                colors: [
+                  ringColor,
+                  ringColor.withValues(alpha: 0.6),
+                ],
+                child: Text(
                   '${(value * 100).toInt()}%',
                   style: TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w800, color: ringColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: ringColor,
                   ),
                 ),
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           Text(
@@ -1152,8 +1146,8 @@ class _RingStatCard extends StatelessWidget {
             style: KText.label,
           ),
           const SizedBox(height: 4),
-          Text(
-            '${consumed.toInt()}',
+          KAnimatedCount(
+            value: consumed,
             style: KText.h3,
           ),
           Text(
@@ -1482,19 +1476,34 @@ class _ActivitySyncCard extends StatelessWidget {
       );
     }
 
-    // ── Syncing spinner ───────────────────────────────────────────────────────
+    // ── Syncing Shimmer ───────────────────────────────────────────────────────
     if (syncing) {
-      return const Row(
-        children: [
-          SizedBox(
-            width: 20, height: 20,
-            child: CircularProgressIndicator(
-                strokeWidth: 2.5, color: Color(0xFF52B788)),
-          ),
-          SizedBox(width: 14),
-          Text('Syncing with Health Connect…',
-              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
-        ],
+      return KShimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 16, height: 16,
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 8),
+                Container(width: 120, height: 14, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: Container(height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)))),
+                const SizedBox(width: 12),
+                Expanded(child: Container(height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)))),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(width: double.infinity, height: 38, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10))),
+          ],
+        ),
       );
     }
 
@@ -1927,10 +1936,12 @@ class _WeightSummaryChip extends StatelessWidget {
 
 class _WeightTrendCard extends StatefulWidget {
   final List<WeightReading>? weightHistory;
+  final bool syncing;
   final VoidCallback onRequestPermission;
 
   const _WeightTrendCard({
     required this.weightHistory,
+    required this.syncing,
     required this.onRequestPermission,
   });
 
@@ -1975,6 +1986,26 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
   @override
   Widget build(BuildContext context) {
     final history = widget.weightHistory;
+    if (widget.syncing && (history == null || history.isEmpty)) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: _Card(
+          child: KShimmer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(width: 80, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+                const SizedBox(height: 8),
+                Container(width: 120, height: 24, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
+                const SizedBox(height: 16),
+                Container(width: double.infinity, height: 120, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12))),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (history == null || history.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),

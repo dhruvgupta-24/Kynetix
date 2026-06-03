@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_theme.dart';
 import '../models/workout_session.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
@@ -122,7 +123,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   // ── State A: Setup needed ─────────────────────────────────────────────────
 
   Widget _buildSetupPrompt() => Scaffold(
-    backgroundColor: const Color(0xFF13131F),
+    backgroundColor: KColor.bg,
     body: SafeArea(
       child: Center(
         child: Padding(
@@ -130,20 +131,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2D6A4F).withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.fitness_center_rounded,
-                  color: Color(0xFF52B788),
-                  size: 34,
-                ),
-              ),
-              const SizedBox(height: 24),
+              const KPulseLoader(size: 54, color: KColor.green),
+              const SizedBox(height: 32),
               const Text(
                 'Set up your training',
                 textAlign: TextAlign.center,
@@ -153,35 +142,21 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               const Text(
                 'Configure your workout split once.\nThen just open the app and log your sets.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Color(0xFF6B7280),
+                  color: KColor.textSecondary,
                   fontSize: 14,
                   height: 1.5,
                 ),
               ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.arrow_forward_rounded),
-                  label: const Text(
-                    'Set Up Training',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D6A4F),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  onPressed: _openSetup,
-                ),
+              const SizedBox(height: 36),
+              KButton(
+                label: 'Set Up Training',
+                icon: Icons.arrow_forward_rounded,
+                onTap: _openSetup,
               ),
             ],
           ),
@@ -1665,21 +1640,16 @@ class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.icon, required this.text});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => KCard(
     padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: const Color(0xFF1E1E2C),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: const Color(0xFF2E2E3E)),
-    ),
     child: Row(
       children: [
-        Icon(icon, color: const Color(0xFF4B5563), size: 20),
+        Icon(icon, color: KColor.textMuted, size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+            style: const TextStyle(color: KColor.textSecondary, fontSize: 13),
           ),
         ),
       ],

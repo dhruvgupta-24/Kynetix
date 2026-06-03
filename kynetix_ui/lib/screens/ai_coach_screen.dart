@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -68,19 +69,26 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   final _controller    = TextEditingController();
   final _scrollCtrl    = ScrollController();
   final _imagePicker   = ImagePicker();
+  final _inputFocusNode = FocusNode();
 
   // Static so history persists across navigations within the same session.
   static final List<_ChatMessage> _messages = [];
 
   bool        _loading      = false;
   bool        _isStreaming  = false;
-  String      _streamingText = '';
+  final ValueNotifier<String> _streamingTextNotifier = ValueNotifier<String>('');
   List<Uint8List> _pendingImages = [];
+  bool        _isInputFocused = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _inputFocusNode.addListener(() {
+      setState(() {
+        _isInputFocused = _inputFocusNode.hasFocus;
+      });
+    });
   }
 
   @override
@@ -95,6 +103,8 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     _scrollCtrl.dispose();
+    _inputFocusNode.dispose();
+    _streamingTextNotifier.dispose();
     super.dispose();
   }
 
@@ -178,18 +188,15 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       debugPrint('[AI_COACH_SCREEN] Chat message model/state saved: last message role=user, text="$text", images=${_messages.last.imagesBytes?.length ?? 0}');
       _loading       = true;
       _isStreaming   = false;
-      _streamingText = '';
+      _streamingTextNotifier.value = '';
       _pendingImages.clear();
     });
     _controller.clear();
     _scrollToBottom();
 
     try {
-      // Build conversation history from prior committed messages (exclude last user msg
-      // which is being sent as 'message' itself).
       final history = _messages
           .where((m) => m.text.isNotEmpty)
-          // last entry is the user message we just added — exclude it (backend uses 'message' field)
           .take(_messages.length - 1)
           .map((m) => {
                 'role': m.role == _Role.user ? 'user' : 'assistant',
@@ -211,26 +218,27 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       bool firstChunk = true;
       await for (final token in stream) {
         if (!mounted) return;
-        setState(() {
-          if (firstChunk) {
+        if (firstChunk) {
+          setState(() {
             _loading     = false;   // hide typing dots
             _isStreaming = true;    // show live bubble
-            firstChunk   = false;
-          }
-          _streamingText += token;
-        });
+          });
+          firstChunk   = false;
+        }
+        _streamingTextNotifier.value += token;
         _scrollToBottom();
       }
 
       // Stream completed — commit to history
       if (!mounted) return;
+      final finalResponseText = _streamingTextNotifier.value;
       setState(() {
         _isStreaming = false;
         _loading     = false;
-        if (_streamingText.isNotEmpty) {
-          _messages.add(_ChatMessage(role: _Role.assistant, text: _streamingText));
+        if (finalResponseText.isNotEmpty) {
+          _messages.add(_ChatMessage(role: _Role.assistant, text: finalResponseText));
         }
-        _streamingText = '';
+        _streamingTextNotifier.value = '';
       });
       _scrollToBottom();
 
@@ -243,7 +251,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           role: _Role.assistant,
           text: 'Something went wrong: ${e.toString().replaceAll('Exception: ', '')}',
         ));
-        _streamingText = '';
+        _streamingTextNotifier.value = '';
       });
       _scrollToBottom();
     }
@@ -413,14 +421,12 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       itemBuilder: (_, i) {
         if (i == _messages.length) {
           // Streaming: live bubble with blinking cursor
-          if (_isStreaming && _streamingText.isNotEmpty) {
+          if (_isStreaming) {
             return _AnimatedChatEntry(
               key: const ValueKey('streaming'),
               child: _ChatBubble(
-                message: _ChatMessage(
-                  role: _Role.assistant,
-                  text: _streamingText,
-                ),
+                role: _Role.assistant,
+                textListenable: _streamingTextNotifier,
                 showCursor: true,
               ),
             );
@@ -428,9 +434,14 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           // Waiting for first token
           return const _TypingBubble();
         }
+        final msg = _messages[i];
         return _AnimatedChatEntry(
           key: ValueKey(i),
-          child: _ChatBubble(message: _messages[i]),
+          child: _ChatBubble(
+            message: msg,
+            role: msg.role,
+            imagesBytes: msg.imagesBytes,
+          ),
         );
       },
     );
@@ -496,6 +507,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   }
 
   Widget _buildInputBar() {
+    final disabled = _loading || _isStreaming;
     return Container(
       decoration: BoxDecoration(
         color: KColor.surface,
@@ -516,21 +528,31 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           _IconBtn(
             icon: Icons.add_photo_alternate_rounded,
             color: _pendingImages.isNotEmpty ? _kGreen : _kMuted,
-            onTap: _pickImage,
+            onTap: disabled ? () {} : _pickImage,
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
               constraints: const BoxConstraints(maxHeight: 120),
               decoration: BoxDecoration(
                 color: KColor.card,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: KColor.border, width: 0.5),
+                border: Border.all(
+                  color: _isInputFocused ? KColor.green : KColor.border,
+                  width: _isInputFocused ? 1.5 : 0.5,
+                ),
+                boxShadow: _isInputFocused ? KShadow.glow(KColor.green) : null,
               ),
               child: TextField(
                 controller: _controller,
-                style: const TextStyle(
-                  color: Colors.white, fontSize: 15, height: 1.45,
+                focusNode: _inputFocusNode,
+                enabled: !disabled,
+                autofocus: true,
+                style: TextStyle(
+                  color: disabled ? KColor.textDisabled : Colors.white,
+                  fontSize: 15,
+                  height: 1.45,
                 ),
                 maxLines:   null,
                 minLines:   1,
@@ -548,7 +570,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
             ),
           ),
           const SizedBox(width: 8),
-          _SendBtn(loading: _loading || _isStreaming, onTap: _send),
+          _SendBtn(loading: disabled, onTap: _send),
         ],
       ),
     );
@@ -596,13 +618,24 @@ class _AnimatedChatEntryState extends State<_AnimatedChatEntry>
 // ─── Chat bubble ──────────────────────────────────────────────────────────────
 
 class _ChatBubble extends StatelessWidget {
-  final _ChatMessage message;
-  final bool         showCursor;   // blinking | during streaming
-  const _ChatBubble({required this.message, this.showCursor = false});
+  final _ChatMessage? message;
+  final ValueListenable<String>? textListenable;
+  final _Role role;
+  final List<Uint8List>? imagesBytes;
+  final bool showCursor;
+
+  const _ChatBubble({
+    super.key,
+    this.message,
+    this.textListenable,
+    required this.role,
+    this.imagesBytes,
+    this.showCursor = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.role == _Role.user;
+    final isUser = role == _Role.user;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
@@ -631,19 +664,19 @@ class _ChatBubble extends StatelessWidget {
               crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 // Image preview (user side only)
-                if (message.imagesBytes != null && message.imagesBytes!.isNotEmpty)
+                if (imagesBytes != null && imagesBytes!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Wrap(
                       spacing: 6,
                       runSpacing: 6,
-                      children: message.imagesBytes!.map((bytes) {
+                      children: imagesBytes!.map((bytes) {
                         return ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Image.memory(
                             bytes,
-                            width: message.imagesBytes!.length == 1 ? 180 : 120,
-                            height: message.imagesBytes!.length == 1 ? 180 : 120,
+                            width: imagesBytes!.length == 1 ? 180 : 120,
+                            height: imagesBytes!.length == 1 ? 180 : 120,
                             fit: BoxFit.cover,
                           ),
                         );
@@ -651,62 +684,72 @@ class _ChatBubble extends StatelessWidget {
                     ),
                   ),
                 // Bubble
-                if (message.text.isNotEmpty)
-                  GestureDetector(
-                    // Long-press copies the user's own message to clipboard
-                    onLongPress: isUser ? () {
-                      Clipboard.setData(ClipboardData(text: message.text));
-                      kHapticMedium();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Row(
-                            children: [
-                              Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
-                              SizedBox(width: 8),
-                              Text('Copied to clipboard',
-                                style: TextStyle(fontSize: 13, color: Colors.white)),
-                            ],
-                          ),
-                          duration: const Duration(seconds: 2),
-                          backgroundColor: KColor.surface,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: KRadius.md,
-                            side: const BorderSide(color: KColor.border, width: 0.5),
-                          ),
-                          margin: const EdgeInsets.all(12),
+                GestureDetector(
+                  // Long-press copies the message text to clipboard
+                  onLongPress: () {
+                    final textToCopy = textListenable != null ? textListenable!.value : (message?.text ?? '');
+                    if (textToCopy.isEmpty) return;
+                    Clipboard.setData(ClipboardData(text: textToCopy));
+                    kHapticMedium();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Row(
+                          children: [
+                            Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
+                            SizedBox(width: 8),
+                            Text('Copied to clipboard',
+                              style: TextStyle(fontSize: 13, color: Colors.white)),
+                          ],
                         ),
-                      );
-                    } : null,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: isUser ? _kGreenDark : _kCard,
-                        borderRadius: BorderRadius.only(
-                          topLeft:     const Radius.circular(18),
-                          topRight:    const Radius.circular(18),
-                          bottomLeft:  Radius.circular(isUser ? 18 : 4),
-                          bottomRight: Radius.circular(isUser ? 4 : 18),
+                        duration: const Duration(seconds: 2),
+                        backgroundColor: KColor.surface,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: KRadius.md,
+                          side: const BorderSide(color: KColor.border, width: 0.5),
                         ),
-                        border: Border.all(
-                          color: isUser
-                              ? _kGreen.withValues(alpha: 0.2)
-                              : _kBorder,
-                          width: 0.5,
-                        ),
+                        margin: const EdgeInsets.all(12),
                       ),
-                      child: isUser
-                          ? Text(
-                              message.text,
-                              style: const TextStyle(
-                                color: Colors.white, fontSize: 14, height: 1.55,
-                              ),
-                            )
-                          : showCursor
-                              ? _StreamingMarkdown(text: message.text)
-                              : _MarkdownText(message.text),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isUser ? _kGreenDark : _kCard,
+                      borderRadius: BorderRadius.only(
+                        topLeft:     const Radius.circular(18),
+                        topRight:    const Radius.circular(18),
+                        bottomLeft:  Radius.circular(isUser ? 18 : 4),
+                        bottomRight: Radius.circular(isUser ? 4 : 18),
+                      ),
+                      border: Border.all(
+                        color: isUser
+                            ? _kGreen.withValues(alpha: 0.2)
+                            : _kBorder,
+                        width: 0.5,
+                      ),
                     ),
+                    child: isUser
+                        ? Text(
+                            message?.text ?? '',
+                            style: const TextStyle(
+                              color: Colors.white, fontSize: 14, height: 1.55,
+                            ),
+                          )
+                        : textListenable != null
+                            ? ValueListenableBuilder<String>(
+                                valueListenable: textListenable!,
+                                builder: (context, val, _) {
+                                  return showCursor
+                                      ? _StreamingMarkdown(text: val)
+                                      : _MarkdownText(val);
+                                },
+                              )
+                            : showCursor
+                                ? _StreamingMarkdown(text: message?.text ?? '')
+                                : _MarkdownText(message?.text ?? ''),
                   ),
+                ),
               ],
             ),
           ),
@@ -747,31 +790,8 @@ class _MarkdownText extends StatelessWidget {
 
 // ─── Typing indicator ─────────────────────────────────────────────────────────
 
-class _TypingBubble extends StatefulWidget {
+class _TypingBubble extends StatelessWidget {
   const _TypingBubble();
-
-  @override
-  State<_TypingBubble> createState() => _TypingBubbleState();
-}
-
-class _TypingBubbleState extends State<_TypingBubble>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double>   _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -803,36 +823,12 @@ class _TypingBubbleState extends State<_TypingBubble>
               ),
               border: Border.all(color: const Color(0xFF2E2E3E)),
             ),
-            child: FadeTransition(
-              opacity: _anim,
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _Dot(),
-                  SizedBox(width: 5),
-                  _Dot(),
-                  SizedBox(width: 5),
-                  _Dot(),
-                ],
-              ),
+            child: const KLoadingDots(
+              size: 6.0,
+              color: Color(0xFF52B788),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Dot extends StatelessWidget {
-  const _Dot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 8, height: 8,
-      decoration: BoxDecoration(
-        color: const Color(0xFF52B788).withValues(alpha: 0.7),
-        shape: BoxShape.circle,
       ),
     );
   }

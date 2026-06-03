@@ -21,8 +21,18 @@ class CloudSyncService {
     debugPrint('[CloudSyncService] Starting cloud hydration for user: $userId');
 
     try {
-      // 1. Hydrate Day Logs
-      final dayLogsResp = await _supabase.from('day_logs').select();
+      // Hydrate all components concurrently
+      final results = await Future.wait([
+        _supabase.from('day_logs').select(),
+        _supabase.from('workout_sessions').select(),
+        _supabase.from('user_nutrition_memory').select(),
+      ]);
+
+      final dayLogsResp = results[0];
+      final workoutsResp = results[1];
+      final memoryResp = results[2];
+
+      // 1. Process Day Logs
       for (final row in dayLogsResp) {
         final dateKey = row['date_key'] as String;
         final gymDayJson = row['gym_day_json'];
@@ -47,8 +57,7 @@ class CloudSyncService {
       // Re-save locally
       await PersistenceService.saveDayLogs();
 
-      // 2. Hydrate Workouts
-      final workoutsResp = await _supabase.from('workout_sessions').select();
+      // 2. Process Workouts
       // Only merge if not already present
       bool updatedWorkouts = false;
       for (final row in workoutsResp) {
@@ -73,12 +82,9 @@ class CloudSyncService {
       if (updatedWorkouts) {
         // WorkoutService internally manages state, but we'll sort them.
         WorkoutService.instance.sessions.sort((a, b) => b.date.compareTo(a.date));
-        // Force a save to local
-        // Ideally WorkoutService exposes a method to save blindly, or we just rely on its own state.
       }
 
-      // 3. Hydrate Nutrition Memory
-      final memoryResp = await _supabase.from('user_nutrition_memory').select();
+      // 3. Process Nutrition Memory
       final cloudOverrides = <UserMealOverride>[];
       for (final row in memoryResp) {
         try {

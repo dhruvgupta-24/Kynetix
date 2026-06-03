@@ -447,55 +447,110 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Header(currentStep: _currentStep, totalSteps: _totalSteps),
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (i) => setState(() => _currentStep = i),
-                children: [
-                  _StepPersonal(
-                    formKey:  _step1Key,
-                    nameCtrl: _nameCtrl,
-                    ageCtrl:  _ageCtrl,
-                    gender:   _gender,
-                    onGender: (v) => setState(() => _gender = v),
-                  ),
-                  _StepBody(
-                    formKey:       _step2Key,
-                    useCm:         _useCm,
-                    heightCmCtrl:  _heightCmCtrl,
-                    heightFtCtrl:  _heightFtCtrl,
-                    heightInCtrl:  _heightInCtrl,
-                    weightCtrl:    _weightCtrl,
-                    onToggleUnit:  () => setState(() => _useCm = !_useCm),
-                  ),
-                  _StepLifestyle(
-                    workoutIdx:       _workoutIdx,
-                    goal:             _goal,
-                    onWorkout:        (i) => setState(() => _workoutIdx = i),
-                    onGoal:           (v) => setState(() => _goal = v),
-                  ),
-                  _StepEatingStyle(
-                    selected: _portionAnchor,
-                    onSelect: (v) => setState(() => _portionAnchor = v),
-                    onSkip:   _submit,   // skip = submit with null portionAnchor
-                  ),
-                ],
+      backgroundColor: const Color(0xFF07070C),
+      body: Stack(
+        children: [
+          // Background linear mesh gradient
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF0F0F1A),
+                    Color(0xFF07070C),
+                    Color(0xFF0A1411),
+                  ],
+                ),
               ),
             ),
-            _Footer(
-              currentStep: _currentStep,
-              totalSteps:  _totalSteps,
-              onNext:      _nextStep,
-              onBack:      _prevStep,
+          ),
+          // Glowing radial orbs
+          Positioned(
+            top: -150,
+            left: -150,
+            child: Container(
+              width: 400,
+              height: 400,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF52B788).withValues(alpha: 0.12),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
+          ),
+          Positioned(
+            bottom: -200,
+            right: -200,
+            child: Container(
+              width: 500,
+              height: 500,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFFFF6B35).withValues(alpha: 0.06),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                _Header(currentStep: _currentStep, totalSteps: _totalSteps),
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onPageChanged: (i) => setState(() => _currentStep = i),
+                    children: [
+                      _StepPersonal(
+                        formKey:  _step1Key,
+                        nameCtrl: _nameCtrl,
+                        ageCtrl:  _ageCtrl,
+                        gender:   _gender,
+                        onGender: (v) => setState(() => _gender = v),
+                      ),
+                      _StepBody(
+                        formKey:       _step2Key,
+                        useCm:         _useCm,
+                        heightCmCtrl:  _heightCmCtrl,
+                        heightFtCtrl:  _heightFtCtrl,
+                        heightInCtrl:  _heightInCtrl,
+                        weightCtrl:    _weightCtrl,
+                        onToggleUnit:  () => setState(() => _useCm = !_useCm),
+                      ),
+                      _StepLifestyle(
+                        workoutIdx:       _workoutIdx,
+                        goal:             _goal,
+                        onWorkout:        (i) => setState(() => _workoutIdx = i),
+                        onGoal:           (v) => setState(() => _goal = v),
+                      ),
+                      _StepEatingStyle(
+                        selected: _portionAnchor,
+                        onSelect: (v) => setState(() => _portionAnchor = v),
+                        onSkip:   _submit,
+                      ),
+                    ],
+                  ),
+                ),
+                _Footer(
+                  currentStep: _currentStep,
+                  totalSteps:  _totalSteps,
+                  onNext:      _nextStep,
+                  onBack:      _prevStep,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -664,6 +719,7 @@ class _StepPersonal extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Form(
         key: formKey,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -733,6 +789,7 @@ class _StepBody extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Form(
         key: formKey,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

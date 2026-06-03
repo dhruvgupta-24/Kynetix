@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:health/health.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -34,12 +35,13 @@ Future<void> main() async {
   final startupSession = Supabase.instance.client.auth.currentSession;
   debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
 
-  await Health().configure();
-  await MealMemory.instance.init();
-  await PersonalNutritionMemory.instance.init();
-
-  await PersistenceService.load();
-  await WorkoutService.instance.init();
+  await Future.wait([
+    Health().configure(),
+    MealMemory.instance.init(),
+    PersonalNutritionMemory.instance.init(),
+    PersistenceService.load(),
+    WorkoutService.instance.init(),
+  ]);
 
   runApp(const KynetixApp());
 }
@@ -79,7 +81,7 @@ class _KynetixAppState extends State<KynetixApp> {
           surface: KColor.surface,
         ),
         useMaterial3: true,
-        fontFamily: 'Roboto',
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
         scaffoldBackgroundColor: KColor.bg,
         // Consistent slide-up transitions on all MaterialPageRoutes
         pageTransitionsTheme: const PageTransitionsTheme(
@@ -90,21 +92,29 @@ class _KynetixAppState extends State<KynetixApp> {
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: KColor.card,
+          fillColor: Colors.white.withValues(alpha: 0.04),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: KColor.border, width: 0.5),
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             borderSide: const BorderSide(color: KColor.green, width: 1.5),
           ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: KColor.danger, width: 1),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: KColor.danger, width: 1.5),
+          ),
           hintStyle: const TextStyle(color: KColor.textMuted),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
@@ -112,14 +122,14 @@ class _KynetixAppState extends State<KynetixApp> {
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
             elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             textStyle: const TextStyle(
               fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.3,
             ),
           ),
         ),
       ),
-      home: AuthGate(),
+      home: const AuthGate(),
     );
   }
 }

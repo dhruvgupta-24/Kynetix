@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_theme.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
@@ -10,12 +11,48 @@ class NutritionIntelligenceScreen extends StatefulWidget {
   State<NutritionIntelligenceScreen> createState() => _NutritionIntelligenceScreenState();
 }
 
+class _SectionHeader {
+  final String title;
+  final String emoji;
+  const _SectionHeader({required this.title, required this.emoji});
+}
+
+class _EmptyState {
+  final String message;
+  const _EmptyState({required this.message});
+}
+
+class _InsightsCard {
+  const _InsightsCard();
+}
+
 class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScreen> {
+  int _selectedTab = 0; // 0 = All, 1 = Customized, 2 = Learned
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() {
+      setState(() {
+        _searchQuery = _searchCtrl.text;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _resetPattern(LearnedPatternEntry entry) async {
+    kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
           'Reset Pattern',
@@ -23,16 +60,16 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         ),
         content: Text(
           'Are you sure you want to reset the learned behavior pattern for "${entry.key}"?',
-          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+          style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            style: TextButton.styleFrom(foregroundColor: KColor.danger),
             child: const Text('Reset', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
@@ -50,10 +87,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
   }
 
   Future<void> _deleteOverride(UserMealOverride override) async {
+    kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
           'Delete Food Memory',
@@ -61,16 +99,16 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         ),
         content: Text(
           'Are you sure you want to delete the customized override for "${override.canonicalMeal}"? It will revert to AI estimates.',
-          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+          style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            style: TextButton.styleFrom(foregroundColor: KColor.danger),
             child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
@@ -84,10 +122,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
   }
 
   Future<void> _resetAll() async {
+    kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
+        backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
           'Reset All Patterns & Memory',
@@ -95,16 +134,16 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         ),
         content: const Text(
           'This will permanently delete all learned eating patterns, customized ingredients, and food memory. This action cannot be undone.',
-          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+          style: TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            style: TextButton.styleFrom(foregroundColor: KColor.danger),
             child: const Text('Reset All', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
@@ -122,7 +161,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('All personalizations reset successfully.'),
-            backgroundColor: Color(0xFFEF4444),
+            backgroundColor: KColor.danger,
           ),
         );
       }
@@ -131,11 +170,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
 
   Widget _buildRoleBadge(FoodRole role) {
     final (label, color) = switch (role) {
-      FoodRole.primary       => ('Base/Carb', const Color(0xFF60A5FA)),
-      FoodRole.protein       => ('Protein', const Color(0xFF52B788)),
-      FoodRole.accompaniment => ('Side/Curry', const Color(0xFFFBBF24)),
+      FoodRole.primary       => ('Base/Carb', KColor.blue),
+      FoodRole.protein       => ('Protein', KColor.protein),
+      FoodRole.accompaniment => ('Side/Curry', KColor.amber),
       FoodRole.addOn         => ('Add-on', const Color(0xFFA78BFA)),
-      FoodRole.completeMeal  => ('Single Unit', const Color(0xFF9CA3AF)),
+      FoodRole.completeMeal  => ('Single Unit', KColor.textSecondary),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
@@ -155,286 +194,189 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final patterns = EatingPatternService.instance.allLearned;
-    final overrides = UserNutritionMemory.instance.allOverrides;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
-        surfaceTintColor: Colors.transparent,
-        title: const Text(
-          'Nutrition Intelligence',
-          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444)),
-            tooltip: 'Reset all intelligence',
-            onPressed: (patterns.isNotEmpty || overrides.isNotEmpty) ? _resetAll : null,
+  Widget _buildSectionHeader(_SectionHeader item) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 10),
+      child: Row(
+        children: [
+          Text(item.emoji, style: const TextStyle(fontSize: 18)),
+          const SizedBox(width: 8),
+          Text(
+            item.title,
+            style: KText.label,
           ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
+    );
+  }
+
+  Widget _buildEmptyState(_EmptyState item) {
+    return KCard(
+      padding: const EdgeInsets.all(16),
+      child: Text(
+        item.message,
+        style: const TextStyle(color: KColor.textSecondary, fontSize: 13, height: 1.4),
+      ),
+    );
+  }
+
+  Widget _buildPatternCard(LearnedPatternEntry entry) {
+    final color = entry.scalar < 1.0 ? KColor.protein : KColor.calorie;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: KCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Section 1: Eating patterns ─────────────────────────────────
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('🧠', style: TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Text(
-                  'LEARNED EATING PATTERNS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF6B7280),
-                    letterSpacing: 1.1,
-                  ),
+                _buildRoleBadge(entry.key.targetRole),
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded, size: 16, color: KColor.textMuted),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => _resetPattern(entry),
+                  tooltip: 'Reset pattern',
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            Text(
+              entry.explanation,
+              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
+            ),
             const SizedBox(height: 12),
-            if (patterns.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF2E2E3E)),
-                ),
-                child: const Text(
-                  'No eating patterns learned yet. Correct ingredient estimates via "Edit Ingredients" 3+ times to train the system.',
-                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12.5, height: 1.4),
-                ),
-              )
-            else
-              ...patterns.map((entry) {
-                final color = entry.scalar < 1.0 ? const Color(0xFF52B788) : const Color(0xFFFF6B35);
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E2C),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF2E2E3E)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildRoleBadge(entry.key.targetRole),
-                          IconButton(
-                            icon: const Icon(Icons.refresh_rounded, size: 16, color: Color(0xFF6B7280)),
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => _resetPattern(entry),
-                            tooltip: 'Reset pattern',
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        entry.explanation,
-                        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
-                      ),
-                      const SizedBox(height: 12),
-                      // Stats row
-                      Row(
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('SCALAR', style: TextStyle(fontSize: 8, color: Color(0xFF6B7280), fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${entry.scalar.toStringAsFixed(2)}×',
-                                style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 24),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('CONFIDENCE', style: TextStyle(fontSize: 8, color: Color(0xFF6B7280), fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${(entry.confidence * 100).toInt()}%',
-                                style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 24),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('UPDATED', style: TextStyle(fontSize: 8, color: Color(0xFF6B7280), fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${DateTime.now().difference(entry.lastUpdated).inDays}d ago',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              }),
-
-            const SizedBox(height: 28),
-
-            // ── Section 2: Stored Ingredient memory ─────────────────────────────
             Row(
               children: [
-                const Text('🥛', style: TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Text(
-                  'STORED FOOD MEMORY',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF6B7280),
-                    letterSpacing: 1.1,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('SCALAR', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${entry.scalar.toStringAsFixed(2)}×',
+                      style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 24),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('CONFIDENCE', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${(entry.confidence * 100).toInt()}%',
+                      style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 24),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('UPDATED', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${DateTime.now().difference(entry.lastUpdated).inDays}d ago',
+                      style: const TextStyle(fontSize: 12, color: KColor.textSecondary, fontWeight: FontWeight.w600),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            if (overrides.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF2E2E3E)),
-                ),
-                child: const Text(
-                  'No custom ingredient overrides saved yet. Save corrections with "Remember for next time" checked to save them here.',
-                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12.5, height: 1.4),
-                ),
-              )
-            else
-              ...overrides.map((override) {
-                final carbs = override.carbohydratesPerUnit != null ? (override.carbohydratesPerUnit! * override.referenceQuantity) : null;
-                final fat = override.fatPerUnit != null ? (override.fatPerUnit! * override.referenceQuantity) : null;
-                final fiber = override.fiberPerUnit != null ? (override.fiberPerUnit! * override.referenceQuantity) : null;
+          ],
+        ),
+      ),
+    );
+  }
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E2C),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF2E2E3E)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              override.canonicalMeal,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Row(
-                            children: [
-                              _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFEF4444)),
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () => _deleteOverride(override),
-                                tooltip: 'Delete food memory',
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Portions info
-                      Text(
-                        '1 unit = ${override.referenceQuantity == override.referenceQuantity.truncate() ? override.referenceQuantity.toInt().toString() : override.referenceQuantity} ${override.referenceUnit}',
-                        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
-                      ),
-                      const SizedBox(height: 10),
-                      // Macros row
-                      Row(
-                        children: [
-                          _buildMiniMacro('CAL', '${(override.caloriesPerUnit * override.referenceQuantity).toInt()}', const Color(0xFFFF6B35)),
-                          const SizedBox(width: 16),
-                          _buildMiniMacro('PRO', '${(override.proteinPerUnit * override.referenceQuantity).toStringAsFixed(1)}g', const Color(0xFF52B788)),
-                          const SizedBox(width: 16),
-                          if (carbs != null) ...[
-                            _buildMiniMacro('CARB', '${carbs.toStringAsFixed(0)}g', const Color(0xFF60A5FA)),
-                            const SizedBox(width: 16),
-                          ],
-                          if (fat != null) ...[
-                            _buildMiniMacro('FAT', '${fat.toStringAsFixed(0)}g', const Color(0xFFFBBF24)),
-                            const SizedBox(width: 16),
-                          ],
-                          if (fiber != null)
-                            _buildMiniMacro('FIB', '${fiber.toStringAsFixed(1)}g', const Color(0xFFA78BFA)),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              }),
+  Widget _buildOverrideCard(UserMealOverride override) {
+    final carbs = override.carbohydratesPerUnit != null ? (override.carbohydratesPerUnit! * override.referenceQuantity) : null;
+    final fat = override.fatPerUnit != null ? (override.fatPerUnit! * override.referenceQuantity) : null;
+    final fiber = override.fiberPerUnit != null ? (override.fiberPerUnit! * override.referenceQuantity) : null;
 
-            const SizedBox(height: 28),
-
-            // ── Section 3: Eating Context Stats ─────────────────────────────
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: KCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('📊', style: TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Text(
-                  'MEAL CONTEXT INSIGHTS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF6B7280),
-                    letterSpacing: 1.1,
+                Expanded(
+                  child: Text(
+                    override.canonicalMeal,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
                   ),
+                ),
+                Row(
+                  children: [
+                    _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 16, color: KColor.danger),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () => _deleteOverride(override),
+                      tooltip: 'Delete food memory',
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF2E2E3E)),
-              ),
-              child: Column(
-                children: [
-                  _buildStatRow('Total meals tracked contextually', '${EatingPatternService.instance.totalMealsTracked}'),
-                  const Divider(color: Color(0xFF2E2E3E), height: 24),
-                  _buildStatRow('Most common primary carb base', EatingPatternService.instance.dominantPrimaryFood),
-                  const Divider(color: Color(0xFF2E2E3E), height: 24),
-                  _buildStatRow('Avg primary portion per log', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
+            const SizedBox(height: 8),
+            Text(
+              '1 unit = ${override.referenceQuantity == override.referenceQuantity.truncate() ? override.referenceQuantity.toInt().toString() : override.referenceQuantity} ${override.referenceUnit}',
+              style: const TextStyle(color: KColor.textSecondary, fontSize: 11),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _buildMiniMacro('CAL', '${(override.caloriesPerUnit * override.referenceQuantity).toInt()}', KColor.calorie),
+                const SizedBox(width: 16),
+                _buildMiniMacro('PRO', '${(override.proteinPerUnit * override.referenceQuantity).toStringAsFixed(1)}g', KColor.protein),
+                const SizedBox(width: 16),
+                if (carbs != null) ...[
+                  _buildMiniMacro('CARB', '${carbs.toStringAsFixed(0)}g', KColor.blue),
+                  const SizedBox(width: 16),
                 ],
-              ),
+                if (fat != null) ...[
+                  _buildMiniMacro('FAT', '${fat.toStringAsFixed(0)}g', KColor.amber),
+                  const SizedBox(width: 16),
+                ],
+                if (fiber != null)
+                  _buildMiniMacro('FIB', '${fiber.toStringAsFixed(1)}g', const Color(0xFFA78BFA)),
+              ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInsightsCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: KCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            _buildStatRow('Total meals tracked contextually', '${EatingPatternService.instance.totalMealsTracked}'),
+            const Divider(color: KColor.divider, height: 24),
+            _buildStatRow('Most common primary carb base', EatingPatternService.instance.dominantPrimaryFood),
+            const Divider(color: KColor.divider, height: 24),
+            _buildStatRow('Avg primary portion per log', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
           ],
         ),
       ),
@@ -448,7 +390,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(fontSize: 12.5, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 12.5, color: KColor.textSecondary, fontWeight: FontWeight.w600),
           ),
         ),
         const SizedBox(width: 12),
@@ -468,6 +410,202 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         const SizedBox(height: 2),
         Text(val, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
       ],
+    );
+  }
+
+  Widget _buildTabs() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: KColor.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: KColor.border, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          _buildTabButton(0, 'All'),
+          _buildTabButton(1, 'Customized'),
+          _buildTabButton(2, 'Learned Patterns'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabButton(int index, String label) {
+    final isSelected = _selectedTab == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          kHapticSelect();
+          setState(() {
+            _selectedTab = index;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? KColor.cardHigh : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isSelected ? Colors.white : KColor.textSecondary,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final patterns = EatingPatternService.instance.allLearned;
+    final overrides = UserNutritionMemory.instance.allOverrides;
+
+    // Filter overrides
+    final filteredOverrides = overrides.where((o) {
+      if (_searchQuery.isEmpty) return true;
+      return o.canonicalMeal.toLowerCase().contains(_searchQuery.toLowerCase());
+    }).toList();
+
+    // Construct flat items list for the ListView.builder recycler
+    final items = <Object>[];
+
+    if (_selectedTab == 0) {
+      // ALL
+      items.add(const _SectionHeader(title: 'LEARNED EATING PATTERNS', emoji: '🧠'));
+      if (patterns.isEmpty) {
+        items.add(const _EmptyState(message: 'No eating patterns learned yet. Correct ingredient estimates via "Edit Ingredients" 3+ times to train the system.'));
+      } else {
+        items.addAll(patterns);
+      }
+
+      items.add(const _SectionHeader(title: 'STORED FOOD MEMORY', emoji: '🥛'));
+      if (filteredOverrides.isEmpty) {
+        items.add(_EmptyState(
+          message: _searchQuery.isEmpty 
+              ? 'No custom ingredient overrides saved yet. Save corrections with "Remember for next time" checked.' 
+              : 'No matching custom food overrides found.'
+        ));
+      } else {
+        items.addAll(filteredOverrides);
+      }
+
+      items.add(const _SectionHeader(title: 'MEAL CONTEXT INSIGHTS', emoji: '📊'));
+      items.add(const _InsightsCard());
+    } else if (_selectedTab == 1) {
+      // CUSTOMIZED
+      if (filteredOverrides.isEmpty) {
+        items.add(_EmptyState(
+          message: _searchQuery.isEmpty 
+              ? 'No custom ingredient overrides saved yet. Save corrections with "Remember for next time" checked.' 
+              : 'No matching custom food overrides found.'
+        ));
+      } else {
+        items.addAll(filteredOverrides);
+      }
+    } else if (_selectedTab == 2) {
+      // LEARNED PATTERNS
+      items.add(const _SectionHeader(title: 'LEARNED EATING PATTERNS', emoji: '🧠'));
+      if (patterns.isEmpty) {
+        items.add(const _EmptyState(message: 'No eating patterns learned yet. Correct ingredient estimates via "Edit Ingredients" 3+ times to train the system.'));
+      } else {
+        items.addAll(patterns);
+      }
+
+      items.add(const _SectionHeader(title: 'MEAL CONTEXT INSIGHTS', emoji: '📊'));
+      items.add(const _InsightsCard());
+    }
+
+    final showSearch = _selectedTab == 0 || _selectedTab == 1;
+
+    return Scaffold(
+      backgroundColor: KColor.bg,
+      appBar: AppBar(
+        backgroundColor: KColor.bg,
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Nutrition Intelligence',
+          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded, color: KColor.danger),
+            tooltip: 'Reset all intelligence',
+            onPressed: (patterns.isNotEmpty || overrides.isNotEmpty) ? _resetAll : null,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: _buildTabs(),
+            ),
+            if (showSearch)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Container(
+                  height: 46,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: KColor.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: KColor.border, width: 0.5),
+                  ),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                    decoration: InputDecoration(
+                      icon: const Icon(Icons.search_rounded, color: KColor.textMuted, size: 18),
+                      hintText: 'Search customized food memory...',
+                      hintStyle: const TextStyle(color: KColor.textMuted, fontSize: 13.5),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear_rounded, color: KColor.textMuted, size: 16),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                              },
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  if (item is _SectionHeader) {
+                    return _buildSectionHeader(item);
+                  } else if (item is _EmptyState) {
+                    return _buildEmptyState(item);
+                  } else if (item is LearnedPatternEntry) {
+                    return _buildPatternCard(item);
+                  } else if (item is UserMealOverride) {
+                    return _buildOverrideCard(item);
+                  } else if (item is _InsightsCard) {
+                    return _buildInsightsCard();
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
