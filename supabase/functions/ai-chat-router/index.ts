@@ -33,7 +33,7 @@ const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 // OpenRouter fallback
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
-const OPENROUTER_VISION_MODEL = 'google/gemini-2.5-flash';
+const OPENROUTER_VISION_MODEL = 'google/gemini-3.5-flash';
 
 function hasImage(messages: any[]): boolean {
   for (const m of messages) {
