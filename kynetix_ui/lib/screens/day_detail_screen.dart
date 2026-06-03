@@ -16,6 +16,7 @@ import '../services/persistence_service.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
+import 'dashboard_screen.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -581,6 +582,18 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               _CoachInsightCard(insights: insights),
               const SizedBox(height: 12),
             ],
+
+            DailyNutritionQualityCard(
+              log: _log,
+              targetCal: target?.calories ?? 2000.0,
+              targetPro: target?.protein ?? 130.0,
+            ),
+            AdditionalMacrosCard(
+              log: _log,
+              targetCal: target?.calories ?? 2000.0,
+              targetPro: target?.protein ?? 130.0,
+            ),
+            const SizedBox(height: 12),
 
             // ── Quick Add ───────────────────────────────────────────
             _QuickAddCard(onAdd: _quickAddMeal),
@@ -1558,6 +1571,7 @@ class _EntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final calMid = entry.result.calories.mid;
     return Dismissible(
       key: ObjectKey(entry),
       direction: DismissDirection.endToStart,
@@ -1623,12 +1637,92 @@ class _EntryTile extends StatelessWidget {
                           ),
                           const Color(0xFF52B788),
                         ),
+                        if (calMid >= 100 && entry.result.mealQualityScore != null) ...[
+                          const SizedBox(width: 6),
+                          _MacroBadge(
+                            'Quality: ${entry.result.mealQualityScore}',
+                            entry.result.mealQualityScore! >= 80
+                                ? const Color(0xFF52B788)
+                                : (entry.result.mealQualityScore! >= 60
+                                    ? const Color(0xFFFFB347)
+                                    : const Color(0xFFEF4444)),
+                          ),
+                        ],
                         if (entry.edited) ...[
                           const SizedBox(width: 6),
                           const _MacroBadge('Edited', Color(0xFF60A5FA)),
                         ],
                       ],
                     ),
+                    if (calMid >= 100 &&
+                        (entry.result.mealQualityPositive != null ||
+                            entry.result.mealQualityImprovement != null ||
+                            entry.result.mealQualityExplanation != null)) ...[
+                      const SizedBox(height: 6),
+                      if (entry.result.mealQualityExplanation != null &&
+                          entry.result.mealQualityExplanation!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4.0),
+                          child: Text(
+                            entry.result.mealQualityExplanation!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF9CA3AF),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      if (entry.result.mealQualityPositive != null &&
+                          entry.result.mealQualityPositive!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(top: 2.0),
+                                child: Icon(Icons.add_circle_outline_rounded,
+                                    color: Color(0xFF52B788), size: 10),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  entry.result.mealQualityPositive!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (entry.result.mealQualityImprovement != null &&
+                          entry.result.mealQualityImprovement!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(top: 2.0),
+                                child: Icon(Icons.arrow_upward_rounded,
+                                    color: Color(0xFFFFB347), size: 10),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  entry.result.mealQualityImprovement!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),

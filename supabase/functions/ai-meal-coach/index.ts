@@ -103,7 +103,24 @@ function buildMealContext(sectionsJson: any): {
   text: string;
   totalCal: number;
   totalPro: number;
-  entries: Array<{ section: string; cal: number; pro: number; foods: string[] }>;
+  totalCarbs: number;
+  totalFat: number;
+  totalFiber: number;
+  totalSugar: number;
+  totalSatFat: number;
+  totalSodium: number;
+  entries: Array<{
+    section: string;
+    cal: number;
+    pro: number;
+    carbs: number;
+    fat: number;
+    fiber: number;
+    sugar: number;
+    satFat: number;
+    sodium: number;
+    foods: string[];
+  }>;
 } {
   const sectionOrder = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
   const sectionLabels: Record<string, string> = {
@@ -116,7 +133,13 @@ function buildMealContext(sectionsJson: any): {
 
   let totalCal = 0;
   let totalPro = 0;
-  const entries: Array<{ section: string; cal: number; pro: number; foods: string[] }> = [];
+  let totalCarbs = 0;
+  let totalFat = 0;
+  let totalFiber = 0;
+  let totalSugar = 0;
+  let totalSatFat = 0;
+  let totalSodium = 0;
+  const entries: Array<any> = [];
   const lines: string[] = [];
 
   for (const key of sectionOrder) {
@@ -125,21 +148,74 @@ function buildMealContext(sectionsJson: any): {
 
     let sectionCal = 0;
     let sectionPro = 0;
+    let sectionCarbs = 0;
+    let sectionFat = 0;
+    let sectionFiber = 0;
+    let sectionSugar = 0;
+    let sectionSatFat = 0;
+    let sectionSodium = 0;
     const foods: string[] = [];
 
     for (const item of items) {
       const cal = parseFloat(item?.result?.calories?.mid ?? item?.result?.calories?.max ?? 0);
       const pro = parseFloat(item?.result?.protein?.mid  ?? item?.result?.protein?.max  ?? 0);
+      const carbs = parseFloat(item?.result?.carbohydrates?.mid ?? item?.result?.carbohydrates?.max ?? 0);
+      const fat = parseFloat(item?.result?.fat?.mid ?? item?.result?.fat?.max ?? 0);
+      const fiber = parseFloat(item?.result?.fiber?.mid ?? item?.result?.fiber?.max ?? 0);
+      const sugar = parseFloat(item?.result?.sugar?.mid ?? item?.result?.sugar?.max ?? 0);
+      const satFat = parseFloat(item?.result?.saturatedFat?.mid ?? item?.result?.saturatedFat?.max ?? 0);
+      const sodium = parseFloat(item?.result?.sodium?.mid ?? item?.result?.sodium?.max ?? 0);
+      const score = item?.result?.mealQualityScore;
+      const positive = item?.result?.mealQualityPositive;
+      const improvement = item?.result?.mealQualityImprovement;
+
       const name = (item?.result?.canonicalMeal ?? item?.rawInput ?? 'unknown meal').trim();
       sectionCal += cal;
       sectionPro += pro;
-      foods.push(`${name} (~${Math.round(cal)} kcal, ${Math.round(pro)}g protein)`);
+      sectionCarbs += carbs;
+      sectionFat += fat;
+      sectionFiber += fiber;
+      sectionSugar += sugar;
+      sectionSatFat += satFat;
+      sectionSodium += sodium;
+
+      let foodDesc = `${name} (~${Math.round(cal)} kcal, ${Math.round(pro)}g protein`;
+      if (carbs > 0 || fat > 0 || fiber > 0) {
+        foodDesc += `, ${Math.round(carbs)}g carbs, ${Math.round(fat)}g fat, ${Math.round(fiber)}g fiber`;
+      }
+      foodDesc += `)`;
+      if (score !== undefined && score !== null) {
+        foodDesc += ` [Quality Score: ${score}/100`;
+        if (positive) foodDesc += `, Positive: ${positive}`;
+        if (improvement) foodDesc += `, Improvement: ${improvement}`;
+        foodDesc += `]`;
+      }
+      foods.push(foodDesc);
     }
 
     totalCal += sectionCal;
     totalPro += sectionPro;
-    entries.push({ section: sectionLabels[key] ?? key, cal: sectionCal, pro: sectionPro, foods });
-    lines.push(`  ${sectionLabels[key]} — ${Math.round(sectionCal)} kcal, ${Math.round(sectionPro)}g protein`);
+    totalCarbs += sectionCarbs;
+    totalFat += sectionFat;
+    totalFiber += sectionFiber;
+    totalSugar += sectionSugar;
+    totalSatFat += sectionSatFat;
+    totalSodium += sectionSodium;
+
+    entries.push({
+      section: sectionLabels[key] ?? key,
+      cal: sectionCal,
+      pro: sectionPro,
+      carbs: sectionCarbs,
+      fat: sectionFat,
+      fiber: sectionFiber,
+      sugar: sectionSugar,
+      satFat: sectionSatFat,
+      sodium: sectionSodium,
+      foods
+    });
+
+    lines.push(`  ${sectionLabels[key]} — ${Math.round(sectionCal)} kcal, ${Math.round(sectionPro)}g protein, ${Math.round(sectionFiber)}g fiber`);
     for (const f of foods) lines.push(`    • ${f}`);
   }
 
@@ -147,8 +223,45 @@ function buildMealContext(sectionsJson: any): {
     text: lines.join('\n') || '  (no meals logged yet today)',
     totalCal: Math.round(totalCal),
     totalPro: Math.round(totalPro),
+    totalCarbs: Math.round(totalCarbs),
+    totalFat: Math.round(totalFat),
+    totalFiber: Math.round(totalFiber),
+    totalSugar: Math.round(totalSugar),
+    totalSatFat: Math.round(totalSatFat),
+    totalSodium: Math.round(totalSodium),
     entries,
   };
+}
+
+function computeDailyNutritionScore(sectionsJson: any): number | null {
+  const allItems: any[] = [];
+  const sectionKeys = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
+  for (const key of sectionKeys) {
+    const items = sectionsJson?.[key] ?? [];
+    for (const item of items) {
+      allItems.push(item);
+    }
+  }
+
+  const entriesWithScore = allItems.filter(item => item?.result?.mealQualityScore !== undefined && item?.result?.mealQualityScore !== null);
+  if (entriesWithScore.length === 0) return null;
+
+  let weightedSum = 0;
+  let totalCaloriesWithScore = 0;
+
+  for (const item of entriesWithScore) {
+    const score = item.result.mealQualityScore!;
+    const cals = (parseFloat(item.result.calories?.min ?? 0) + parseFloat(item.result.calories?.max ?? 0)) / 2;
+    weightedSum += score * cals;
+    totalCaloriesWithScore += cals;
+  }
+
+  if (totalCaloriesWithScore > 0) {
+    return Math.max(0, Math.min(100, Math.round(weightedSum / totalCaloriesWithScore)));
+  }
+
+  const sumScores = entriesWithScore.reduce((acc, item) => acc + item.result.mealQualityScore!, 0);
+  return Math.max(0, Math.min(100, Math.round(sumScores / entriesWithScore.length)));
 }
 
 // ── Build food memory snippet ──────────────────────────────────────────────────
@@ -175,19 +288,33 @@ function buildSystemPrompt(params: {
   profile:            any;
   targetCal:          number;
   targetPro:          number;
+  targetFiber:        number;
+  targetCarbs:        number;
+  targetFat:          number;
   dayLabel:           string;
   mealContext:        string;
   totalCal:           number;
   totalPro:           number;
+  totalCarbs:         number;
+  totalFat:           number;
+  totalFiber:         number;
+  totalSugar:         number;
+  totalSatFat:        number;
+  totalSodium:        number;
   remainCal:          number;
   remainPro:          number;
   foodMemory:         string;
   isGymDay:           boolean;
   isManualOverride:   boolean;
+  dailyNutritionScore: number | null;
+  caloriePct:         number;
+  proteinPct:         number;
+  fiberPct:           number;
 }): string {
-  const { profile, targetCal, targetPro, dayLabel, mealContext,
-          totalCal, totalPro, remainCal, remainPro, foodMemory,
-          isGymDay, isManualOverride } = params;
+  const { profile, targetCal, targetPro, targetFiber, targetCarbs, targetFat, dayLabel, mealContext,
+          totalCal, totalPro, totalCarbs, totalFat, totalFiber, totalSugar, totalSatFat, totalSodium,
+          remainCal, remainPro, foodMemory, isGymDay, isManualOverride,
+          dailyNutritionScore, caloriePct, proteinPct, fiberPct } = params;
 
   // When user has manually set a calorie target for the day, tell the AI explicitly
   // so it doesn't express surprise or confusion about an unusual number.
@@ -210,19 +337,36 @@ Gender: ${profile.gender}
 Gym days/week: ${profile.workout_days_min}–${profile.workout_days_max}
 
 ═══════════════════════════════════════════════════
-TODAY'S TARGETS — ${dayLabel}${isManualOverride ? ' (Manual Override)' : ''}
+TODAY'S TARGETS & ACHIEVEMENTS — ${dayLabel}${isManualOverride ? ' (Manual Override)' : ''}
 ═══════════════════════════════════════════════════
-Calorie target:  ${targetCal} kcal${overrideNote}
-Protein target:  ${targetPro} g
-Day type:        ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}${isManualOverride ? '\n⚠️  Note: calorie target for today was manually overridden by the user. The number above is the actual target to use — NOT a formula estimate.' : ''}
+Calorie target:            ${targetCal} kcal${overrideNote} (Achievement: ${caloriePct}%)
+Protein target:            ${targetPro} g (Achievement: ${proteinPct}%)
+Fiber target:              ${targetFiber} g (Achievement: ${fiberPct}%)
+Estimated Carbs target:    ${Math.round(targetCarbs)} g
+Estimated Fat target:      ${Math.round(targetFat)} g
+Day type:                  ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}${isManualOverride ? '\n⚠️  Note: calorie target for today was manually overridden by the user. The number above is the actual target to use — NOT a formula estimate.' : ''}
 
 ═══════════════════════════════════════════════════
-TODAY'S LOGGED MEALS
+TODAY'S NUTRITION TOTALS & QUALITY SCORE
+═══════════════════════════════════════════════════
+Daily Nutrition Quality Score: ${dailyNutritionScore !== null ? `${dailyNutritionScore} / 100` : 'No score computed yet (need meal entries)'}
+
+TOTALS CONSUMED SO FAR:
+• Calories:       ${totalCal} kcal (Target: ${targetCal} kcal, Remaining: ${remainCal} kcal)
+• Protein:        ${totalPro} g (Target: ${targetPro} g, Remaining: ${remainPro} g)
+• Dietary Fiber:  ${totalFiber} g (Target: ${targetFiber} g, Remaining: ${Math.max(0, targetFiber - totalFiber).toFixed(1)} g)
+• Carbohydrates:  ${totalCarbs} g (Target: ${Math.round(targetCarbs)} g, Remaining: ${Math.max(0, targetCarbs - totalCarbs).toFixed(1)} g)
+• Fat:            ${totalFat} g (Target: ${Math.round(targetFat)} g, Remaining: ${Math.max(0, targetFat - totalFat).toFixed(1)} g)
+
+OPTIONAL MACROS CONSUMED:
+• Sugar:          ${totalSugar} g
+• Saturated Fat:  ${totalSatFat} g
+• Sodium:         ${totalSodium} mg
+
+═══════════════════════════════════════════════════
+TODAY'S LOGGED MEALS & INDIVIDUAL QUALITY SCORES
 ═══════════════════════════════════════════════════
 ${mealContext}
-
-TOTALS SO FAR:   ${totalCal} kcal consumed,  ${totalPro}g protein consumed
-REMAINING:       ${remainCal} kcal left,     ${remainPro}g protein left
 
 ═══════════════════════════════════════════════════
 USER'S KNOWN EATING HABITS (follow these strictly)
@@ -331,17 +475,20 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const userMessage: string = body.message ?? '';
     const imageBase64: string | null = body.image_base64 ?? null;
+    const imagesBase64: string[] = Array.isArray(body.images_base64)
+      ? body.images_base64
+      : (imageBase64 ? [imageBase64] : []);
     const streamMode: boolean = body.stream === true;
     // date_key must be YYYY-MM-DD (matches cloud_sync_service format in Flutter)
     const dateKey: string = body.date_key ?? new Date().toISOString().slice(0, 10);
 
-    if (!userMessage.trim() && !imageBase64) {
-      return new Response(JSON.stringify({ error: 'message or image_base64 required' }), {
+    if (!userMessage.trim() && imagesBase64.length === 0) {
+      return new Response(JSON.stringify({ error: 'message or images_base64 required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`[ai-meal-coach] user=${user.id} date=${dateKey} hasImage=${!!imageBase64}`);
+    console.log(`[ai-meal-coach] user=${user.id} date=${dateKey} hasImages=${imagesBase64.length}`);
 
     // ── Fetch all data in parallel ────────────────────────────────────────────
     const [profileRes, dayLogRes, memoryRes] = await Promise.all([
@@ -393,8 +540,17 @@ Deno.serve(async (req: Request) => {
     console.log(`[ai-meal-coach] calorieTarget=${targetCal}${isManualOverride ? ' (MANUAL OVERRIDE, original='+computedCal+')' : ' (formula)'}  protein=${targetPro}`);
 
     // ── Build meal context ────────────────────────────────────────────────────
-    const { text: mealContext, totalCal, totalPro } =
-      buildMealContext(dayLogRes.data?.sections_json ?? {});
+    const {
+      text: mealContext,
+      totalCal,
+      totalPro,
+      totalCarbs,
+      totalFat,
+      totalFiber,
+      totalSugar,
+      totalSatFat,
+      totalSodium
+    } = buildMealContext(dayLogRes.data?.sections_json ?? {});
 
     const remainCal = Math.max(0, targetCal - totalCal);
     const remainPro = Math.max(0, targetPro - totalPro);
@@ -402,23 +558,63 @@ Deno.serve(async (req: Request) => {
     // ── Build food memory ─────────────────────────────────────────────────────
     const foodMemory = buildFoodMemory(memoryRes.data ?? []);
 
+    // ── Calculate daily nutrition score ───────────────────────────────────────
+    const dailyNutritionScore = computeDailyNutritionScore(dayLogRes.data?.sections_json ?? {});
+
+    // ── Calculate target achievement percentages ──────────────────────────────
+    const caloriePct = targetCal > 0 ? Math.round((totalCal / targetCal) * 100) : 0;
+    const proteinPct = targetPro > 0 ? Math.round((totalPro / targetPro) * 100) : 0;
+    const targetFiber = 30.0;
+    const fiberPct = targetFiber > 0 ? Math.round((totalFiber / targetFiber) * 100) : 0;
+
+    // ── Calculate remaining carbs/fat targets ─────────────────────────────────
+    const remainingCal = Math.max(0, targetCal - targetPro * 4);
+    const targetFat = remainingCal * 0.35 / 9;
+    const targetCarbs = remainingCal * 0.65 / 4;
+
     console.log(`[ai-meal-coach] targets=${targetCal}kcal/${targetPro}g consumed=${totalCal}/${totalPro} remain=${remainCal}/${remainPro}`);
 
     // ── Build messages for ai-chat-router ────────────────────────────────────
     const systemPrompt = buildSystemPrompt({
-      profile, targetCal, targetPro, dayLabel: workoutType,
-      mealContext, totalCal, totalPro,
-      remainCal, remainPro, foodMemory, isGymDay, isManualOverride,
+      profile,
+      targetCal,
+      targetPro,
+      targetFiber,
+      targetCarbs,
+      targetFat,
+      dayLabel: workoutType,
+      mealContext,
+      totalCal,
+      totalPro,
+      totalCarbs,
+      totalFat,
+      totalFiber,
+      totalSugar,
+      totalSatFat,
+      totalSodium,
+      remainCal,
+      remainPro,
+      foodMemory,
+      isGymDay,
+      isManualOverride,
+      dailyNutritionScore,
+      caloriePct,
+      proteinPct,
+      fiberPct,
     });
 
-    // Construct user message content (text + optional image)
+    // Construct user message content (text + optional images)
     let userContent: any;
-    if (imageBase64) {
-      // Vision-capable message with image
+    if (imagesBase64.length > 0) {
       userContent = [
-        { type: 'text', text: userMessage || 'Analyze this food/menu image and advise me based on my remaining targets.' },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+        { type: 'text', text: userMessage || 'Analyze this food/menu image and advise me based on my remaining targets.' }
       ];
+      for (const img of imagesBase64) {
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: `data:image/jpeg;base64,${img}` }
+        });
+      }
     } else {
       userContent = userMessage;
     }
@@ -536,6 +732,13 @@ Deno.serve(async (req: Request) => {
         consumed_pro: totalPro,
         remain_cal:   remainCal,
         remain_pro:   remainPro,
+        consumed_fiber: totalFiber,
+        consumed_carbs: totalCarbs,
+        consumed_fat: totalFat,
+        daily_score:   dailyNutritionScore,
+        calorie_pct:   caloriePct,
+        protein_pct:   proteinPct,
+        fiber_pct:     fiberPct,
       },
     }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

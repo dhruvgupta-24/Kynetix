@@ -734,6 +734,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
+          DailyNutritionQualityCard(
+            log: _selectedLog,
+            targetCal: _targetCalories,
+            targetPro: _targetProtein,
+          ),
+          AdditionalMacrosCard(
+            log: _selectedLog,
+            targetCal: _targetCalories,
+            targetPro: _targetProtein,
+          ),
         ],
       ),
     );
@@ -2522,6 +2532,300 @@ class _DeltaChip extends StatelessWidget {
         style: TextStyle(
             fontSize: 11, color: color, fontWeight: FontWeight.w600),
       ),
+    );
+  }
+}
+
+class DailyNutritionQualityCard extends StatelessWidget {
+  final DayLog log;
+  final double targetCal;
+  final double targetPro;
+
+  const DailyNutritionQualityCard({
+    super.key,
+    required this.log,
+    required this.targetCal,
+    required this.targetPro,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (log.isEmpty) return const SizedBox.shrink();
+
+    final score = log.dailyNutritionScore;
+    final insights = log.getDailyNutritionInsights(targetCal, targetPro, 30.0);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12.0),
+      child: KCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: const [
+                    Icon(Icons.analytics_rounded, color: Color(0xFF52B788), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Daily Nutrition Quality',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                if (score != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (score >= 80
+                              ? const Color(0xFF52B788)
+                              : (score >= 60
+                                  ? const Color(0xFFFFB347)
+                                  : const Color(0xFFEF4444)))
+                          .withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '$score / 100',
+                      style: TextStyle(
+                        color: score >= 80
+                            ? const Color(0xFF52B788)
+                            : (score >= 60
+                                ? const Color(0xFFFFB347)
+                                : const Color(0xFFEF4444)),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                else
+                  const Text(
+                    '--',
+                    style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...insights.map((insight) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 5.0, right: 8.0),
+                        child: Icon(
+                          Icons.circle,
+                          size: 6,
+                          color: Color(0xFF52B788),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          insight,
+                          style: const TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AdditionalMacrosCard extends StatefulWidget {
+  final DayLog log;
+  final double targetCal;
+  final double targetPro;
+
+  const AdditionalMacrosCard({
+    super.key,
+    required this.log,
+    required this.targetCal,
+    required this.targetPro,
+  });
+
+  @override
+  State<AdditionalMacrosCard> createState() => _AdditionalMacrosCardState();
+}
+
+class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.log.isEmpty) return const SizedBox.shrink();
+
+    // Standardized Targets
+    final targetFiber = 30.0;
+    final remainingCal = (widget.targetCal - widget.targetPro * 4).clamp(0.0, double.infinity);
+    final targetFat = remainingCal * 0.35 / 9;
+    final targetCarbs = remainingCal * 0.65 / 4;
+
+    // Consumed Midpoints
+    final consumedFiber = widget.log.totalFiberMid;
+    final consumedCarbs = widget.log.totalCarbsMid;
+    final consumedFat = widget.log.totalFatMid;
+
+    final consumedSugar = widget.log.totalSugarMid;
+    final consumedSatFat = widget.log.totalSaturatedFatMid;
+    final consumedSodium = widget.log.totalSodiumMid;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12.0),
+      child: KCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.tune_rounded, color: Color(0xFF60A5FA), size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Additional Macros',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Icon(
+                      _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                      color: const Color(0xFF9CA3AF),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(
+                  children: [
+                    const Divider(color: Color(0xFF2E2E3E), height: 1),
+                    const SizedBox(height: 12),
+                    // 1. Fiber (Highest priority secondary metric)
+                    _buildMacroRow(
+                      label: 'Dietary Fiber',
+                      consumed: consumedFiber,
+                      target: targetFiber,
+                      unit: 'g',
+                      color: const Color(0xFF52B788),
+                    ),
+                    const SizedBox(height: 12),
+                    // 2. Carbohydrates
+                    _buildMacroRow(
+                      label: 'Carbohydrates',
+                      consumed: consumedCarbs,
+                      target: targetCarbs,
+                      unit: 'g',
+                      color: const Color(0xFF60A5FA),
+                    ),
+                    const SizedBox(height: 12),
+                    // 3. Fat
+                    _buildMacroRow(
+                      label: 'Fat',
+                      consumed: consumedFat,
+                      target: targetFat,
+                      unit: 'g',
+                      color: const Color(0xFFFFB347),
+                    ),
+                    
+                    // Optional macros: Sugar, Sat Fat, Sodium
+                    if (consumedSugar > 0) ...[
+                      const SizedBox(height: 12),
+                      _buildOptionalMacroRow('Sugar', consumedSugar, 'g'),
+                    ],
+                    if (consumedSatFat > 0) ...[
+                      const SizedBox(height: 12),
+                      _buildOptionalMacroRow('Saturated Fat', consumedSatFat, 'g'),
+                    ],
+                    if (consumedSodium > 0) ...[
+                      const SizedBox(height: 12),
+                      _buildOptionalMacroRow('Sodium', consumedSodium, 'mg'),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMacroRow({
+    required String label,
+    required double consumed,
+    required double target,
+    required String unit,
+    required Color color,
+  }) {
+    final pct = target > 0 ? (consumed / target).clamp(0.0, 1.0) : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            Text(
+              '${consumed.toStringAsFixed(1)} / ${target.toStringAsFixed(0)} $unit (${(pct * 100).toStringAsFixed(0)}%)',
+              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: pct,
+            minHeight: 6,
+            backgroundColor: const Color(0xFF2E2E3E),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOptionalMacroRow(String label, double consumed, String unit) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+        ),
+        Text(
+          '${consumed.toStringAsFixed(1)} $unit',
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+      ],
     );
   }
 }
