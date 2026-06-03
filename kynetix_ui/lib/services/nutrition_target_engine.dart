@@ -99,6 +99,25 @@ class NutritionTargetEngine {
     final trainCal = _r((rawAvg + cycle).clamp(floor, double.infinity));
     final restCal  = _r((rawAvg - cycle).clamp(floor, double.infinity));
 
+    if (profile.useCustomTargets) {
+      final maintenance = profile.customMaintenanceCalories ?? tdee;
+      final customTrainCal = profile.customTrainingDayCalories ?? trainCal;
+      final customRestCal = profile.customRestDayCalories ?? restCal;
+      final protein = profile.customProteinTarget ?? avgProt;
+
+      return WeeklyTargetPlan(
+        maintenanceCalories:  maintenance,
+        avgDailyCalories:     _r((customTrainCal + customRestCal) / 2),
+        avgDailyProtein:      protein,
+        trainingDayCalories:  customTrainCal,
+        restDayCalories:      customRestCal,
+        trainingDayProtein:   protein,
+        restDayProtein:       protein,
+        healthConnectActive:  health?.hasData == true,
+        effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt(),
+      );
+    }
+
     return WeeklyTargetPlan(
       maintenanceCalories:  tdee,
       avgDailyCalories:     avgCal,
@@ -129,6 +148,7 @@ class NutritionTargetEngine {
     WorkoutSession? session,
     String? workoutTypeName, // e.g. "Push", "Cardio", "Rest"
     double? targetCaloriesOverride,
+    double? carryForwardAdjustment,
   }) {
     final plan = weeklyPlan(profile, health: health);
 
@@ -149,8 +169,8 @@ class NutritionTargetEngine {
       calBonus  = _loadToCalBonus(loadScore, session);
     }
 
-    final calculatedTotalCal = _r((cal + calBonus).clamp(
-        _calFloor(profile), double.infinity));
+    final baseCal = cal + calBonus + (carryForwardAdjustment ?? 0.0);
+    final calculatedTotalCal = _r(baseCal.clamp(_calFloor(profile), double.infinity));
         
     final isOverride = targetCaloriesOverride != null;
     final finalCal = targetCaloriesOverride ?? calculatedTotalCal;
@@ -172,7 +192,10 @@ class NutritionTargetEngine {
       final noteExtra = calBonus != 0
           ? ' | session load: ${calBonus > 0 ? '+' : ''}$calBonus kcal'
           : '';
-      note = '$noteBase$noteExtra';
+      final noteCarry = carryForwardAdjustment != null && carryForwardAdjustment != 0
+          ? ' | carry-forward: ${carryForwardAdjustment > 0 ? '+' : ''}${carryForwardAdjustment.toInt()} kcal'
+          : '';
+      note = '$noteBase$noteExtra$noteCarry';
     }
 
     return DayTarget(

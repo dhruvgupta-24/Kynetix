@@ -399,6 +399,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           _buildGoalCard(),
           const SizedBox(height: 16),
+          _buildNutritionTargetsCard(),
+          const SizedBox(height: 16),
           _buildHealthCard(),
           const SizedBox(height: 16),
           _buildAiCard(),
@@ -966,6 +968,765 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildNutritionTargetsCard() {
+    final profile = _profile;
+    final enginePlan = NutritionTargetEngine().weeklyPlan(
+      profile.copyWith(useCustomTargets: false),
+      health: profile.healthSyncEnabled && profile.averageDailySteps != null
+          ? HealthSyncResult(
+              effectiveAverageSteps: profile.averageDailySteps!.toDouble(),
+              averageDailySteps14d: profile.averageDailySteps!.toDouble(),
+              averageDailySteps30d: profile.averageDailySteps!.toDouble(),
+              syncedAt: profile.lastHealthSyncAt ?? DateTime.now(),
+              activityTier: _tierFromPersistedSteps(profile.averageDailySteps!),
+            )
+          : null,
+    );
+    final activePlan = _plan;
+
+    return _Section(
+      title: 'Nutrition Targets',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Target source',
+            style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildSourceChip(
+                label: 'System Calculated',
+                selected: !profile.useCustomTargets,
+                onTap: () {
+                  if (profile.useCustomTargets) {
+                    _changeTargetSource(useCustom: false);
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              _buildSourceChip(
+                label: 'Custom Targets',
+                selected: profile.useCustomTargets,
+                onTap: () {
+                  if (!profile.useCustomTargets) {
+                    _changeTargetSource(useCustom: true);
+                  }
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFF2E2E3E), height: 1),
+          const SizedBox(height: 12),
+
+          if (!profile.useCustomTargets) ...[
+            _InfoRow(
+              icon: Icons.local_fire_department_rounded,
+              label: 'Maintenance Calories',
+              value: '${activePlan.maintenanceCalories.toStringAsFixed(0)} kcal',
+            ),
+            _InfoRow(
+              icon: Icons.bolt_rounded,
+              label: 'Training Day Calories',
+              value: '${activePlan.trainingDayCalories.toStringAsFixed(0)} kcal',
+            ),
+            _InfoRow(
+              icon: Icons.nightlight_round,
+              label: 'Rest Day Calories',
+              value: '${activePlan.restDayCalories.toStringAsFixed(0)} kcal',
+            ),
+            _InfoRow(
+              icon: Icons.egg_outlined,
+              label: 'Daily Protein Target',
+              value: '${activePlan.avgDailyProtein.toStringAsFixed(0)} g',
+              isLast: true,
+            ),
+          ] else ...[
+            _InfoRow(
+              icon: Icons.local_fire_department_rounded,
+              label: 'Maintenance Calories',
+              value: '${(profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories).toStringAsFixed(0)} kcal',
+              isEditable: true,
+              onTap: () => _editCustomTargetValue(
+                title: 'Maintenance Calories',
+                minValue: 800,
+                maxValue: 6000,
+                currentValue: profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories,
+                onSave: (val) {
+                  final prev = {
+                    'useCustomTargets': profile.useCustomTargets,
+                    'customMaintenanceCalories': profile.customMaintenanceCalories,
+                    'customTrainingDayCalories': profile.customTrainingDayCalories,
+                    'customRestDayCalories': profile.customRestDayCalories,
+                    'customProteinTarget': profile.customProteinTarget,
+                  };
+                  final updated = profile.copyWith(
+                    customMaintenanceCalories: val,
+                    targetChangeHistory: [
+                      ...profile.targetChangeHistory,
+                      TargetChangeRecord(
+                        timestamp: DateTime.now(),
+                        sourceType: 'Custom Targets',
+                        maintenanceCalories: val,
+                        trainingDayCalories: profile.customTrainingDayCalories,
+                        restDayCalories: profile.customRestDayCalories,
+                        proteinTarget: profile.customProteinTarget,
+                        previousValues: prev,
+                      ),
+                    ],
+                  );
+                  _saveProfile(updated);
+                },
+              ),
+            ),
+            _InfoRow(
+              icon: Icons.bolt_rounded,
+              label: 'Training Day Calories',
+              value: '${(profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories).toStringAsFixed(0)} kcal',
+              isEditable: true,
+              onTap: () => _editCustomTargetValue(
+                title: 'Training Day Calories',
+                minValue: 800,
+                maxValue: 6000,
+                currentValue: profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories,
+                onSave: (val) {
+                  final prev = {
+                    'useCustomTargets': profile.useCustomTargets,
+                    'customMaintenanceCalories': profile.customMaintenanceCalories,
+                    'customTrainingDayCalories': profile.customTrainingDayCalories,
+                    'customRestDayCalories': profile.customRestDayCalories,
+                    'customProteinTarget': profile.customProteinTarget,
+                  };
+                  final updated = profile.copyWith(
+                    customTrainingDayCalories: val,
+                    targetChangeHistory: [
+                      ...profile.targetChangeHistory,
+                      TargetChangeRecord(
+                        timestamp: DateTime.now(),
+                        sourceType: 'Custom Targets',
+                        maintenanceCalories: profile.customMaintenanceCalories,
+                        trainingDayCalories: val,
+                        restDayCalories: profile.customRestDayCalories,
+                        proteinTarget: profile.customProteinTarget,
+                        previousValues: prev,
+                      ),
+                    ],
+                  );
+                  _saveProfile(updated);
+                },
+              ),
+            ),
+            _InfoRow(
+              icon: Icons.nightlight_round,
+              label: 'Rest Day Calories',
+              value: '${(profile.customRestDayCalories ?? enginePlan.restDayCalories).toStringAsFixed(0)} kcal',
+              isEditable: true,
+              onTap: () => _editCustomTargetValue(
+                title: 'Rest Day Calories',
+                minValue: 800,
+                maxValue: 6000,
+                currentValue: profile.customRestDayCalories ?? enginePlan.restDayCalories,
+                onSave: (val) {
+                  final prev = {
+                    'useCustomTargets': profile.useCustomTargets,
+                    'customMaintenanceCalories': profile.customMaintenanceCalories,
+                    'customTrainingDayCalories': profile.customTrainingDayCalories,
+                    'customRestDayCalories': profile.customRestDayCalories,
+                    'customProteinTarget': profile.customProteinTarget,
+                  };
+                  final updated = profile.copyWith(
+                    customRestDayCalories: val,
+                    targetChangeHistory: [
+                      ...profile.targetChangeHistory,
+                      TargetChangeRecord(
+                        timestamp: DateTime.now(),
+                        sourceType: 'Custom Targets',
+                        maintenanceCalories: profile.customMaintenanceCalories,
+                        trainingDayCalories: profile.customTrainingDayCalories,
+                        restDayCalories: val,
+                        proteinTarget: profile.customProteinTarget,
+                        previousValues: prev,
+                      ),
+                    ],
+                  );
+                  _saveProfile(updated);
+                },
+              ),
+            ),
+            _InfoRow(
+              icon: Icons.egg_outlined,
+              label: 'Daily Protein Target',
+              value: '${(profile.customProteinTarget ?? enginePlan.avgDailyProtein).toStringAsFixed(0)} g',
+              isEditable: true,
+              onTap: () => _editCustomTargetValue(
+                title: 'Daily Protein Target',
+                minValue: 30,
+                maxValue: 350,
+                currentValue: profile.customProteinTarget ?? enginePlan.avgDailyProtein,
+                onSave: (val) {
+                  final prev = {
+                    'useCustomTargets': profile.useCustomTargets,
+                    'customMaintenanceCalories': profile.customMaintenanceCalories,
+                    'customTrainingDayCalories': profile.customTrainingDayCalories,
+                    'customRestDayCalories': profile.customRestDayCalories,
+                    'customProteinTarget': profile.customProteinTarget,
+                  };
+                  final updated = profile.copyWith(
+                    customProteinTarget: val,
+                    targetChangeHistory: [
+                      ...profile.targetChangeHistory,
+                      TargetChangeRecord(
+                        timestamp: DateTime.now(),
+                        sourceType: 'Custom Targets',
+                        maintenanceCalories: profile.customMaintenanceCalories,
+                        trainingDayCalories: profile.customTrainingDayCalories,
+                        restDayCalories: profile.customRestDayCalories,
+                        proteinTarget: val,
+                        previousValues: prev,
+                      ),
+                    ],
+                  );
+                  _saveProfile(updated);
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: _resetToRecommendations,
+                icon: const Icon(Icons.refresh_rounded, size: 16, color: Color(0xFF52B788)),
+                label: const Text(
+                  'Reset to Recommendations',
+                  style: TextStyle(color: Color(0xFF52B788), fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: const Color(0xFF52B788).withValues(alpha: 0.3)),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFF2E2E3E), height: 1),
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              const Icon(Icons.cached_rounded, size: 18, color: Color(0xFF9CA3AF)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Calorie Carry-Forward',
+                      style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Adjust next day\'s target for yesterday\'s deviations',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: profile.carryForwardEnabled,
+                activeThumbColor: const Color(0xFF52B788),
+                activeTrackColor: const Color(0xFF52B788).withValues(alpha: 0.2),
+                inactiveThumbColor: const Color(0xFF4B5563),
+                inactiveTrackColor: const Color(0xFF1E1E2C),
+                onChanged: (val) {
+                  _saveProfile(profile.copyWith(carryForwardEnabled: val));
+                },
+              ),
+            ],
+          ),
+
+          if (profile.carryForwardEnabled) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Carry-forward threshold',
+              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildThresholdChip(100),
+                _buildThresholdChip(150),
+                _buildThresholdChip(200),
+                _buildThresholdChip(250),
+                _buildCustomThresholdChip(),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSourceChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF52B788).withValues(alpha: 0.12)
+                : const Color(0xFF13131F),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFF52B788)
+                  : const Color(0xFF2E2E3E),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: selected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThresholdChip(int kcal) {
+    final selected = _profile.carryForwardThreshold == kcal;
+    return GestureDetector(
+      onTap: () {
+        _saveProfile(_profile.copyWith(carryForwardThreshold: kcal));
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF52B788).withValues(alpha: 0.12)
+              : const Color(0xFF13131F),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
+          ),
+        ),
+        child: Text(
+          '$kcal kcal',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: selected ? const Color(0xFF52B788) : const Color(0xFF9CA3AF),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomThresholdChip() {
+    final currentThreshold = _profile.carryForwardThreshold;
+    final isPreset = const [100, 150, 200, 250].contains(currentThreshold);
+    final selected = !isPreset;
+
+    final label = selected ? 'Custom ($currentThreshold kcal)' : 'Custom...';
+
+    return GestureDetector(
+      onTap: _promptCustomThreshold,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF52B788).withValues(alpha: 0.12)
+              : const Color(0xFF13131F),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: selected ? const Color(0xFF52B788) : const Color(0xFF9CA3AF),
+              ),
+            ),
+            if (selected) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.edit_rounded, size: 10, color: Color(0xFF52B788)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _changeTargetSource({required bool useCustom}) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: Text(
+            useCustom ? 'Switch to Custom Targets?' : 'Switch to Calculated Targets?',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: Text(
+            useCustom
+                ? 'Your nutrition targets will be determined by values you manually set instead of automatically calculating them from your profile settings.'
+                : 'Your nutrition targets will revert to automatically calculated recommendations matching your weight, height, age, steps, and goal.',
+            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                final prev = {
+                  'useCustomTargets': _profile.useCustomTargets,
+                  'customMaintenanceCalories': _profile.customMaintenanceCalories,
+                  'customTrainingDayCalories': _profile.customTrainingDayCalories,
+                  'customRestDayCalories': _profile.customRestDayCalories,
+                  'customProteinTarget': _profile.customProteinTarget,
+                };
+                final updated = _profile.copyWith(
+                  useCustomTargets: useCustom,
+                  targetChangeHistory: [
+                    ..._profile.targetChangeHistory,
+                    TargetChangeRecord(
+                      timestamp: DateTime.now(),
+                      sourceType: useCustom ? 'Custom Targets' : 'System Calculated',
+                      maintenanceCalories: _profile.customMaintenanceCalories,
+                      trainingDayCalories: _profile.customTrainingDayCalories,
+                      restDayCalories: _profile.customRestDayCalories,
+                      proteinTarget: _profile.customProteinTarget,
+                      previousValues: prev,
+                    ),
+                  ],
+                );
+                _saveProfile(updated);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _editCustomTargetValue({
+    required String title,
+    required double minValue,
+    required double maxValue,
+    required double currentValue,
+    required void Function(double) onSave,
+  }) {
+    final ctrl = TextEditingController(text: currentValue.toStringAsFixed(0));
+    final formKey = GlobalKey<FormState>();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: Text(
+            'Edit $title',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enter a value between ${minValue.toInt()} and ${maxValue.toInt()}.',
+                  style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: ctrl,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  decoration: InputDecoration(
+                    labelText: title.contains('Protein') ? 'Protein (g)' : 'Calories (kcal)',
+                    labelStyle: const TextStyle(color: Color(0xFF4B5563)),
+                    filled: true,
+                    fillColor: const Color(0xFF0F0F14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return 'Value required';
+                    final numVal = double.tryParse(value);
+                    if (numVal == null) return 'Invalid number';
+                    if (numVal < minValue || numVal > maxValue) {
+                      return 'Must be within ${minValue.toInt()}–${maxValue.toInt()}';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  final val = double.parse(ctrl.text.trim());
+                  Navigator.pop(ctx);
+                  _confirmValueChange(title, currentValue, val, onSave);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmValueChange(
+    String title,
+    double oldVal,
+    double newVal,
+    void Function(double) onSave,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: Text(
+            'Confirm $title Change',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: Text(
+            'Are you sure you want to change $title from ${oldVal.toInt()} to ${newVal.toInt()}?',
+            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                onSave(newVal);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _resetToRecommendations() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: const Text(
+            'Reset Custom Targets?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: const Text(
+            'This will clear all manual targets and switch you back to System Calculated Recommendations. Your custom target history will keep a log of this change.',
+            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                final prev = {
+                  'useCustomTargets': _profile.useCustomTargets,
+                  'customMaintenanceCalories': _profile.customMaintenanceCalories,
+                  'customTrainingDayCalories': _profile.customTrainingDayCalories,
+                  'customRestDayCalories': _profile.customRestDayCalories,
+                  'customProteinTarget': _profile.customProteinTarget,
+                };
+                final updated = _profile.copyWith(
+                  useCustomTargets: false,
+                  customMaintenanceCalories: null,
+                  customTrainingDayCalories: null,
+                  customRestDayCalories: null,
+                  customProteinTarget: null,
+                  targetChangeHistory: [
+                    ..._profile.targetChangeHistory,
+                    TargetChangeRecord(
+                      timestamp: DateTime.now(),
+                      sourceType: 'System Calculated',
+                      maintenanceCalories: null,
+                      trainingDayCalories: null,
+                      restDayCalories: null,
+                      proteinTarget: null,
+                      previousValues: prev,
+                    ),
+                  ],
+                );
+                _saveProfile(updated);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Reset', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _promptCustomThreshold() {
+    final ctrl = TextEditingController(text: _profile.carryForwardThreshold.toString());
+    final formKey = GlobalKey<FormState>();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: const Text(
+            'Custom Threshold',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Enter carry-forward deviation threshold (kcal). Range: 50–1,000 kcal.',
+                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: ctrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  decoration: InputDecoration(
+                    labelText: 'Threshold (kcal)',
+                    labelStyle: const TextStyle(color: Color(0xFF4B5563)),
+                    filled: true,
+                    fillColor: const Color(0xFF0F0F14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return 'Value required';
+                    final val = int.tryParse(value);
+                    if (val == null) return 'Invalid integer';
+                    if (val < 50 || val > 1000) return 'Must be within 50–1,000 kcal';
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  final val = int.parse(ctrl.text.trim());
+                  Navigator.pop(ctx);
+                  _saveProfile(_profile.copyWith(carryForwardThreshold: val));
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -59,6 +59,46 @@ enum PortionAnchor {
   };
 }
 
+class TargetChangeRecord {
+  final DateTime timestamp;
+  final String sourceType; // "System Calculated" or "Custom Targets"
+  final double? maintenanceCalories;
+  final double? trainingDayCalories;
+  final double? restDayCalories;
+  final double? proteinTarget;
+  final Map<String, dynamic>? previousValues;
+
+  const TargetChangeRecord({
+    required this.timestamp,
+    required this.sourceType,
+    this.maintenanceCalories,
+    this.trainingDayCalories,
+    this.restDayCalories,
+    this.proteinTarget,
+    this.previousValues,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'timestamp': timestamp.toIso8601String(),
+    'sourceType': sourceType,
+    if (maintenanceCalories != null) 'maintenanceCalories': maintenanceCalories,
+    if (trainingDayCalories != null) 'trainingDayCalories': trainingDayCalories,
+    if (restDayCalories != null) 'restDayCalories': restDayCalories,
+    if (proteinTarget != null) 'proteinTarget': proteinTarget,
+    if (previousValues != null) 'previousValues': previousValues,
+  };
+
+  factory TargetChangeRecord.fromJson(Map<String, dynamic> json) => TargetChangeRecord(
+    timestamp: DateTime.parse(json['timestamp'] as String),
+    sourceType: json['sourceType'] as String,
+    maintenanceCalories: (json['maintenanceCalories'] as num?)?.toDouble(),
+    trainingDayCalories: (json['trainingDayCalories'] as num?)?.toDouble(),
+    restDayCalories: (json['restDayCalories'] as num?)?.toDouble(),
+    proteinTarget: (json['proteinTarget'] as num?)?.toDouble(),
+    previousValues: json['previousValues'] as Map<String, dynamic>?,
+  );
+}
+
 class UserProfile {
   final String   name;
   final int      age;
@@ -80,6 +120,17 @@ class UserProfile {
   final bool      healthSyncEnabled;
   final DateTime? lastHealthSyncAt;
 
+  // ── Custom nutrition target & Carry-Forward customization ──────────────────
+  final bool useCustomTargets;
+  final double? customMaintenanceCalories;
+  final double? customTrainingDayCalories;
+  final double? customRestDayCalories;
+  final double? customProteinTarget;
+  final List<TargetChangeRecord> targetChangeHistory;
+
+  final bool carryForwardEnabled;
+  final int carryForwardThreshold; // defaults to 100 kcal
+
   const UserProfile({
     required this.name,
     required this.age,
@@ -93,6 +144,14 @@ class UserProfile {
     this.averageDailySteps,
     this.healthSyncEnabled = false,
     this.lastHealthSyncAt,
+    this.useCustomTargets = false,
+    this.customMaintenanceCalories,
+    this.customTrainingDayCalories,
+    this.customRestDayCalories,
+    this.customProteinTarget,
+    this.targetChangeHistory = const [],
+    this.carryForwardEnabled = false,
+    this.carryForwardThreshold = 100,
   });
 
   /// Returns a copy with health-sync fields updated.
@@ -112,6 +171,14 @@ class UserProfile {
     averageDailySteps: averageDailySteps,
     healthSyncEnabled: true,
     lastHealthSyncAt:  lastHealthSyncAt,
+    useCustomTargets:  useCustomTargets,
+    customMaintenanceCalories: customMaintenanceCalories,
+    customTrainingDayCalories: customTrainingDayCalories,
+    customRestDayCalories: customRestDayCalories,
+    customProteinTarget: customProteinTarget,
+    targetChangeHistory: targetChangeHistory,
+    carryForwardEnabled: carryForwardEnabled,
+    carryForwardThreshold: carryForwardThreshold,
   );
 
   /// Returns a copy with any overridden fields.
@@ -128,6 +195,14 @@ class UserProfile {
     int? averageDailySteps,
     bool? healthSyncEnabled,
     DateTime? lastHealthSyncAt,
+    bool? useCustomTargets,
+    double? customMaintenanceCalories,
+    double? customTrainingDayCalories,
+    double? customRestDayCalories,
+    double? customProteinTarget,
+    List<TargetChangeRecord>? targetChangeHistory,
+    bool? carryForwardEnabled,
+    int? carryForwardThreshold,
   }) => UserProfile(
     name:              name ?? this.name,
     age:               age ?? this.age,
@@ -141,6 +216,14 @@ class UserProfile {
     averageDailySteps: averageDailySteps ?? this.averageDailySteps,
     healthSyncEnabled: healthSyncEnabled ?? this.healthSyncEnabled,
     lastHealthSyncAt:  lastHealthSyncAt ?? this.lastHealthSyncAt,
+    useCustomTargets:  useCustomTargets ?? this.useCustomTargets,
+    customMaintenanceCalories: customMaintenanceCalories ?? this.customMaintenanceCalories,
+    customTrainingDayCalories: customTrainingDayCalories ?? this.customTrainingDayCalories,
+    customRestDayCalories: customRestDayCalories ?? this.customRestDayCalories,
+    customProteinTarget: customProteinTarget ?? this.customProteinTarget,
+    targetChangeHistory: targetChangeHistory ?? this.targetChangeHistory,
+    carryForwardEnabled: carryForwardEnabled ?? this.carryForwardEnabled,
+    carryForwardThreshold: carryForwardThreshold ?? this.carryForwardThreshold,
   );
 
   // ── JSON serialization ──────────────────────────────────────────────────────
@@ -158,6 +241,14 @@ class UserProfile {
     if (averageDailySteps != null) 'averageDailySteps': averageDailySteps,
     'healthSyncEnabled': healthSyncEnabled,
     if (lastHealthSyncAt != null) 'lastHealthSyncAt': lastHealthSyncAt!.toIso8601String(),
+    'useCustomTargets':  useCustomTargets,
+    if (customMaintenanceCalories != null) 'customMaintenanceCalories': customMaintenanceCalories,
+    if (customTrainingDayCalories != null) 'customTrainingDayCalories': customTrainingDayCalories,
+    if (customRestDayCalories != null) 'customRestDayCalories': customRestDayCalories,
+    if (customProteinTarget != null) 'customProteinTarget': customProteinTarget,
+    'targetChangeHistory': targetChangeHistory.map((e) => e.toJson()).toList(),
+    'carryForwardEnabled': carryForwardEnabled,
+    'carryForwardThreshold': carryForwardThreshold,
   };
 
   factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
@@ -175,6 +266,17 @@ class UserProfile {
     averageDailySteps: j['averageDailySteps'] as int?,
     healthSyncEnabled: j['healthSyncEnabled'] as bool? ?? false,
     lastHealthSyncAt:  DateTime.tryParse(j['lastHealthSyncAt'] as String? ?? ''),
+    useCustomTargets:  j['useCustomTargets'] as bool? ?? false,
+    customMaintenanceCalories: (j['customMaintenanceCalories'] as num?)?.toDouble(),
+    customTrainingDayCalories: (j['customTrainingDayCalories'] as num?)?.toDouble(),
+    customRestDayCalories: (j['customRestDayCalories'] as num?)?.toDouble(),
+    customProteinTarget: (j['customProteinTarget'] as num?)?.toDouble(),
+    targetChangeHistory: (j['targetChangeHistory'] as List<dynamic>?)
+            ?.map((e) => TargetChangeRecord.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+    carryForwardEnabled: j['carryForwardEnabled'] as bool? ?? false,
+    carryForwardThreshold: j['carryForwardThreshold'] as int? ?? 100,
   );
 
   double get bmi => weight / ((height / 100) * (height / 100));

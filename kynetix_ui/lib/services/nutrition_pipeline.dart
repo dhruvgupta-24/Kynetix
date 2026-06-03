@@ -215,13 +215,13 @@ class NutritionPipeline {
             aiUsed = true;
           } catch (e) {
             debugPrint('[Pipeline] ❌ AI failed for item "$itemStr": $e');
-            final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI failed for item');
+            final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI escalation required; AI failed for item');
             final item = _pullBestItem(localResult, parsed);
             finalItems.add(item);
             localHybridUsed = true;
           }
         } else {
-          final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'No AI key');
+          final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI escalation required; No AI key');
           final item = _pullBestItem(localResult, parsed);
           finalItems.add(item);
           localHybridUsed = true;
@@ -442,8 +442,10 @@ class NutritionPipeline {
         (match * 0.58) + (coverage * 0.42) - complexityPenalty;
 
     final lowCoverage = coverage < _minCoverageConfidence;
-    final lowMatch = match < _minMatchConfidence;
-    final lowOverall = overall < _minOverallLocalConfidence;
+    final minMatch = (coverage >= 1.0) ? 0.85 : _minMatchConfidence;
+    final lowMatch = match < minMatch;
+    final minOverall = (coverage >= 1.0) ? 0.90 : _minOverallLocalConfidence;
+    final lowOverall = overall < minOverall;
     final noItems = analysis.estimation.items.isEmpty;
     final collapseRisk = complexity.multiItem && analysis.estimation.items.length <= 1;
 

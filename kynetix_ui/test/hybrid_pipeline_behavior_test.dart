@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kynetix/services/meal_memory.dart';
 import 'package:kynetix/services/nutrition_pipeline.dart';
 import 'package:kynetix/services/personal_nutrition_memory.dart';
+import 'package:kynetix/services/ai_nutrition_service.dart';
+import 'package:kynetix/models/nutrition_result.dart';
 
 bool _escalationTriggered(String? source, String? fallbackReason) {
   return source == 'ai' ||
@@ -17,6 +19,24 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await MealMemory.instance.init();
     await PersonalNutritionMemory.instance.init();
+    
+    // Inject mock AI estimator so network/Supabase calls are bypassed in unit tests
+    AiNutritionService.instance.mockEstimate = (rawInput, {context}) async {
+      return NutritionResult(
+        canonicalMeal: rawInput,
+        items: const [],
+        calories: const NutrientRange(min: 300, max: 400),
+        protein: const NutrientRange(min: 10, max: 20),
+        confidence: 0.95,
+        warnings: const [],
+        source: 'ai',
+        createdAt: DateTime.now(),
+      );
+    };
+  });
+
+  tearDownAll(() {
+    AiNutritionService.instance.mockEstimate = null;
   });
 
   test('1) 1 scoop whey stays fast and local', () async {

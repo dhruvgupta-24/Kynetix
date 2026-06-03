@@ -256,6 +256,9 @@ class DayLog {
   /// Gym status for this day — mutable, set from DayDetailScreen.
   GymDay? gymDay;
 
+  /// Calorie carry-forward adjustment applied to this day (optional).
+  double? carryForwardAdjustment;
+
   List<MealEntry> entriesFor(MealSection section) =>
       List.unmodifiable(_sections[section]!);
 
@@ -293,6 +296,7 @@ class DayLog {
 
   Map<String, dynamic> toJson() => {
     if (gymDay != null) 'gymDay': gymDay!.toJson(),
+    if (carryForwardAdjustment != null) 'carryForwardAdjustment': carryForwardAdjustment,
     'sections': {
       for (final s in MealSection.values)
         s.name: _sections[s]!.map((e) => e.toJson()).toList(),
@@ -303,6 +307,9 @@ class DayLog {
     final log = DayLog();
     if (j['gymDay'] is Map<String, dynamic>) {
       log.gymDay = GymDay.fromJson(j['gymDay'] as Map<String, dynamic>);
+    }
+    if (j['carryForwardAdjustment'] != null) {
+      log.carryForwardAdjustment = (j['carryForwardAdjustment'] as num).toDouble();
     }
     final sections = j['sections'] as Map<String, dynamic>? ?? {};
     for (final s in MealSection.values) {

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:async' show Timer;
+import 'dart:convert';
 import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/day_detail_screen.dart';
 import '../screens/profile_screen.dart';
 import '../models/day_log.dart';
+import '../models/carry_forward_record.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
@@ -12,6 +14,7 @@ import '../services/widget_service.dart';
 import '../services/workout_service.dart';
 import '../screens/app_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +50,178 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _syncing = true;
     }
     _initHealth();
+    
+    // Check for calorie carry-forward adjustments on next day's launch
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkCalorieCarryForward();
+    });
+  }
+
+  Future<void> _checkCalorieCarryForward() async {
+    final profile = currentUserProfile;
+    if (profile == null || !profile.carryForwardEnabled) return;
+
+    final today = DateTime.now();
+    final todayKey = dateKey(today);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final yesterdayKey = dateKey(yesterday);
+
+    final prefs = await SharedPreferences.getInstance();
+    final resolvedListRaw = prefs.getStringList('carry_forward_resolved_dates_v1') ?? [];
+    if (resolvedListRaw.contains(yesterdayKey)) {
+      debugPrint('[CarryForward] Yesterday $yesterdayKey already resolved');
+      return;
+    }
+
+    final yesterdayLog = logFor(yesterday);
+    final yesterdayConsumed = yesterdayLog.totalCaloriesMid;
+    if (yesterdayConsumed == 0) {
+      debugPrint('[CarryForward] Yesterday had 0 logged calories, skipping');
+      return;
+    }
+
+    final ws = WorkoutService.instance;
+    final yesterdaySession = ws.sessionFor(yesterday);
+    final yesterdaySplit = ws.splitDayFor(yesterday);
+    final yesterdayGymDay = yesterdayLog.gymDay;
+
+    final bool isGymDay;
+    if (yesterdayGymDay != null) {
+      isGymDay = yesterdayGymDay.didGym || (yesterdaySession?.isEmpty == false);
+    } else {
+      final splitIsTraining = yesterdaySplit != null && !yesterdaySplit.isRestDay;
+      isGymDay = splitIsTraining || (yesterdaySession?.isEmpty == false);
+    }
+
+    final String? workoutTypeName;
+    if (yesterdaySession != null && !yesterdaySession.isEmpty && yesterdaySession.splitDayName.isNotEmpty) {
+      workoutTypeName = yesterdaySession.splitDayName;
+    } else if (yesterdayGymDay != null && yesterdayGymDay.workoutType != null) {
+      workoutTypeName = yesterdayGymDay.workoutType!.displayName;
+    } else if (yesterdayGymDay != null && yesterdayGymDay.splitDayName != null) {
+      workoutTypeName = yesterdayGymDay.splitDayName;
+    } else if (yesterdaySplit != null && !yesterdaySplit.isRestDay) {
+      workoutTypeName = yesterdaySplit.name;
+    } else {
+      workoutTypeName = null;
+    }
+
+    final targetDay = NutritionTargetEngine().dayTarget(
+      profile,
+      isGymDay: isGymDay,
+      health: _syncResult,
+      session: yesterdaySession,
+      workoutTypeName: workoutTypeName,
+      targetCaloriesOverride: yesterdayGymDay?.targetCaloriesOverride,
+      carryForwardAdjustment: yesterdayLog.carryForwardAdjustment,
+    );
+
+    final yesterdayTarget = targetDay.calories;
+    final diff = yesterdayConsumed - yesterdayTarget;
+    final absDiff = diff.abs();
+
+    final threshold = profile.carryForwardThreshold;
+    if (absDiff < threshold) {
+      debugPrint('[CarryForward] Deviation $absDiff < threshold $threshold, skipping');
+      return;
+    }
+
+    // adjustment amount = -diff, capped at ±500
+    final rawAdjustment = -diff;
+    final adjustmentAmount = rawAdjustment.clamp(-500.0, 500.0);
+
+    if (!mounted) return;
+
+    final directionWord = diff > 0 ? 'above' : 'below';
+    final absDiffInt = absDiff.round();
+    final adjWord = adjustmentAmount > 0 ? 'increase' : 'decrease';
+    final absAdjInt = adjustmentAmount.abs().round();
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E3E)),
+          ),
+          title: Row(
+            children: const [
+              Icon(Icons.cached_rounded, color: Color(0xFF52B788)),
+              SizedBox(width: 8),
+              Text(
+                'Calorie Carry-Forward',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Text(
+            'Yesterday you ate $absDiffInt kcal $directionWord your target.\n\n'
+            'Would you like to $adjWord today\'s target by $absAdjInt kcal to account for this?',
+            style: const TextStyle(color: Color(0xFF9CA3AF), height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                resolvedListRaw.add(yesterdayKey);
+                await prefs.setStringList('carry_forward_resolved_dates_v1', resolvedListRaw);
+
+                final historyRaw = prefs.getStringList('carry_forward_history_v1') ?? [];
+                final record = CarryForwardRecord(
+                  date: todayKey,
+                  yesterdayDate: yesterdayKey,
+                  yesterdayTarget: yesterdayTarget,
+                  yesterdayConsumed: yesterdayConsumed,
+                  difference: diff,
+                  adjustmentAmount: adjustmentAmount,
+                  accepted: false,
+                );
+                historyRaw.add(jsonEncode(record.toJson()));
+                await prefs.setStringList('carry_forward_history_v1', historyRaw);
+              },
+              child: const Text('Ignore', style: TextStyle(color: Color(0xFF9CA3AF))),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                resolvedListRaw.add(yesterdayKey);
+                await prefs.setStringList('carry_forward_resolved_dates_v1', resolvedListRaw);
+
+                final historyRaw = prefs.getStringList('carry_forward_history_v1') ?? [];
+                final record = CarryForwardRecord(
+                  date: todayKey,
+                  yesterdayDate: yesterdayKey,
+                  yesterdayTarget: yesterdayTarget,
+                  yesterdayConsumed: yesterdayConsumed,
+                  difference: diff,
+                  adjustmentAmount: adjustmentAmount,
+                  accepted: true,
+                );
+                historyRaw.add(jsonEncode(record.toJson()));
+                await prefs.setStringList('carry_forward_history_v1', historyRaw);
+
+                final todayLog = logFor(today);
+                todayLog.carryForwardAdjustment = adjustmentAmount;
+                await PersistenceService.saveDayLogs();
+
+                if (mounted) {
+                  setState(() {});
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF52B788),
+                foregroundColor: const Color(0xFF0F0F14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Adjust Today', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _initHealth() async {
@@ -173,6 +348,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       session:                session,
       workoutTypeName:        workoutTypeName,
       targetCaloriesOverride: gymDay?.targetCaloriesOverride,
+      carryForwardAdjustment: log.carryForwardAdjustment,
     );
   }
 

@@ -460,6 +460,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       session:         session,
       workoutTypeName: workoutTypeName,
       targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
+      carryForwardAdjustment: _log.carryForwardAdjustment,
     );
   }
 

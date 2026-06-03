@@ -31,6 +31,9 @@ class AiNutritionService {
   AiNutritionService._();
   static final AiNutritionService instance = AiNutritionService._();
 
+  // Test delegate to override the AI estimation behavior during tests.
+  Future<NutritionResult> Function(String, {AiEscalationContext? context})? mockEstimate;
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   /// Always configured — routing handled by backend ai-chat-router.
@@ -46,6 +49,9 @@ class AiNutritionService {
     String rawInput, {
     AiEscalationContext? context,
   }) async {
+    if (mockEstimate != null) {
+      return mockEstimate!(rawInput, context: context);
+    }
     debugPrint('[AI] estimating: "$rawInput"');
 
     // ── Route through backend ai-chat-router ─────────────────────────────────
