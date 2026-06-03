@@ -1657,7 +1657,7 @@ class _EntryTile extends StatelessWidget {
                                     : const Color(0xFFEF4444)),
                           ),
                         ],
-                        if (entry.edited) ...[
+                        if (entry.edited || entry.result.macrosLockedByUser) ...[
                           const SizedBox(width: 6),
                           const _MacroBadge('Edited', Color(0xFF60A5FA)),
                         ],
@@ -1740,6 +1740,36 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                           color: Color(0xFF6B7280),
                         ),
                       ),
+                      // ── Edited macros indicator ─────────────────────────────
+                      if (entry.result.macrosLockedByUser) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF60A5FA).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: const Color(0xFF60A5FA).withValues(alpha: 0.4),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.lock_rounded, size: 9, color: Color(0xFF60A5FA)),
+                              SizedBox(width: 4),
+                              Text(
+                                'Manually Edited — values are source of truth',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF60A5FA),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1843,15 +1873,17 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
             ),
             const SizedBox(height: 10),
             Builder(builder: (c) {
+              final locked = entry.result.macrosLockedByUser;
               final cards = <Widget>[
-                _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), const Color(0xFFFF6B35)),
-                _buildGridMacroCell('Protein', _macroLabel(entry.result.protein.min, entry.result.protein.max, 'g'), const Color(0xFF52B788)),
-                if (carbs != null && (carbs.max > 0 || carbs.min > 0))
-                  _buildGridMacroCell('Carbs', _macroLabel(carbs.min, carbs.max, 'g'), const Color(0xFF60A5FA)),
-                if (fat != null && (fat.max > 0 || fat.min > 0))
-                  _buildGridMacroCell('Fat', _macroLabel(fat.min, fat.max, 'g'), const Color(0xFFFBBF24)),
-                if (fiber != null && (fiber.max > 0 || fiber.min > 0))
-                  _buildGridMacroCell('Fiber', _macroLabel(fiber.min, fiber.max, 'g'), const Color(0xFFA78BFA)),
+                _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), const Color(0xFFFF6B35), locked: locked),
+                _buildGridMacroCell('Protein',  _macroLabel(entry.result.protein.min,  entry.result.protein.max,  'g'),    const Color(0xFF52B788), locked: locked),
+                // When macros are locked always show carbs/fat/fiber, even if 0.
+                if (locked || (carbs != null && (carbs.max > 0 || carbs.min > 0)))
+                  _buildGridMacroCell('Carbs', _macroLabel(carbs?.min ?? 0, carbs?.max ?? 0, 'g'), const Color(0xFF60A5FA), locked: locked),
+                if (locked || (fat != null && (fat.max > 0 || fat.min > 0)))
+                  _buildGridMacroCell('Fat', _macroLabel(fat?.min ?? 0, fat?.max ?? 0, 'g'), const Color(0xFFFBBF24), locked: locked),
+                if (locked || (fiber != null && (fiber.max > 0 || fiber.min > 0)))
+                  _buildGridMacroCell('Fiber', _macroLabel(fiber?.min ?? 0, fiber?.max ?? 0, 'g'), const Color(0xFFA78BFA), locked: locked),
                 if (sugar != null && (sugar.max > 0 || sugar.min > 0))
                   _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), const Color(0xFFF472B6)),
                 if (satFat != null && (satFat.max > 0 || satFat.min > 0))
@@ -1942,25 +1974,38 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
   );
 }
 
-Widget _buildGridMacroCell(String name, String value, Color color) {
+Widget _buildGridMacroCell(String name, String value, Color color, {bool locked = false}) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
     decoration: BoxDecoration(
       color: const Color(0xFF1E1E2C),
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+      border: Border.all(
+        color: locked
+            ? color.withValues(alpha: 0.35)
+            : const Color(0xFF2E2E3E),
+        width: locked ? 1.0 : 0.5,
+      ),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          name,
-          style: TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w600,
-            color: color.withValues(alpha: 0.85),
-          ),
+        Row(
+          children: [
+            Text(
+              name,
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                color: color.withValues(alpha: 0.85),
+              ),
+            ),
+            if (locked) ...[
+              const SizedBox(width: 3),
+              Icon(Icons.lock_rounded, size: 7, color: color.withValues(alpha: 0.6)),
+            ],
+          ],
         ),
         const SizedBox(height: 2),
         Text(

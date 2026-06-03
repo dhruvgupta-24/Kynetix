@@ -16,7 +16,10 @@ class _FixValues {
   final List<NutritionItem> items;
   final double cal;
   final double pro;
-  _FixValues(this.items, this.cal, this.pro);
+  final double carbs;
+  final double fat;
+  final double fiber;
+  _FixValues(this.items, this.cal, this.pro, this.carbs, this.fat, this.fiber);
 }
 
 class AddMealScreen extends StatefulWidget {
@@ -95,6 +98,35 @@ class _AddMealScreenState extends State<AddMealScreen>
   Future<void> _calculate() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _loading) return;
+
+    // Never overwrite a manually-locked result via AI re-estimation.
+    // The user must explicitly tap "Fix Estimate" to change macros.
+    if (_result != null && _result!.macrosLockedByUser) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.lock_rounded, color: Color(0xFF60A5FA), size: 14),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Macros are manually edited. Tap "Fix Estimate" to update them.',
+                    style: TextStyle(fontSize: 12.5),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF1E1E2C),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+      return;
+    }
+
     _focusNode.unfocus();
     HapticFeedback.lightImpact();
     setState(() { _loading = true; _result = null; _error = null; });
@@ -109,6 +141,13 @@ class _AddMealScreenState extends State<AddMealScreen>
   Future<void> _fixEstimate() async {
     if (_result == null) return;
     
+    // Pre-populate initial values from current result
+    final initCal  = _result!.primaryCaloriesEstimate;
+    final initPro  = _result!.primaryProteinEstimate;
+    final initCarbs = ((_result!.carbohydrates?.min ?? 0) + (_result!.carbohydrates?.max ?? 0)) / 2;
+    final initFat  = ((_result!.fat?.min ?? 0) + (_result!.fat?.max ?? 0)) / 2;
+    final initFiber = ((_result!.fiber?.min ?? 0) + (_result!.fiber?.max ?? 0)) / 2;
+
     final vals = await showModalBottomSheet<_FixValues>(
       context: context,
       isScrollControlled: true,
@@ -116,8 +155,11 @@ class _AddMealScreenState extends State<AddMealScreen>
       builder: (_) => _FixEstimateSheet(
         items: _result!.items,
         canonicalMeal: _result!.canonicalMeal,
-        initialCal: _result!.primaryCaloriesEstimate,
-        initialPro: _result!.primaryProteinEstimate,
+        initialCal: initCal,
+        initialPro: initPro,
+        initialCarbs: initCarbs > 0 ? initCarbs : null,
+        initialFat:   initFat  > 0 ? initFat   : null,
+        initialFiber: initFiber > 0 ? initFiber : null,
       ),
     );
     if (!mounted || vals == null) return;
@@ -134,16 +176,14 @@ class _AddMealScreenState extends State<AddMealScreen>
 
     if (saveMode == _SaveMode.recurring) {
       if (vals.items.length <= 1) {
-        // Single-item fix: save per-unit-1 values so the pipeline can scale
-        // correctly. If item has explicit quantity (e.g. 150g tofu = 80 kcal),
-        // we store 80/150 kcal per unit so a later 300g tofu lookup gets 160 kcal.
         final item = vals.items.isEmpty ? null : vals.items.first;
         final qty = (item?.quantity ?? 1.0).clamp(1.0, double.infinity);
-        final calPerUnit  = vals.cal / qty;
-        final proPerUnit  = vals.pro / qty;
-        final carbPerUnit = ((item?.carbohydrates?.min ?? 0) + (item?.carbohydrates?.max ?? 0)) / 2 / qty;
-        final fatPerUnit  = ((item?.fat?.min ?? 0) + (item?.fat?.max ?? 0)) / 2 / qty;
-        final fibPerUnit  = ((item?.fiber?.min ?? 0) + (item?.fiber?.max ?? 0)) / 2 / qty;
+        // Use the user's exact values per unit — never ratio-scale.
+        final calPerUnit  = vals.cal   / qty;
+        final proPerUnit  = vals.pro   / qty;
+        final carbPerUnit = vals.carbs / qty;
+        final fatPerUnit  = vals.fat   / qty;
+        final fibPerUnit  = vals.fiber / qty;
         await UserNutritionMemory.instance.saveOverride(
           item?.name ?? mealName,
           calPerUnit,
@@ -155,19 +195,23 @@ class _AddMealScreenState extends State<AddMealScreen>
           referenceUnit: item?.unit ?? 'serving',
         );
       } else {
-        // Multi-item: save each atomic item at its own per-unit-1 rate.
+        // Multi-item: distribute corrections proportionally by item calorie share.
+        final totalCalFromItems = vals.items.fold<double>(0, (s, it) => s + it.calories.max);
         for (final item in vals.items) {
           final qty = item.quantity.clamp(1.0, double.infinity);
-          final carbPerUnit = ((item.carbohydrates?.min ?? 0) + (item.carbohydrates?.max ?? 0)) / 2 / qty;
-          final fatPerUnit  = ((item.fat?.min ?? 0) + (item.fat?.max ?? 0)) / 2 / qty;
-          final fibPerUnit  = ((item.fiber?.min ?? 0) + (item.fiber?.max ?? 0)) / 2 / qty;
+          final share = totalCalFromItems > 0 ? item.calories.max / totalCalFromItems : 1.0 / vals.items.length;
+          final itemCal  = vals.cal   * share;
+          final itemPro  = vals.pro   * share;
+          final itemCarb = vals.carbs * share;
+          final itemFat  = vals.fat   * share;
+          final itemFib  = vals.fiber * share;
           await UserNutritionMemory.instance.saveOverride(
             item.name,
-            item.calories.max / qty,
-            item.protein.max / qty,
-            carbohydratesPerUnit: carbPerUnit,
-            fatPerUnit: fatPerUnit,
-            fiberPerUnit: fibPerUnit,
+            itemCal  / qty,
+            itemPro  / qty,
+            carbohydratesPerUnit: itemCarb / qty,
+            fatPerUnit:  itemFat / qty,
+            fiberPerUnit: itemFib / qty,
             referenceQuantity: qty,
             referenceUnit: item.unit,
           );
@@ -175,42 +219,49 @@ class _AddMealScreenState extends State<AddMealScreen>
       }
     }
 
-    double carbMin = 0, carbMax = 0;
-    double fatMin = 0, fatMax = 0;
-    double fiberMin = 0, fiberMax = 0;
-    double sugarMin = 0, sugarMax = 0;
-    double satMin = 0, satMax = 0;
-    double sodMin = 0, sodMax = 0;
-
-    for (final item in vals.items) {
-      carbMin += item.carbohydrates?.min ?? 0;
-      carbMax += item.carbohydrates?.max ?? 0;
-      fatMin += item.fat?.min ?? 0;
-      fatMax += item.fat?.max ?? 0;
-      fiberMin += item.fiber?.min ?? 0;
-      fiberMax += item.fiber?.max ?? 0;
-      sugarMin += item.sugar?.min ?? 0;
-      sugarMax += item.sugar?.max ?? 0;
-      satMin += item.saturatedFat?.min ?? 0;
-      satMax += item.saturatedFat?.max ?? 0;
-      sodMin += item.sodium?.min ?? 0;
-      sodMax += item.sodium?.max ?? 0;
-    }
+    // Build updated items with user's exact values (no ratio re-scaling).
+    final updatedItems = vals.items.isEmpty
+        ? <NutritionItem>[]
+        : vals.items.map((item) {
+            final totalCalFromItems = vals.items.fold<double>(0, (s, it) => s + it.calories.max);
+            final share = totalCalFromItems > 0 ? item.calories.max / totalCalFromItems : 1.0 / vals.items.length;
+            final iCal   = vals.cal   * share;
+            final iPro   = vals.pro   * share;
+            final iCarb  = vals.carbs * share;
+            final iFat   = vals.fat   * share;
+            final iFib   = vals.fiber * share;
+            return NutritionItem(
+              name: item.name,
+              quantity: item.quantity,
+              unit: item.unit,
+              estimated: true,
+              mode: item.mode,
+              calories: NutrientRange(min: iCal,  max: iCal),
+              protein:  NutrientRange(min: iPro,  max: iPro),
+              carbohydrates: NutrientRange(min: iCarb, max: iCarb),
+              fat:   NutrientRange(min: iFat,  max: iFat),
+              fiber: NutrientRange(min: iFib,  max: iFib),
+              sugar: item.sugar,
+              saturatedFat: item.saturatedFat,
+              sodium: item.sodium,
+            );
+          }).toList();
 
     final score = NutritionResult.calculateLocalQualityScore(vals.cal, vals.pro, mealName);
 
     setState(() {
       _result = NutritionResult(
         canonicalMeal: mealName,
-        items: vals.items,
-        calories: NutrientRange(min: vals.cal, max: vals.cal),
-        protein: NutrientRange(min: vals.pro, max: vals.pro),
-        carbohydrates: NutrientRange(min: carbMin, max: carbMax),
-        fat: NutrientRange(min: fatMin, max: fatMax),
-        fiber: NutrientRange(min: fiberMin, max: fiberMax),
-        sugar: sugarMin > 0 || sugarMax > 0 ? NutrientRange(min: sugarMin, max: sugarMax) : null,
-        saturatedFat: satMin > 0 || satMax > 0 ? NutrientRange(min: satMin, max: satMax) : null,
-        sodium: sodMin > 0 || sodMax > 0 ? NutrientRange(min: sodMin, max: sodMax) : null,
+        items: updatedItems,
+        calories: NutrientRange(min: vals.cal,   max: vals.cal),
+        protein:  NutrientRange(min: vals.pro,   max: vals.pro),
+        carbohydrates: NutrientRange(min: vals.carbs, max: vals.carbs),
+        fat:   NutrientRange(min: vals.fat,   max: vals.fat),
+        fiber: NutrientRange(min: vals.fiber, max: vals.fiber),
+        // Preserve sugar / sat-fat / sodium from original if available.
+        sugar: _result?.sugar,
+        saturatedFat: _result?.saturatedFat,
+        sodium: _result?.sodium,
         mealQualityScore: score,
         mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
         mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
@@ -219,6 +270,8 @@ class _AddMealScreenState extends State<AddMealScreen>
         warnings: const [],
         source: 'user_override',
         createdAt: DateTime.now(),
+        // Lock so AI / pipeline never overwrites these values.
+        macrosLockedByUser: true,
       );
     });
   }
@@ -227,6 +280,8 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (_result == null || _result!.calories.max == 0) return;
     HapticFeedback.mediumImpact();
     final parsedFoods = _result!.items.map((i) => i.name).toList(growable: false);
+    // edited=true when: (a) re-editing an existing entry, OR (b) user fixed macros on this new entry.
+    final isEdited = widget.initialEntry != null || (_result?.macrosLockedByUser ?? false);
     final entry = MealEntry(
       rawInput: widget.initialEntry?.rawInput ?? _controller.text.trim(),
       result:   _result!,
@@ -234,7 +289,7 @@ class _AddMealScreenState extends State<AddMealScreen>
       section: widget.section,
       dayOfWeek: widget.date.weekday,
       parsedFoods: parsedFoods,
-      edited: widget.initialEntry != null,
+      edited: isEdited,
       editCount: (widget.initialEntry?.editCount ?? 0) + (widget.initialEntry != null ? 1 : 0),
       finalSavedInput: _controller.text.trim(),
     );
@@ -940,12 +995,18 @@ class _FixEstimateSheet extends StatefulWidget {
   final String canonicalMeal;
   final double initialCal;
   final double initialPro;
+  final double? initialCarbs;
+  final double? initialFat;
+  final double? initialFiber;
 
   const _FixEstimateSheet({
     required this.items,
     required this.canonicalMeal,
     required this.initialCal,
     required this.initialPro,
+    this.initialCarbs,
+    this.initialFat,
+    this.initialFiber,
   });
 
   @override
@@ -954,8 +1015,12 @@ class _FixEstimateSheet extends StatefulWidget {
 
 class _FixEstimateSheetState extends State<_FixEstimateSheet> {
   late final List<NutritionItem> _displayItems;
-  final List<TextEditingController> _calCtrls = [];
-  final List<TextEditingController> _proCtrls = [];
+  final List<TextEditingController> _calCtrls   = [];
+  final List<TextEditingController> _proCtrls   = [];
+  final List<TextEditingController> _carbCtrls  = [];
+  final List<TextEditingController> _fatCtrls   = [];
+  final List<TextEditingController> _fibCtrls   = [];
+  String? _validationWarning;
 
   @override
   void initState() {
@@ -969,72 +1034,113 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
           estimated: true,
           mode: EstimationMode.contextualIntake,
           calories: NutrientRange(min: widget.initialCal, max: widget.initialCal),
-          protein: NutrientRange(min: widget.initialPro, max: widget.initialPro),
+          protein:  NutrientRange(min: widget.initialPro, max: widget.initialPro),
         )
       ];
     } else {
       _displayItems = List.from(widget.items);
     }
-    
-    for (final item in _displayItems) {
-      final calMid = (item.calories.min + item.calories.max) / 2;
-      final proMid = (item.protein.min + item.protein.max) / 2;
-      _calCtrls.add(TextEditingController(text: calMid.toInt().toString()));
-      _proCtrls.add(TextEditingController(text: proMid.toInt().toString()));
+
+    // Distribute initial totals proportionally across items if multi-item.
+    final totalCalFromItems = _displayItems.fold<double>(0, (s, it) => s + (it.calories.min + it.calories.max) / 2);
+
+    for (int i = 0; i < _displayItems.length; i++) {
+      final item = _displayItems[i];
+      final calMid  = (item.calories.min + item.calories.max) / 2;
+      final proMid  = (item.protein.min  + item.protein.max)  / 2;
+      final carbMid = (item.carbohydrates != null)
+          ? (item.carbohydrates!.min + item.carbohydrates!.max) / 2
+          : (widget.initialCarbs != null
+              ? widget.initialCarbs! * (totalCalFromItems > 0 ? calMid / totalCalFromItems : 1)
+              : NutritionResult.estimateCarbsLocally(calMid, proMid, item.name).min);
+      final fatMid  = (item.fat != null)
+          ? (item.fat!.min + item.fat!.max) / 2
+          : (widget.initialFat != null
+              ? widget.initialFat! * (totalCalFromItems > 0 ? calMid / totalCalFromItems : 1)
+              : NutritionResult.estimateFatLocally(calMid, proMid, item.name).min);
+      final fibMid  = (item.fiber != null)
+          ? (item.fiber!.min + item.fiber!.max) / 2
+          : (widget.initialFiber != null
+              ? widget.initialFiber! * (totalCalFromItems > 0 ? calMid / totalCalFromItems : 1)
+              : NutritionResult.estimateFiberLocally(calMid, item.name).min);
+
+      _calCtrls.add(TextEditingController(text: calMid.toStringAsFixed(0)));
+      _proCtrls.add(TextEditingController(text: proMid.toStringAsFixed(1)));
+      _carbCtrls.add(TextEditingController(text: carbMid.toStringAsFixed(1)));
+      _fatCtrls.add(TextEditingController(text: fatMid.toStringAsFixed(1)));
+      _fibCtrls.add(TextEditingController(text: fibMid.toStringAsFixed(1)));
+    }
+
+    // Listen to any field change to re-validate.
+    for (final ctrl in [..._calCtrls, ..._proCtrls, ..._carbCtrls, ..._fatCtrls, ..._fibCtrls]) {
+      ctrl.addListener(_validate);
     }
   }
 
   @override
   void dispose() {
-    for (final c in _calCtrls) {
-      c.dispose();
-    }
-    for (final c in _proCtrls) {
+    for (final c in [..._calCtrls, ..._proCtrls, ..._carbCtrls, ..._fatCtrls, ..._fibCtrls]) {
       c.dispose();
     }
     super.dispose();
   }
 
+  /// Warns when macro-derived calories diverge from entered calories by > 15%.
+  void _validate() {
+    double totalCal = 0, totalPro = 0, totalCarb = 0, totalFat = 0;
+    for (int i = 0; i < _displayItems.length; i++) {
+      totalCal  += double.tryParse(_calCtrls[i].text)  ?? 0;
+      totalPro  += double.tryParse(_proCtrls[i].text)  ?? 0;
+      totalCarb += double.tryParse(_carbCtrls[i].text) ?? 0;
+      totalFat  += double.tryParse(_fatCtrls[i].text)  ?? 0;
+    }
+    final impliedCal = totalPro * 4 + totalCarb * 4 + totalFat * 9;
+    String? warning;
+    if (totalCal > 0 && impliedCal > 0) {
+      final deviation = ((impliedCal - totalCal) / totalCal).abs();
+      if (deviation > 0.15) {
+        warning = 'Macro totals imply ~${impliedCal.toStringAsFixed(0)} kcal but '
+            'you entered ${totalCal.toStringAsFixed(0)} kcal. '
+            'Check your values — protein×4 + carbs×4 + fat×9 should equal calories.';
+      }
+    }
+    if (warning != _validationWarning) setState(() => _validationWarning = warning);
+  }
+
   void _submit() {
-    double totalCal = 0;
-    double totalPro = 0;
+    double totalCal = 0, totalPro = 0, totalCarb = 0, totalFat = 0, totalFib = 0;
     final updatedItems = <NutritionItem>[];
-    
+
     for (int i = 0; i < _displayItems.length; i++) {
       final item = _displayItems[i];
-      final calMid = (item.calories.min + item.calories.max) / 2;
-      final proMid = (item.protein.min + item.protein.max) / 2;
-      
-      final cVal = double.tryParse(_calCtrls[i].text) ?? calMid;
-      final pVal = double.tryParse(_proCtrls[i].text) ?? proMid;
-      
-      totalCal += cVal;
-      totalPro += pVal;
-      
-      final double scale = calMid > 0 ? (cVal / calMid) : 1.0;
-      
-      final carbs = item.carbohydrates != null
-          ? NutrientRange(min: double.parse((item.carbohydrates!.min * scale).toStringAsFixed(1)), max: double.parse((item.carbohydrates!.max * scale).toStringAsFixed(1)))
-          : NutritionResult.estimateCarbsLocally(cVal, pVal, item.name);
+      final calMid  = (item.calories.min + item.calories.max) / 2;
 
-      final fat = item.fat != null
-          ? NutrientRange(min: double.parse((item.fat!.min * scale).toStringAsFixed(1)), max: double.parse((item.fat!.max * scale).toStringAsFixed(1)))
-          : NutritionResult.estimateFatLocally(cVal, pVal, item.name);
+      // Use user-entered values exactly — no ratio scaling.
+      final cVal  = double.tryParse(_calCtrls[i].text)  ?? calMid;
+      final pVal  = double.tryParse(_proCtrls[i].text)  ?? ((item.protein.min + item.protein.max) / 2);
+      final carbVal = double.tryParse(_carbCtrls[i].text) ?? 0;
+      final fatVal  = double.tryParse(_fatCtrls[i].text)  ?? 0;
+      final fibVal  = double.tryParse(_fibCtrls[i].text)  ?? 0;
 
-      final fiber = item.fiber != null
-          ? NutrientRange(min: double.parse((item.fiber!.min * scale).toStringAsFixed(1)), max: double.parse((item.fiber!.max * scale).toStringAsFixed(1)))
-          : NutritionResult.estimateFiberLocally(cVal, item.name);
+      totalCal  += cVal;
+      totalPro  += pVal;
+      totalCarb += carbVal;
+      totalFat  += fatVal;
+      totalFib  += fibVal;
 
+      // Preserve sugar / sat-fat / sodium via proportional scale on original cal.
+      final scale = calMid > 0 ? cVal / calMid : 1.0;
       final sugar = item.sugar != null
-          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)), max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
           : null;
-
       final saturatedFat = item.saturatedFat != null
-          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)), max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
           : null;
-
       final sodium = item.sodium != null
-          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)), max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
           : null;
 
       updatedItems.add(NutritionItem(
@@ -1043,17 +1149,59 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
         unit: item.unit,
         estimated: true,
         mode: item.mode,
-        calories: NutrientRange(min: cVal, max: cVal),
-        protein: NutrientRange(min: pVal, max: pVal),
-        carbohydrates: carbs,
-        fat: fat,
-        fiber: fiber,
+        calories: NutrientRange(min: cVal,    max: cVal),
+        protein:  NutrientRange(min: pVal,    max: pVal),
+        carbohydrates: NutrientRange(min: carbVal, max: carbVal),
+        fat:   NutrientRange(min: fatVal,  max: fatVal),
+        fiber: NutrientRange(min: fibVal,  max: fibVal),
         sugar: sugar,
         saturatedFat: saturatedFat,
         sodium: sodium,
       ));
     }
-    Navigator.of(context).pop(_FixValues(updatedItems, totalCal, totalPro));
+    Navigator.of(context).pop(
+        _FixValues(updatedItems, totalCal, totalPro, totalCarb, totalFat, totalFib));
+  }
+
+  Widget _buildField(String label, TextEditingController ctrl, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.85),
+          ),
+        ),
+        const SizedBox(height: 5),
+        TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF1E1E2C),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            isDense: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: color.withValues(alpha: 0.25)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: color, width: 1.5),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -1067,15 +1215,51 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Header ──────────────────────────────────────────────
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Correct Macros',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF60A5FA).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF60A5FA).withValues(alpha: 0.4)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock_rounded, size: 10, color: Color(0xFF60A5FA)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Becomes source of truth',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF60A5FA),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
               const Text(
-                'Adjust Estimate',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
+                'All five fields are editable. Values you enter will never be overwritten by AI.',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280), height: 1.4),
               ),
               const SizedBox(height: 20),
+              // ── Per-item fields ─────────────────────────────────────
               ...List.generate(_displayItems.length, (i) {
                 final item = _displayItems[i];
                 return Padding(
@@ -1083,81 +1267,90 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.name,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFD1D5DB),
+                      if (_displayItems.length > 1) ...[
+                        Text(
+                          item.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFD1D5DB),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 10),
+                      ],
+                      // Row 1: Calories + Protein
                       Row(
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Calories (kcal)',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
-                                ),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: _calCtrls[i],
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    filled: true,
-                                    fillColor: const Color(0xFF1E1E2C),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                    isDense: true,
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Protein (g)',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
-                                ),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: _proCtrls[i],
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    filled: true,
-                                    fillColor: const Color(0xFF1E1E2C),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                    isDense: true,
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                          Expanded(child: _buildField('Calories (kcal)', _calCtrls[i], const Color(0xFFFF6B35))),
+                          const SizedBox(width: 10),
+                          Expanded(child: _buildField('Protein (g)', _proCtrls[i], const Color(0xFF52B788))),
                         ],
+                      ),
+                      const SizedBox(height: 10),
+                      // Row 2: Carbs + Fat
+                      Row(
+                        children: [
+                          Expanded(child: _buildField('Carbs (g)', _carbCtrls[i], const Color(0xFF60A5FA))),
+                          const SizedBox(width: 10),
+                          Expanded(child: _buildField('Fat (g)', _fatCtrls[i], const Color(0xFFFBBF24))),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // Row 3: Fiber (half-width)
+                      SizedBox(
+                        width: (MediaQuery.of(context).size.width - 50) / 2,
+                        child: _buildField('Fiber (g)', _fibCtrls[i], const Color(0xFFA78BFA)),
                       ),
                     ],
                   ),
                 );
               }),
+              // ── Validation warning ──────────────────────────────────
+              if (_validationWarning != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFB347).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: Color(0xFFFFB347), size: 14),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _validationWarning!,
+                          style: const TextStyle(
+                              fontSize: 11.5,
+                              color: Color(0xFFFFB347),
+                              height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              // ── Apply button ────────────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _submit,
-                  child: const Text('Apply'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Apply Corrections',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
                 ),
               ),
             ],

@@ -167,11 +167,15 @@ class NutritionResult {
   final String?             mealCategory;
   final String?             mealDensity;
   final List<String>        riskFlags;
-  /// 'ai', 'cache', or 'local_fallback'
+  /// 'ai', 'cache', 'local_fallback', or 'user_override'
   final String              source;
   final DateTime            createdAt;
   /// Only set when source == 'local_fallback'. Explains why Gemini was skipped.
   final String?             fallbackReason;
+
+  /// When true the user has manually edited one or more macros.
+  /// The pipeline MUST NOT overwrite any macro on a locked result.
+  final bool                macrosLockedByUser;
 
   const NutritionResult({
     required this.canonicalMeal,
@@ -198,11 +202,14 @@ class NutritionResult {
     this.mealQualityExplanation,
     this.mealQualityPositive,
     this.mealQualityImprovement,
+    this.macrosLockedByUser = false,
   });
 
   NutritionResult copyWith({
     String? source,
     String? fallbackReason,
+    NutrientRange? calories,
+    NutrientRange? protein,
     NutrientRange? carbohydrates,
     NutrientRange? fat,
     NutrientRange? fiber,
@@ -213,11 +220,12 @@ class NutritionResult {
     String? mealQualityExplanation,
     String? mealQualityPositive,
     String? mealQualityImprovement,
+    bool? macrosLockedByUser,
   }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
-        calories:       calories,
-        protein:        protein,
+        calories:       calories ?? this.calories,
+        protein:        protein ?? this.protein,
         confidence:     confidence,
         warnings:       warnings,
         coachSummary:   coachSummary,
@@ -238,9 +246,12 @@ class NutritionResult {
         mealQualityExplanation: mealQualityExplanation ?? this.mealQualityExplanation,
         mealQualityPositive: mealQualityPositive ?? this.mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement ?? this.mealQualityImprovement,
+        macrosLockedByUser: macrosLockedByUser ?? this.macrosLockedByUser,
       );
 
   /// Guardrails-specific copy — replaces macros + warnings without touching items.
+  /// Respects [macrosLockedByUser]: if true, returns [this] unchanged so that
+  /// guardrails cannot clobber user-edited values.
   NutritionResult copyWithMacros({
     required NutrientRange calories,
     required NutrientRange protein,
@@ -251,7 +262,10 @@ class NutritionResult {
     NutrientRange? sugar,
     NutrientRange? saturatedFat,
     NutrientRange? sodium,
-  }) => NutritionResult(
+  }) {
+    // Never overwrite user-edited macros.
+    if (macrosLockedByUser) return this;
+    return NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
         calories:       calories,
@@ -276,9 +290,15 @@ class NutritionResult {
         mealQualityExplanation: mealQualityExplanation,
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
+        macrosLockedByUser: macrosLockedByUser,
       );
+  }
 
-  NutritionResult normalizedUncertainty() => NutritionResult(
+  /// When macros are locked by the user we skip range normalization to preserve
+  /// the exact values they entered (min == max, no artificial spread).
+  NutritionResult normalizedUncertainty() {
+    if (macrosLockedByUser) return this;
+    return NutritionResult(
         canonicalMeal: canonicalMeal,
         items: items.map((i) => i.normalizedUncertainty()).toList(),
         calories: NutritionItem._normalizeRange(calories),
@@ -303,7 +323,9 @@ class NutritionResult {
         mealQualityExplanation: mealQualityExplanation,
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
+        macrosLockedByUser: macrosLockedByUser,
       );
+  }
 
   double get primaryCaloriesEstimate => ((calories.min + calories.max) / 2);
   double get primaryProteinEstimate => ((protein.min + protein.max) / 2);
@@ -562,6 +584,7 @@ class NutritionResult {
         if (mealQualityExplanation != null) 'mealQualityExplanation': mealQualityExplanation,
         if (mealQualityPositive != null) 'mealQualityPositive': mealQualityPositive,
         if (mealQualityImprovement != null) 'mealQualityImprovement': mealQualityImprovement,
+        if (macrosLockedByUser) 'macrosLockedByUser': true,
       };
 
   factory NutritionResult.fromJson(Map<String, dynamic> j) {
@@ -607,6 +630,7 @@ class NutritionResult {
     final proMid = (protein.min + protein.max) / 2;
     final score = j['mealQualityScore'] as int? ?? NutritionResult.calculateLocalQualityScore(calMid, proMid, canonicalMeal);
 
+    final locked = j['macrosLockedByUser'] as bool? ?? false;
     return NutritionResult(
       canonicalMeal:  canonicalMeal,
       items:          items,
@@ -623,9 +647,16 @@ class NutritionResult {
       createdAt:      DateTime.tryParse(j['createdAt'] as String? ?? '') ??
                       DateTime.now(),
       fallbackReason: j['fallbackReason'] as String?,
-      carbohydrates:  j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : NutrientRange(min: carbMin, max: carbMax),
-      fat:            j['fat'] != null ? NutritionItem._range(j['fat']) : NutrientRange(min: fatMin, max: fatMax),
-      fiber:          j['fiber'] != null ? NutritionItem._range(j['fiber']) : NutrientRange(min: fiberMin, max: fiberMax),
+      // When macros are locked we restore the exact persisted values, not re-estimated ones.
+      carbohydrates:  locked
+          ? (j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : null)
+          : (j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : NutrientRange(min: carbMin, max: carbMax)),
+      fat:  locked
+          ? (j['fat'] != null ? NutritionItem._range(j['fat']) : null)
+          : (j['fat'] != null ? NutritionItem._range(j['fat']) : NutrientRange(min: fatMin, max: fatMax)),
+      fiber: locked
+          ? (j['fiber'] != null ? NutritionItem._range(j['fiber']) : null)
+          : (j['fiber'] != null ? NutritionItem._range(j['fiber']) : NutrientRange(min: fiberMin, max: fiberMax)),
       sugar:          j['sugar'] != null ? NutritionItem._range(j['sugar']) : NutrientRange(min: sugarMin, max: sugarMax),
       saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : NutrientRange(min: satMin, max: satMax),
       sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : NutrientRange(min: sodMin, max: sodMax),
@@ -633,6 +664,7 @@ class NutritionResult {
       mealQualityExplanation: j['mealQualityExplanation'] as String? ?? NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
       mealQualityPositive: j['mealQualityPositive'] as String? ?? NutritionResult.getLocalQualityPositive(score, canonicalMeal),
       mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
+      macrosLockedByUser: locked,
     ).normalizedUncertainty();
   }
 
