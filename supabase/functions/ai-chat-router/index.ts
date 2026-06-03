@@ -563,8 +563,7 @@ Deno.serve(async (req: Request) => {
 
       // ── Attempt 2: OpenRouter ──────────────────────────────────────────────
       if (openrouterKey) {
-        // Vision requests need more tokens; text requests use default 1500.
-        const maxTok = imageRequest ? 2000 : 1500;
+        const maxTok = 1500;
         try {
           const sRes = await callChatStream(
             OPENROUTER_URL, openrouterKey, activeOpenRouterModel, messages,
@@ -598,7 +597,7 @@ Deno.serve(async (req: Request) => {
     const imageRequest = hasImage(messages);
     // Codex is text-only — skip for vision requests
     const useCodexForThisRequest = userProvider && !imageRequest;
-    const maxTok = imageRequest ? 2000 : 1500;
+    const maxTok = 1500;
 
     // ── Attempt 1: User's ChatGPT via Codex endpoint (text-only) ────────────
     if (useCodexForThisRequest) {
