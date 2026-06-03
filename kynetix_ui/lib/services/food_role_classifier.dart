@@ -123,22 +123,6 @@ class FoodRoleClassifier {
     'side dish', 'side',
   ];
 
-  static const _completeMealKeywords = <String>[
-    'protein bar', 'granola bar', 'energy bar', 'snack bar',
-    'banana', 'apple', 'orange', 'mango', 'grapes', 'pear', 'peach',
-    'fruit', 'berries', 'strawberry', 'blueberry',
-    'pizza', 'burger', 'sandwich', 'sub', 'wrap meal',
-    'biryani', 'pulao', 'pilaf',
-    'thali', 'meal kit', 'ready meal', 'instant noodle', 'cup noodle',
-    'salad', 'caesar salad', 'greek salad',
-    'smoothie', 'milkshake', 'shake',
-    'yogurt', 'curd',   // when eaten alone
-    'chocolate', 'biscuit', 'cookie', 'cracker', 'chips', 'popcorn',
-    'nuts', 'almond', 'cashew', 'walnut', 'peanut',
-    'milk',             // when standalone (not used as add-on)
-    'juice', 'coconut water',
-    'coffee', 'tea', 'chai',
-  ];
 
   // ── Public API ──────────────────────────────────────────────────────────────
 

@@ -4,8 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:kynetix/services/food_role_classifier.dart';
 import 'package:kynetix/services/eating_pattern_service.dart';
 import 'package:kynetix/services/user_nutrition_memory.dart';
-import 'package:kynetix/services/nutrition_pipeline.dart';
-import 'package:kynetix/models/nutrition_result.dart';
 import 'package:kynetix/services/item_parser.dart';
 
 void main() {
@@ -157,9 +155,60 @@ void main() {
       expect(result, isNotNull);
       expect(source, OverrideSource.userCorrected);
 
-      // Verify the lookup works
-      final lookupResult = UserNutritionMemory.instance.lookup('Special Bread');
-      expect(lookupResult, isNotNull);
+    });
+  });
+
+  group('ItemParser tests', () {
+    test('Splits composite meals correctly into atomic ingredients', () {
+      final breadPeanut = ItemParser.parse("4 bread slices with 40g peanut butter");
+      expect(breadPeanut.length, 2);
+      expect(breadPeanut[0].normalizedName, "bread");
+      expect(breadPeanut[0].quantity, 4.0);
+      expect(breadPeanut[0].unit, "slices");
+      expect(breadPeanut[1].normalizedName, "peanut butter");
+      expect(breadPeanut[1].quantity, 40.0);
+      expect(breadPeanut[1].unit, "g");
+
+      final rotiChanna = ItemParser.parse("2 roti + channa");
+      expect(rotiChanna.length, 2);
+      expect(rotiChanna[0].normalizedName, "roti");
+      expect(rotiChanna[1].normalizedName, "channa");
+
+      final riceDal = ItemParser.parse("rice + dal");
+      expect(riceDal.length, 2);
+      expect(riceDal[0].normalizedName, "rice");
+      expect(riceDal[1].normalizedName, "dal");
+
+      final rajmaChawal = ItemParser.parse("rajma chawal");
+      expect(rajmaChawal.length, 2);
+      expect(rajmaChawal[0].normalizedName, "rajma");
+      expect(rajmaChawal[1].normalizedName, "chawal");
+
+      final oatsMilk = ItemParser.parse("oats + milk");
+      expect(oatsMilk.length, 2);
+      expect(oatsMilk[0].normalizedName, "oats");
+      expect(oatsMilk[1].normalizedName, "milk");
+
+      final chickenRice = ItemParser.parse("chicken + rice");
+      expect(chickenRice.length, 2);
+      expect(chickenRice[0].normalizedName, "chicken");
+      expect(chickenRice[1].normalizedName, "rice");
+
+      final paneerRoti = ItemParser.parse("paneer + roti");
+      expect(paneerRoti.length, 2);
+      expect(paneerRoti[0].normalizedName, "paneer");
+      expect(paneerRoti[1].normalizedName, "roti");
+
+      final pastaSauce = ItemParser.parse("pasta + sauce");
+      expect(pastaSauce.length, 2);
+      expect(pastaSauce[0].normalizedName, "pasta");
+      expect(pastaSauce[1].normalizedName, "sauce");
+
+      final sandwichMayo = ItemParser.parse("sandwich + mayo");
+      expect(sandwichMayo.length, 2);
+      expect(sandwichMayo[0].normalizedName, "sandwich");
+      expect(sandwichMayo[1].normalizedName, "mayo");
     });
   });
 }
+

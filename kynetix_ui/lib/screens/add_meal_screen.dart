@@ -8,8 +8,6 @@ import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/item_parser.dart';
 
-enum _SaveMode { once, recurring }
-
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
   const DeleteSentinel();
@@ -55,18 +53,6 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
-
-  static const _examples = [
-    '2 roti and dal',
-    'paneer with rice',
-    'thoda sabzi and 3 chapati',
-    'dal chawal',
-    'oats with milk',
-    '4 egg whites with 400ml milk',
-    '1 scoop whey',
-    'chicken sandwich',
-    '2 tbsp peanut butter bread',
-  ];
 
   @override
   void initState() {
@@ -995,30 +981,6 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _ExampleChip extends StatelessWidget {
-  final String       label;
-  final VoidCallback onTap;
-  const _ExampleChip({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF2E2E3E)),
-        ),
-        child: Text(label,
-            style: const TextStyle(
-                fontSize: 12, color: Color(0xFF9CA3AF))),
-      ),
-    );
-  }
-}
-
 // ─── Fix Estimate Sheet (bottom sheet for manual adjustments) ─────────────────
 
 class _FixEstimateSheet extends StatefulWidget {
@@ -1392,72 +1354,6 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
   }
 }
 
-// ─── Save Override Dialog ──────────────────────────────────────────────────────
-
-class _SaveOverrideDialog extends StatelessWidget {
-  const _SaveOverrideDialog();
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Save Override',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'How would you like to save this adjustment?',
-              style: TextStyle(
-                fontSize: 13,
-                color: Color(0xFF9CA3AF),
-              ),
-            ),
-            const SizedBox(height: 24),
-            // Save once button
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () => Navigator.pop(context, _SaveMode.once),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  backgroundColor: const Color(0xFF2E2E3E),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Save for this meal only',
-                  style: TextStyle(color: Colors.white, fontSize: 13),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Save recurring button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context, _SaveMode.recurring),
-                child: const Text('Save as recurring memory'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 enum _CorrectionMode { applyCorrections, editIngredients }
 
@@ -1591,6 +1487,44 @@ class _IngredientEditResult {
   });
 }
 
+class _IngredientRow {
+  final TextEditingController textCtrl;
+  final FocusNode focusNode;
+  ParsedFoodItem parsed;
+  final TextEditingController calCtrl;
+  final TextEditingController proCtrl;
+  final TextEditingController carbCtrl;
+  final TextEditingController fatCtrl;
+  final TextEditingController fibCtrl;
+  FoodRole role;
+  OverrideSource source;
+  bool isSaved;
+  bool isEstimating = false;
+  double originalCalories;
+  String lastParsedText;
+
+  _IngredientRow({
+    required String rawText,
+    required this.parsed,
+    required double cal,
+    required double pro,
+    required double carb,
+    required double fat,
+    required double fib,
+    required this.role,
+    required this.source,
+    required this.isSaved,
+    required this.originalCalories,
+  }) : textCtrl = TextEditingController(text: rawText),
+       focusNode = FocusNode(),
+       calCtrl = TextEditingController(text: cal.toStringAsFixed(0)),
+       proCtrl = TextEditingController(text: pro.toStringAsFixed(1)),
+       carbCtrl = TextEditingController(text: carb.toStringAsFixed(1)),
+       fatCtrl = TextEditingController(text: fat.toStringAsFixed(1)),
+       fibCtrl = TextEditingController(text: fib.toStringAsFixed(1)),
+       lastParsedText = rawText;
+}
+
 class _IngredientEditSheet extends StatefulWidget {
   final List<NutritionItem> items;
   final String canonicalMeal;
@@ -1605,9 +1539,8 @@ class _IngredientEditSheet extends StatefulWidget {
 }
 
 class _IngredientEditSheetState extends State<_IngredientEditSheet> {
-  late final List<NutritionItem> _originalItems;
-  late final List<NutritionItem> _displayItems;
-  final List<List<TextEditingController>> _controllers = [];
+  final List<_IngredientRow> _rows = [];
+  bool _loading = true;
   bool _rememberEdits = true;
   String? _validationWarning;
 
@@ -1620,42 +1553,239 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
   @override
   void initState() {
     super.initState();
-    _originalItems = List.from(widget.items);
-    _displayItems = List.from(widget.items);
-
-    for (final item in _displayItems) {
-      final cal = (item.calories.min + item.calories.max) / 2;
-      final pro = (item.protein.min + item.protein.max) / 2;
-      final carb = item.carbohydrates != null ? (item.carbohydrates!.min + item.carbohydrates!.max) / 2 : 0.0;
-      final fat = item.fat != null ? (item.fat!.min + item.fat!.max) / 2 : 0.0;
-      final fib = item.fiber != null ? (item.fiber!.min + item.fiber!.max) / 2 : 0.0;
-
-      final itemCtrls = [
-        TextEditingController(text: cal.toStringAsFixed(0)),
-        TextEditingController(text: pro.toStringAsFixed(1)),
-        TextEditingController(text: carb.toStringAsFixed(1)),
-        TextEditingController(text: fat.toStringAsFixed(1)),
-        TextEditingController(text: fib.toStringAsFixed(1)),
-      ];
-
-      for (final ctrl in itemCtrls) {
-        ctrl.addListener(_updateTotalsAndValidate);
-      }
-
-      _controllers.add(itemCtrls);
-    }
-
-    _updateTotalsAndValidate();
+    _initRows();
   }
 
-  @override
-  void dispose() {
-    for (final list in _controllers) {
-      for (final ctrl in list) {
-        ctrl.dispose();
+  bool _namesMatch(String nameA, String nameB) {
+    final a = nameA.toLowerCase().trim();
+    final b = nameB.toLowerCase().trim();
+    if (a == b) return true;
+    if (ItemParser.parse(a).length > 1 || ItemParser.parse(b).length > 1) {
+      return false;
+    }
+    if (a.contains(b) || b.contains(a)) return true;
+    final wordsA = a.split(' ');
+    final wordsB = b.split(' ');
+    for (final w in wordsA) {
+      if (w.length > 3 && wordsB.contains(w)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _initRows() async {
+    setState(() => _loading = true);
+    try {
+      final initialItems = <NutritionItem>[];
+      
+      // Always parse the canonical meal to get the list of atomic ingredients
+      final parsed = ItemParser.parse(widget.canonicalMeal);
+      
+      if (parsed.isNotEmpty) {
+        for (final p in parsed) {
+          // Check if we have a matching item in widget.items (by name match)
+          NutritionItem? matchedItem;
+          
+          for (final item in widget.items) {
+            if (_namesMatch(item.name, p.normalizedName)) {
+              matchedItem = item;
+              break;
+            }
+          }
+          
+          if (matchedItem != null) {
+            initialItems.add(matchedItem);
+          } else {
+            // Estimate this item individually
+            final itemStr = _constructItemString(p);
+            final result = await NutritionPipeline.instance.estimateMeal(itemStr);
+            
+            // Extract the estimated item from result if available, or build a new one
+            NutritionItem estItem;
+            if (result.items.isNotEmpty) {
+              final firstItem = result.items.first;
+              estItem = NutritionItem(
+                name: p.normalizedName,
+                quantity: p.quantity,
+                unit: p.unit,
+                estimated: true,
+                mode: firstItem.mode,
+                calories: firstItem.calories,
+                protein: firstItem.protein,
+                carbohydrates: firstItem.carbohydrates,
+                fat: firstItem.fat,
+                fiber: firstItem.fiber,
+                sugar: firstItem.sugar,
+                saturatedFat: firstItem.saturatedFat,
+                sodium: firstItem.sodium,
+              );
+            } else {
+              estItem = NutritionItem(
+                name: p.normalizedName,
+                quantity: p.quantity,
+                unit: p.unit,
+                estimated: true,
+                mode: EstimationMode.directQuantity,
+                calories: result.calories,
+                protein: result.protein,
+                carbohydrates: result.carbohydrates,
+                fat: result.fat,
+                fiber: result.fiber,
+                sugar: result.sugar,
+                saturatedFat: result.saturatedFat,
+                sodium: result.sodium,
+              );
+            }
+            initialItems.add(estItem);
+          }
+        }
+      } else {
+        // Fallback: if parsed is empty, just use widget.items
+        initialItems.addAll(widget.items);
+      }
+      
+      // If still empty (e.g. canonicalMeal and items are both empty), add a default row
+      if (initialItems.isEmpty) {
+        final parsed = ParsedFoodItem(
+          rawChunk: '1 serving food',
+          normalizedName: 'food',
+          quantity: 1.0,
+          unit: 'serving',
+        );
+        final result = await NutritionPipeline.instance.estimateMeal(widget.canonicalMeal.isNotEmpty ? widget.canonicalMeal : 'food');
+        initialItems.add(NutritionItem(
+          name: parsed.normalizedName,
+          quantity: parsed.quantity,
+          unit: parsed.unit,
+          estimated: true,
+          mode: result.items.isNotEmpty ? result.items.first.mode : EstimationMode.directQuantity,
+          calories: result.calories,
+          protein: result.protein,
+          carbohydrates: result.carbohydrates,
+          fat: result.fat,
+          fiber: result.fiber,
+        ));
+      }
+
+      for (final item in initialItems) {
+        final rawText = _constructItemString(ParsedFoodItem(
+          rawChunk: item.name,
+          normalizedName: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+        ));
+        final parsedItem = ParsedFoodItem(
+          rawChunk: item.name,
+          normalizedName: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+        );
+        
+        final cal = (item.calories.min + item.calories.max) / 2;
+        final pro = (item.protein.min + item.protein.max) / 2;
+        final carb = item.carbohydrates != null ? (item.carbohydrates!.min + item.carbohydrates!.max) / 2 : 0.0;
+        final fat = item.fat != null ? (item.fat!.min + item.fat!.max) / 2 : 0.0;
+        final fib = item.fiber != null ? (item.fiber!.min + item.fiber!.max) / 2 : 0.0;
+        
+        final role = FoodRoleClassifier.classify(item.name);
+        final (stored, source) = UserNutritionMemory.instance.lookupWithSource(item.name);
+        
+        final row = _IngredientRow(
+          rawText: rawText,
+          parsed: parsedItem,
+          cal: cal,
+          pro: pro,
+          carb: carb,
+          fat: fat,
+          fib: fib,
+          role: role,
+          source: source,
+          isSaved: stored != null,
+          originalCalories: cal,
+        );
+        
+        row.calCtrl.addListener(_updateTotalsAndValidate);
+        row.proCtrl.addListener(_updateTotalsAndValidate);
+        row.carbCtrl.addListener(_updateTotalsAndValidate);
+        row.fatCtrl.addListener(_updateTotalsAndValidate);
+        row.fibCtrl.addListener(_updateTotalsAndValidate);
+        
+        row.focusNode.addListener(() {
+          if (!row.focusNode.hasFocus) {
+            _onFocusLost(row);
+          }
+        });
+        
+        _rows.add(row);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+        _updateTotalsAndValidate();
       }
     }
-    super.dispose();
+  }
+
+  String _constructItemString(ParsedFoodItem parsed) {
+    if (parsed.quantity == 1.0 && parsed.unit == 'serving') return parsed.normalizedName;
+    if (parsed.quantity == 1.0) return '${parsed.unit} ${parsed.normalizedName}'.trim();
+    String formattedQty = parsed.quantity == parsed.quantity.toInt() ? '${parsed.quantity.toInt()}' : '${parsed.quantity}';
+    return '$formattedQty ${parsed.unit} ${parsed.normalizedName}'.trim();
+  }
+
+  Future<void> _onFocusLost(_IngredientRow row) async {
+    final text = row.textCtrl.text.trim();
+    if (text.isEmpty || text == row.lastParsedText) return;
+    row.lastParsedText = text;
+
+    final parsedList = ItemParser.parse(text);
+    if (parsedList.isEmpty) return;
+    final p = parsedList.first;
+
+    if (p.normalizedName != row.parsed.normalizedName) {
+      setState(() => row.isEstimating = true);
+      try {
+        final result = await NutritionPipeline.instance.estimateMeal(text);
+        final cal = result.calories.mid;
+        final pro = result.protein.mid;
+        final carb = result.carbohydrates?.mid ?? 0.0;
+        final fat = result.fat?.mid ?? 0.0;
+        final fib = result.fiber?.mid ?? 0.0;
+
+        row.calCtrl.text = cal.toStringAsFixed(0);
+        row.proCtrl.text = pro.toStringAsFixed(1);
+        row.carbCtrl.text = carb.toStringAsFixed(1);
+        row.fatCtrl.text = fat.toStringAsFixed(1);
+        row.fibCtrl.text = fib.toStringAsFixed(1);
+
+        row.role = FoodRoleClassifier.classify(p.normalizedName);
+        final (stored, source) = UserNutritionMemory.instance.lookupWithSource(p.normalizedName);
+        row.source = source;
+        row.isSaved = stored != null;
+        row.parsed = p;
+        row.originalCalories = cal;
+      } catch (_) {
+      } finally {
+        setState(() => row.isEstimating = false);
+        _updateTotalsAndValidate();
+      }
+    } else if (p.quantity != row.parsed.quantity && row.parsed.quantity > 0) {
+      final scale = p.quantity / row.parsed.quantity;
+      final oldCal = double.tryParse(row.calCtrl.text) ?? 0.0;
+      final oldPro = double.tryParse(row.proCtrl.text) ?? 0.0;
+      final oldCarb = double.tryParse(row.carbCtrl.text) ?? 0.0;
+      final oldFat = double.tryParse(row.fatCtrl.text) ?? 0.0;
+      final oldFib = double.tryParse(row.fibCtrl.text) ?? 0.0;
+
+      row.calCtrl.text = (oldCal * scale).toStringAsFixed(0);
+      row.proCtrl.text = (oldPro * scale).toStringAsFixed(1);
+      row.carbCtrl.text = (oldCarb * scale).toStringAsFixed(1);
+      row.fatCtrl.text = (oldFat * scale).toStringAsFixed(1);
+      row.fibCtrl.text = (oldFib * scale).toStringAsFixed(1);
+
+      row.originalCalories = row.originalCalories * scale;
+      row.parsed = p;
+      _updateTotalsAndValidate();
+    }
   }
 
   void _updateTotalsAndValidate() {
@@ -1665,12 +1795,12 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
     double fatSum = 0;
     double fibSum = 0;
 
-    for (int i = 0; i < _displayItems.length; i++) {
-      calSum  += double.tryParse(_controllers[i][0].text) ?? 0;
-      proSum  += double.tryParse(_controllers[i][1].text) ?? 0;
-      carbSum += double.tryParse(_controllers[i][2].text) ?? 0;
-      fatSum  += double.tryParse(_controllers[i][3].text) ?? 0;
-      fibSum  += double.tryParse(_controllers[i][4].text) ?? 0;
+    for (int i = 0; i < _rows.length; i++) {
+      calSum  += double.tryParse(_rows[i].calCtrl.text) ?? 0;
+      proSum  += double.tryParse(_rows[i].proCtrl.text) ?? 0;
+      carbSum += double.tryParse(_rows[i].carbCtrl.text) ?? 0;
+      fatSum  += double.tryParse(_rows[i].fatCtrl.text) ?? 0;
+      fibSum  += double.tryParse(_rows[i].fibCtrl.text) ?? 0;
     }
 
     if (mounted) {
@@ -1699,69 +1829,111 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
   }
 
   void _resetItemToOriginal(int index) {
-    final orig = _originalItems[index];
-    final cal = (orig.calories.min + orig.calories.max) / 2;
-    final pro = (orig.protein.min + orig.protein.max) / 2;
-    final carb = orig.carbohydrates != null ? (orig.carbohydrates!.min + orig.carbohydrates!.max) / 2 : 0.0;
-    final fat = orig.fat != null ? (orig.fat!.min + orig.fat!.max) / 2 : 0.0;
-    final fib = orig.fiber != null ? (orig.fiber!.min + orig.fiber!.max) / 2 : 0.0;
+    final row = _rows[index];
+    row.calCtrl.text = row.originalCalories.toStringAsFixed(0);
+    _updateTotalsAndValidate();
+  }
 
-    _controllers[index][0].text = cal.toStringAsFixed(0);
-    _controllers[index][1].text = pro.toStringAsFixed(1);
-    _controllers[index][2].text = carb.toStringAsFixed(1);
-    _controllers[index][3].text = fat.toStringAsFixed(1);
-    _controllers[index][4].text = fib.toStringAsFixed(1);
+  void _addRow() {
+    final parsed = ParsedFoodItem(
+      rawChunk: '1 serving food',
+      normalizedName: 'food',
+      quantity: 1.0,
+      unit: 'serving',
+    );
+    final row = _IngredientRow(
+      rawText: '1 serving food',
+      parsed: parsed,
+      cal: 100,
+      pro: 5,
+      carb: 10,
+      fat: 2,
+      fib: 0,
+      role: FoodRole.completeMeal,
+      source: OverrideSource.userCorrected,
+      isSaved: false,
+      originalCalories: 100,
+    );
+
+    row.calCtrl.addListener(_updateTotalsAndValidate);
+    row.proCtrl.addListener(_updateTotalsAndValidate);
+    row.carbCtrl.addListener(_updateTotalsAndValidate);
+    row.fatCtrl.addListener(_updateTotalsAndValidate);
+    row.fibCtrl.addListener(_updateTotalsAndValidate);
+
+    row.focusNode.addListener(() {
+      if (!row.focusNode.hasFocus) {
+        _onFocusLost(row);
+      }
+    });
+
+    setState(() {
+      _rows.add(row);
+    });
+    _updateTotalsAndValidate();
+  }
+
+  void _deleteRow(int index) {
+    final row = _rows[index];
+    row.calCtrl.removeListener(_updateTotalsAndValidate);
+    row.proCtrl.removeListener(_updateTotalsAndValidate);
+    row.carbCtrl.removeListener(_updateTotalsAndValidate);
+    row.fatCtrl.removeListener(_updateTotalsAndValidate);
+    row.fibCtrl.removeListener(_updateTotalsAndValidate);
+
+    row.calCtrl.dispose();
+    row.proCtrl.dispose();
+    row.carbCtrl.dispose();
+    row.fatCtrl.dispose();
+    row.fibCtrl.dispose();
+    row.textCtrl.dispose();
+    row.focusNode.dispose();
+
+    setState(() {
+      _rows.removeAt(index);
+    });
+    _updateTotalsAndValidate();
   }
 
   void _submit() {
     final updatedItems = <NutritionItem>[];
+    final originalItems = <NutritionItem>[];
 
-    for (int i = 0; i < _displayItems.length; i++) {
-      final item = _displayItems[i];
-      final origItem = _originalItems[i];
-
-      final cVal = double.tryParse(_controllers[i][0].text) ?? 0;
-      final pVal = double.tryParse(_controllers[i][1].text) ?? 0;
-      final carbVal = double.tryParse(_controllers[i][2].text) ?? 0;
-      final fatVal = double.tryParse(_controllers[i][3].text) ?? 0;
-      final fibVal = double.tryParse(_controllers[i][4].text) ?? 0;
-
-      final origCal = (origItem.calories.min + origItem.calories.max) / 2;
-      final scale = origCal > 0 ? cVal / origCal : 1.0;
-
-      final sugar = item.sugar != null
-          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
-          : null;
-      final saturatedFat = item.saturatedFat != null
-          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
-          : null;
-      final sodium = item.sodium != null
-          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
-          : null;
+    for (int i = 0; i < _rows.length; i++) {
+      final row = _rows[i];
+      final cVal = double.tryParse(row.calCtrl.text) ?? 0;
+      final pVal = double.tryParse(row.proCtrl.text) ?? 0;
+      final carbVal = double.tryParse(row.carbCtrl.text) ?? 0;
+      final fatVal = double.tryParse(row.fatCtrl.text) ?? 0;
+      final fibVal = double.tryParse(row.fibCtrl.text) ?? 0;
 
       updatedItems.add(NutritionItem(
-        name: item.name,
-        quantity: item.quantity,
-        unit: item.unit,
+        name: row.parsed.normalizedName,
+        quantity: row.parsed.quantity,
+        unit: row.parsed.unit,
         estimated: true,
-        mode: item.mode,
+        mode: EstimationMode.directQuantity,
         calories: NutrientRange(min: cVal, max: cVal),
         protein: NutrientRange(min: pVal, max: pVal),
         carbohydrates: NutrientRange(min: carbVal, max: carbVal),
         fat: NutrientRange(min: fatVal, max: fatVal),
         fiber: NutrientRange(min: fibVal, max: fibVal),
-        sugar: sugar,
-        saturatedFat: saturatedFat,
-        sodium: sodium,
+      ));
+
+      originalItems.add(NutritionItem(
+        name: row.parsed.normalizedName,
+        quantity: row.parsed.quantity,
+        unit: row.parsed.unit,
+        estimated: true,
+        mode: EstimationMode.directQuantity,
+        calories: NutrientRange(min: row.originalCalories, max: row.originalCalories),
+        protein: NutrientRange(min: pVal, max: pVal),
       ));
     }
 
     Navigator.of(context).pop(_IngredientEditResult(
       items: updatedItems,
-      originalItems: _originalItems,
+      originalItems: originalItems,
       rememberEdits: _rememberEdits,
     ));
   }
@@ -1859,10 +2031,10 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF0F0F14),
+      height: MediaQuery.of(context).size.height * 0.85,
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Center(
@@ -1920,214 +2092,265 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: Text(
-                'Correct individual ingredients. Edits update memory and train eating patterns.',
+                'Correct individual ingredients or adjust split names below. Edits update memory & behavior scalars.',
                 style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280), height: 1.4),
               ),
             ),
             const SizedBox(height: 16),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  children: List.generate(_displayItems.length, (i) {
-                    final item = _displayItems[i];
-                    final role = FoodRoleClassifier.classify(item.name);
-                    final (stored, source) = UserNutritionMemory.instance.lookupWithSource(item.name);
-                    final isSaved = stored != null;
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E2C),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF2E2E3E)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+            if (_loading)
+              const Expanded(
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: Color(0xFF52B788),
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      ...List.generate(_rows.length, (i) {
+                        final row = _rows[i];
+                        
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 20),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E2C),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFF2E2E3E)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  '${item.quantity == item.quantity.truncate() ? item.quantity.toInt().toString() : item.quantity} ${item.unit} ${item.name}',
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              _buildRoleBadge(role),
-                              const SizedBox(width: 6),
-                              isSaved
-                                  ? _buildSourceBadge(source)
-                                  : Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF374151),
-                                        borderRadius: BorderRadius.circular(6),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: row.textCtrl,
+                                      focusNode: row.focusNode,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
                                       ),
-                                      child: const Text(
-                                        '🤖 AI',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF9CA3AF),
-                                        ),
+                                      decoration: InputDecoration(
+                                        hintText: 'e.g., 4 bread slices',
+                                        hintStyle: const TextStyle(color: Color(0xFF4B5563)),
+                                        isDense: true,
+                                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                                        border: InputBorder.none,
+                                        suffixIcon: row.isEstimating
+                                            ? const SizedBox(
+                                                width: 14,
+                                                height: 14,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Color(0xFF52B788),
+                                                ),
+                                              )
+                                            : null,
                                       ),
                                     ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Row(
-                            children: [
-                              Expanded(child: _buildField('Calories (kcal)', _controllers[i][0], const Color(0xFFFF6B35))),
-                              const SizedBox(width: 10),
-                              Expanded(child: _buildField('Protein (g)', _controllers[i][1], const Color(0xFF52B788))),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(child: _buildField('Carbs (g)', _controllers[i][2], const Color(0xFF60A5FA))),
-                              const SizedBox(width: 10),
-                              Expanded(child: _buildField('Fat (g)', _controllers[i][3], const Color(0xFFFBBF24))),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(child: _buildField('Fiber (g)', _controllers[i][4], const Color(0xFFA78BFA))),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: TextButton.icon(
-                                  onPressed: () => _resetItemToOriginal(i),
-                                  icon: const Icon(Icons.undo_rounded, size: 12),
-                                  label: const Text('Reset to AI', style: TextStyle(fontSize: 11)),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: const Color(0xFF6B7280),
-                                    padding: EdgeInsets.zero,
-                                    alignment: Alignment.centerLeft,
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  _buildRoleBadge(row.role),
+                                  const SizedBox(width: 6),
+                                  row.isSaved
+                                      ? _buildSourceBadge(row.source)
+                                      : Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF374151),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Text(
+                                            '🤖 AI',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF9CA3AF),
+                                            ),
+                                          ),
+                                        ),
+                                  const SizedBox(width: 4),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
+                                    onPressed: () => _deleteRow(i),
+                                    constraints: const BoxConstraints(),
+                                    padding: EdgeInsets.zero,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                ],
+                              ),
+                              const Divider(color: Color(0xFF2E2E3E), height: 16),
+                              Row(
+                                children: [
+                                  Expanded(child: _buildField('Calories (kcal)', row.calCtrl, const Color(0xFFFF6B35))),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: _buildField('Protein (g)', row.proCtrl, const Color(0xFF52B788))),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(child: _buildField('Carbs (g)', row.carbCtrl, const Color(0xFF60A5FA))),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: _buildField('Fat (g)', row.fatCtrl, const Color(0xFFFBBF24))),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(child: _buildField('Fiber (g)', row.fibCtrl, const Color(0xFFA78BFA))),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: TextButton.icon(
+                                      onPressed: () => _resetItemToOriginal(i),
+                                      icon: const Icon(Icons.undo_rounded, size: 12),
+                                      label: const Text('Reset to Estimate', style: TextStyle(fontSize: 11)),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: const Color(0xFF6B7280),
+                                        padding: EdgeInsets.zero,
+                                        alignment: Alignment.centerLeft,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: Color(0xFF0F0F14),
-                border: Border(top: BorderSide(color: Color(0xFF1E1E2C))),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Remember edits for future logs',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFD1D5DB),
+                        );
+                      }),
+                      TextButton.icon(
+                        onPressed: _addRow,
+                        icon: const Icon(Icons.add_rounded, color: Color(0xFF52B788)),
+                        label: const Text(
+                          'Add Ingredient Row',
+                          style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.bold),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(color: const Color(0xFF52B788).withValues(alpha: 0.3)),
+                          ),
                         ),
                       ),
-                      Switch(
-                        value: _rememberEdits,
-                        onChanged: (v) => setState(() => _rememberEdits = v),
-                        activeColor: const Color(0xFF52B788),
-                        activeTrackColor: const Color(0xFF1E3A2F),
-                      ),
+                      const SizedBox(height: 20),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  if (_validationWarning != null)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFB347).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFB347), size: 14),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _validationWarning!,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: Color(0xFFFFB347),
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E2C),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
+                ),
+              ),
+            if (!_loading)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF0F0F14),
+                  border: Border(top: BorderSide(color: Color(0xFF1E1E2C))),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'RUNNING TOTAL',
-                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF6B7280)),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${_totalCal.toStringAsFixed(0)} kcal · ${_totalPro.toStringAsFixed(1)}g P',
-                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
-                            ),
-                          ],
+                        const Text(
+                          'Remember edits for future logs',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFD1D5DB),
+                          ),
                         ),
-                        Text(
-                          'C: ${_totalCarb.toStringAsFixed(0)}g · F: ${_totalFat.toStringAsFixed(0)}g · Fib: ${_totalFib.toStringAsFixed(0)}g',
-                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
+                        Switch(
+                          value: _rememberEdits,
+                          onChanged: (v) => setState(() => _rememberEdits = v),
+                          activeThumbColor: const Color(0xFF52B788),
+                          activeTrackColor: const Color(0xFF1E3A2F),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2D6A4F),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(height: 12),
+                    if (_validationWarning != null)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFB347).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFB347), size: 14),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _validationWarning!,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Color(0xFFFFB347),
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: const Text(
-                        'Apply Ingredient Corrections',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E2C),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'RUNNING TOTAL',
+                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF6B7280)),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${_totalCal.toStringAsFixed(0)} kcal · ${_totalPro.toStringAsFixed(1)}g P',
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            'C: ${_totalCarb.toStringAsFixed(0)}g · F: ${_totalFat.toStringAsFixed(0)}g · Fib: ${_totalFib.toStringAsFixed(0)}g',
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _submit,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2D6A4F),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text(
+                          'Apply Ingredient Corrections',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
