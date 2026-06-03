@@ -7,6 +7,7 @@ import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/item_parser.dart';
+import '../services/persistence_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -316,6 +317,27 @@ class _AddMealScreenState extends State<AddMealScreen>
         );
         _lastLockedText = mealName;
       });
+    }
+
+    if (widget.initialEntry != null && _result != null) {
+      final text = _controller.text.trim();
+      final parsedFoods = _result!.items.map((i) => i.name).toList(growable: false);
+      final entry = MealEntry(
+        rawInput: widget.initialEntry!.rawInput,
+        result: _result!,
+        addedAt: widget.initialEntry!.addedAt,
+        section: widget.initialEntry!.section,
+        dayOfWeek: widget.initialEntry!.dayOfWeek,
+        parsedFoods: parsedFoods,
+        edited: true,
+        editCount: widget.initialEntry!.editCount + 1,
+        finalSavedInput: text.isNotEmpty ? text : widget.initialEntry!.finalSavedInput,
+      );
+      logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
+      await PersistenceService.saveDayLogs();
+      if (mounted) {
+        Navigator.of(context).pop(entry);
+      }
     }
   }
 

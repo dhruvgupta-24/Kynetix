@@ -57,7 +57,13 @@ function buildCodexBody(model: string, messages: any[]): string {
           return { type: contentType, text: b.text ?? '' };
         } else if (b?.type === 'image_url') {
           const url = b.image_url?.url ?? b.image_url ?? '';
-          return { type: 'input_image', image_url: url };
+          return {
+            type: 'input_image',
+            image_url: {
+              url: url,
+              detail: 'auto'
+            }
+          };
         } else {
           // Unknown block type fallback
           const contentType = m.role === 'user' ? 'input_text' : 'output_text';
@@ -93,11 +99,11 @@ function buildCodexBody(model: string, messages: any[]): string {
     role: msg.role,
     content: msg.content.map((b: any) => {
       if (b.type === 'input_image') {
-        const urlStr = b.image_url ?? '';
+        const urlStr = typeof b.image_url === 'object' ? (b.image_url?.url ?? '') : (b.image_url ?? '');
         const preview = urlStr.startsWith('data:') 
           ? `${urlStr.slice(0, 30)}...[len=${urlStr.length}]` 
           : urlStr;
-        return { type: b.type, image_url: preview };
+        return { type: b.type, image_url: { url: preview, detail: 'auto' } };
       }
       return b;
     })
