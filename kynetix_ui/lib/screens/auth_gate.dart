@@ -98,6 +98,15 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
           averageDailySteps: currentUserProfile?.averageDailySteps,
           lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
+          portionAnchor: currentUserProfile?.portionAnchor,
+          useCustomTargets: currentUserProfile?.useCustomTargets,
+          customMaintenanceCalories: currentUserProfile?.customMaintenanceCalories,
+          customTrainingDayCalories: currentUserProfile?.customTrainingDayCalories,
+          customRestDayCalories: currentUserProfile?.customRestDayCalories,
+          customProteinTarget: currentUserProfile?.customProteinTarget,
+          targetChangeHistory: currentUserProfile?.targetChangeHistory,
+          carryForwardEnabled: currentUserProfile?.carryForwardEnabled,
+          carryForwardThreshold: currentUserProfile?.carryForwardThreshold,
         );
         await PersistenceService.saveProfile(mergedProfile);
         currentUserProfile = mergedProfile;
@@ -127,6 +136,15 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
           averageDailySteps: currentUserProfile?.averageDailySteps,
           lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
+          portionAnchor: currentUserProfile?.portionAnchor,
+          useCustomTargets: currentUserProfile?.useCustomTargets,
+          customMaintenanceCalories: currentUserProfile?.customMaintenanceCalories,
+          customTrainingDayCalories: currentUserProfile?.customTrainingDayCalories,
+          customRestDayCalories: currentUserProfile?.customRestDayCalories,
+          customProteinTarget: currentUserProfile?.customProteinTarget,
+          targetChangeHistory: currentUserProfile?.targetChangeHistory,
+          carryForwardEnabled: currentUserProfile?.carryForwardEnabled,
+          carryForwardThreshold: currentUserProfile?.carryForwardThreshold,
         );
 
         // Hydrate local cache

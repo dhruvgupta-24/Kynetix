@@ -450,9 +450,13 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
           ),
         ),
         const SizedBox(width: 12),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ],
     );

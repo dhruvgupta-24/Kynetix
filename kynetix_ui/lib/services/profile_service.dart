@@ -47,16 +47,18 @@ class ProfileService {
       
       debugPrint('[ProfileService] Profile successfully fetched and mapped.');
       return UserProfile(
-      name: data['name'] as String,
-      age: data['age'] as int,
-      gender: data['gender'] as String,
-      height: (data['height_cm'] as num).toDouble(),
-      weight: (data['weight_kg'] as num).toDouble(),
-      workoutDaysMin: data['workout_days_min'] as int? ?? 2,
-      workoutDaysMax: data['workout_days_max'] as int? ?? 3,
-      goal: data['goal'] as String,
-      averageDailySteps: null, // Keep HealthSync strictly local for now
-      healthSyncEnabled: false,
+        name: data['name'] as String,
+        age: data['age'] as int,
+        gender: data['gender'] as String,
+        height: (data['height_cm'] as num).toDouble(),
+        weight: (data['weight_kg'] as num).toDouble(),
+        workoutDaysMin: data['workout_days_min'] as int? ?? 2,
+        workoutDaysMax: data['workout_days_max'] as int? ?? 3,
+        goal: data['goal'] as String,
+        averageDailySteps: null, // Keep HealthSync strictly local for now
+        healthSyncEnabled: false,
+        carryForwardEnabled: data['carry_forward_enabled'] as bool? ?? false,
+        carryForwardThreshold: data['carry_forward_threshold'] as int? ?? 100,
       );
     } catch (e) {
       debugPrint('[ProfileService] Exception during profile fetch: $e');
@@ -82,6 +84,8 @@ class ProfileService {
         'workout_days_min': profile.workoutDaysMin,
         'workout_days_max': profile.workoutDaysMax,
         'goal': profile.goal,
+        'carry_forward_enabled': profile.carryForwardEnabled,
+        'carry_forward_threshold': profile.carryForwardThreshold,
       });
     } catch (e) {
       // Background failure safe due to local-first architecture.

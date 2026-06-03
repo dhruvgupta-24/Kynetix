@@ -5,6 +5,7 @@ import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
 import '../screens/nutrition_intelligence_screen.dart';
+import '../screens/auth_gate.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -455,6 +456,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildAiCard(),
           const SizedBox(height: 16),
           _buildAboutCard(),
+          const SizedBox(height: 24),
+          _buildLogoutButton(),
         ],
       ),
     );
@@ -918,8 +921,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
 
         const SizedBox(height: 12),
+
+        // Always visible diagnostics
+        _InfoRow(
+          icon: Icons.cloud_queue_rounded,
+          label: 'Active Provider',
+          value: _providerDisplayName(s.activeProvider),
+        ),
+        _InfoRow(
+          icon: Icons.psychology_rounded,
+          label: 'Active Model',
+          value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
+        ),
+        _InfoRow(
+          icon: Icons.access_time_rounded,
+          label: 'Last Used',
+          value: _relativeTime(s.lastUsedAt),
+          isLast: true, // We don't want a bottom border/divider before the expandable Diagnostics section
+        ),
+
+        const SizedBox(height: 8),
         
-        // Expandable drawer for Technical Details
+        // Expandable drawer for Advanced Diagnostics
         Theme(
           data: Theme.of(context).copyWith(
             dividerColor: Colors.transparent,
@@ -934,7 +957,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const Icon(Icons.info_outline_rounded, size: 14, color: KColor.textMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'Diagnostic Logs',
+                  'Advanced Diagnostics',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -951,16 +974,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon: Icons.sync_rounded,
                 label: 'Connection Status',
                 value: isConnected ? 'Connected' : 'Disconnected',
-              ),
-              _InfoRow(
-                icon: Icons.cloud_queue_rounded,
-                label: 'Active Provider',
-                value: _providerDisplayName(s.activeProvider),
-              ),
-              _InfoRow(
-                icon: Icons.psychology_rounded,
-                label: 'Selected Model',
-                value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
               ),
               if (isConnected) ...[
                 _InfoRow(
@@ -979,11 +992,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   value: _relativeTime(s.connectedAt),
                 ),
               ],
-              _InfoRow(
-                icon: Icons.access_time_rounded,
-                label: 'Last Used',
-                value: _relativeTime(s.lastUsedAt),
-              ),
               if (s.fallbackReason != null) ...[
                 _InfoRow(
                   icon: Icons.warning_amber_rounded,
@@ -1846,6 +1854,126 @@ class _ProfileScreenState extends State<ProfileScreen> {
       },
     );
   }
+
+  Widget _buildLogoutButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: OutlinedButton(
+        onPressed: _handleLogout,
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
+          backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.08),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
+            SizedBox(width: 8),
+            Text(
+              'Logout',
+              style: TextStyle(
+                color: Color(0xFFEF4444),
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleLogout() async {
+    kHapticSelect();
+    
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Confirm Logout',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Are you sure you want to log out? Your local caches will be cleared, and you will need to sign in again.',
+          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text(
+              'Logout',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // Show a loading dialog
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: Color(0xFFEF4444)),
+      ),
+    );
+
+    try {
+      // 1. Sign out of Supabase
+      await Supabase.instance.client.auth.signOut();
+      
+      // 2. Wipe local databases / caches
+      await PersistenceService.reset();
+      
+      // Reset in-memory UserProfile and onboarding state
+      currentUserProfile = null;
+      
+      // 3. Navigate back to AuthGate
+      if (!mounted) return;
+      // Dismiss loading dialog first
+      Navigator.of(context).pop();
+      
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthGate()),
+        (route) => false,
+      );
+    } catch (e) {
+      debugPrint('[ProfileScreen] Error during logout: $e');
+      if (mounted) {
+        // Dismiss loading dialog
+        Navigator.of(context).pop();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to logout cleanly: $e'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+      }
+    }
+  }
 }
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
@@ -1907,17 +2035,24 @@ class _InfoRow extends StatelessWidget {
             children: [
               Icon(icon, size: 16, color: KColor.textMuted),
               const SizedBox(width: 10),
-              Text(
-                label,
-                style: const TextStyle(fontSize: 13, color: KColor.textSecondary),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: KColor.textSecondary),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
                 ),
               ),
               if (isEditable) ...[
