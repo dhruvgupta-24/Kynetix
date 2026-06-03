@@ -4,6 +4,9 @@ import '../models/nutrition_result.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/user_nutrition_memory.dart';
+import '../services/food_role_classifier.dart';
+import '../services/eating_pattern_service.dart';
+import '../services/item_parser.dart';
 
 enum _SaveMode { once, recurring }
 
@@ -136,144 +139,172 @@ class _AddMealScreenState extends State<AddMealScreen>
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = e.toString(); });
     }
-  }
-
-  Future<void> _fixEstimate() async {
+  }  Future<void> _fixEstimate() async {
     if (_result == null) return;
-    
-    // Pre-populate initial values from current result
-    final initCal  = _result!.primaryCaloriesEstimate;
-    final initPro  = _result!.primaryProteinEstimate;
-    final initCarbs = ((_result!.carbohydrates?.min ?? 0) + (_result!.carbohydrates?.max ?? 0)) / 2;
-    final initFat  = ((_result!.fat?.min ?? 0) + (_result!.fat?.max ?? 0)) / 2;
-    final initFiber = ((_result!.fiber?.min ?? 0) + (_result!.fiber?.max ?? 0)) / 2;
 
-    final vals = await showModalBottomSheet<_FixValues>(
+    final mode = await showModalBottomSheet<_CorrectionMode>(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _FixEstimateSheet(
-        items: _result!.items,
-        canonicalMeal: _result!.canonicalMeal,
-        initialCal: initCal,
-        initialPro: initPro,
-        initialCarbs: initCarbs > 0 ? initCarbs : null,
-        initialFat:   initFat  > 0 ? initFat   : null,
-        initialFiber: initFiber > 0 ? initFiber : null,
-      ),
+      builder: (_) => const _CorrectionModeSheet(),
     );
-    if (!mounted || vals == null) return;
+    if (!mounted || mode == null) return;
 
-    final saveMode = await showDialog<_SaveMode>(
-      context: context,
-      builder: (_) => const _SaveOverrideDialog(),
-    );
-    if (!mounted || saveMode == null) return;
-
-    final mealName = _controller.text.trim().isNotEmpty 
-        ? _controller.text.trim() 
+    final mealName = _controller.text.trim().isNotEmpty
+        ? _controller.text.trim()
         : _result!.canonicalMeal;
 
-    if (saveMode == _SaveMode.recurring) {
-      if (vals.items.length <= 1) {
-        final item = vals.items.isEmpty ? null : vals.items.first;
-        final qty = (item?.quantity ?? 1.0).clamp(1.0, double.infinity);
-        // Use the user's exact values per unit — never ratio-scale.
-        final calPerUnit  = vals.cal   / qty;
-        final proPerUnit  = vals.pro   / qty;
-        final carbPerUnit = vals.carbs / qty;
-        final fatPerUnit  = vals.fat   / qty;
-        final fibPerUnit  = vals.fiber / qty;
-        await UserNutritionMemory.instance.saveOverride(
-          item?.name ?? mealName,
-          calPerUnit,
-          proPerUnit,
-          carbohydratesPerUnit: carbPerUnit,
-          fatPerUnit: fatPerUnit,
-          fiberPerUnit: fibPerUnit,
-          referenceQuantity: qty,
-          referenceUnit: item?.unit ?? 'serving',
+    if (mode == _CorrectionMode.applyCorrections) {
+      // 1. Apply Corrections (Whole-meal)
+      final initCal = _result!.primaryCaloriesEstimate;
+      final initPro = _result!.primaryProteinEstimate;
+      final initCarbs = ((_result!.carbohydrates?.min ?? 0) + (_result!.carbohydrates?.max ?? 0)) / 2;
+      final initFat = ((_result!.fat?.min ?? 0) + (_result!.fat?.max ?? 0)) / 2;
+      final initFiber = ((_result!.fiber?.min ?? 0) + (_result!.fiber?.max ?? 0)) / 2;
+
+      final vals = await showModalBottomSheet<_FixValues>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _FixEstimateSheet(
+          items: const [], // Empty items force a single overall meal correction form
+          canonicalMeal: mealName,
+          initialCal: initCal,
+          initialPro: initPro,
+          initialCarbs: initCarbs > 0 ? initCarbs : null,
+          initialFat: initFat > 0 ? initFat : null,
+          initialFiber: initFiber > 0 ? initFiber : null,
+        ),
+      );
+      if (!mounted || vals == null) return;
+
+      final score = NutritionResult.calculateLocalQualityScore(vals.cal, vals.pro, mealName);
+
+      setState(() {
+        _result = NutritionResult(
+          canonicalMeal: mealName,
+          items: const [], // whole meal only has no sub-items
+          calories: NutrientRange(min: vals.cal, max: vals.cal),
+          protein: NutrientRange(min: vals.pro, max: vals.pro),
+          carbohydrates: NutrientRange(min: vals.carbs, max: vals.carbs),
+          fat: NutrientRange(min: vals.fat, max: vals.fat),
+          fiber: NutrientRange(min: vals.fiber, max: vals.fiber),
+          sugar: _result?.sugar,
+          saturatedFat: _result?.saturatedFat,
+          sodium: _result?.sodium,
+          mealQualityScore: score,
+          mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
+          mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
+          mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
+          confidence: 0.99,
+          warnings: const [],
+          source: 'user_override',
+          createdAt: DateTime.now(),
+          macrosLockedByUser: true,
         );
-      } else {
-        // Multi-item: distribute corrections proportionally by item calorie share.
-        final totalCalFromItems = vals.items.fold<double>(0, (s, it) => s + it.calories.max);
-        for (final item in vals.items) {
-          final qty = item.quantity.clamp(1.0, double.infinity);
-          final share = totalCalFromItems > 0 ? item.calories.max / totalCalFromItems : 1.0 / vals.items.length;
-          final itemCal  = vals.cal   * share;
-          final itemPro  = vals.pro   * share;
-          final itemCarb = vals.carbs * share;
-          final itemFat  = vals.fat   * share;
-          final itemFib  = vals.fiber * share;
+      });
+    } else {
+      // 2. Edit Ingredients
+      final res = await showModalBottomSheet<_IngredientEditResult>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _IngredientEditSheet(
+          items: _result!.items,
+          canonicalMeal: mealName,
+        ),
+      );
+      if (!mounted || res == null) return;
+
+      final vals = res.items;
+      final originalItems = res.originalItems;
+      final remember = res.rememberEdits;
+
+      double totalCal = 0;
+      double totalPro = 0;
+      double totalCarb = 0;
+      double totalFat = 0;
+      double totalFib = 0;
+
+      for (int i = 0; i < vals.length; i++) {
+        final item = vals[i];
+        final origItem = originalItems[i];
+        final cVal = item.calories.max;
+        final pVal = item.protein.max;
+        final carbVal = item.carbohydrates?.max ?? 0;
+        final fatVal = item.fat?.max ?? 0;
+        final fibVal = item.fiber?.max ?? 0;
+
+        totalCal += cVal;
+        totalPro += pVal;
+        totalCarb += carbVal;
+        totalFat += fatVal;
+        totalFib += fibVal;
+
+        final qty = item.quantity.clamp(1.0, double.infinity);
+        final origCal = (origItem.calories.min + origItem.calories.max) / 2;
+
+        // Save override if "Remember edits" is checked
+        if (remember) {
           await UserNutritionMemory.instance.saveOverride(
             item.name,
-            itemCal  / qty,
-            itemPro  / qty,
-            carbohydratesPerUnit: itemCarb / qty,
-            fatPerUnit:  itemFat / qty,
-            fiberPerUnit: itemFib / qty,
+            cVal / qty,
+            pVal / qty,
+            carbohydratesPerUnit: carbVal / qty,
+            fatPerUnit: fatVal / qty,
+            fiberPerUnit: fibVal / qty,
             referenceQuantity: qty,
             referenceUnit: item.unit,
           );
         }
+
+        // Record ingredient ratio correction to EatingPatternService (always learned)
+        final rolledItems = FoodRoleClassifier.classifyAll(
+          vals.map((v) => ParsedFoodItem(
+            rawChunk: v.name,
+            normalizedName: v.name,
+            quantity: v.quantity,
+            unit: v.unit,
+          )).toList()
+        );
+        final hasPrimary = rolledItems.any((r) => r.role == FoodRole.primary);
+        final itemRole = FoodRoleClassifier.classify(item.name);
+
+        EatingPatternService.instance.recordIngredientCorrection(
+          correctedItemRole: itemRole,
+          mealHasPrimary: hasPrimary,
+          pipelineCalEstimate: origCal,
+          userCorrectedCal: cVal,
+        );
       }
+
+      await EatingPatternService.instance.save();
+
+      final score = NutritionResult.calculateLocalQualityScore(totalCal, totalPro, mealName);
+
+      setState(() {
+        _result = NutritionResult(
+          canonicalMeal: mealName,
+          items: vals,
+          calories: NutrientRange(min: totalCal, max: totalCal),
+          protein: NutrientRange(min: totalPro, max: totalPro),
+          carbohydrates: NutrientRange(min: totalCarb, max: totalCarb),
+          fat: NutrientRange(min: totalFat, max: totalFat),
+          fiber: NutrientRange(min: totalFib, max: totalFib),
+          sugar: _result?.sugar,
+          saturatedFat: _result?.saturatedFat,
+          sodium: _result?.sodium,
+          mealQualityScore: score,
+          mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
+          mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
+          mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
+          confidence: 0.99,
+          warnings: const [],
+          source: 'user_override',
+          createdAt: DateTime.now(),
+          macrosLockedByUser: true,
+        );
+      });
     }
-
-    // Build updated items with user's exact values (no ratio re-scaling).
-    final updatedItems = vals.items.isEmpty
-        ? <NutritionItem>[]
-        : vals.items.map((item) {
-            final totalCalFromItems = vals.items.fold<double>(0, (s, it) => s + it.calories.max);
-            final share = totalCalFromItems > 0 ? item.calories.max / totalCalFromItems : 1.0 / vals.items.length;
-            final iCal   = vals.cal   * share;
-            final iPro   = vals.pro   * share;
-            final iCarb  = vals.carbs * share;
-            final iFat   = vals.fat   * share;
-            final iFib   = vals.fiber * share;
-            return NutritionItem(
-              name: item.name,
-              quantity: item.quantity,
-              unit: item.unit,
-              estimated: true,
-              mode: item.mode,
-              calories: NutrientRange(min: iCal,  max: iCal),
-              protein:  NutrientRange(min: iPro,  max: iPro),
-              carbohydrates: NutrientRange(min: iCarb, max: iCarb),
-              fat:   NutrientRange(min: iFat,  max: iFat),
-              fiber: NutrientRange(min: iFib,  max: iFib),
-              sugar: item.sugar,
-              saturatedFat: item.saturatedFat,
-              sodium: item.sodium,
-            );
-          }).toList();
-
-    final score = NutritionResult.calculateLocalQualityScore(vals.cal, vals.pro, mealName);
-
-    setState(() {
-      _result = NutritionResult(
-        canonicalMeal: mealName,
-        items: updatedItems,
-        calories: NutrientRange(min: vals.cal,   max: vals.cal),
-        protein:  NutrientRange(min: vals.pro,   max: vals.pro),
-        carbohydrates: NutrientRange(min: vals.carbs, max: vals.carbs),
-        fat:   NutrientRange(min: vals.fat,   max: vals.fat),
-        fiber: NutrientRange(min: vals.fiber, max: vals.fiber),
-        // Preserve sugar / sat-fat / sodium from original if available.
-        sugar: _result?.sugar,
-        saturatedFat: _result?.saturatedFat,
-        sodium: _result?.sodium,
-        mealQualityScore: score,
-        mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
-        mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
-        mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
-        confidence: 0.99,
-        warnings: const [],
-        source: 'user_override',
-        createdAt: DateTime.now(),
-        // Lock so AI / pipeline never overwrites these values.
-        macrosLockedByUser: true,
-      );
-    });
   }
 
   void _confirm() {
@@ -1419,6 +1450,682 @@ class _SaveOverrideDialog extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(context, _SaveMode.recurring),
                 child: const Text('Save as recurring memory'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _CorrectionMode { applyCorrections, editIngredients }
+
+class _CorrectionModeSheet extends StatelessWidget {
+  const _CorrectionModeSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F0F14),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'How would you like to correct this meal?',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 20),
+            InkWell(
+              onTap: () => Navigator.pop(context, _CorrectionMode.applyCorrections),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E2C),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF2E2E3E)),
+                ),
+                child: Row(
+                  children: [
+                    const Text('✏️', style: TextStyle(fontSize: 24)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Apply Corrections (Whole-meal)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Enter total meal macros. Affects this entry only. Saves to no memory.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: const Color(0xFF9CA3AF),
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded, color: Color(0xFF6B7280)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () => Navigator.pop(context, _CorrectionMode.editIngredients),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E2C),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF2E2E3E)),
+                ),
+                child: Row(
+                  children: [
+                    const Text('🔬', style: TextStyle(fontSize: 24)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Edit Ingredients',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Edit each ingredient separately. Saves to ingredient memory and updates eating patterns.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: const Color(0xFF9CA3AF),
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded, color: Color(0xFF6B7280)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IngredientEditResult {
+  final List<NutritionItem> items;
+  final List<NutritionItem> originalItems;
+  final bool rememberEdits;
+  _IngredientEditResult({
+    required this.items,
+    required this.originalItems,
+    required this.rememberEdits,
+  });
+}
+
+class _IngredientEditSheet extends StatefulWidget {
+  final List<NutritionItem> items;
+  final String canonicalMeal;
+
+  const _IngredientEditSheet({
+    required this.items,
+    required this.canonicalMeal,
+  });
+
+  @override
+  State<_IngredientEditSheet> createState() => _IngredientEditSheetState();
+}
+
+class _IngredientEditSheetState extends State<_IngredientEditSheet> {
+  late final List<NutritionItem> _originalItems;
+  late final List<NutritionItem> _displayItems;
+  final List<List<TextEditingController>> _controllers = [];
+  bool _rememberEdits = true;
+  String? _validationWarning;
+
+  double _totalCal = 0;
+  double _totalPro = 0;
+  double _totalCarb = 0;
+  double _totalFat = 0;
+  double _totalFib = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _originalItems = List.from(widget.items);
+    _displayItems = List.from(widget.items);
+
+    for (final item in _displayItems) {
+      final cal = (item.calories.min + item.calories.max) / 2;
+      final pro = (item.protein.min + item.protein.max) / 2;
+      final carb = item.carbohydrates != null ? (item.carbohydrates!.min + item.carbohydrates!.max) / 2 : 0.0;
+      final fat = item.fat != null ? (item.fat!.min + item.fat!.max) / 2 : 0.0;
+      final fib = item.fiber != null ? (item.fiber!.min + item.fiber!.max) / 2 : 0.0;
+
+      final itemCtrls = [
+        TextEditingController(text: cal.toStringAsFixed(0)),
+        TextEditingController(text: pro.toStringAsFixed(1)),
+        TextEditingController(text: carb.toStringAsFixed(1)),
+        TextEditingController(text: fat.toStringAsFixed(1)),
+        TextEditingController(text: fib.toStringAsFixed(1)),
+      ];
+
+      for (final ctrl in itemCtrls) {
+        ctrl.addListener(_updateTotalsAndValidate);
+      }
+
+      _controllers.add(itemCtrls);
+    }
+
+    _updateTotalsAndValidate();
+  }
+
+  @override
+  void dispose() {
+    for (final list in _controllers) {
+      for (final ctrl in list) {
+        ctrl.dispose();
+      }
+    }
+    super.dispose();
+  }
+
+  void _updateTotalsAndValidate() {
+    double calSum = 0;
+    double proSum = 0;
+    double carbSum = 0;
+    double fatSum = 0;
+    double fibSum = 0;
+
+    for (int i = 0; i < _displayItems.length; i++) {
+      calSum  += double.tryParse(_controllers[i][0].text) ?? 0;
+      proSum  += double.tryParse(_controllers[i][1].text) ?? 0;
+      carbSum += double.tryParse(_controllers[i][2].text) ?? 0;
+      fatSum  += double.tryParse(_controllers[i][3].text) ?? 0;
+      fibSum  += double.tryParse(_controllers[i][4].text) ?? 0;
+    }
+
+    if (mounted) {
+      setState(() {
+        _totalCal = calSum;
+        _totalPro = proSum;
+        _totalCarb = carbSum;
+        _totalFat = fatSum;
+        _totalFib = fibSum;
+
+        final impliedCal = proSum * 4 + carbSum * 4 + fatSum * 9;
+        if (calSum > 0 && impliedCal > 0) {
+          final deviation = ((impliedCal - calSum) / calSum).abs();
+          if (deviation > 0.15) {
+            _validationWarning = 'Macro totals imply ~${impliedCal.toStringAsFixed(0)} kcal but '
+                'running total is ${calSum.toStringAsFixed(0)} kcal. '
+                'protein×4 + carbs×4 + fat×9 should equal calories.';
+          } else {
+            _validationWarning = null;
+          }
+        } else {
+          _validationWarning = null;
+        }
+      });
+    }
+  }
+
+  void _resetItemToOriginal(int index) {
+    final orig = _originalItems[index];
+    final cal = (orig.calories.min + orig.calories.max) / 2;
+    final pro = (orig.protein.min + orig.protein.max) / 2;
+    final carb = orig.carbohydrates != null ? (orig.carbohydrates!.min + orig.carbohydrates!.max) / 2 : 0.0;
+    final fat = orig.fat != null ? (orig.fat!.min + orig.fat!.max) / 2 : 0.0;
+    final fib = orig.fiber != null ? (orig.fiber!.min + orig.fiber!.max) / 2 : 0.0;
+
+    _controllers[index][0].text = cal.toStringAsFixed(0);
+    _controllers[index][1].text = pro.toStringAsFixed(1);
+    _controllers[index][2].text = carb.toStringAsFixed(1);
+    _controllers[index][3].text = fat.toStringAsFixed(1);
+    _controllers[index][4].text = fib.toStringAsFixed(1);
+  }
+
+  void _submit() {
+    final updatedItems = <NutritionItem>[];
+
+    for (int i = 0; i < _displayItems.length; i++) {
+      final item = _displayItems[i];
+      final origItem = _originalItems[i];
+
+      final cVal = double.tryParse(_controllers[i][0].text) ?? 0;
+      final pVal = double.tryParse(_controllers[i][1].text) ?? 0;
+      final carbVal = double.tryParse(_controllers[i][2].text) ?? 0;
+      final fatVal = double.tryParse(_controllers[i][3].text) ?? 0;
+      final fibVal = double.tryParse(_controllers[i][4].text) ?? 0;
+
+      final origCal = (origItem.calories.min + origItem.calories.max) / 2;
+      final scale = origCal > 0 ? cVal / origCal : 1.0;
+
+      final sugar = item.sugar != null
+          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
+          : null;
+      final saturatedFat = item.saturatedFat != null
+          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
+          : null;
+      final sodium = item.sodium != null
+          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)),
+                          max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
+          : null;
+
+      updatedItems.add(NutritionItem(
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        estimated: true,
+        mode: item.mode,
+        calories: NutrientRange(min: cVal, max: cVal),
+        protein: NutrientRange(min: pVal, max: pVal),
+        carbohydrates: NutrientRange(min: carbVal, max: carbVal),
+        fat: NutrientRange(min: fatVal, max: fatVal),
+        fiber: NutrientRange(min: fibVal, max: fibVal),
+        sugar: sugar,
+        saturatedFat: saturatedFat,
+        sodium: sodium,
+      ));
+    }
+
+    Navigator.of(context).pop(_IngredientEditResult(
+      items: updatedItems,
+      originalItems: _originalItems,
+      rememberEdits: _rememberEdits,
+    ));
+  }
+
+  Widget _buildField(String label, TextEditingController ctrl, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.85),
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF0F0F14),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            isDense: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: color.withValues(alpha: 0.25)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: color, width: 1.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoleBadge(FoodRole role) {
+    final (label, color) = switch (role) {
+      FoodRole.primary       => ('Base/Carb', const Color(0xFF60A5FA)),
+      FoodRole.protein       => ('Protein', const Color(0xFF52B788)),
+      FoodRole.accompaniment => ('Side/Curry', const Color(0xFFFBBF24)),
+      FoodRole.addOn         => ('Add-on', const Color(0xFFA78BFA)),
+      FoodRole.completeMeal  => ('Single Unit', const Color(0xFF9CA3AF)),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourceBadge(OverrideSource source) {
+    final (label, color) = switch (source) {
+      OverrideSource.userCorrected => ('✏️ Saved', const Color(0xFF60A5FA)),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0F0F14),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 12),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF374151),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Edit Ingredients',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF52B788).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.4)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.memory_rounded, size: 10, color: Color(0xFF52B788)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Saves to Ingredient Memory',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF52B788),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Correct individual ingredients. Edits update memory and train eating patterns.',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280), height: 1.4),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: List.generate(_displayItems.length, (i) {
+                    final item = _displayItems[i];
+                    final role = FoodRoleClassifier.classify(item.name);
+                    final (stored, source) = UserNutritionMemory.instance.lookupWithSource(item.name);
+                    final isSaved = stored != null;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E2C),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF2E2E3E)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${item.quantity == item.quantity.truncate() ? item.quantity.toInt().toString() : item.quantity} ${item.unit} ${item.name}',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildRoleBadge(role),
+                              const SizedBox(width: 6),
+                              isSaved
+                                  ? _buildSourceBadge(source)
+                                  : Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF374151),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        '🤖 AI',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF9CA3AF),
+                                        ),
+                                      ),
+                                    ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(child: _buildField('Calories (kcal)', _controllers[i][0], const Color(0xFFFF6B35))),
+                              const SizedBox(width: 10),
+                              Expanded(child: _buildField('Protein (g)', _controllers[i][1], const Color(0xFF52B788))),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(child: _buildField('Carbs (g)', _controllers[i][2], const Color(0xFF60A5FA))),
+                              const SizedBox(width: 10),
+                              Expanded(child: _buildField('Fat (g)', _controllers[i][3], const Color(0xFFFBBF24))),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(child: _buildField('Fiber (g)', _controllers[i][4], const Color(0xFFA78BFA))),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: TextButton.icon(
+                                  onPressed: () => _resetItemToOriginal(i),
+                                  icon: const Icon(Icons.undo_rounded, size: 12),
+                                  label: const Text('Reset to AI', style: TextStyle(fontSize: 11)),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFF6B7280),
+                                    padding: EdgeInsets.zero,
+                                    alignment: Alignment.centerLeft,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0F14),
+                border: Border(top: BorderSide(color: Color(0xFF1E1E2C))),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Remember edits for future logs',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFD1D5DB),
+                        ),
+                      ),
+                      Switch(
+                        value: _rememberEdits,
+                        onChanged: (v) => setState(() => _rememberEdits = v),
+                        activeColor: const Color(0xFF52B788),
+                        activeTrackColor: const Color(0xFF1E3A2F),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_validationWarning != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFB347).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFB347), size: 14),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _validationWarning!,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFFFFB347),
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E2C),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'RUNNING TOTAL',
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF6B7280)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${_totalCal.toStringAsFixed(0)} kcal · ${_totalPro.toStringAsFixed(1)}g P',
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          'C: ${_totalCarb.toStringAsFixed(0)}g · F: ${_totalFat.toStringAsFixed(0)}g · Fib: ${_totalFib.toStringAsFixed(0)}g',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2D6A4F),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text(
+                        'Apply Ingredient Corrections',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

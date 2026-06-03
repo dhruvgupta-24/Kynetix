@@ -139,6 +139,36 @@ class NutritionItem {
     final collapsed = double.parse(mid.toStringAsFixed(1));
     return NutrientRange(min: collapsed, max: collapsed);
   }
+
+  NutritionItem withScalar(double scalar) {
+    return NutritionItem(
+      name: name,
+      quantity: quantity,
+      unit: unit,
+      estimated: estimated,
+      mode: mode,
+      calories: NutrientRange(min: calories.min * scalar, max: calories.max * scalar),
+      protein: NutrientRange(min: protein.min * scalar, max: protein.max * scalar),
+      carbohydrates: carbohydrates != null
+          ? NutrientRange(min: carbohydrates!.min * scalar, max: carbohydrates!.max * scalar)
+          : null,
+      fat: fat != null
+          ? NutrientRange(min: fat!.min * scalar, max: fat!.max * scalar)
+          : null,
+      fiber: fiber != null
+          ? NutrientRange(min: fiber!.min * scalar, max: fiber!.max * scalar)
+          : null,
+      sugar: sugar != null
+          ? NutrientRange(min: sugar!.min * scalar, max: sugar!.max * scalar)
+          : null,
+      saturatedFat: saturatedFat != null
+          ? NutrientRange(min: saturatedFat!.min * scalar, max: saturatedFat!.max * scalar)
+          : null,
+      sodium: sodium != null
+          ? NutrientRange(min: sodium!.min * scalar, max: sodium!.max * scalar)
+          : null,
+    );
+  }
 }
 
 // ─── NutritionResult ─────────────────────────────────────────────────────────

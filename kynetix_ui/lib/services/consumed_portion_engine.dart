@@ -1,4 +1,7 @@
 import '../screens/onboarding_screen.dart' show currentUserProfile, PortionAnchor;
+import 'food_role_classifier.dart';
+import 'eating_pattern_service.dart';
+
 // ─── ConsumedPortionEngine ────────────────────────────────────────────────────
 //
 // Behavior-based consumed portion estimator for Indian hostel/mess meals.
@@ -65,7 +68,19 @@ class ConsumedPortionEngine {
 
     // Clamp the scalar for safety in case of unexpected enum additions.
     final safeScalar = anchorScalar.clamp(0.5, 2.0);
-    final scaledCarbLoad = (effectiveCarbLoad * safeScalar).clamp(0.5, 12.0);
+
+    final FoodRole targetRole = switch (ctx.profile!) {
+      _DishProfile.paneer => FoodRole.protein,
+      _DishProfile.soya   => FoodRole.protein,
+      _                   => FoodRole.accompaniment,
+    };
+    final patternScalar = EatingPatternService.instance.getScalar(
+      targetRole,
+      contextRole: FoodRole.primary,
+    ) ?? 1.0;
+
+    final combinedScalar = (safeScalar * patternScalar).clamp(0.3, 2.5);
+    final scaledCarbLoad = (effectiveCarbLoad * combinedScalar).clamp(0.5, 12.0);
 
     return switch (ctx.profile!) {
       _DishProfile.paneer      => _paneer(ctx, scaledCarbLoad),

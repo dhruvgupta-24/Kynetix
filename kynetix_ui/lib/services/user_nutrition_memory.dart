@@ -18,6 +18,14 @@ import '../services/unit_normalizer.dart';
 //     e.g. caloriesPerUnit == 2.0 with referenceUnit == 'g' means 2 kcal/gram
 //   - originalTokens are tokenized from the normalized canonicalMeal
 
+// ─── OverrideSource ───────────────────────────────────────────────────────────
+
+/// The origin of a [UserMealOverride] entry.
+/// Used to show source badges in the ingredient editor and Nutrition Intelligence screen.
+enum OverrideSource { userCorrected }
+
+// ─── UserMealOverride ─────────────────────────────────────────────────────────
+
 class UserMealOverride {
   final String canonicalMeal;      // normalized food name
   final double caloriesPerUnit;    // kcal per 1 referenceUnit
@@ -29,6 +37,14 @@ class UserMealOverride {
   final String referenceUnit;      // canonical unit (g / ml / scoop / …)
   final List<String> originalTokens;
 
+  // ── Source metadata (added v2; all have defaults for backward-compat) ──────
+  /// Who created this override.  Always 'user_corrected' for user-edited entries.
+  final OverrideSource overrideSource;
+  /// When this override was last written.
+  final DateTime savedAt;
+  /// Number of times the user has explicitly corrected this ingredient.
+  final int correctionCount;
+
   UserMealOverride({
     required this.canonicalMeal,
     required this.caloriesPerUnit,
@@ -39,7 +55,11 @@ class UserMealOverride {
     this.referenceQuantity = 1.0,
     this.referenceUnit     = 'serving',
     List<String>? originalTokens,
-  }) : originalTokens = originalTokens ?? _tokenize(canonicalMeal);
+    this.overrideSource  = OverrideSource.userCorrected,
+    DateTime?     savedAt,
+    this.correctionCount = 1,
+  })  : originalTokens = originalTokens ?? _tokenize(canonicalMeal),
+        savedAt        = savedAt ?? DateTime.now();
 
   // ── Serialization ──────────────────────────────────────────────────────────
 
@@ -53,6 +73,10 @@ class UserMealOverride {
         'referenceQuantity': referenceQuantity,
         'referenceUnit':     referenceUnit,
         'originalTokens':    originalTokens,
+        // Source metadata
+        'overrideSource':  overrideSource.name,
+        'savedAt':         savedAt.toIso8601String(),
+        'correctionCount': correctionCount,
         // Legacy keys kept for backward compat with old SharedPreferences data
         // and existing Supabase rows.  New writes always have 'caloriesPerUnit'.
         'calories': caloriesPerUnit,
@@ -103,6 +127,18 @@ class UserMealOverride {
     final rawMeal = json['canonicalMeal'] as String? ?? '';
     final normMeal = FoodNameNormalizer.normalize(rawMeal);
 
+    // Parse source metadata with safe defaults for old entries
+    final sourceStr = json['overrideSource'] as String? ?? 'userCorrected';
+    final source = OverrideSource.values.firstWhere(
+      (e) => e.name == sourceStr,
+      orElse: () => OverrideSource.userCorrected,
+    );
+    final savedAtRaw = json['savedAt'] as String?;
+    final savedAt = savedAtRaw != null
+        ? DateTime.tryParse(savedAtRaw) ?? DateTime.now()
+        : DateTime.now();
+    final correctionCount = (json['correctionCount'] as int?) ?? 1;
+
     return UserMealOverride(
       canonicalMeal:     normMeal,
       caloriesPerUnit:   finalCal,
@@ -113,6 +149,9 @@ class UserMealOverride {
       referenceQuantity: (json['referenceQuantity'] as num?)?.toDouble() ?? 1.0,
       referenceUnit:     normUnit,
       originalTokens:    List<String>.from(json['originalTokens'] ?? []),
+      overrideSource:    source,
+      savedAt:           savedAt,
+      correctionCount:   correctionCount,
     );
   }
 
@@ -183,6 +222,10 @@ class UserNutritionMemory {
     double referenceQuantity = 1.0,
     String referenceUnit     = defaultServingUnit,
   }) async {
+    // Compute correctionCount: increment if entry already exists
+    final existingNorm = FoodNameNormalizer.normalize(rawMealName);
+    final existing = _overrides.where((o) => o.canonicalMeal == existingNorm).firstOrNull;
+    final newCorrectionCount = (existing?.correctionCount ?? 0) + 1;
     // Normalize inputs on the way in
     final normName = FoodNameNormalizer.normalize(rawMealName);
     final normUnit = UnitNormalizer.normalizeUnit(referenceUnit);
@@ -216,6 +259,9 @@ class UserNutritionMemory {
       fiberPerUnit:      finalFiber,
       referenceQuantity: normQty,
       referenceUnit:     normUnit,
+      overrideSource:    OverrideSource.userCorrected,
+      savedAt:           DateTime.now(),
+      correctionCount:   newCorrectionCount,
     );
 
     // Replace existing entry for the same food name
@@ -250,6 +296,31 @@ class UserNutritionMemory {
   }
 
   // ── Lookup ─────────────────────────────────────────────────────────────────
+
+  /// Lookup with source metadata.  Returns the [NutritionResult] AND the
+  /// [OverrideSource] that produced it.  Used by the ingredient editor to show
+  /// the correct source badge (🤖 AI Estimate vs ✏️ User Corrected).
+  ///
+  /// Returns (null, OverrideSource.userCorrected) when no match is found —
+  /// caller should treat null NutritionResult as "no stored override".
+  (NutritionResult?, OverrideSource) lookupWithSource(String rawInput) {
+    final result = lookup(rawInput);
+    if (result == null) return (null, OverrideSource.userCorrected);
+    final normInput = FoodNameNormalizer.normalize(rawInput);
+    final match = _overrides.firstWhere(
+      (o) => o.canonicalMeal == normInput,
+      orElse: () => _overrides.firstWhere(
+        (o) => o.originalTokens.isNotEmpty &&
+            o.originalTokens.every(
+                (t) => UserMealOverride._tokenize(normInput).contains(t)),
+        orElse: () => _overrides.first,
+      ),
+    );
+    return (result, match.overrideSource);
+  }
+
+  /// All stored overrides — exposed for the Nutrition Intelligence screen.
+  List<UserMealOverride> get allOverrides => List.unmodifiable(_overrides);
 
   /// Look up a memory match for [rawInput] (food name only, no quantity/unit).
   ///

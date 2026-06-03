@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
+import '../screens/nutrition_intelligence_screen.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
@@ -402,6 +403,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildNutritionTargetsCard(),
           const SizedBox(height: 16),
           _buildHealthCard(),
+          const SizedBox(height: 16),
+          _buildNutritionIntelligenceCard(),
           const SizedBox(height: 16),
           _buildAiCard(),
           const SizedBox(height: 16),
@@ -946,6 +949,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  // ── Nutrition Intelligence ─────────────────────────────────────────────────
+
+  Widget _buildNutritionIntelligenceCard() {
+    return _Section(
+      title: 'Nutrition Intelligence',
+      child: Column(
+        children: [
+          _InfoRow(
+            icon: Icons.psychology_rounded,
+            label: 'Nutrition Intelligence',
+            value: 'View learned patterns & memory',
+            isEditable: true,
+            isLast: true,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NutritionIntelligenceScreen()),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── About ──────────────────────────────────────────────────────────────────

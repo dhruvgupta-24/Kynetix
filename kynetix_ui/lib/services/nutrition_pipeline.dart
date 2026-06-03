@@ -13,6 +13,8 @@ import '../services/mock_estimation_service.dart'
     NutrientRange;
 import '../services/item_parser.dart';
 import '../services/unit_normalizer.dart';
+import '../services/food_role_classifier.dart';
+import '../services/eating_pattern_service.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -229,6 +231,33 @@ class NutritionPipeline {
       }
     }
 
+    // Apply eating pattern scalars
+    final rolledItems = FoodRoleClassifier.classifyAll(parsedItems);
+    final rolledMap = { for (final r in rolledItems) r.parsed.normalizedName: r };
+
+    for (int i = 0; i < finalItems.length; i++) {
+      var item = finalItems[i];
+      final rolled = rolledMap[item.name];
+      if (rolled == null) continue;
+
+      // Determine context: is there a primary food in this meal?
+      final hasPrimary = rolledItems.any((r) => r.role == FoodRole.primary);
+      final contextRole = hasPrimary ? FoodRole.primary : null;
+
+      final scalar = EatingPatternService.instance.getScalar(
+        rolled.role,
+        contextRole: contextRole,
+      );
+
+      if (scalar != null) {
+        // Apply scalar to calorie/macro estimates (scale min AND max)
+        finalItems[i] = item.withScalar(scalar);
+        debugPrint('[Pipeline] 🧠 Pattern scalar ${scalar.toStringAsFixed(2)}× '
+            'applied to "${item.name}" (${rolled.role.name} in context of '
+            '${contextRole?.name ?? "solo"})');
+      }
+    }
+
     // ── 4. AGGREGATION ───────────────────────────────────────────────────────
     double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
     for (final item in finalItems) {
@@ -273,6 +302,9 @@ class NutritionPipeline {
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
     final score = NutritionResult.calculateLocalQualityScore(midCal, midPro, trimmed);
+
+    // Record meal context for pattern learning
+    EatingPatternService.instance.recordMealContext(rolledItems);
 
     return NutritionResult(
       canonicalMeal: trimmed,

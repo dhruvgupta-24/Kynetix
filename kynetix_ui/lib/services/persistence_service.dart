@@ -5,6 +5,7 @@ import '../screens/onboarding_screen.dart';
 import '../models/day_log.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
+import '../services/eating_pattern_service.dart';
 import 'widget_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
@@ -54,6 +55,7 @@ class PersistenceService {
       // Load recurring nutrition memory from SharedPreferences.
       // This makes memory available offline, before cloud hydration runs.
       await UserNutritionMemory.instance.init();
+      await EatingPatternService.instance.load();
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
@@ -139,12 +141,15 @@ class PersistenceService {
     _onboardingDone = false;
     currentUserProfile = null;
     dayLogStore.clear();
+    EatingPatternService.instance.resetAll();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kProfile);
       await prefs.remove(_kOnboarding);
       await prefs.remove(_kDayLogs);
       await prefs.remove('user_meal_overrides_v1'); // nutrition memory
+      await prefs.remove('eating_patterns_v1');
+      await prefs.remove('meal_context_v1');
     } catch (_) {}
   }
 }
