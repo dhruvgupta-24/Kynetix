@@ -30,8 +30,6 @@ void main() {
     // pump() once to let initState run. pumpAndSettle() times out on repeating animations.
     await tester.pump();
 
-    final state = screenKey.currentState as dynamic;
-
     // Test cases for structure change detection
     expect(AddMealScreen.hasParsedMealStructureChanged('1 roti', '1.5 roti'), isTrue);
     expect(AddMealScreen.hasParsedMealStructureChanged('2 roti + channa', '2 roti + rice + channa'), isTrue);

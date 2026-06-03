@@ -109,24 +109,10 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (_result != null && _result!.macrosLockedByUser) {
       final changed = text != _lastLockedText || AddMealScreen.hasParsedMealStructureChanged(_lastLockedText ?? '', text);
       if (changed) {
-        final action = await showDialog<_LockedTextChangeAction>(
-          context: context,
-          builder: (_) => const _LockedTextChangeDialog(),
-        );
-        if (action == null) return;
-
-        if (action == _LockedTextChangeAction.recalculate) {
-          setState(() {
-            _result = null;
-            _lastLockedText = null;
-          });
-          // Proceed with normal calculation below
-        } else {
-          setState(() {
-            _lastLockedText = text;
-          });
-          return;
-        }
+        setState(() {
+          _result = null;
+          _lastLockedText = null;
+        });
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2440,8 +2426,7 @@ class _LockedTextChangeDialog extends StatelessWidget {
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
       ),
       content: const Text(
-        'This meal has manually corrected macros. The meal description or quantity has changed.\n\n'
-        'Would you like to recalculate the macros from the new description, or keep your existing manual macros?',
+        'Meal text changed since manual corrections were applied. Recalculate before saving?',
         style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
       ),
       actions: [
