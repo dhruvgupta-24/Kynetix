@@ -33,7 +33,15 @@ const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 // OpenRouter fallback
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
-const OPENROUTER_VISION_MODEL = 'google/gemini-3.5-flash';
+// Vision model candidates in priority order.
+// The account is on OpenRouter free tier — paid models return 402.
+// Free-tier (:free) models are tried in order; first success wins.
+const OPENROUTER_VISION_MODELS = [
+  'google/gemma-4-27b-it:free',      // Google Gemma 4 27B — free, multimodal
+  'google/gemma-4-26b-a4b-it:free',  // Google Gemma 4 26B MoE — free, multimodal
+  'nvidia/nemotron-nano-12b-v2-vl:free', // NVIDIA Nemotron VL — free, multimodal
+  'moonshotai/kimi-k2.6:free',       // Kimi K2 — free, multimodal
+];
 
 function hasImage(messages: any[]): boolean {
   for (const m of messages) {
@@ -523,9 +531,10 @@ Deno.serve(async (req: Request) => {
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
     const userProvider = await getUserChatGptProvider(supabaseAdmin, user.id);
     const providerLabel = userProvider ? 'user_chatgpt' : 'openrouter';
-    const activeOpenRouterModel = hasImage(messages) ? OPENROUTER_VISION_MODEL : OPENROUTER_MODEL;
+    const imageRequest = hasImage(messages);
+    const activeOpenRouterModel = imageRequest ? OPENROUTER_VISION_MODELS[0] : OPENROUTER_MODEL;
 
-    console.log(`[AI ROUTER] user=${user.id} stream=${streamMode} provider=${providerLabel} model=${userProvider?.model ?? activeOpenRouterModel}`);
+    console.log(`[AI ROUTER] user=${user.id} stream=${streamMode} provider=${providerLabel} imageRequest=${imageRequest} model=${userProvider?.model ?? activeOpenRouterModel}`);
 
     // ══════════════════════════════════════════════════
     // STREAMING PATH
@@ -561,27 +570,32 @@ Deno.serve(async (req: Request) => {
         console.log(`[AI ROUTER] skipping Codex for vision request — routing directly to OpenRouter`);
       }
 
-      // ── Attempt 2: OpenRouter ──────────────────────────────────────────────
+      // ── Attempt 2: OpenRouter (with per-model fallback for vision) ──────────
       if (openrouterKey) {
         const maxTok = 1500;
-        try {
-          const sRes = await callChatStream(
-            OPENROUTER_URL, openrouterKey, activeOpenRouterModel, messages,
-            { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
-            maxTok,
-          );
-          console.log(`[AI ROUTER] streaming via openrouter model=${activeOpenRouterModel}`);
-          return new Response(sRes.body, {
-            headers: {
-              ...corsHeaders,
-              'Content-Type':    'text/event-stream',
-              'Cache-Control':   'no-cache',
-              'X-Provider-Used': 'openrouter',
-              'X-Model-Used':    activeOpenRouterModel,
-            },
-          });
-        } catch (err: any) {
-          console.error(`[AI ROUTER] OpenRouter stream failed: ${err?.message?.slice(0, 500)}`);
+        const modelsToTry = imageRequest ? OPENROUTER_VISION_MODELS : [OPENROUTER_MODEL];
+        for (const model of modelsToTry) {
+          try {
+            console.log(`[AI ROUTER] trying openrouter model=${model} stream=true`);
+            const sRes = await callChatStream(
+              OPENROUTER_URL, openrouterKey, model, messages,
+              { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
+              maxTok,
+            );
+            console.log(`[AI ROUTER] streaming via openrouter model=${model}`);
+            return new Response(sRes.body, {
+              headers: {
+                ...corsHeaders,
+                'Content-Type':    'text/event-stream',
+                'Cache-Control':   'no-cache',
+                'X-Provider-Used': 'openrouter',
+                'X-Model-Used':    model,
+              },
+            });
+          } catch (err: any) {
+            console.error(`[AI ROUTER] OpenRouter stream failed model=${model}: ${err?.message?.slice(0, 300)}`);
+            // 402 = no credits for this model, 429 = rate limited, try next
+          }
         }
       }
 
@@ -594,7 +608,7 @@ Deno.serve(async (req: Request) => {
     // NON-STREAMING PATH
     // ══════════════════════════════════════════════════
 
-    const imageRequest = hasImage(messages);
+    // imageRequest was already computed above at line ~533
     // Codex is text-only — skip for vision requests
     const useCodexForThisRequest = userProvider && !imageRequest;
     const maxTok = 1500;
@@ -628,7 +642,7 @@ Deno.serve(async (req: Request) => {
       console.log(`[AI ROUTER] skipping Codex for vision request — routing directly to OpenRouter`);
     }
 
-    // ── Attempt 2: OpenRouter ────────────────────────────────────────────────
+    // ── Attempt 2: OpenRouter (with per-model fallback for vision) ────────────
     if (!openrouterKey) {
       return new Response(JSON.stringify({
         success:       false,
@@ -637,31 +651,37 @@ Deno.serve(async (req: Request) => {
       }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    try {
-      const { text, usage } = await callChat(
-        OPENROUTER_URL, openrouterKey, activeOpenRouterModel, messages,
-        { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
-        maxTok,
-      );
-      console.log(`[AI ROUTER] provider=openrouter model=${activeOpenRouterModel} success`);
-      return new Response(JSON.stringify({
-        success:       true,
-        provider_used: 'openrouter',
-        model_used:    activeOpenRouterModel,
-        response:      text,
-        usage,
-        fallback_used: !userProvider,
-      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-
-    } catch (err: any) {
-      const reason = err?.message ?? String(err);
-      console.error(`[AI ROUTER] all providers failed. openrouter=${reason.slice(0, 500)}`);
-      return new Response(JSON.stringify({
-        success:       false,
-        provider_used: 'none',
-        error:         'All AI providers failed',
-      }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const modelsToTry = imageRequest ? OPENROUTER_VISION_MODELS : [OPENROUTER_MODEL];
+    let lastErr = '';
+    for (const model of modelsToTry) {
+      try {
+        console.log(`[AI ROUTER] trying openrouter model=${model} stream=false`);
+        const { text, usage } = await callChat(
+          OPENROUTER_URL, openrouterKey, model, messages,
+          { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
+          maxTok,
+        );
+        console.log(`[AI ROUTER] provider=openrouter model=${model} success`);
+        return new Response(JSON.stringify({
+          success:       true,
+          provider_used: 'openrouter',
+          model_used:    model,
+          response:      text,
+          usage,
+          fallback_used: !userProvider,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      } catch (err: any) {
+        lastErr = err?.message ?? String(err);
+        console.error(`[AI ROUTER] openrouter model=${model} failed: ${lastErr.slice(0, 300)}`);
+        // 402/429 → try next model
+      }
     }
+    console.error(`[AI ROUTER] all providers failed. lastErr=${lastErr.slice(0, 500)}`);
+    return new Response(JSON.stringify({
+      success:       false,
+      provider_used: 'none',
+      error:         'All AI providers failed',
+    }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err: any) {
     console.error(`[AI ROUTER] Unhandled exception: ${err?.message ?? err}`);
