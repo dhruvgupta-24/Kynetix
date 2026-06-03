@@ -230,11 +230,37 @@ class NutritionPipeline {
     }
 
     // ── 4. AGGREGATION ───────────────────────────────────────────────────────
+    double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
     for (final item in finalItems) {
       sumCalMin += item.calories.min;
       sumCalMax += item.calories.max;
       sumProMin += item.protein.min;
       sumProMax += item.protein.max;
+
+      if (item.carbohydrates != null) {
+        carbMin = (carbMin ?? 0) + item.carbohydrates!.min;
+        carbMax = (carbMax ?? 0) + item.carbohydrates!.max;
+      }
+      if (item.fat != null) {
+        fatMin = (fatMin ?? 0) + item.fat!.min;
+        fatMax = (fatMax ?? 0) + item.fat!.max;
+      }
+      if (item.fiber != null) {
+        fibMin = (fibMin ?? 0) + item.fiber!.min;
+        fibMax = (fibMax ?? 0) + item.fiber!.max;
+      }
+      if (item.sugar != null) {
+        sugMin = (sugMin ?? 0) + item.sugar!.min;
+        sugMax = (sugMax ?? 0) + item.sugar!.max;
+      }
+      if (item.saturatedFat != null) {
+        satMin = (satMin ?? 0) + item.saturatedFat!.min;
+        satMax = (satMax ?? 0) + item.saturatedFat!.max;
+      }
+      if (item.sodium != null) {
+        sodMin = (sodMin ?? 0) + item.sodium!.min;
+        sodMax = (sodMax ?? 0) + item.sodium!.max;
+      }
     }
 
     String source = 'user_override';
@@ -243,6 +269,10 @@ class NutritionPipeline {
     } else if (localHybridUsed) {
       source = 'local_hybrid';
     }
+
+    final midCal = (sumCalMin + sumCalMax) / 2;
+    final midPro = (sumProMin + sumProMax) / 2;
+    final score = NutritionResult.calculateLocalQualityScore(midCal, midPro, trimmed);
 
     return NutritionResult(
       canonicalMeal: trimmed,
@@ -253,6 +283,16 @@ class NutritionPipeline {
       warnings: allWarnings,
       source: source,
       createdAt: DateTime.now(),
+      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : null,
+      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : null,
+      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : null,
+      sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
+      saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
+      sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,
+      mealQualityScore: score,
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, trimmed),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
     );
   }
 
@@ -308,6 +348,24 @@ class NutritionPipeline {
           min: mem.calories.min * scale, max: mem.calories.max * scale),
       protein: NutrientRange(
           min: mem.protein.min * scale, max: mem.protein.max * scale),
+      carbohydrates: mem.carbohydrates != null
+          ? NutrientRange(min: mem.carbohydrates!.min * scale, max: mem.carbohydrates!.max * scale)
+          : null,
+      fat: mem.fat != null
+          ? NutrientRange(min: mem.fat!.min * scale, max: mem.fat!.max * scale)
+          : null,
+      fiber: mem.fiber != null
+          ? NutrientRange(min: mem.fiber!.min * scale, max: mem.fiber!.max * scale)
+          : null,
+      sugar: mem.sugar != null
+          ? NutrientRange(min: mem.sugar!.min * scale, max: mem.sugar!.max * scale)
+          : null,
+      saturatedFat: mem.saturatedFat != null
+          ? NutrientRange(min: mem.saturatedFat!.min * scale, max: mem.saturatedFat!.max * scale)
+          : null,
+      sodium: mem.sodium != null
+          ? NutrientRange(min: mem.sodium!.min * scale, max: mem.sodium!.max * scale)
+          : null,
     );
   }
 
@@ -320,15 +378,72 @@ class NutritionPipeline {
       ParsedFoodItem parsed, NutritionResult mem) {
     // Sum items if present, otherwise use top-level totals.
     double cMin = 0, cMax = 0, pMin = 0, pMax = 0;
+    double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
+
     if (mem.items.isNotEmpty) {
       for (final i in mem.items) {
         cMin += i.calories.min; cMax += i.calories.max;
         pMin += i.protein.min;  pMax += i.protein.max;
+        if (i.carbohydrates != null) {
+          carbMin = (carbMin ?? 0) + i.carbohydrates!.min;
+          carbMax = (carbMax ?? 0) + i.carbohydrates!.max;
+        }
+        if (i.fat != null) {
+          fatMin = (fatMin ?? 0) + i.fat!.min;
+          fatMax = (fatMax ?? 0) + i.fat!.max;
+        }
+        if (i.fiber != null) {
+          fibMin = (fibMin ?? 0) + i.fiber!.min;
+          fibMax = (fibMax ?? 0) + i.fiber!.max;
+        }
+        if (i.sugar != null) {
+          sugMin = (sugMin ?? 0) + i.sugar!.min;
+          sugMax = (sugMax ?? 0) + i.sugar!.max;
+        }
+        if (i.saturatedFat != null) {
+          satMin = (satMin ?? 0) + i.saturatedFat!.min;
+          satMax = (satMax ?? 0) + i.saturatedFat!.max;
+        }
+        if (i.sodium != null) {
+          sodMin = (sodMin ?? 0) + i.sodium!.min;
+          sodMax = (sodMax ?? 0) + i.sodium!.max;
+        }
       }
     } else {
       cMin = mem.calories.min; cMax = mem.calories.max;
       pMin = mem.protein.min;  pMax = mem.protein.max;
+      if (mem.carbohydrates != null) {
+        carbMin = mem.carbohydrates!.min;
+        carbMax = mem.carbohydrates!.max;
+      }
+      if (mem.fat != null) {
+        fatMin = mem.fat!.min;
+        fatMax = mem.fat!.max;
+      }
+      if (mem.fiber != null) {
+        fibMin = mem.fiber!.min;
+        fibMax = mem.fiber!.max;
+      }
+      if (mem.sugar != null) {
+        sugMin = mem.sugar!.min;
+        sugMax = mem.sugar!.max;
+      }
+      if (mem.saturatedFat != null) {
+        satMin = mem.saturatedFat!.min;
+        satMax = mem.saturatedFat!.max;
+      }
+      if (mem.sodium != null) {
+        sodMin = mem.sodium!.min;
+        sodMax = mem.sodium!.max;
+      }
     }
+
+    final midCal = (cMin + cMax) / 2;
+    final midPro = (pMin + pMax) / 2;
+    final fallbackCarbs = NutritionResult.estimateCarbsLocally(midCal, midPro, parsed.normalizedName);
+    final fallbackFat = NutritionResult.estimateFatLocally(midCal, midPro, parsed.normalizedName);
+    final fallbackFiber = NutritionResult.estimateFiberLocally(midCal, parsed.normalizedName);
+
     return NutritionItem(
       name:      parsed.normalizedName,
       quantity:  parsed.quantity,
@@ -339,6 +454,12 @@ class NutritionPipeline {
           : EstimationMode.directQuantity,
       calories: NutrientRange(min: cMin, max: cMax),
       protein:  NutrientRange(min: pMin, max: pMax),
+      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : fallbackCarbs,
+      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : fallbackFat,
+      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : fallbackFiber,
+      sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : const NutrientRange(min: 0, max: 0),
+      saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : const NutrientRange(min: 0, max: 0),
+      sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : const NutrientRange(min: 0, max: 0),
     );
   }
 
@@ -392,14 +513,45 @@ class NutritionPipeline {
         mode: EstimationMode.directQuantity,
         calories: result.calories,
         protein: result.protein,
+        carbohydrates: result.carbohydrates,
+        fat: result.fat,
+        fiber: result.fiber,
+        sugar: result.sugar,
+        saturatedFat: result.saturatedFat,
+        sodium: result.sodium,
       );
     }
     
     // Bundle mock-separated logic pieces logically tracking atomic components
     double cMin = 0, cMax = 0, pMin = 0, pMax = 0;
+    double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
     for (final i in result.items) {
       cMin += i.calories.min; cMax += i.calories.max;
       pMin += i.protein.min; pMax += i.protein.max;
+      if (i.carbohydrates != null) {
+        carbMin = (carbMin ?? 0) + i.carbohydrates!.min;
+        carbMax = (carbMax ?? 0) + i.carbohydrates!.max;
+      }
+      if (i.fat != null) {
+        fatMin = (fatMin ?? 0) + i.fat!.min;
+        fatMax = (fatMax ?? 0) + i.fat!.max;
+      }
+      if (i.fiber != null) {
+        fibMin = (fibMin ?? 0) + i.fiber!.min;
+        fibMax = (fibMax ?? 0) + i.fiber!.max;
+      }
+      if (i.sugar != null) {
+        sugMin = (sugMin ?? 0) + i.sugar!.min;
+        sugMax = (sugMax ?? 0) + i.sugar!.max;
+      }
+      if (i.saturatedFat != null) {
+        satMin = (satMin ?? 0) + i.saturatedFat!.min;
+        satMax = (satMax ?? 0) + i.saturatedFat!.max;
+      }
+      if (i.sodium != null) {
+        sodMin = (sodMin ?? 0) + i.sodium!.min;
+        sodMax = (sodMax ?? 0) + i.sodium!.max;
+      }
     }
 
     return NutritionItem(
@@ -410,6 +562,12 @@ class NutritionPipeline {
       mode: result.items.first.mode,
       calories: NutrientRange(min: cMin, max: cMax),
       protein: NutrientRange(min: pMin, max: pMax),
+      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : null,
+      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : null,
+      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : null,
+      sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
+      saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
+      sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,
     );
   }
 

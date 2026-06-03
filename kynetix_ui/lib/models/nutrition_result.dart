@@ -359,7 +359,7 @@ class NutritionResult {
 
   // ── Local Fallback Estimations ───────────────────────────────────────────
 
-  static NutrientRange _estimateCarbsLocally(double cal, double pro, String text) {
+  static NutrientRange estimateCarbsLocally(double cal, double pro, String text) {
     final lowerText = text.toLowerCase();
     double ratio = 0.55; // default 55% of remaining calories to carbs
     if (lowerText.contains('rice') || lowerText.contains('roti') || lowerText.contains('bread') || lowerText.contains('banana') || lowerText.contains('oats')) {
@@ -372,7 +372,7 @@ class NutritionResult {
     return NutrientRange(min: double.parse((carbsGrams * 0.9).toStringAsFixed(1)), max: double.parse((carbsGrams * 1.1).toStringAsFixed(1)));
   }
 
-  static NutrientRange _estimateFatLocally(double cal, double pro, String text) {
+  static NutrientRange estimateFatLocally(double cal, double pro, String text) {
     final lowerText = text.toLowerCase();
     double ratio = 0.45; // default 45% of remaining calories to fat
     if (lowerText.contains('rice') || lowerText.contains('roti') || lowerText.contains('bread') || lowerText.contains('banana') || lowerText.contains('oats')) {
@@ -385,7 +385,7 @@ class NutritionResult {
     return NutrientRange(min: double.parse((fatGrams * 0.9).toStringAsFixed(1)), max: double.parse((fatGrams * 1.1).toStringAsFixed(1)));
   }
 
-  static NutrientRange _estimateFiberLocally(double cal, String text) {
+  static NutrientRange estimateFiberLocally(double cal, String text) {
     final lowerText = text.toLowerCase();
     double fiberGrams = 1.5;
     if (lowerText.contains('salad') || lowerText.contains('broccoli') || lowerText.contains('vegetable') || lowerText.contains('greens')) {
@@ -398,7 +398,7 @@ class NutritionResult {
     return NutrientRange(min: double.parse((fiberGrams * 0.8).toStringAsFixed(1)), max: double.parse((fiberGrams * 1.2).toStringAsFixed(1)));
   }
 
-  static int _calculateLocalQualityScore(double cal, double pro, String text) {
+  static int calculateLocalQualityScore(double cal, double pro, String text) {
     final lowerText = text.toLowerCase();
     double score = 70.0; // base score
 
@@ -427,7 +427,7 @@ class NutritionResult {
     return score.clamp(0.0, 100.0).round();
   }
 
-  static String _getLocalQualityExplanation(int score, String text) {
+  static String getLocalQualityExplanation(int score, String text) {
     final lowerText = text.toLowerCase();
     if (score >= 85) {
       return 'Nutritious whole food choice with excellent protein density and clean ingredients.';
@@ -443,7 +443,7 @@ class NutritionResult {
     }
   }
 
-  static String _getLocalQualityPositive(int score, String text) {
+  static String getLocalQualityPositive(int score, String text) {
     final lowerText = text.toLowerCase();
     if (lowerText.contains('salad') || lowerText.contains('vegetable') || lowerText.contains('broccoli')) {
       return 'Contains micronutrient-rich vegetables.';
@@ -460,7 +460,7 @@ class NutritionResult {
     return 'Quick energy source to fuel your immediate activities.';
   }
 
-  static String _getLocalQualityImprovement(int score, String text) {
+  static String getLocalQualityImprovement(int score, String text) {
     final lowerText = text.toLowerCase();
     if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries') || lowerText.contains('fried')) {
       return 'Reduce intake of deep-fried items to lower saturated fat consumption.';
@@ -484,10 +484,10 @@ class NutritionResult {
   ) {
     final calVal = r.calories.mid;
     final proVal = r.protein.mid;
-    final carbs = _estimateCarbsLocally(calVal, proVal, rawInput);
-    final fat = _estimateFatLocally(calVal, proVal, rawInput);
-    final fiber = _estimateFiberLocally(calVal, rawInput);
-    final score = _calculateLocalQualityScore(calVal, proVal, rawInput);
+    final carbs = estimateCarbsLocally(calVal, proVal, rawInput);
+    final fat = estimateFatLocally(calVal, proVal, rawInput);
+    final fiber = estimateFiberLocally(calVal, rawInput);
+    final score = calculateLocalQualityScore(calVal, proVal, rawInput);
     
     return NutritionResult(
       canonicalMeal: rawInput,
@@ -500,9 +500,9 @@ class NutritionResult {
                 mode:      EstimationMode.contextualIntake,
                 calories:  fi.calories,
                 protein:   fi.protein,
-                carbohydrates: _estimateCarbsLocally(fi.calories.mid, fi.protein.mid, fi.name),
-                fat:           _estimateFatLocally(fi.calories.mid, fi.protein.mid, fi.name),
-                fiber:         _estimateFiberLocally(fi.calories.mid, fi.name),
+                carbohydrates: estimateCarbsLocally(fi.calories.mid, fi.protein.mid, fi.name),
+                fat:           estimateFatLocally(fi.calories.mid, fi.protein.mid, fi.name),
+                fiber:         estimateFiberLocally(fi.calories.mid, fi.name),
               ))
           .toList(),
       calories:   r.calories,
@@ -515,9 +515,9 @@ class NutritionResult {
       fat:            fat,
       fiber:          fiber,
       mealQualityScore: score,
-      mealQualityExplanation: _getLocalQualityExplanation(score, rawInput),
-      mealQualityPositive: _getLocalQualityPositive(score, rawInput),
-      mealQualityImprovement: _getLocalQualityImprovement(score, rawInput),
+      mealQualityExplanation: getLocalQualityExplanation(score, rawInput),
+      mealQualityPositive: getLocalQualityPositive(score, rawInput),
+      mealQualityImprovement: getLocalQualityImprovement(score, rawInput),
     );
   }
 
