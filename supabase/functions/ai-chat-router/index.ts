@@ -37,10 +37,10 @@ const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
 // The account is on OpenRouter free tier — paid models return 402.
 // Free-tier (:free) models are tried in order; first success wins.
 const OPENROUTER_VISION_MODELS = [
-  'google/gemma-4-27b-it:free',      // Google Gemma 4 27B — free, multimodal
-  'google/gemma-4-26b-a4b-it:free',  // Google Gemma 4 26B MoE — free, multimodal
+  'google/gemma-4-31b-it:free',          // Google Gemma 4 31B — free, multimodal (valid ID)
+  'google/gemma-4-26b-a4b-it:free',      // Google Gemma 4 26B MoE — free, multimodal
   'nvidia/nemotron-nano-12b-v2-vl:free', // NVIDIA Nemotron VL — free, multimodal
-  'moonshotai/kimi-k2.6:free',       // Kimi K2 — free, multimodal
+  'moonshotai/kimi-k2.6:free',           // Kimi K2 — free, multimodal
 ];
 
 function hasImage(messages: any[]): boolean {
