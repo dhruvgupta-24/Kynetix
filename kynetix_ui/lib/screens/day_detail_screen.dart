@@ -9,7 +9,6 @@ import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/coach_service.dart';
 import '../services/health_service.dart';
-import '../services/meal_suggestion_service.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
@@ -92,34 +91,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     if (entry != null) _refresh();
   }
 
-  /// Opens AddMealScreen with [prefilledText] for the time-appropriate section.
-  Future<void> _openAddMealWithText(String prefilledText) async {
-    final entry = await Navigator.of(context).push<dynamic>(
-      PageRouteBuilder(
-        pageBuilder: (_, animation, secondaryAnimation) => AddMealScreen(
-          section: _currentSection,
-          date: widget.date,
-          initialText: prefilledText,
-        ),
-        transitionsBuilder: (_, animation, secondaryAnimation, child) =>
-            SlideTransition(
-              position:
-                  Tween<Offset>(
-                    begin: const Offset(0, 1),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    ),
-                  ),
-              child: child,
-            ),
-        transitionDuration: const Duration(milliseconds: 380),
-      ),
-    );
-    if (entry != null) _refresh();
-  }
+
 
   /// The most time-appropriate meal section right now.
   MealSection get _currentSection {
@@ -487,14 +459,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             todayWorkout: todayWorkout,
           )
         : const <CoachInsight>[];
-    final suggestions = (target != null && profile != null)
-        ? MealSuggestionService.instance.suggestionsForDay(
-            date: widget.date,
-            log: _log,
-            target: target,
-            profile: profile,
-          )
-        : const <MealSuggestion>[];
+
     final dayStatus = target != null
         ? DayStatusEngine.classify(_log, target)
         : null;
@@ -2162,130 +2127,7 @@ class _CoachInsightRow extends StatelessWidget {
   }
 }
 
-// ─── Suggestion card ──────────────────────────────────────────────────────────
 
-class _SuggestionCard extends StatelessWidget {
-  final List<MealSuggestion> suggestions;
-  final void Function(String text) onSuggestionTap;
-  const _SuggestionCard({
-    required this.suggestions,
-    required this.onSuggestionTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (suggestions.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E2E3E)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.lightbulb_outline_rounded,
-                  size: 14,
-                  color: Color(0xFFFFB347),
-                ),
-                SizedBox(width: 6),
-                Text(
-                  'What to eat next',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Divider(color: Color(0xFF2A2A3A), height: 1),
-          // Suggestions
-          for (int i = 0; i < suggestions.length; i++) ...[
-            if (i > 0)
-              const Divider(
-                color: Color(0xFF252535),
-                height: 1,
-                indent: 16,
-                endIndent: 16,
-              ),
-            _SuggestionRow(
-              suggestion: suggestions[i],
-              onTap: suggestions[i].prefilledText != null
-                  ? () => onSuggestionTap(suggestions[i].prefilledText!)
-                  : null,
-            ),
-          ],
-          const SizedBox(height: 4),
-        ],
-      ),
-    );
-  }
-}
-
-class _SuggestionRow extends StatelessWidget {
-  final MealSuggestion suggestion;
-  final VoidCallback? onTap;
-  const _SuggestionRow({required this.suggestion, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${suggestion.title}  •  ${suggestion.quantity}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    suggestion.reason,
-                    style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 11.5,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 10),
-              const Icon(
-                Icons.add_circle_outline_rounded,
-                size: 18,
-                color: Color(0xFF52B788),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ─── Quick Add item model ─────────────────────────────────────────────────────
 

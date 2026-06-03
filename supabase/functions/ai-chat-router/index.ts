@@ -33,6 +33,20 @@ const CODEX_URL = 'https://chatgpt.com/backend-api/codex/responses';
 // OpenRouter fallback
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3-0324';
+const OPENROUTER_VISION_MODEL = 'google/gemini-2.5-flash';
+
+function hasImage(messages: any[]): boolean {
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block?.type === 'image_url' || block?.type === 'input_image') {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
 // ── Convert standard messages[] → Codex request body ─────────────────────────
 // The Codex Responses API uses:
@@ -305,9 +319,10 @@ async function callChat(
   model:        string,
   messages:     any[],
   extraHeaders: Record<string, string> = {},
+  maxTokens:    number = 1500,
 ): Promise<{ text: string; usage: any }> {
-  const requestBody: any = { model, messages, temperature: 0.25, max_tokens: 1500 };
-  console.log(`[AI ROUTER] → ${endpoint} model=${model} msgs=${messages.length}`);
+  const requestBody: any = { model, messages, temperature: 0.25, max_tokens: maxTokens };
+  console.log(`[AI ROUTER] → ${endpoint} model=${model} msgs=${messages.length} max_tokens=${maxTokens}`);
 
   const res = await fetch(endpoint, {
     method:  'POST',
@@ -322,7 +337,10 @@ async function callChat(
   const rawBody = await res.text();
   console.log(`[AI ROUTER] ← status=${res.status} body_preview=${rawBody.slice(0, 300)}`);
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${rawBody.slice(0, 400)}`);
+  if (!res.ok) {
+    console.error(`[AI ROUTER] ← FULL ERROR from ${endpoint}: ${rawBody.slice(0, 1000)}`);
+    throw new Error(`HTTP ${res.status}: ${rawBody.slice(0, 400)}`);
+  }
 
   const data = JSON.parse(rawBody);
   const text = extractText(rawBody, data);
@@ -339,8 +357,9 @@ async function callChatStream(
   model:        string,
   messages:     any[],
   extraHeaders: Record<string, string> = {},
+  maxTokens:    number = 1500,
 ): Promise<Response> {
-  console.log(`[AI ROUTER] stream → ${endpoint} model=${model}`);
+  console.log(`[AI ROUTER] stream → ${endpoint} model=${model} max_tokens=${maxTokens}`);
 
   const res = await fetch(endpoint, {
     method:  'POST',
@@ -349,11 +368,12 @@ async function callChatStream(
       'Content-Type':  'application/json',
       ...extraHeaders,
     },
-    body: JSON.stringify({ model, messages, temperature: 0.25, max_tokens: 1500, stream: true }),
+    body: JSON.stringify({ model, messages, temperature: 0.25, max_tokens: maxTokens, stream: true }),
   });
 
   if (!res.ok) {
     const errBody = await res.text();
+    console.error(`[AI ROUTER] stream ← FULL ERROR from ${endpoint} (${res.status}): ${errBody.slice(0, 1000)}`);
     throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 400)}`);
   }
   return res;
@@ -503,25 +523,31 @@ Deno.serve(async (req: Request) => {
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
     const userProvider = await getUserChatGptProvider(supabaseAdmin, user.id);
     const providerLabel = userProvider ? 'user_chatgpt' : 'openrouter';
+    const activeOpenRouterModel = hasImage(messages) ? OPENROUTER_VISION_MODEL : OPENROUTER_MODEL;
 
-    console.log(`[AI ROUTER] user=${user.id} stream=${streamMode} provider=${providerLabel} model=${userProvider?.model ?? OPENROUTER_MODEL}`);
+    console.log(`[AI ROUTER] user=${user.id} stream=${streamMode} provider=${providerLabel} model=${userProvider?.model ?? activeOpenRouterModel}`);
 
     // ══════════════════════════════════════════════════
     // STREAMING PATH
     // ══════════════════════════════════════════════════
     if (streamMode) {
-      // ── Attempt 1: User's ChatGPT via Codex endpoint ──────────────────────
-      if (userProvider) {
+      const imageRequest = hasImage(messages);
+      // Codex (chatgpt.com/backend-api/codex/responses) is a text-only endpoint.
+      // Skip it entirely for vision requests to avoid a guaranteed failure + wasted latency.
+      const useCodexForThisRequest = userProvider && !imageRequest;
+
+      // ── Attempt 1: User's ChatGPT via Codex endpoint (text-only) ──────────
+      if (useCodexForThisRequest) {
         try {
           const streamRes = await callCodexStream(
-            userProvider.accessToken, userProvider.model, messages,
+            userProvider!.accessToken, userProvider!.model, messages,
           );
           await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
-          console.log(`[AI ROUTER] streaming via user_chatgpt (Codex) model=${userProvider.model}`);
+          console.log(`[AI ROUTER] streaming via user_chatgpt (Codex) model=${userProvider!.model}`);
           // Inject provider headers into the existing response headers
           const headers = new Headers(streamRes.headers);
           headers.set('X-Provider-Used', 'user_chatgpt');
-          headers.set('X-Model-Used', userProvider.model);
+          headers.set('X-Model-Used', userProvider!.model);
           return new Response(streamRes.body, { headers });
         } catch (err: any) {
           console.error(`[AI ROUTER] user_chatgpt (Codex) stream failed: ${err?.message?.slice(0, 300)}`);
@@ -531,27 +557,32 @@ Deno.serve(async (req: Request) => {
             .eq('user_id', user.id);
           // Fall through to OpenRouter
         }
+      } else if (userProvider && imageRequest) {
+        console.log(`[AI ROUTER] skipping Codex for vision request — routing directly to OpenRouter`);
       }
 
       // ── Attempt 2: OpenRouter ──────────────────────────────────────────────
       if (openrouterKey) {
+        // Vision requests need more tokens; text requests use default 1500.
+        const maxTok = imageRequest ? 2000 : 1500;
         try {
           const sRes = await callChatStream(
-            OPENROUTER_URL, openrouterKey, OPENROUTER_MODEL, messages,
+            OPENROUTER_URL, openrouterKey, activeOpenRouterModel, messages,
             { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
+            maxTok,
           );
-          console.log(`[AI ROUTER] streaming via openrouter`);
+          console.log(`[AI ROUTER] streaming via openrouter model=${activeOpenRouterModel}`);
           return new Response(sRes.body, {
             headers: {
               ...corsHeaders,
               'Content-Type':    'text/event-stream',
               'Cache-Control':   'no-cache',
               'X-Provider-Used': 'openrouter',
-              'X-Model-Used':    OPENROUTER_MODEL,
+              'X-Model-Used':    activeOpenRouterModel,
             },
           });
         } catch (err: any) {
-          console.error(`[AI ROUTER] OpenRouter stream failed: ${err?.message?.slice(0, 300)}`);
+          console.error(`[AI ROUTER] OpenRouter stream failed: ${err?.message?.slice(0, 500)}`);
         }
       }
 
@@ -564,18 +595,23 @@ Deno.serve(async (req: Request) => {
     // NON-STREAMING PATH
     // ══════════════════════════════════════════════════
 
-    // ── Attempt 1: User's ChatGPT via Codex endpoint ────────────────────────
-    if (userProvider) {
+    const imageRequest = hasImage(messages);
+    // Codex is text-only — skip for vision requests
+    const useCodexForThisRequest = userProvider && !imageRequest;
+    const maxTok = imageRequest ? 2000 : 1500;
+
+    // ── Attempt 1: User's ChatGPT via Codex endpoint (text-only) ────────────
+    if (useCodexForThisRequest) {
       try {
         const { text, usage } = await callCodex(
-          userProvider.accessToken, userProvider.model, messages,
+          userProvider!.accessToken, userProvider!.model, messages,
         );
         await trackUsage(supabaseAdmin, user.id, 'user_chatgpt');
-        console.log(`[AI ROUTER] provider=user_chatgpt (Codex) model=${userProvider.model} success`);
+        console.log(`[AI ROUTER] provider=user_chatgpt (Codex) model=${userProvider!.model} success`);
         return new Response(JSON.stringify({
           success:       true,
           provider_used: 'user_chatgpt',
-          model_used:    userProvider.model,
+          model_used:    userProvider!.model,
           response:      text,
           usage,
           fallback_used: false,
@@ -589,6 +625,8 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', user.id);
         // Fall through to OpenRouter
       }
+    } else if (userProvider && imageRequest) {
+      console.log(`[AI ROUTER] skipping Codex for vision request — routing directly to OpenRouter`);
     }
 
     // ── Attempt 2: OpenRouter ────────────────────────────────────────────────
@@ -602,14 +640,15 @@ Deno.serve(async (req: Request) => {
 
     try {
       const { text, usage } = await callChat(
-        OPENROUTER_URL, openrouterKey, OPENROUTER_MODEL, messages,
+        OPENROUTER_URL, openrouterKey, activeOpenRouterModel, messages,
         { 'HTTP-Referer': 'https://kynetix.app', 'X-Title': 'Kynetix AI Coach' },
+        maxTok,
       );
-      console.log(`[AI ROUTER] provider=openrouter success`);
+      console.log(`[AI ROUTER] provider=openrouter model=${activeOpenRouterModel} success`);
       return new Response(JSON.stringify({
         success:       true,
         provider_used: 'openrouter',
-        model_used:    OPENROUTER_MODEL,
+        model_used:    activeOpenRouterModel,
         response:      text,
         usage,
         fallback_used: !userProvider,
@@ -617,7 +656,7 @@ Deno.serve(async (req: Request) => {
 
     } catch (err: any) {
       const reason = err?.message ?? String(err);
-      console.error(`[AI ROUTER] all providers failed. openrouter=${reason.slice(0, 200)}`);
+      console.error(`[AI ROUTER] all providers failed. openrouter=${reason.slice(0, 500)}`);
       return new Response(JSON.stringify({
         success:       false,
         provider_used: 'none',

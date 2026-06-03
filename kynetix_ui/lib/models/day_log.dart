@@ -1,3 +1,4 @@
+
 import 'nutrition_result.dart';
 
 // ─── Workout types ────────────────────────────────────────────────────────────
@@ -244,6 +245,16 @@ class MealEntry {
     finalSavedInput: j['finalSavedInput'] as String? ?? j['rawInput'] as String? ?? '',
     result:   NutritionResult.fromJson(j['result'] as Map<String, dynamic>? ?? {}),
   );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MealEntry &&
+          runtimeType == other.runtimeType &&
+          addedAt.isAtSameMomentAs(other.addedAt);
+
+  @override
+  int get hashCode => addedAt.hashCode;
 }
 
 // ─── DayLog ───────────────────────────────────────────────────────────────────
@@ -267,13 +278,19 @@ class DayLog {
 
   void replace(MealSection oldSection, MealEntry oldEntry, MealEntry newEntry) {
     final oldList = _sections[oldSection]!;
-    final index = oldList.indexOf(oldEntry);
+    final index = oldList.indexWhere((e) => e.addedAt.isAtSameMomentAs(oldEntry.addedAt) || e == oldEntry);
     if (index >= 0) {
       oldList.removeAt(index);
     } else {
-      oldList.remove(oldEntry);
+      oldList.removeWhere((e) => e.addedAt.isAtSameMomentAs(oldEntry.addedAt) || e == oldEntry);
     }
-    _sections[newEntry.section]!.insert(index >= 0 ? index.clamp(0, _sections[newEntry.section]!.length) : _sections[newEntry.section]!.length, newEntry);
+    // Safeguard: also clear any potential duplicates matching this entry in the target section
+    _sections[newEntry.section]!.removeWhere((e) => e.addedAt.isAtSameMomentAs(oldEntry.addedAt) || e == oldEntry);
+    
+    _sections[newEntry.section]!.insert(
+      index >= 0 ? index.clamp(0, _sections[newEntry.section]!.length) : _sections[newEntry.section]!.length,
+      newEntry,
+    );
   }
 
   void remove(MealSection section, MealEntry entry) =>
