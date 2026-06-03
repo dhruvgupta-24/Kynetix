@@ -95,15 +95,18 @@ class AiCoachService {
 
     // Image encoding
     if (imagesBytes != null && imagesBytes.isNotEmpty) {
-      body['images_base64'] = imagesBytes.map((img) => base64Encode(img)).toList();
-      debugPrint('[AiCoachService] attaching ${imagesBytes.length} images');
+      final base64List = imagesBytes.map((img) => base64Encode(img)).toList();
+      body['images_base64'] = base64List;
+      debugPrint('[AiCoachService] (4/7) sendMessage payload: attaching ${imagesBytes.length} images. Base64 lengths: ${base64List.map((s) => s.length).toList()}');
+    } else {
+      debugPrint('[AiCoachService] (4/7) sendMessage payload: no images attached.');
     }
 
     // Pass portion anchor so the edge function can include it in the system prompt.
     final portionHint = _portionAnchorHint();
     if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
 
-    debugPrint('[AiCoachService] → ai-meal-coach message="${message.substring(0, message.length.clamp(0, 80))}"');
+    debugPrint('[AiCoachService] (5/7) sendMessage request invoking ai-meal-coach: keys=${body.keys.toList()}');
 
     final res = await Supabase.instance.client.functions.invoke(
       'ai-meal-coach',
@@ -122,7 +125,7 @@ class AiCoachService {
     }
 
     final response = AiCoachResponse.fromJson(data);
-    debugPrint('[AiCoachService] ✔ provider=${response.providerUsed} fallback=${response.fallbackUsed}');
+    debugPrint('[AiCoachService] (7/7) sendMessage response received: provider=${response.providerUsed} fallback=${response.fallbackUsed} message length=${response.message.length}');
     return response;
   }
 
@@ -149,7 +152,11 @@ class AiCoachService {
       'date_key': _isoToday(dateKey),
     };
     if (imagesBytes != null && imagesBytes.isNotEmpty) {
-      body['images_base64'] = imagesBytes.map((img) => base64Encode(img)).toList();
+      final base64List = imagesBytes.map((img) => base64Encode(img)).toList();
+      body['images_base64'] = base64List;
+      debugPrint('[AiCoachService] (4/7) streamMessage payload: attaching ${imagesBytes.length} images. Base64 lengths: ${base64List.map((s) => s.length).toList()}');
+    } else {
+      debugPrint('[AiCoachService] (4/7) streamMessage payload: no images attached.');
     }
     // Pass client gym state so edge function uses real-time data instead of stale DB
     if (isGymDay != null) {
@@ -183,7 +190,7 @@ class AiCoachService {
       }
     }
 
-    debugPrint('[AiCoachService] ↔ streaming → ai-meal-coach');
+    debugPrint('[AiCoachService] (5/7) streamMessage request invoking ai-meal-coach: keys=${body.keys.toList()}');
 
     final url     = Uri.parse('${SupabaseSecrets.url}/functions/v1/ai-meal-coach');
     final request = http.Request('POST', url)

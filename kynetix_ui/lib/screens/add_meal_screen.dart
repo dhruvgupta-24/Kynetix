@@ -38,6 +38,18 @@ class AddMealScreen extends StatefulWidget {
     this.initialText,
   });
 
+  static bool hasParsedMealStructureChanged(String oldText, String newText) {
+    final oldParsed = ItemParser.parse(oldText);
+    final newParsed = ItemParser.parse(newText);
+    if (oldParsed.length != newParsed.length) return true;
+    for (int i = 0; i < oldParsed.length; i++) {
+      if (oldParsed[i].normalizedName != newParsed[i].normalizedName) return true;
+      if (oldParsed[i].quantity != newParsed[i].quantity) return true;
+      if (oldParsed[i].unit != newParsed[i].unit) return true;
+    }
+    return false;
+  }
+
   @override
   State<AddMealScreen> createState() => _AddMealScreenState();
 }
@@ -50,6 +62,7 @@ class _AddMealScreenState extends State<AddMealScreen>
   NutritionResult? _result;
   bool _loading = false;
   String? _error;
+  String? _lastLockedText;
 
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
@@ -60,6 +73,9 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (widget.initialEntry != null) {
       _controller.text = widget.initialEntry!.finalSavedInput;
       _result = widget.initialEntry!.result;
+      if (_result?.macrosLockedByUser ?? false) {
+        _lastLockedText = widget.initialEntry!.finalSavedInput;
+      }
     } else if (widget.initialText != null) {
       _controller.text = widget.initialText!;
     }
@@ -91,29 +107,51 @@ class _AddMealScreenState extends State<AddMealScreen>
     // Never overwrite a manually-locked result via AI re-estimation.
     // The user must explicitly tap "Fix Estimate" to change macros.
     if (_result != null && _result!.macrosLockedByUser) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.lock_rounded, color: Color(0xFF60A5FA), size: 14),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Macros are manually edited. Tap "Fix Estimate" to update them.',
-                    style: TextStyle(fontSize: 12.5),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: const Color(0xFF1E1E2C),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+      final changed = text != _lastLockedText || AddMealScreen.hasParsedMealStructureChanged(_lastLockedText ?? '', text);
+      if (changed) {
+        final action = await showDialog<_LockedTextChangeAction>(
+          context: context,
+          builder: (_) => const _LockedTextChangeDialog(),
         );
+        if (action == null) return;
+
+        if (action == _LockedTextChangeAction.recalculate) {
+          setState(() {
+            _result = null;
+            _lastLockedText = null;
+          });
+          // Proceed with normal calculation below
+        } else {
+          setState(() {
+            _lastLockedText = text;
+          });
+          return;
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.lock_rounded, color: Color(0xFF60A5FA), size: 14),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Macros are manually edited. Tap "Fix Estimate" to update them.',
+                      style: TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFF1E1E2C),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
+        return;
       }
-      return;
     }
 
     _focusNode.unfocus();
@@ -187,6 +225,7 @@ class _AddMealScreenState extends State<AddMealScreen>
           createdAt: DateTime.now(),
           macrosLockedByUser: true,
         );
+        _lastLockedText = mealName;
       });
     } else {
       // 2. Edit Ingredients
@@ -289,18 +328,45 @@ class _AddMealScreenState extends State<AddMealScreen>
           createdAt: DateTime.now(),
           macrosLockedByUser: true,
         );
+        _lastLockedText = mealName;
       });
     }
   }
 
-  void _confirm() {
+  Future<void> _confirm() async {
     if (_result == null || _result!.calories.max == 0) return;
+    
+    final text = _controller.text.trim();
+    if (_result!.macrosLockedByUser) {
+      final changed = text != _lastLockedText || AddMealScreen.hasParsedMealStructureChanged(_lastLockedText ?? '', text);
+      if (changed) {
+        final action = await showDialog<_LockedTextChangeAction>(
+          context: context,
+          builder: (_) => const _LockedTextChangeDialog(),
+        );
+        if (action == null) return;
+
+        if (action == _LockedTextChangeAction.recalculate) {
+          setState(() {
+            _result = null;
+            _lastLockedText = null;
+          });
+          _calculate();
+          return;
+        } else {
+          setState(() {
+            _lastLockedText = text;
+          });
+        }
+      }
+    }
+
     HapticFeedback.mediumImpact();
     final parsedFoods = _result!.items.map((i) => i.name).toList(growable: false);
     // edited=true when: (a) re-editing an existing entry, OR (b) user fixed macros on this new entry.
     final isEdited = widget.initialEntry != null || (_result?.macrosLockedByUser ?? false);
     final entry = MealEntry(
-      rawInput: widget.initialEntry?.rawInput ?? _controller.text.trim(),
+      rawInput: widget.initialEntry?.rawInput ?? text,
       result:   _result!,
       addedAt:  widget.initialEntry?.addedAt ?? DateTime.now(),
       section: widget.section,
@@ -308,13 +374,14 @@ class _AddMealScreenState extends State<AddMealScreen>
       parsedFoods: parsedFoods,
       edited: isEdited,
       editCount: (widget.initialEntry?.editCount ?? 0) + (widget.initialEntry != null ? 1 : 0),
-      finalSavedInput: _controller.text.trim(),
+      finalSavedInput: text,
     );
     if (widget.initialEntry != null) {
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
     } else {
       logFor(widget.date).add(widget.section, entry);
     }
+    if (!mounted) return;
     Navigator.of(context).pop(entry);
   }
 
@@ -2357,3 +2424,44 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
     );
   }
 }
+
+enum _LockedTextChangeAction { recalculate, keep }
+
+class _LockedTextChangeDialog extends StatelessWidget {
+  const _LockedTextChangeDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: const Text(
+        'Meal Text Changed',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+      ),
+      content: const Text(
+        'This meal has manually corrected macros. The meal description or quantity has changed.\n\n'
+        'Would you like to recalculate the macros from the new description, or keep your existing manual macros?',
+        style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_LockedTextChangeAction.keep),
+          child: const Text(
+            'Keep Manual Macros',
+            style: TextStyle(color: Color(0xFF6B7280)),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_LockedTextChangeAction.recalculate),
+          style: TextButton.styleFrom(foregroundColor: const Color(0xFF52B788)),
+          child: const Text(
+            'Recalculate',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
+  }
+}
+

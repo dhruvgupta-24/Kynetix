@@ -145,8 +145,10 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       );
       if (xFile == null) return;
       final bytes = await xFile.readAsBytes();
+      debugPrint('[AI_COACH_SCREEN] (1/7) Image captured from CAMERA: size=${bytes.length} bytes, path=${xFile.path}');
       setState(() {
         _pendingImages.add(bytes);
+        debugPrint('[AI_COACH_SCREEN] (2/7) Stored image in pending state: total pending images = ${_pendingImages.length}');
       });
     } else {
       final List<XFile> xFiles = await _imagePicker.pickMultiImage(
@@ -156,8 +158,10 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       if (xFiles.isEmpty) return;
       for (final xFile in xFiles) {
         final bytes = await xFile.readAsBytes();
+        debugPrint('[AI_COACH_SCREEN] (1/7) Image picked from GALLERY: size=${bytes.length} bytes, path=${xFile.path}');
         setState(() {
           _pendingImages.add(bytes);
+          debugPrint('[AI_COACH_SCREEN] (2/7) Stored image in pending state: total pending images = ${_pendingImages.length}');
         });
       }
     }
@@ -168,8 +172,10 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     if ((text.isEmpty && _pendingImages.isEmpty) || _loading || _isStreaming) return;
 
     final imageList = List<Uint8List>.from(_pendingImages);
+    debugPrint('[AI_COACH_SCREEN] (3/7) Message is being sent: text="$text", attached images=${imageList.length}');
     setState(() {
       _messages.add(_ChatMessage(role: _Role.user, text: text, imagesBytes: imageList));
+      debugPrint('[AI_COACH_SCREEN] Chat message model/state saved: last message role=user, text="$text", images=${_messages.last.imagesBytes?.length ?? 0}');
       _loading       = true;
       _isStreaming   = false;
       _streamingText = '';

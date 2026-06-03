@@ -46,19 +46,30 @@ function buildCodexBody(model: string, messages: any[]): string {
   const nonSystemMsgs  = messages.filter((m: any) => m.role !== 'system');
 
   const input = nonSystemMsgs.map((m: any) => {
-    const contentText = typeof m.content === 'string'
-      ? m.content
-      : Array.isArray(m.content)
-        ? m.content.map((b: any) => b?.text ?? '').join('')
-        : '';
-
-    // "input_text" for user turns, "output_text" for assistant turns
-    const contentType = m.role === 'user' ? 'input_text' : 'output_text';
+    let contentBlocks: any[] = [];
+    if (typeof m.content === 'string') {
+      const contentType = m.role === 'user' ? 'input_text' : 'output_text';
+      contentBlocks = [{ type: contentType, text: m.content }];
+    } else if (Array.isArray(m.content)) {
+      contentBlocks = m.content.map((b: any) => {
+        if (b?.type === 'text') {
+          const contentType = m.role === 'user' ? 'input_text' : 'output_text';
+          return { type: contentType, text: b.text ?? '' };
+        } else if (b?.type === 'image_url') {
+          const url = b.image_url?.url ?? b.image_url ?? '';
+          return { type: 'input_image', image_url: url };
+        } else {
+          // Unknown block type fallback
+          const contentType = m.role === 'user' ? 'input_text' : 'output_text';
+          return { type: contentType, text: typeof b === 'string' ? b : JSON.stringify(b) };
+        }
+      });
+    }
 
     return {
       type:    'message',
       role:    m.role,
-      content: [{ type: contentType, text: contentText }],
+      content: contentBlocks,
     };
   });
 
@@ -75,6 +86,27 @@ function buildCodexBody(model: string, messages: any[]): string {
   if (model && model !== 'codex') {
     reqBody.model = model;
   }
+
+  // Debug logging of final request body received by Codex to inspect blocks and order.
+  // We censor long base64 strings to keep logs readable.
+  const loggedInput = input.map((msg: any) => ({
+    role: msg.role,
+    content: msg.content.map((b: any) => {
+      if (b.type === 'input_image') {
+        const urlStr = b.image_url ?? '';
+        const preview = urlStr.startsWith('data:') 
+          ? `${urlStr.slice(0, 30)}...[len=${urlStr.length}]` 
+          : urlStr;
+        return { type: b.type, image_url: preview };
+      }
+      return b;
+    })
+  }));
+  console.log('[AI ROUTER] Codex request body built:', JSON.stringify({
+    instructions: instructions.slice(0, 100) + '...',
+    model: reqBody.model,
+    input: loggedInput
+  }, null, 2));
 
   return JSON.stringify(reqBody);
 }
@@ -435,6 +467,19 @@ Deno.serve(async (req: Request) => {
     const body         = await req.json().catch(() => ({}));
     const messages: any[] = body.messages ?? [];
     const streamMode: boolean = body.stream === true;
+
+    console.log(`[AI ROUTER] (5/7) Request received: messages=${messages.length}, streamMode=${streamMode}`);
+    messages.forEach((msg, idx) => {
+      if (typeof msg.content === 'string') {
+        console.log(`  msg[${idx}] role=${msg.role}: content_type=string (length=${msg.content.length})`);
+      } else if (Array.isArray(msg.content)) {
+        const types = msg.content.map((b: any) => b?.type ?? 'unknown');
+        console.log(`  msg[${idx}] role=${msg.role}: content_type=array (blocks=${types.join(', ')})`);
+      } else {
+        console.log(`  msg[${idx}] role=${msg.role}: content_type=other (${typeof msg.content})`);
+      }
+    });
+
     if (!messages.length) {
       return new Response(JSON.stringify({ error: 'messages array is required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

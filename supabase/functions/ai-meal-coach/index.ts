@@ -482,6 +482,11 @@ Deno.serve(async (req: Request) => {
     // date_key must be YYYY-MM-DD (matches cloud_sync_service format in Flutter)
     const dateKey: string = body.date_key ?? new Date().toISOString().slice(0, 10);
 
+    console.log(`[ai-meal-coach] (4/7) Request received: userMessage="${userMessage}", imagesCount=${imagesBase64.length}, streamMode=${streamMode}`);
+    if (imagesBase64.length > 0) {
+      console.log(`[ai-meal-coach] images base64 lengths: ${imagesBase64.map(s => s.length)}`);
+    }
+
     if (!userMessage.trim() && imagesBase64.length === 0) {
       return new Response(JSON.stringify({ error: 'message or images_base64 required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
