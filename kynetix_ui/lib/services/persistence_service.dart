@@ -8,6 +8,7 @@ import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/quick_add_service.dart';
 import 'widget_service.dart';
+import 'workout_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -146,6 +147,8 @@ class PersistenceService {
     EatingPatternService.instance.resetAll();
     await QuickAddService.instance.resetAll();
     await UserNutritionMemory.instance.clearAll();
+    await WorkoutService.instance.clearAll();
+    await WidgetService.updateWidgetData();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kProfile);

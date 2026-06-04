@@ -53,6 +53,17 @@ class AuthService {
     debugPrint('[AuthService] Initiating signOut sequence.');
     try {
       await PersistenceService.reset();
+
+      // Clear native Google Sign-In cache to show account picker next time
+      try {
+        final googleSignIn = GoogleSignIn(
+          serverClientId: SupabaseSecrets.googleWebClientId.isNotEmpty ? SupabaseSecrets.googleWebClientId : null,
+        );
+        await googleSignIn.signOut();
+      } catch (ge) {
+        debugPrint('[AuthService] Native Google Sign-In signOut failed (non-blocking): $ge');
+      }
+
       await supabase.auth.signOut();
       debugPrint('[AuthService] signOut completed successfully.');
     } catch (e) {

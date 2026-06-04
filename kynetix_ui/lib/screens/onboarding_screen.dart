@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dashboard_screen.dart';
+import 'app_shell.dart';
 import '../config/app_theme.dart';
 import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
@@ -473,7 +474,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, animation, secondaryAnimation) =>
-            const DashboardScreen(),
+            const AppShell(),
         transitionsBuilder: (_, animation, secondaryAnimation, child) =>
             FadeTransition(opacity: animation, child: child),
         transitionDuration: const Duration(milliseconds: 450),

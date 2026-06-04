@@ -724,6 +724,22 @@ class WorkoutService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Wipes all workout splits, logged sessions, custom exercises, drafts, and setup configuration.
+  Future<void> clearAll() async {
+    _split = null;
+    _sessions = [];
+    _customExercises = [];
+    _draftSession = null;
+    _setupDone = false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kData);
+    } catch (e) {
+      debugPrint('[WorkoutService] Clear data failed: $e');
+    }
+    notifyListeners();
+  }
+
   // ── Persistence ──────────────────────────────────────────────────────────
 
   Future<void> _persist() async {
