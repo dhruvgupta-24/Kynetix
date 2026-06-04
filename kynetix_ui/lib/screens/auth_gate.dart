@@ -9,6 +9,7 @@ import '../services/nutrition_hydration_guard.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
+import '../services/insights_report_service.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -136,6 +137,9 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           setState(() {}); // refresh visual state
         }
       }
+      if (currentUserProfile != null) {
+        InsightsReportService.instance.maybeRecompute(currentUserProfile!).ignore();
+      }
     } catch (e) {
       debugPrint('[_LoggedInGate] Background sync failed (non-blocking): $e');
     }
@@ -174,6 +178,8 @@ class _LoggedInGateState extends State<_LoggedInGate> {
         await PersistenceService.setOnboardingDone();
         currentUserProfile = mergedProfile;
         
+        InsightsReportService.instance.maybeRecompute(currentUserProfile!).ignore();
+
         if (mounted) setState(() => _hasProfile = true);
         return;
       }
@@ -184,6 +190,9 @@ class _LoggedInGateState extends State<_LoggedInGate> {
         debugPrint('[_LoggedInGate] Falling back to local cache. Session is live, just offline.');
         final userId = Supabase.instance.client.auth.currentUser?.id;
         NutritionHydrationGuard.instance.markComplete(userId);
+        
+        InsightsReportService.instance.maybeRecompute(currentUserProfile!).ignore();
+
         if (mounted) setState(() => _hasProfile = true);
         return;
       }

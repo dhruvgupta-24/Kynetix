@@ -12,6 +12,7 @@ import '../services/meal_memory.dart';
 import '../services/nutrition_hydration_guard.dart';
 import 'widget_service.dart';
 import 'workout_service.dart';
+import 'insights_report_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -79,6 +80,7 @@ class PersistenceService {
       await UserNutritionMemory.instance.init();
       await EatingPatternService.instance.load();
       await QuickAddService.instance.init();
+      await InsightsReportService.instance.init();
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
@@ -191,6 +193,7 @@ class PersistenceService {
     EatingPatternService.instance.resetAll();
     await QuickAddService.instance.resetAll();
     await WorkoutService.instance.clearAll();
+    await InsightsReportService.instance.reset();
     await WidgetService.updateWidgetData();
 
     // Step 8: explicit SharedPreferences cleanup (belt-and-suspenders over
@@ -202,6 +205,13 @@ class PersistenceService {
       await prefs.remove(_kOnboarding);
       await prefs.remove(_kDayLogs);
       await prefs.remove('cached_owner_user_id_v1');
+      await prefs.remove('insights_weekly_v1');
+      await prefs.remove('insights_monthly_v1');
+      await prefs.remove('insights_yearly_v1');
+      await prefs.remove('insights_personal_bests_v1');
+      await prefs.remove('insights_achievements_v1');
+      await prefs.remove('insights_ai_summaries_v1');
+      await prefs.remove('insights_last_computed_v1');
       // Nutrition memory (belt-and-suspenders over clearAll() calls above)
       await prefs.remove('personal_nutrition_memory_v1');
       await prefs.remove('meal_memory_v1');

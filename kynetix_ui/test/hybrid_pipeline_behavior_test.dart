@@ -6,6 +6,7 @@ import 'package:kynetix/services/nutrition_pipeline.dart';
 import 'package:kynetix/services/personal_nutrition_memory.dart';
 import 'package:kynetix/services/ai_nutrition_service.dart';
 import 'package:kynetix/models/nutrition_result.dart';
+import 'package:kynetix/services/nutrition_hydration_guard.dart';
 
 bool _escalationTriggered(String? source, String? fallbackReason) {
   return source == 'ai' ||
@@ -17,6 +18,8 @@ void main() {
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
+    NutritionHydrationGuard.instance.currentUserIdOverride = 'mock-user-id';
+    NutritionHydrationGuard.instance.markComplete('mock-user-id');
     await MealMemory.instance.init();
     await PersonalNutritionMemory.instance.init();
     
@@ -37,6 +40,8 @@ void main() {
 
   tearDownAll(() {
     AiNutritionService.instance.mockEstimate = null;
+    NutritionHydrationGuard.instance.reset();
+    NutritionHydrationGuard.instance.currentUserIdOverride = null;
   });
 
   test('1) 1 scoop whey stays fast and local', () async {

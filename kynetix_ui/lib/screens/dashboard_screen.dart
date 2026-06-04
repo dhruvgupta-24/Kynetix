@@ -15,6 +15,9 @@ import '../services/workout_service.dart';
 import '../screens/app_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/insights_report_service.dart';
+import '../models/insights_models.dart';
+import 'insights_screen.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -448,7 +451,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onRequestPermission: _doRequestWeightPermission,
               ),
             ),
-            SliverToBoxAdapter(child: _buildStreak()),
+            SliverToBoxAdapter(child: _buildInsightsEntryCard()),
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ),
@@ -851,67 +854,208 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return streak;
   }
 
-  Widget _buildStreak() {
-    final streak = _computeStreak();
-    final hasStreak = streak > 0;
+  Widget _buildInsightsEntryCard() {
+    return ListenableBuilder(
+      listenable: InsightsReportService.instance,
+      builder: (context, _) {
+        final streak = _computeStreak();
+        final latestWeekly = InsightsReportService.instance.latestWeekly();
+        final newCount = InsightsReportService.instance.newAchievementCount;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: _Card(
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: hasStreak
-                    ? const Color(0xFFFF6B35).withValues(alpha: 0.15)
-                    : const Color(0xFF2E2E3E),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Center(
-                child: Text(
-                  hasStreak ? '🔥' : '💤',
-                  style: const TextStyle(fontSize: 24),
+        final hasStreak = streak > 0;
+        final hasReport = latestWeekly != null;
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          child: Pressable(
+            onTap: () {
+              kHaptic();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const InsightsScreen(),
                 ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
+              );
+            },
+            borderRadius: BorderRadius.circular(18),
+            child: _Card(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    hasStreak ? 'Current Streak' : 'No streak yet',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF6B7280),
-                      fontWeight: FontWeight.w500,
-                    ),
+                  Row(
+                    children: [
+                      const Text('📊', style: TextStyle(fontSize: 16)),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Weekly Insights',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (newCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2D6A4F),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 5,
+                                height: 5,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF52B788),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$newCount new',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    hasStreak
-                        ? '$streak ${streak == 1 ? 'day' : 'days'} in a row'
-                        : 'Log a meal today to start!',
-                    style: TextStyle(
-                      fontSize: hasStreak ? 20 : 14,
-                      fontWeight: FontWeight.w800,
-                      color: hasStreak ? Colors.white : const Color(0xFF4B5563),
+                  const SizedBox(height: 8),
+                  if (hasReport) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        const Text(
+                          'Consistency Score: ',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF9CA3AF),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Text(
+                          '${latestWeekly.consistencyScore.score}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        if (latestWeekly.deltaVsPrior?.consistencyScoreDelta != null) ...[
+                          _buildDeltaChip(latestWeekly.deltaVsPrior!.consistencyScoreDelta!),
+                        ],
+                      ],
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _getWeeklyNarrative(latestWeekly),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF6B7280),
+                        height: 1.2,
+                      ),
+                    ),
+                  ] else ...[
+                    const Text(
+                      'Log meals this week to unlock your insights report.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9CA3AF),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: hasStreak
+                              ? const Color(0xFFFF6B35).withValues(alpha: 0.12)
+                              : const Color(0xFF2E2E3E),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(hasStreak ? '🔥' : '💤', style: const TextStyle(fontSize: 12)),
+                            const SizedBox(width: 4),
+                            Text(
+                              hasStreak
+                                  ? '$streak ${streak == 1 ? 'day' : 'days'}'
+                                  : 'No streak',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: hasStreak ? Colors.white : const Color(0xFF6B7280)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'View Insights →',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF52B788),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            if (hasStreak)
-              Text(
-                streak >= 7 ? '🏆' : streak >= 3 ? '⭐' : '✨',
-                style: const TextStyle(fontSize: 28),
-              ),
-          ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDeltaChip(int delta) {
+    final isPositive = delta > 0;
+    if (delta == 0) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: isPositive
+            ? const Color(0xFF52B788).withValues(alpha: 0.12)
+            : const Color(0xFFFF4D4D).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '${isPositive ? '+' : ''}$delta ${isPositive ? '↑' : '↓'}',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: isPositive ? const Color(0xFF52B788) : const Color(0xFFFF4D4D),
         ),
       ),
     );
+  }
+
+  String _getWeeklyNarrative(WeeklyReport report) {
+    final aiSummary = InsightsReportService.instance.aiSummaryFor(report.weekKey);
+    if (aiSummary != null && aiSummary.narrative.isNotEmpty && !aiSummary.isStale) {
+      return aiSummary.narrative;
+    }
+    final logged = report.loggedDaysCount;
+    final proteinHits = (report.consistencyScore.proteinAdherence * logged).round();
+    final gym = report.gymDaysCount;
+    return 'Protein hit $proteinHits/$logged days. Gym $gym sessions.';
   }
 
   // ── Section title ─────────────────────────────────────────────────────────────

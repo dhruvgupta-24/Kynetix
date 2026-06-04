@@ -13,6 +13,8 @@ import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/insights_report_service.dart';
+import 'insights_screen.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
 
@@ -455,6 +457,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildNutritionIntelligenceCard(),
           const SizedBox(height: 16),
           _buildAiCard(),
+          const SizedBox(height: 16),
+          _buildInsightsCard(),
           const SizedBox(height: 16),
           _buildAboutCard(),
           const SizedBox(height: 24),
@@ -1064,6 +1068,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // ── Insights & Progress ────────────────────────────────────────────────────
+
+  Widget _buildInsightsCard() {
+    return ListenableBuilder(
+      listenable: InsightsReportService.instance,
+      builder: (context, _) {
+        final newCount = InsightsReportService.instance.newAchievementCount;
+        return _Section(
+          title: 'Insights & Progress',
+          child: Column(
+            children: [
+              _InfoRow(
+                icon: Icons.insights_rounded,
+                label: 'Insights & Reports',
+                value: newCount > 0 ? '$newCount new' : 'View history & achievements',
+                isEditable: true,
+                isLast: true,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const InsightsScreen()),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

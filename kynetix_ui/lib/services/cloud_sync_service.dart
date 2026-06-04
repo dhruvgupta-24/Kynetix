@@ -11,6 +11,8 @@ import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
 
 import '../services/nutrition_hydration_guard.dart';
+import '../models/insights_models.dart';
+import '../services/insights_report_service.dart';
 
 class CloudSyncService {
   CloudSyncService._();
@@ -209,6 +211,28 @@ class CloudSyncService {
         );
       }
 
+      // 8. Restore achievements from cloud
+      try {
+        final cloudAchievements = await _supabase.from('user_achievements').select();
+        final restored = cloudAchievements.map((row) {
+          final earnedAtStr = row['earned_at'] as String;
+          final id = row['id'] as String;
+          return Achievement(
+            id: id,
+            title: '',
+            description: '',
+            emoji: '',
+            category: AchievementCategory.consistency,
+            earnedAt: DateTime.parse(earnedAtStr),
+            isNew: false,
+          );
+        }).toList();
+        await InsightsReportService.instance.mergeAchievementsFromCloud(restored);
+        debugPrint('[CloudSyncService] 🔄 Restored ${restored.length} achievements from cloud');
+      } catch (e) {
+        debugPrint('[CloudSyncService] Error restoring achievements: $e');
+      }
+
       debugPrint('[CloudSyncService] Hydration completed.');
       NutritionHydrationGuard.instance.markComplete(userId);
     } catch (e) {
@@ -377,6 +401,51 @@ class CloudSyncService {
       debugPrint('[CloudSyncService] 🔄 Meal contexts synced (${contexts.length} records)');
     } catch (e) {
       debugPrint('[CloudSyncService] Meal context sync failed: $e');
+    }
+  }
+
+  /// Fire-and-forget sync for insights cache
+  Future<void> syncInsightsCacheBackground() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final service = InsightsReportService.instance;
+      await _supabase.from('user_insights_cache').upsert({
+        'user_id': userId,
+        'weekly_json': service.weeklyCache.map((k, v) => MapEntry(k, v.toJson())),
+        'monthly_json': service.monthlyCache.map((k, v) => MapEntry(k, v.toJson())),
+        'yearly_json': service.yearlyCache.map((k, v) => MapEntry(k, v.toJson())),
+        'personal_bests_json': service.personalBests?.toJson(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id');
+      debugPrint('[CloudSyncService] 🔄 Insights cache synced to cloud successfully.');
+    } catch (e) {
+      debugPrint('[CloudSyncService] Background insights cache sync failed: $e');
+    }
+  }
+
+  /// Fire-and-forget sync for new achievements
+  Future<void> syncAchievementsBackground() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final newOnes = InsightsReportService.instance.achievements
+          .where((a) => a.earnedAt.isAfter(DateTime.now().subtract(const Duration(minutes: 5))))
+          .toList();
+      for (final a in newOnes) {
+        await _supabase.from('user_achievements').upsert({
+          'user_id': userId,
+          'id': a.id,
+          'earned_at': a.earnedAt.toIso8601String(),
+        }, onConflict: 'user_id, id');
+      }
+      if (newOnes.isNotEmpty) {
+        debugPrint('[CloudSyncService] 🔄 Synced ${newOnes.length} new achievements to cloud.');
+      }
+    } catch (e) {
+      debugPrint('[CloudSyncService] Background achievements sync failed: $e');
     }
   }
 }
