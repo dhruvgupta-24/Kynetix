@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/day_log.dart';
 import '../models/workout_session.dart';
+import '../models/workout_split.dart';
 import '../services/workout_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
@@ -30,13 +31,15 @@ class CloudSyncService {
         _supabase.from('user_nutrition_memory').select(),
         _supabase.from('user_eating_patterns').select().order('recorded_at', ascending: true),
         _supabase.from('user_meal_contexts').select().order('recorded_at', ascending: true),
+        _supabase.from('workout_splits').select().maybeSingle(),
       ]);
 
-      final dayLogsResp = results[0];
-      final workoutsResp = results[1];
-      final memoryResp = results[2];
-      final patternsResp = results[3];
-      final contextsResp = results[4];
+      final dayLogsResp = results[0] as List<dynamic>;
+      final workoutsResp = results[1] as List<dynamic>;
+      final memoryResp = results[2] as List<dynamic>;
+      final patternsResp = results[3] as List<dynamic>;
+      final contextsResp = results[4] as List<dynamic>;
+      final splitResp = results[5] as Map<String, dynamic>?;
 
       // 1. Process Day Logs
       for (final row in dayLogsResp) {
@@ -143,6 +146,59 @@ class CloudSyncService {
       // 6. Sync Quick Adds from Cloud
       await QuickAddService.instance.syncWithCloud();
 
+      // 7. Process Workout Split & Custom Exercises
+      if (splitResp != null) {
+        final splitJson = splitResp['split_json'];
+        final customExercisesJson = splitResp['custom_exercises_json'] as List<dynamic>?;
+        final cloudUpdatedAtStr = splitResp['updated_at'] as String?;
+        final cloudUpdatedAt = cloudUpdatedAtStr != null 
+            ? DateTime.tryParse(cloudUpdatedAtStr) 
+            : null;
+        
+        final localUpdatedAt = WorkoutService.instance.splitUpdatedAt;
+        
+        List<Exercise> customExercises = [];
+        if (customExercisesJson != null) {
+          try {
+            customExercises = customExercisesJson
+                .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
+                .toList();
+          } catch (e) {
+            debugPrint('[CloudSyncService] Error parsing custom exercises from cloud: $e');
+          }
+        }
+
+        final isLocalNewer = WorkoutService.instance.isSetupDone && 
+            cloudUpdatedAt != null && 
+            localUpdatedAt.isAfter(cloudUpdatedAt);
+
+        if (isLocalNewer) {
+          debugPrint('[CloudSyncService] Local workout split is newer than cloud. Backing up split to cloud...');
+          await syncWorkoutSplitBackground(
+            WorkoutService.instance.split,
+            WorkoutService.instance.customExercises,
+          );
+        } else if (splitJson != null) {
+          try {
+            final cloudSplit = WorkoutSplit.fromJson(splitJson as Map<String, dynamic>);
+            await WorkoutService.instance.loadSplitAndCustomExercisesFromCloud(
+              cloudSplit,
+              customExercises,
+              cloudUpdatedAt: cloudUpdatedAt,
+            );
+            debugPrint('[CloudSyncService] 🔄 Hydrated workout split and custom exercises from cloud');
+          } catch (e) {
+            debugPrint('[CloudSyncService] Error parsing cloud workout split: $e');
+          }
+        }
+      } else if (WorkoutService.instance.isSetupDone) {
+        debugPrint('[CloudSyncService] Cloud split empty but local setup done. Backing up split to cloud...');
+        await syncWorkoutSplitBackground(
+          WorkoutService.instance.split,
+          WorkoutService.instance.customExercises,
+        );
+      }
+
       debugPrint('[CloudSyncService] Hydration completed.');
     } catch (e) {
       debugPrint('[CloudSyncService] Error during hydration: $e');
@@ -202,6 +258,24 @@ class CloudSyncService {
       }, onConflict: 'id');
     } catch (e) {
       debugPrint('[CloudSyncService] Background workout sync failed: $e');
+    }
+  }
+
+  /// Fire-and-forget sync for the workout split and custom exercises
+  Future<void> syncWorkoutSplitBackground(WorkoutSplit split, List<Exercise> customExercises) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      await _supabase.from('workout_splits').upsert({
+        'user_id': userId,
+        'split_json': split.toJson(),
+        'custom_exercises_json': customExercises.map((e) => e.toJson()).toList(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id');
+      debugPrint('[CloudSyncService] 🔄 Workout split and custom exercises synced successfully.');
+    } catch (e) {
+      debugPrint('[CloudSyncService] Background workout split sync failed: $e');
     }
   }
 

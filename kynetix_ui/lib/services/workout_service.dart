@@ -33,10 +33,12 @@ class WorkoutService extends ChangeNotifier {
   WorkoutSession? _draftSession;
   bool _setupDone = false;
   bool _ready = false;
+  DateTime _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // ── Public read API ──────────────────────────────────────────────────────
 
   WorkoutSplit get split => _split ?? defaultWorkoutSplit;
+  DateTime get splitUpdatedAt => _splitUpdatedAt;
 
   List<WorkoutSession> get sessions => List.unmodifiable(_sessions);
 
@@ -607,14 +609,22 @@ class WorkoutService extends ChangeNotifier {
   Future<void> addCustomExercise(Exercise exercise) async {
     _customExercises.removeWhere((e) => e.id == exercise.id);
     _customExercises.add(exercise);
+    _splitUpdatedAt = DateTime.now();
     await _persist();
     notifyListeners();
+
+    // Sync to cloud
+    CloudSyncService.instance.syncWorkoutSplitBackground(split, _customExercises);
   }
 
   Future<void> removeCustomExercise(String id) async {
     _customExercises.removeWhere((e) => e.id == id);
+    _splitUpdatedAt = DateTime.now();
     await _persist();
     notifyListeners();
+
+    // Sync to cloud
+    CloudSyncService.instance.syncWorkoutSplitBackground(split, _customExercises);
   }
 
   // ── Write API ────────────────────────────────────────────────────────────
@@ -663,6 +673,23 @@ class WorkoutService extends ChangeNotifier {
   Future<void> saveSplit(WorkoutSplit newSplit) async {
     _split = newSplit;
     _setupDone = true;
+    _splitUpdatedAt = DateTime.now();
+    await _persist();
+    notifyListeners();
+
+    // Sync to cloud
+    CloudSyncService.instance.syncWorkoutSplitBackground(newSplit, _customExercises);
+  }
+
+  Future<void> loadSplitAndCustomExercisesFromCloud(
+    WorkoutSplit cloudSplit,
+    List<Exercise> cloudCustomExercises, {
+    DateTime? cloudUpdatedAt,
+  }) async {
+    _split = cloudSplit;
+    _customExercises = cloudCustomExercises;
+    _setupDone = true;
+    _splitUpdatedAt = cloudUpdatedAt ?? DateTime.now();
     await _persist();
     notifyListeners();
   }
@@ -679,6 +706,13 @@ class WorkoutService extends ChangeNotifier {
         // Load each field independently so a corrupted session list doesn't
         // wipe the split config or the setupDone flag.
         _setupDone = data['setupDone'] as bool? ?? false;
+        if (data['splitUpdatedAt'] != null) {
+          try {
+            _splitUpdatedAt = DateTime.parse(data['splitUpdatedAt'] as String);
+          } catch (e) {
+            debugPrint('[WorkoutService] splitUpdatedAt parse error: $e');
+          }
+        }
         if (data['split'] != null) {
           try {
             _split = WorkoutSplit.fromJson(data['split'] as Map<String, dynamic>);
@@ -719,6 +753,7 @@ class WorkoutService extends ChangeNotifier {
       _customExercises = [];
       _draftSession = null;
       _setupDone = false;
+      _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     }
     _ready = true;
     notifyListeners();
@@ -731,6 +766,7 @@ class WorkoutService extends ChangeNotifier {
     _customExercises = [];
     _draftSession = null;
     _setupDone = false;
+    _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kData);
@@ -750,6 +786,7 @@ class WorkoutService extends ChangeNotifier {
         jsonEncode({
           'setupDone': _setupDone,
           'split': split.toJson(),
+          'splitUpdatedAt': _splitUpdatedAt.toIso8601String(),
           'sessions': _sessions.map((s) => s.toJson()).toList(),
           'customExercises': _customExercises.map((e) => e.toJson()).toList(),
           if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
