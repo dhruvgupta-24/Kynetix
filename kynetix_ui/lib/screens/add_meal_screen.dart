@@ -1331,7 +1331,7 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
                         Icon(Icons.lock_rounded, size: 10, color: Color(0xFF60A5FA)),
                         SizedBox(width: 4),
                         Text(
-                          'Becomes source of truth',
+                          'Overrides standard estimate',
                           style: TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w700,

@@ -1001,7 +1001,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
               _InfoRow(
                 icon: Icons.verified_rounded,
-                label: 'Engine Verified',
+                label: 'Service Verified',
                 value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
                 isLast: true,
               ),
@@ -1108,7 +1108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _InfoRow(
             icon: Icons.restaurant_menu_rounded,
-            label: 'Engine',
+            label: 'Baseline Formula',
             value: 'Kynetix Indian Caloric Baseline',
             isLast: true,
           ),
@@ -1139,7 +1139,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Target source',
+            'Daily Target Setting',
             style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),

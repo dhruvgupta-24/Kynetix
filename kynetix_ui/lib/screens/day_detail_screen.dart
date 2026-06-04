@@ -1802,7 +1802,7 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                               Icon(Icons.lock_rounded, size: 9, color: Color(0xFF60A5FA)),
                               SizedBox(width: 4),
                               Text(
-                                'Manually Edited — values are source of truth',
+                                'Manually Edited — using custom values',
                                 style: TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w700,

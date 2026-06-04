@@ -406,7 +406,7 @@ class _ConfidenceBar extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(confidence >= 0.75 ? 'High confidence' : confidence >= 0.55 ? 'Approximate' : 'Lower confidence',
+            Text(confidence >= 0.75 ? 'Highly Reliable' : confidence >= 0.55 ? 'Approximate' : 'Rough Estimate',
                 style: TextStyle(
                   fontSize: 12, color: _barColor(),
                   fontWeight: FontWeight.w600, letterSpacing: 0.4,

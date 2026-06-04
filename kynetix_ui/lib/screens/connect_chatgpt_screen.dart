@@ -281,7 +281,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           ),
         ),
         const SizedBox(height: 28),
-        _buildBenefitRow(Icons.model_training_rounded, 'Optimal analysis engine selected automatically'),
+        _buildBenefitRow(Icons.model_training_rounded, 'Optimal analysis service selected automatically'),
         const SizedBox(height: 10),
         _buildBenefitRow(Icons.lock_rounded, 'Your credentials stay server-side only'),
         const SizedBox(height: 10),
@@ -550,13 +550,13 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _reportRow('Selected AI Engine', r.selectedModel ?? '—', highlight: true),
+                _reportRow('Selected AI Service', r.selectedModel ?? '—', highlight: true),
                 const Divider(color: Color(0xFF2E2E3E), height: 20),
                 _reportRow('Optimization Reason', r.selectionReason ?? '—'),
                 const Divider(color: Color(0xFF2E2E3E), height: 20),
                 _reportRow(
-                  'Supported AI Engines',
-                  '${r.chatModelsFound.length} engine${r.chatModelsFound.length == 1 ? '' : 's'}',
+                  'Supported AI Services',
+                  '${r.chatModelsFound.length} service${r.chatModelsFound.length == 1 ? '' : 's'}',
                 ),
                 if (r.chatModelsFound.isNotEmpty) ...[
                   const SizedBox(height: 8),
