@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/nutrition_hydration_guard.dart';
@@ -154,6 +155,7 @@ class MealMemory {
   /// These are safe to serve before hydration completes (identical for all users).
   final _bootstrapKeys = <String>{};
   bool _initialized = false;
+  String? _ownerUserId;
 
   // ── Init ─────────────────────────────────────────────────────────────────
 
@@ -191,11 +193,13 @@ class MealMemory {
       }
 
       _bootstrapDefaultKnownFoods();
+      _ownerUserId = prefs.getString('cached_owner_user_id_v1');
     } catch (_) {
       // Corrupt prefs — start fresh; next store() will rebuild.
       _store.clear();
       _candidates.clear();
       _knownFoods.clear();
+      _ownerUserId = null;
       _bootstrapDefaultKnownFoods();
     }
   }
@@ -215,6 +219,15 @@ class MealMemory {
       debugPrint('[MealMemory] 🔒 guard not ready — skipping recurring lookup for "$rawInput"');
       return null;
     }
+
+    // DEFENSE-IN-DEPTH: cache-level ownership verification
+    final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+    if (_ownerUserId == null || _ownerUserId != currentUserId) {
+      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+          'cache owned by $_ownerUserId, current user is $currentUserId');
+      return null;
+    }
+
     final key   = normalize(rawInput);
     final entry = _store[key];
     if (entry == null) return null;
@@ -236,13 +249,14 @@ class MealMemory {
   /// have at most 1 extra token beyond the query (to avoid collapsing distinct
   /// foods like "paneer" and "paneer butter masala").
   NutritionResult? lookupExactKnownFood(String rawInput) {
+    final key = normalize(rawInput);
+
     // _knownFoods contains both bootstrapped defaults (safe) and user-learned
     // entries (user-specific). We guard user-learned entries conservatively:
     // if guard is not ready, we only serve bootstrapped defaults, identified
     // by checking against the bootstrap key set.
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
       debugPrint('[MealMemory] 🔒 guard not ready — returning compiled-in defaults only');
-      final key = normalize(rawInput);
       // Serve only if it exists in the bootstrap set (no user-learned contamination)
       final boot = _knownFoods[key];
       if (boot != null && _bootstrapKeys.contains(key)) {
@@ -250,7 +264,22 @@ class MealMemory {
       }
       return null;
     }
-    final key = normalize(rawInput);
+
+    // If it is in the bootstrapKeys, it's a default and we can always return it.
+    // Otherwise, it is user-learned, so we MUST check the cache owner ID.
+    if (_bootstrapKeys.contains(key)) {
+      final boot = _knownFoods[key];
+      if (boot != null) return boot.copyWith(source: 'memory_exact');
+    }
+
+    // DEFENSE-IN-DEPTH: cache-level ownership verification for user-learned known food
+    final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+    if (_ownerUserId == null || _ownerUserId != currentUserId) {
+      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer (user-learned known food): '
+          'cache owned by $_ownerUserId, current user is $currentUserId');
+      return null;
+    }
+
     final exact = _knownFoods[key];
     if (exact != null) return exact.copyWith(source: 'memory_exact');
     // Conservative alias fallback
@@ -268,8 +297,17 @@ class MealMemory {
     // lookup() is already guard-gated — if guard not ready, returns null
     final exact = lookup(rawInput);
     if (exact != null) return exact;
-    // Token-subset alias: also user-specific, must be guard-gated
+
+    // Token-subset alias: also user-specific, must be guard-gated and owner-verified
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) return null;
+
+    final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+    if (_ownerUserId == null || _ownerUserId != currentUserId) {
+      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+          'cache owned by $_ownerUserId, current user is $currentUserId');
+      return null;
+    }
+
     final key = normalize(rawInput);
     final aliasEntry = _lookupEntryByTokenSubset(_store, key);
     if (aliasEntry == null) return null;
@@ -286,6 +324,7 @@ class MealMemory {
     final now = DateTime.now();
     final existing = _candidates[key];
 
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     if (existing == null) {
       _candidates[key] = MealCandidateEntry(
         normalizedInput: key,
@@ -330,11 +369,13 @@ class MealMemory {
       createdAt:       now,
       updatedAt:       now,
     );
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     await _persist();
   }
 
   Future<void> storeKnownFood(String rawInput, NutritionResult result) async {
     _knownFoods[normalize(rawInput)] = result.normalizedUncertainty();
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     await _persistKnownFoods();
   }
 
@@ -393,6 +434,7 @@ class MealMemory {
     _candidates.clear();
     _knownFoods.clear();
     _initialized = false;
+    _ownerUserId = null;
     // Immediately restore compiled-in defaults (safe for all users)
     _bootstrapDefaultKnownFoods();
     try {

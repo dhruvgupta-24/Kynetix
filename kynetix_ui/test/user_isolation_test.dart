@@ -16,6 +16,8 @@ import 'package:kynetix/services/nutrition_hydration_guard.dart';
 import 'package:kynetix/services/user_nutrition_memory.dart';
 import 'package:kynetix/services/meal_memory.dart';
 import 'package:kynetix/services/personal_nutrition_memory.dart';
+import 'package:kynetix/services/persistence_service.dart';
+import 'package:kynetix/services/nutrition_pipeline.dart';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -451,6 +453,140 @@ void main() {
       expect(UserNutritionMemory.instance.lookup('my special food'), isNull);
       expect(MealMemory.instance.lookup('my lunch'), isNull);
       expect(PersonalNutritionMemory.instance.lookupExact('my custom snack'), isNull);
+    });
+  });
+
+  // ── 9. Hydration Failure Safety ─────────────────────────────────────────────
+
+  group('Hydration Failure Safety', () {
+    test('9a: Timeout/Exception in hydration leaves guard non-ready', () async {
+      // Set guard to hydrating
+      NutritionHydrationGuard.instance.beginHydration();
+      expect(NutritionHydrationGuard.instance.isReadyForCurrentUser, isFalse);
+
+      // Save an override under User A
+      _hydrateAs(_userA);
+      await UserNutritionMemory.instance.init();
+      await UserNutritionMemory.instance.saveOverride(
+        'chicken breast', 165, 31,
+        referenceQuantity: 100, referenceUnit: 'g',
+      );
+
+      // Now simulate a hydration failure for User A (reset guard, beginHydration, but no markComplete)
+      NutritionHydrationGuard.instance.reset();
+      NutritionHydrationGuard.instance.beginHydration();
+      NutritionHydrationGuard.instance.currentUserIdOverride = _userA;
+
+      // Verify that lookup returns null (due to Hydrating state blocking reads)
+      expect(UserNutritionMemory.instance.lookup('chicken breast'), isNull);
+      expect(MealMemory.instance.lookupRecurring('chicken breast'), isNull);
+    });
+  });
+
+  // ── 10. Cold Start / Force-Kill Scenario ────────────────────────────────────
+
+  group('Cold Start / Force-Kill Scenario', () {
+    test('10a: Cold launch starts in NotReady and handles owner mismatch', () async {
+      // 1. User A logs in, completes hydration
+      _hydrateAs(_userA);
+      await UserNutritionMemory.instance.init();
+      await UserNutritionMemory.instance.saveOverride(
+        'user a food', 200, 20,
+        referenceQuantity: 1, referenceUnit: 'serving',
+      );
+      
+      // Save owner ID and profile in mock SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_owner_user_id_v1', _userA);
+      await prefs.setBool('onboarding_done_v1', true);
+      await prefs.setString('user_profile_v2', '{"name":"User A","age":25,"gender":"Male","height":175,"weight":70,"workoutDaysMin":3,"workoutDaysMax":4,"goal":"Fat Loss"}');
+
+      // Verify User A can read their food
+      expect(UserNutritionMemory.instance.lookup('user a food'), isNotNull);
+
+      // 2. App is force-killed (simulate cold launch by resetting guard and reloading PersistenceService from disk mock)
+      _resetGuard();
+      
+      // Re-load PersistenceService (loads User A's cached profile and _cachedOwnerId == _userA)
+      await PersistenceService.load(); 
+      
+      // Verify guard starts as NotReady on cold launch
+      expect(NutritionHydrationGuard.instance.stateName, 'NotReady');
+      expect(NutritionHydrationGuard.instance.isReadyForCurrentUser, isFalse);
+      
+      // Verify lookups are blocked even though User A's data was loaded in memory
+      expect(UserNutritionMemory.instance.lookup('user a food'), isNull);
+
+      // 3. User B logs in (current session is now User B)
+      NutritionHydrationGuard.instance.currentUserIdOverride = _userB;
+      
+      // Check if _hasProfile logic blocks quick-pass
+      final currentUserId = _userB;
+      final cachedOwnerId = PersistenceService.cachedOwnerId;
+      final hasProfileQuickPass = (PersistenceService.isOnboardingDone && cachedOwnerId == currentUserId);
+      
+      expect(hasProfileQuickPass, isFalse, reason: 'Quick-pass must be blocked on user ID mismatch');
+
+      // Simulate mismatch handler in auth_gate.dart
+      if (cachedOwnerId != null && cachedOwnerId != _userB) {
+        await PersistenceService.reset();
+      }
+
+      // Verify that after reset, local cache is wiped clean
+      expect(UserNutritionMemory.instance.allOverrides.isEmpty, isTrue);
+      expect(PersistenceService.cachedOwnerId, isNull);
+      
+      // Verify B's lookup returns null even after hydration completes
+      _hydrateAs(_userB);
+      expect(UserNutritionMemory.instance.lookup('user a food'), isNull);
+    });
+  });
+
+  // ── 11. End-to-End integration test (Account Switch) ──────────────────────
+
+  group('End-to-End integration test (Account Switch)', () {
+    test('11a: Pipeline switches cleanly and serves defaults only for User B', () async {
+      // 1. User A logs in and hydrates
+      _hydrateAs(_userA);
+      await UserNutritionMemory.instance.init();
+      await MealMemory.instance.init();
+      await PersonalNutritionMemory.instance.init();
+
+      // User A creates a correction for "special bread"
+      await UserNutritionMemory.instance.saveOverride(
+        'special bread', 150.0, 5.0,
+        referenceQuantity: 1.0, referenceUnit: 'serving',
+      );
+
+      // Verify User A logs "special bread" and pipeline uses the correction (150 kcal)
+      final pipeline = NutritionPipeline.instance;
+      final resultA = await pipeline.estimateMeal('special bread');
+      expect(resultA.calories.min, 150.0);
+      expect(resultA.protein.min, 5.0);
+      expect(resultA.source, 'user_override');
+
+      // 2. User A logs out (triggers reset sequence)
+      NutritionHydrationGuard.instance.reset();
+      await PersonalNutritionMemory.instance.clearAll();
+      await MealMemory.instance.clearAll();
+      await UserNutritionMemory.instance.clearAll();
+
+      // Verify lookup is blocked immediately (returns defaults or estimated, not the override)
+      final resultBetween = await pipeline.estimateMeal('special bread');
+      expect(resultBetween.source, isNot('user_override'));
+
+      // 3. User B logs in and hydrates
+      _hydrateAs(_userB);
+      await UserNutritionMemory.instance.init();
+      await MealMemory.instance.init();
+      await PersonalNutritionMemory.instance.init();
+
+      // User B logs "special bread"
+      final resultB = await pipeline.estimateMeal('special bread');
+      // User B should get AI or local estimation, NOT User A's override!
+      expect(resultB.source, isNot('user_override'), 
+          reason: 'User B must not see User A\'s corrections in the pipeline');
+      expect(resultB.calories.min, isNot(150.0));
     });
   });
 }

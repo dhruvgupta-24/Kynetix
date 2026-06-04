@@ -32,6 +32,14 @@ This applies to:
 - `PersonalNutritionMemory.lookupExact()` — user-added overrides only (built-ins always safe)
 - `PersonalNutritionMemory.lookupTemplate()` — user-added overrides only (built-ins always safe)
 
+### Defense-in-Depth Cache Ownership Verification
+
+To guard against edge cases where the authentication context changes without triggering a full reset, each individual cache layer implements cache-level ownership verification:
+1. When any write is performed (e.g. `saveOverride`, `store`, `storeKnownFood`), the cache saves the active user ID (`_ownerUserId = NutritionHydrationGuard.instance.currentUserId`).
+2. During initialization (`init()`), each cache loads its cached owner ID from SharedPreferences (`cached_owner_user_id_v1`).
+3. On every read lookup of user-specific data, the cache verifies that `_ownerUserId == currentUserId` (retrieved via `NutritionHydrationGuard.instance.currentUserId`, which delegates to Supabase auth in production and supports test overrides).
+4. If there is a mismatch, the lookup **fails closed** and returns `null`. Any mismatch in `_LoggedInGateState` (or on app cold launch) immediately triggers a call to `PersistenceService.reset()` to purge the stale user's profile and cache.
+
 ---
 
 ## Gate: NutritionHydrationGuard

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
@@ -48,7 +49,13 @@ class _LoggedInGate extends StatefulWidget {
 }
 
 class _LoggedInGateState extends State<_LoggedInGate> {
-  late bool? _hasProfile = (PersistenceService.isOnboardingDone && currentUserProfile != null) ? true : null;
+  late bool? _hasProfile = () {
+    if (!PersistenceService.isOnboardingDone || currentUserProfile == null) return null;
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null) return null;
+    if (PersistenceService.cachedOwnerId != currentUserId) return null;
+    return true;
+  }();
   String? _fatalError;
 
   @override
@@ -73,6 +80,19 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       // Sign out cleanly to reset the auth stream and trigger AuthGate to show AuthScreen.
       await Supabase.instance.client.auth.signOut();
       return;
+    }
+
+    // Cached owner mismatch check
+    final prefs = await SharedPreferences.getInstance();
+    final cachedOwnerId = prefs.getString('cached_owner_user_id_v1');
+    if (cachedOwnerId != null && cachedOwnerId != session.user.id) {
+      debugPrint('[_LoggedInGate] 🚨 CACHED OWNER MISMATCH: '
+          'cache owned by $cachedOwnerId, current user is ${session.user.id}. '
+          'Wiping local cache.');
+      await PersistenceService.reset();
+    } else if (cachedOwnerId == null && currentUserProfile != null) {
+      debugPrint('[_LoggedInGate] 🚨 ORPHANED CACHE: profile exists but no owner ID. Wiping local cache.');
+      await PersistenceService.reset();
     }
 
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately

@@ -74,6 +74,10 @@ class NutritionHydrationGuard {
     debugPrint('[HydrationGuard] 🔄 HYDRATING — nutrition memory reads blocked');
   }
 
+  /// Callback triggered when hydration marks complete. Used to notify the
+  /// persistence layer to save the owner ID without creating circular imports.
+  void Function(String userId)? onHydrationComplete;
+
   /// Call after cloud hydration succeeds. Opens the gate for [userId] only.
   /// If [userId] is null (should never happen in practice), stays NotReady.
   void markComplete(String? userId) {
@@ -85,6 +89,12 @@ class NutritionHydrationGuard {
     }
     _state = _HydrationState.ready;
     _hydratedUserId = userId;
+    
+    final callback = onHydrationComplete;
+    if (callback != null) {
+      callback(userId);
+    }
+    
     debugPrint('[HydrationGuard] ✅ READY — nutrition memory reads enabled for $userId');
   }
 
@@ -111,11 +121,13 @@ class NutritionHydrationGuard {
   @visibleForTesting
   set currentUserIdOverride(String? id) => _currentUserIdOverride = id;
 
+  /// The active user ID, respecting test overrides.
+  String? get currentUserId => _currentUserIdOverride ?? Supabase.instance.client.auth.currentUser?.id;
+
   /// Convenience getter — reads the current Supabase auth user and checks ownership.
   /// Use this in production lookup code for brevity.
   bool get isReadyForCurrentUser {
-    final currentId = _currentUserIdOverride ?? Supabase.instance.client.auth.currentUser?.id;
-    return isReadyForUser(currentId);
+    return isReadyForUser(currentUserId);
   }
 
   // ── Diagnostics ──────────────────────────────────────────────────────────

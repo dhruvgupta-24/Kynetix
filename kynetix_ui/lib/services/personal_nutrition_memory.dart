@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/nutrition_hydration_guard.dart';
@@ -40,6 +41,7 @@ class PersonalNutritionMemory {
   // User-added custom overrides (editable at runtime)
   final _userOverrides = <String, _PersonalEntry>{};
   bool _initialized = false;
+  String? _ownerUserId;
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -56,12 +58,14 @@ class PersonalNutritionMemory {
               e.value as Map<String, dynamic>);
         }
       }
+      _ownerUserId = prefs.getString('cached_owner_user_id_v1');
     } catch (_) {
       _userOverrides.clear();
+      _ownerUserId = null;
     }
     debugPrint('[PersonalMemory] initialized — '
                '${_userOverrides.length} user overrides + '
-               '${_defaultTemplates.length} built-in templates');
+               '${_defaultTemplates.length} built-in templates (owner: $_ownerUserId)');
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -72,10 +76,16 @@ class PersonalNutritionMemory {
 
     // User overrides: FAIL CLOSED — guard must be ready and own current user
     if (NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      final override = _userOverrides[key];
-      if (override != null) {
-        debugPrint('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
-        return override.toResult(source: 'personal_exact');
+      final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+      if (_ownerUserId != null && _ownerUserId == currentUserId) {
+        final override = _userOverrides[key];
+        if (override != null) {
+          debugPrint('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
+          return override.toResult(source: 'personal_exact');
+        }
+      } else {
+        debugPrint('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+            'cache owned by $_ownerUserId, current user is $currentUserId');
       }
     } else {
       debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user overrides for "$key"');
@@ -102,13 +112,19 @@ class PersonalNutritionMemory {
 
     // User overrides (fuzzy): FAIL CLOSED — guard must be ready and own current user
     if (NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      for (final entry in _userOverrides.values) {
-        if (entry.keywords.isNotEmpty &&
-            _allKeywordsMatch(lc, entry.keywords)) {
-          debugPrint('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
-                     '"${entry.label}" (keywords: ${entry.keywords})');
-          return entry.toResult(source: 'personal_template');
+      final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+      if (_ownerUserId != null && _ownerUserId == currentUserId) {
+        for (final entry in _userOverrides.values) {
+          if (entry.keywords.isNotEmpty &&
+              _allKeywordsMatch(lc, entry.keywords)) {
+            debugPrint('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
+                       '"${entry.label}" (keywords: ${entry.keywords})');
+            return entry.toResult(source: 'personal_template');
+          }
         }
+      } else {
+        debugPrint('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+            'cache owned by $_ownerUserId, current user is $currentUserId');
       }
     } else {
       debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user override fuzzy lookup');
@@ -148,6 +164,7 @@ class PersonalNutritionMemory {
       fiber:    fiber,
       keywords: keywords,
     );
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     await _persist();
     debugPrint('[PersonalMemory] saved override: "$key" → ${kcal.toInt()} kcal');
   }
@@ -157,7 +174,7 @@ class PersonalNutritionMemory {
     await _persist();
   }
 
-    List<Map<String, dynamic>> get allUserOverrides => _userOverrides.values
+  List<Map<String, dynamic>> get allUserOverrides => _userOverrides.values
       .map((e) => e.toJson())
       .toList(growable: false);
 
@@ -215,6 +232,7 @@ class PersonalNutritionMemory {
   Future<void> clearAll() async {
     _userOverrides.clear();
     _initialized = false;
+    _ownerUserId = null;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_prefKey);

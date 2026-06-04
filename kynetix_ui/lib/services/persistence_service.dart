@@ -26,6 +26,17 @@ class PersistenceService {
   static const _kDayLogs    = 'day_logs_v1';
 
   static bool _onboardingDone = false;
+  static String? _cachedOwnerId;
+
+  static String? get cachedOwnerId => _cachedOwnerId;
+
+  static Future<void> setCachedOwnerId(String userId) async {
+    _cachedOwnerId = userId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_owner_user_id_v1', userId);
+    } catch (_) {}
+  }
 
   static bool get isOnboardingDone => _onboardingDone;
 
@@ -37,6 +48,12 @@ class PersistenceService {
       final prefs = await SharedPreferences.getInstance();
 
       _onboardingDone = prefs.getBool(_kOnboarding) ?? false;
+      _cachedOwnerId = prefs.getString('cached_owner_user_id_v1');
+
+      // Hook hydration complete callback to save user ID
+      NutritionHydrationGuard.instance.onHydrationComplete = (userId) {
+        setCachedOwnerId(userId).ignore();
+      };
 
       final profileRaw = prefs.getString(_kProfile);
       if (profileRaw != null) {
@@ -162,6 +179,7 @@ class PersistenceService {
 
     _onboardingDone = false;
     currentUserProfile = null;
+    _cachedOwnerId = null;
     dayLogStore.clear();
 
     // Steps 2–4: wipe user-specific nutrition memory
@@ -183,6 +201,7 @@ class PersistenceService {
       await prefs.remove(_kProfile);
       await prefs.remove(_kOnboarding);
       await prefs.remove(_kDayLogs);
+      await prefs.remove('cached_owner_user_id_v1');
       // Nutrition memory (belt-and-suspenders over clearAll() calls above)
       await prefs.remove('personal_nutrition_memory_v1');
       await prefs.remove('meal_memory_v1');

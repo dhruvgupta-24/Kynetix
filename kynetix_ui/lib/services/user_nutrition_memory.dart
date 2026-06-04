@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/cloud_sync_service.dart';
@@ -185,6 +186,7 @@ class UserNutritionMemory {
 
   final List<UserMealOverride> _overrides = [];
   bool _ready = false;
+  String? _ownerUserId;
 
   // ── Startup ────────────────────────────────────────────────────────────────
 
@@ -202,8 +204,9 @@ class UserNutritionMemory {
         debugPrint('[UserNutritionMemory] parse error: $e');
       }
     }
+    _ownerUserId = prefs.getString('cached_owner_user_id_v1');
     _ready = true;
-    debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage');
+    debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId)');
   }
 
   // ── Write ──────────────────────────────────────────────────────────────────
@@ -269,6 +272,7 @@ class UserNutritionMemory {
     _overrides.removeWhere(
         (o) => o.canonicalMeal == normName);
     _overrides.add(override);
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
 
     await _persist();
     CloudSyncService.instance.syncMemoryBackground(override);
@@ -316,6 +320,7 @@ class UserNutritionMemory {
       }
     }
 
+    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     await _persist();
     debugPrint('[UserNutritionMemory] merged ${cloudOverrides.length} cloud overrides');
 
@@ -372,6 +377,15 @@ class UserNutritionMemory {
       debugPrint('[UserNutritionMemory] 🔒 guard not ready — skipping override lookup for "$rawInput"');
       return null;
     }
+
+    // DEFENSE-IN-DEPTH: cache-level ownership verification
+    final currentUserId = NutritionHydrationGuard.instance.currentUserId;
+    if (_ownerUserId == null || _ownerUserId != currentUserId) {
+      debugPrint('[UserNutritionMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+          'cache owned by $_ownerUserId, current user is $currentUserId');
+      return null;
+    }
+
     if (!_ready || _overrides.isEmpty) return null;
 
     final normInput   = FoodNameNormalizer.normalize(rawInput);
@@ -453,6 +467,7 @@ class UserNutritionMemory {
   Future<void> clearAll() async {
     _overrides.clear();
     _ready = false; // force re-init on next login so init() re-reads clean prefs
+    _ownerUserId = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kOverrides);
     debugPrint('[UserNutritionMemory] 🗑️  clearAll() complete — overrides wiped');
