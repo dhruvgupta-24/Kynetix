@@ -5,6 +5,7 @@ import '../config/supabase_secrets.dart';
 import '../config/supabase_client.dart';
 
 import '../services/persistence_service.dart';
+import '../services/nutrition_hydration_guard.dart';
 
 class AuthService {
   const AuthService();
@@ -52,6 +53,12 @@ class AuthService {
   Future<void> signOut() async {
     debugPrint('[AuthService] Initiating signOut sequence.');
     try {
+      // Step 1: Close the hydration gate FIRST — any nutrition memory read
+      // attempted after this point will return null (fail closed).
+      // PersistenceService.reset() also calls this internally, but we call it
+      // here explicitly to guarantee zero window between gate open and reset.
+      NutritionHydrationGuard.instance.reset();
+
       await PersistenceService.reset();
 
       // Clear native Google Sign-In cache to show account picker next time

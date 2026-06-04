@@ -7,6 +7,9 @@ import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/quick_add_service.dart';
+import '../services/personal_nutrition_memory.dart';
+import '../services/meal_memory.dart';
+import '../services/nutrition_hydration_guard.dart';
 import 'widget_service.dart';
 import 'workout_service.dart';
 
@@ -140,23 +143,62 @@ class PersistenceService {
   static Future<void> saveDay(DateTime _) => saveDayLogs();
 
   /// Wipe all persisted data (for settings / reset flow).
+  ///
+  /// ACCOUNT SWITCH SEQUENCE (enforced):
+  ///   1. NutritionHydrationGuard.reset()    ← FIRST (closes the gate)
+  ///   2. PersonalNutritionMemory.clearAll()
+  ///   3. MealMemory.clearAll()
+  ///   4. UserNutritionMemory.clearAll()
+  ///   5. QuickAddService.resetAll()
+  ///   6. EatingPatternService.resetAll()
+  ///   7. WorkoutService.clearAll()
+  ///   8. SharedPreferences cleanup
+  ///   9. supabase.auth.signOut()  ← happens in AuthService.signOut() after this
+  ///  10. Login screen shown
   static Future<void> reset() async {
+    // Step 1: close the nutrition memory gate BEFORE clearing any local data.
+    // This prevents any read that might slip in between clear calls.
+    NutritionHydrationGuard.instance.reset();
+
     _onboardingDone = false;
     currentUserProfile = null;
     dayLogStore.clear();
+
+    // Steps 2–4: wipe user-specific nutrition memory
+    await PersonalNutritionMemory.instance.clearAll();
+    await MealMemory.instance.clearAll();
+    await UserNutritionMemory.instance.clearAll();
+
+    // Steps 5–7: wipe other local services
     EatingPatternService.instance.resetAll();
     await QuickAddService.instance.resetAll();
-    await UserNutritionMemory.instance.clearAll();
     await WorkoutService.instance.clearAll();
     await WidgetService.updateWidgetData();
+
+    // Step 8: explicit SharedPreferences cleanup (belt-and-suspenders over
+    // the individual clearAll() calls above, plus keys those don't own)
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Core profile + session
       await prefs.remove(_kProfile);
       await prefs.remove(_kOnboarding);
       await prefs.remove(_kDayLogs);
-      await prefs.remove('user_meal_overrides_v1'); // nutrition memory
+      // Nutrition memory (belt-and-suspenders over clearAll() calls above)
+      await prefs.remove('personal_nutrition_memory_v1');
+      await prefs.remove('meal_memory_v1');
+      await prefs.remove('meal_memory_candidates_v1');
+      await prefs.remove('known_food_memory_v1');
+      await prefs.remove('user_meal_overrides_v1');
+      // Eating patterns
       await prefs.remove('eating_patterns_v1');
       await prefs.remove('meal_context_v1');
+      // Carry-forward cache (dashboard_screen)
+      await prefs.remove('carry_forward_resolved_dates_v1');
+      await prefs.remove('carry_forward_history_v1');
+      // NOTE: 'memory_schema_v2_migrated' is intentionally NOT removed.
+      // It is a one-time migration sentinel; clearing it would re-trigger
+      // the legacy quarantine on every logout.
     } catch (_) {}
+    debugPrint('[PersistenceService] ✅ reset() complete — all user data wiped');
   }
 }

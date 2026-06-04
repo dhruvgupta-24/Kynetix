@@ -6,6 +6,8 @@ import '../config/app_theme.dart';
 import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/nutrition_hydration_guard.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── User profile model ───────────────────────────────────────────────────────
 
@@ -466,6 +468,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // Persist before navigating so a quick kill won't lose profile.
     await PersistenceService.saveProfile(currentUserProfile!);
     await PersistenceService.setOnboardingDone();
+
+    // Mark hydration complete since this is a new onboarding flow with fresh/empty memory
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    NutritionHydrationGuard.instance.markComplete(userId);
 
     // Fire & forget cloud update
     ProfileService.instance.upsertProfile(currentUserProfile!);

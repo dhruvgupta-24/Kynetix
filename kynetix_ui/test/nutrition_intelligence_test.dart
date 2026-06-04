@@ -6,6 +6,11 @@ import 'package:kynetix/services/eating_pattern_service.dart';
 import 'package:kynetix/services/user_nutrition_memory.dart';
 import 'package:kynetix/services/item_parser.dart';
 import 'package:kynetix/services/nutrition_pipeline.dart';
+import 'package:kynetix/models/nutrition_result.dart';
+import 'package:kynetix/models/day_log.dart';
+import 'package:kynetix/screens/day_detail_screen.dart';
+
+import 'package:kynetix/services/nutrition_hydration_guard.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +25,8 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    NutritionHydrationGuard.instance.currentUserIdOverride = 'test-user-id';
+    NutritionHydrationGuard.instance.markComplete('test-user-id');
     await UserNutritionMemory.instance.init();
     await EatingPatternService.instance.load();
     EatingPatternService.instance.resetAll();
@@ -216,6 +223,7 @@ void main() {
     test('Fractional quantity scaling behaves correctly', () async {
       // Clear overrides
       await UserNutritionMemory.instance.clearAll();
+      await UserNutritionMemory.instance.init();
       
       // Save an override for "whey protein" with a fractional quantity (0.5)
       // Total calories is 60 kcal. So per-unit calories should be 60 / 0.5 = 120.
@@ -250,6 +258,7 @@ void main() {
 
     test('Conflict resolution (newer wins) works correctly', () async {
       await UserNutritionMemory.instance.clearAll();
+      await UserNutritionMemory.instance.init();
 
       final now = DateTime.now();
 
@@ -299,6 +308,7 @@ void main() {
 
     test('Unit category mismatch blocks override and skips to estimation', () async {
       await UserNutritionMemory.instance.clearAll();
+      await UserNutritionMemory.instance.init();
 
       // Stored unit: 'serving' (non-metric)
       await UserNutritionMemory.instance.saveOverride(
@@ -313,6 +323,136 @@ void main() {
       // Since 'serving' and 'g' are incompatible categories, fast memory lookup should skip it
       final res = NutritionPipeline.instance.fastMemoryLookupSync('40g my custom peanut butter');
       expect(res, isNull); // Skipped/returned null because of unit category mismatch!
+    });
+  });
+
+  group('Meal Quality Score Calibration', () {
+    test('Verify plain burger + fries + cola', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        700.0,
+        15.0,
+        'Plain burger + fries + cola',
+        carbs: 90.0,
+        fat: 35.0,
+        fiber: 1.0,
+      );
+      expect(score, 20);
+    });
+
+    test('Verify pizza meal', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        800.0,
+        20.0,
+        'Pizza meal',
+        carbs: 100.0,
+        fat: 40.0,
+        fiber: 2.0,
+      );
+      expect(score, 25);
+    });
+
+    test('Verify Indian home meal (roti + dal + sabzi)', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        400.0,
+        13.0,
+        'Roti + dal + sabzi',
+        carbs: 65.0,
+        fat: 10.0,
+        fiber: 6.0,
+      );
+      expect(score, 75);
+    });
+
+    test('Verify paneer + roti meal', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        450.0,
+        16.0,
+        'Paneer + roti meal',
+        carbs: 55.0,
+        fat: 18.0,
+        fiber: 4.0,
+      );
+      expect(score, 65);
+    });
+
+    test('Verify chicken breast + rice + vegetables', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        500.0,
+        40.0,
+        'Chicken breast + rice + vegetables',
+        carbs: 50.0,
+        fat: 8.0,
+        fiber: 4.0,
+      );
+      expect(score, 95);
+    });
+
+    test('Verify salad with lean protein', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        350.0,
+        30.0,
+        'Salad with lean protein',
+        carbs: 15.0,
+        fat: 12.0,
+        fiber: 6.0,
+      );
+      expect(score, 100);
+    });
+
+    test('Verify protein shake only', () {
+      final score = NutritionResult.calculateLocalQualityScore(
+        130.0,
+        25.0,
+        'Protein shake only',
+        carbs: 3.0,
+        fat: 1.5,
+        fiber: 0.0,
+      );
+      expect(score, 80);
+    });
+  });
+
+  group('Midnight Meal Assignment Edge Cases', () {
+    test('12:30 AM logging for yesterday -> Late Night', () {
+      final now = DateTime(2026, 6, 5, 0, 30); // 12:30 AM
+      final targetDate = DateTime(2026, 6, 4); // Yesterday
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.lateNight);
+    });
+
+    test('2:00 AM logging for yesterday -> Late Night', () {
+      final now = DateTime(2026, 6, 5, 2, 0); // 2:00 AM
+      final targetDate = DateTime(2026, 6, 4); // Yesterday
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.lateNight);
+    });
+
+    test('4:59 AM logging for yesterday -> Late Night', () {
+      final now = DateTime(2026, 6, 5, 4, 59); // 4:59 AM
+      final targetDate = DateTime(2026, 6, 4); // Yesterday
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.lateNight);
+    });
+
+    test('5:00 AM logging for yesterday -> Breakfast', () {
+      final now = DateTime(2026, 6, 5, 5, 0); // 5:00 AM
+      final targetDate = DateTime(2026, 6, 4); // Yesterday
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.breakfast);
+    });
+
+    test('Logging a meal 3 days in the past at 1 AM -> Late Night', () {
+      final now = DateTime(2026, 6, 5, 1, 0); // 1:00 AM
+      final targetDate = DateTime(2026, 6, 2); // 3 Days Ago
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.lateNight);
+    });
+
+    test('Logging a meal for current day after midnight -> Breakfast', () {
+      final now = DateTime(2026, 6, 5, 1, 0); // 1:00 AM
+      final targetDate = DateTime(2026, 6, 5); // Current Day
+      final section = DayDetailScreen.getSectionForTimeAndDate(now, targetDate);
+      expect(section, MealSection.breakfast);
     });
   });
 }

@@ -469,48 +469,106 @@ class NutritionResult {
     return NutrientRange(min: _safe(fiberGrams * 0.8), max: _safe(fiberGrams * 1.2));
   }
 
-  static int calculateLocalQualityScore(double cal, double pro, String text) {
+  static int calculateLocalQualityScore(
+    double cal,
+    double pro,
+    String text, {
+    double? carbs,
+    double? fat,
+    double? fiber,
+  }) {
     final lowerText = text.toLowerCase();
-    double score = 70.0; // base score
+    double score = 55.0; // base score
 
     if (cal > 0) {
       final proteinCalRatio = (pro * 4) / cal;
       if (proteinCalRatio >= 0.3) {
-        score += 15.0; // protein bonus
+        score += 20.0; // protein bonus
       } else if (proteinCalRatio >= 0.2) {
-        score += 8.0;
+        score += 10.0;
+      } else if (proteinCalRatio >= 0.15) {
+        score += 5.0;
       }
     }
 
-    if (lowerText.contains('salad') || lowerText.contains('vegetable') || lowerText.contains('broccoli') || lowerText.contains('spinach')) {
+    if (fiber != null) {
+      if (fiber >= 5.0) {
+        score += 10.0;
+      } else if (fiber >= 3.0) {
+        score += 5.0;
+      }
+    }
+
+    if (lowerText.contains('salad') ||
+        lowerText.contains('vegetable') ||
+        lowerText.contains('veg') || // handles veggies, vegetables, etc.
+        lowerText.contains('sabzi') ||
+        lowerText.contains('broccoli') ||
+        lowerText.contains('spinach') ||
+        lowerText.contains('greens')) {
       score += 10.0;
     }
-    if (lowerText.contains('oats') || lowerText.contains('egg') || lowerText.contains('chicken breast') || lowerText.contains('fish')) {
+
+    if (lowerText.contains('chicken') ||
+        lowerText.contains('fish') ||
+        lowerText.contains('tofu') ||
+        lowerText.contains('paneer') ||
+        lowerText.contains('egg') ||
+        lowerText.contains('oats') ||
+        lowerText.contains('whey') ||
+        lowerText.contains('protein') ||
+        lowerText.contains('sprouts')) {
       score += 5.0;
     }
 
-    if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('soda') || lowerText.contains('fries') || lowerText.contains('fried') || lowerText.contains('coke')) {
-      score -= 25.0;
-    } else if (lowerText.contains('sugar') || lowerText.contains('cookie') || lowerText.contains('chocolate') || lowerText.contains('cake') || lowerText.contains('donut')) {
-      score -= 15.0;
+    double penalties = 0.0;
+    if (lowerText.contains('pizza')) {
+      penalties += 30.0;
+    }
+    if (lowerText.contains('burger')) {
+      penalties += 25.0;
+    }
+    if (lowerText.contains('fries') || lowerText.contains('fried')) {
+      penalties += 20.0;
+    }
+    if (lowerText.contains('soda') ||
+        lowerText.contains('coke') ||
+        lowerText.contains('cola') ||
+        lowerText.contains('pepsi')) {
+      penalties += 15.0;
+    }
+    if (lowerText.contains('sugar') ||
+        lowerText.contains('cookie') ||
+        lowerText.contains('chocolate') ||
+        lowerText.contains('cake') ||
+        lowerText.contains('donut') ||
+        lowerText.contains('candy') ||
+        lowerText.contains('sweet') ||
+        lowerText.contains('ice cream')) {
+      penalties += 15.0;
     }
 
-    return score.clamp(0.0, 100.0).round();
+    if (penalties > 35.0) {
+      penalties = 35.0;
+    }
+    score -= penalties;
+
+    return score.clamp(20.0, 100.0).round();
   }
 
   static String getLocalQualityExplanation(int score, String text) {
     final lowerText = text.toLowerCase();
-    if (score >= 85) {
-      return 'Nutritious whole food choice with excellent protein density and clean ingredients.';
-    } else if (score >= 70) {
-      return 'Balanced meal with decent macronutrient profile, suitable for daily fuel.';
+    if (score >= 90) {
+      return 'Exceptional choice! Highly nutritious, protein-dense, and rich in whole foods.';
+    } else if (score >= 75) {
+      return 'Balanced meal with a solid macronutrient profile and good nutritional value.';
     } else if (score >= 50) {
-      return 'Moderate nutrition score. Could be improved by adding fresh vegetables or high-quality lean protein.';
+      return 'Moderate nutrition score. Consider adding more lean protein or vegetables to improve balance.';
     } else {
       if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries')) {
         return 'High in saturated fats and fast-digesting carbohydrates. Pair with a high-protein source next time.';
       }
-      return 'Higher processed content or sugar level. Try to replace with whole grains or lean protein options.';
+      return 'Lower nutritional quality. High in processed ingredients, simple sugars, or refined fats. Try to replace with whole grains or lean protein options.';
     }
   }
 
@@ -558,7 +616,14 @@ class NutritionResult {
     final carbs = estimateCarbsLocally(calVal, proVal, rawInput);
     final fat = estimateFatLocally(calVal, proVal, rawInput);
     final fiber = estimateFiberLocally(calVal, rawInput);
-    final score = calculateLocalQualityScore(calVal, proVal, rawInput);
+    final score = calculateLocalQualityScore(
+      calVal,
+      proVal,
+      rawInput,
+      carbs: carbs.mid,
+      fat: fat.mid,
+      fiber: fiber.mid,
+    );
     
     return NutritionResult(
       canonicalMeal: rawInput,
@@ -660,12 +725,30 @@ class NutritionResult {
       sodMax += item.sodium?.max ?? 0;
     }
 
+    final locked = j['macrosLockedByUser'] as bool? ?? false;
+    final carbsRange = j['carbohydrates'] != null
+        ? NutritionItem._range(j['carbohydrates'])
+        : (locked ? null : NutrientRange(min: carbMin, max: carbMax));
+    final fatRange = j['fat'] != null
+        ? NutritionItem._range(j['fat'])
+        : (locked ? null : NutrientRange(min: fatMin, max: fatMax));
+    final fiberRange = j['fiber'] != null
+        ? NutritionItem._range(j['fiber'])
+        : (locked ? null : NutrientRange(min: fiberMin, max: fiberMax));
+
     final canonicalMeal = j['canonicalMeal'] as String? ?? '';
     final calMid = (calories.min + calories.max) / 2;
     final proMid = (protein.min + protein.max) / 2;
-    final score = j['mealQualityScore'] as int? ?? NutritionResult.calculateLocalQualityScore(calMid, proMid, canonicalMeal);
+    final score = j['mealQualityScore'] as int? ??
+        NutritionResult.calculateLocalQualityScore(
+          calMid,
+          proMid,
+          canonicalMeal,
+          carbs: carbsRange?.mid,
+          fat: fatRange?.mid,
+          fiber: fiberRange?.mid,
+        );
 
-    final locked = j['macrosLockedByUser'] as bool? ?? false;
     return NutritionResult(
       canonicalMeal:  canonicalMeal,
       items:          items,
@@ -682,16 +765,9 @@ class NutritionResult {
       createdAt:      DateTime.tryParse(j['createdAt'] as String? ?? '') ??
                       DateTime.now(),
       fallbackReason: j['fallbackReason'] as String?,
-      // When macros are locked we restore the exact persisted values, not re-estimated ones.
-      carbohydrates:  locked
-          ? (j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : null)
-          : (j['carbohydrates'] != null ? NutritionItem._range(j['carbohydrates']) : NutrientRange(min: carbMin, max: carbMax)),
-      fat:  locked
-          ? (j['fat'] != null ? NutritionItem._range(j['fat']) : null)
-          : (j['fat'] != null ? NutritionItem._range(j['fat']) : NutrientRange(min: fatMin, max: fatMax)),
-      fiber: locked
-          ? (j['fiber'] != null ? NutritionItem._range(j['fiber']) : null)
-          : (j['fiber'] != null ? NutritionItem._range(j['fiber']) : NutrientRange(min: fiberMin, max: fiberMax)),
+      carbohydrates:  carbsRange,
+      fat:            fatRange,
+      fiber:          fiberRange,
       sugar:          j['sugar'] != null ? NutritionItem._range(j['sugar']) : NutrientRange(min: sugarMin, max: sugarMax),
       saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : NutrientRange(min: satMin, max: satMax),
       sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : NutrientRange(min: sodMin, max: sodMax),

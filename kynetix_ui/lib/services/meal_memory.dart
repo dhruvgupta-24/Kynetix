@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
+import '../services/nutrition_hydration_guard.dart';
 
 // ─── MealMemoryEntry ─────────────────────────────────────────────────────────
 
@@ -148,6 +150,9 @@ class MealMemory {
   final _store = <String, MealMemoryEntry>{};
   final _candidates = <String, MealCandidateEntry>{};
   final _knownFoods = <String, NutritionResult>{};
+  /// Tracks which _knownFoods keys came from the compiled-in bootstrap.
+  /// These are safe to serve before hydration completes (identical for all users).
+  final _bootstrapKeys = <String>{};
   bool _initialized = false;
 
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -199,8 +204,17 @@ class MealMemory {
 
   /// Returns a cached result for [rawInput] if one exists, else null.
   ///
+  /// FAIL CLOSED: returns null unless NutritionHydrationGuard is ready
+  /// for the currently authenticated user. This prevents User A's AI-confirmed
+  /// recurring meal data from being served to User B during account switches.
+  ///
   /// Increments [timesUsed] and updates [updatedAt] on hit.
   NutritionResult? lookup(String rawInput) {
+    // FAIL CLOSED: user-specific recurring store
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      debugPrint('[MealMemory] 🔒 guard not ready — skipping recurring lookup for "$rawInput"');
+      return null;
+    }
     final key   = normalize(rawInput);
     final entry = _store[key];
     if (entry == null) return null;
@@ -211,14 +225,31 @@ class MealMemory {
     return entry.result.copyWith(source: 'cache');
   }
 
-  /// Exact known foods / saved defaults have highest priority and must never be
-  /// overridden by AI.
+  /// Exact known foods / saved defaults have highest priority.
+  ///
+  /// FAIL CLOSED for user-learned entries (_knownFoods entries saved via
+  /// storeKnownFood). The compiled-in bootstrap defaults are always safe
+  /// since they are identical for all users.
   ///
   /// Falls back to a conservative token-subset match when no exact hit exists:
   /// all query tokens must be present in the stored key AND the stored key may
   /// have at most 1 extra token beyond the query (to avoid collapsing distinct
   /// foods like "paneer" and "paneer butter masala").
   NutritionResult? lookupExactKnownFood(String rawInput) {
+    // _knownFoods contains both bootstrapped defaults (safe) and user-learned
+    // entries (user-specific). We guard user-learned entries conservatively:
+    // if guard is not ready, we only serve bootstrapped defaults, identified
+    // by checking against the bootstrap key set.
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      debugPrint('[MealMemory] 🔒 guard not ready — returning compiled-in defaults only');
+      final key = normalize(rawInput);
+      // Serve only if it exists in the bootstrap set (no user-learned contamination)
+      final boot = _knownFoods[key];
+      if (boot != null && _bootstrapKeys.contains(key)) {
+        return boot.copyWith(source: 'memory_exact');
+      }
+      return null;
+    }
     final key = normalize(rawInput);
     final exact = _knownFoods[key];
     if (exact != null) return exact.copyWith(source: 'memory_exact');
@@ -229,12 +260,16 @@ class MealMemory {
 
   /// Recurring memory = previously confirmed full-meal matches.
   ///
+  /// FAIL CLOSED: delegates to lookup() which is already guarded.
+  ///
   /// Falls back to token-subset matching when no exact normalized key is found
   /// (e.g. user types "oreo" but memory stored "oreo biscuit").
   NutritionResult? lookupRecurring(String rawInput) {
+    // lookup() is already guard-gated — if guard not ready, returns null
     final exact = lookup(rawInput);
     if (exact != null) return exact;
-    // Conservative alias fallback — update hit count on match
+    // Token-subset alias: also user-specific, must be guard-gated
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) return null;
     final key = normalize(rawInput);
     final aliasEntry = _lookupEntryByTokenSubset(_store, key);
     if (aliasEntry == null) return null;
@@ -348,6 +383,27 @@ class MealMemory {
     } catch (_) {}
   }
 
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  /// Wipe all user-specific memory: recurring store, AI candidates, and
+  /// user-learned known foods. Restores compiled-in bootstrapped defaults.
+  /// Called during logout (step 3 of the account switch sequence).
+  Future<void> clearAll() async {
+    _store.clear();
+    _candidates.clear();
+    _knownFoods.clear();
+    _initialized = false;
+    // Immediately restore compiled-in defaults (safe for all users)
+    _bootstrapDefaultKnownFoods();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefKey);
+      await prefs.remove(_candidatePrefKey);
+      await prefs.remove(_knownFoodPrefKey);
+    } catch (_) {}
+    debugPrint('[MealMemory] 🗑️  clearAll() complete — recurring/candidates/user-foods wiped, defaults restored');
+  }
+
   bool _isStable(NutritionResult a, NutritionResult b) {
     final aCal = ((a.calories.min + a.calories.max) / 2).abs();
     final bCal = ((b.calories.min + b.calories.max) / 2).abs();
@@ -368,6 +424,7 @@ class MealMemory {
 
     for (final entry in _defaultKnownFoods.entries) {
       _knownFoods[entry.key] = entry.value;
+      _bootstrapKeys.add(entry.key); // mark as safe compiled-in default
     }
   }
 

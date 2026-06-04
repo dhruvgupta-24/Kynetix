@@ -11,6 +11,7 @@ import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
+import '../services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
@@ -1941,14 +1942,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     try {
-      // 1. Sign out of Supabase
-      await Supabase.instance.client.auth.signOut();
-      
-      // 2. Wipe local databases / caches
-      await PersistenceService.reset();
-      
-      // Reset in-memory UserProfile and onboarding state
-      currentUserProfile = null;
+      // Sign out using the canonical AuthService signOut sequence
+      await const AuthService().signOut();
       
       // 3. Navigate back to AuthGate
       if (!mounted) return;

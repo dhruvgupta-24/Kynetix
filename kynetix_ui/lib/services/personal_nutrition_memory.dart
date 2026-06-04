@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
+import '../services/nutrition_hydration_guard.dart';
 
 // ─── PersonalNutritionMemory ──────────────────────────────────────────────────
 //
@@ -69,14 +70,18 @@ class PersonalNutritionMemory {
   NutritionResult? lookupExact(String rawInput) {
     final key = _normalize(rawInput);
 
-    // User overrides take priority over built-in defaults
-    final override = _userOverrides[key];
-    if (override != null) {
-      debugPrint('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
-      return override.toResult(source: 'personal_exact');
+    // User overrides: FAIL CLOSED — guard must be ready and own current user
+    if (NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      final override = _userOverrides[key];
+      if (override != null) {
+        debugPrint('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
+        return override.toResult(source: 'personal_exact');
+      }
+    } else {
+      debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user overrides for "$key"');
     }
 
-    // Built-in personal defaults
+    // Built-in personal defaults are identical for all users — always safe
     final builtin = _defaultTemplates[key];
     if (builtin != null) {
       debugPrint('[PersonalMemory] ✅ EXACT BUILT-IN TEMPLATE: "$key"');
@@ -95,17 +100,21 @@ class PersonalNutritionMemory {
   NutritionResult? lookupTemplate(String rawInput) {
     final lc = rawInput.toLowerCase();
 
-    // Check user overrides first (fuzzy)
-    for (final entry in _userOverrides.values) {
-      if (entry.keywords.isNotEmpty &&
-          _allKeywordsMatch(lc, entry.keywords)) {
-        debugPrint('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
-                   '"${entry.label}" (keywords: ${entry.keywords})');
-        return entry.toResult(source: 'personal_template');
+    // User overrides (fuzzy): FAIL CLOSED — guard must be ready and own current user
+    if (NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      for (final entry in _userOverrides.values) {
+        if (entry.keywords.isNotEmpty &&
+            _allKeywordsMatch(lc, entry.keywords)) {
+          debugPrint('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
+                     '"${entry.label}" (keywords: ${entry.keywords})');
+          return entry.toResult(source: 'personal_template');
+        }
       }
+    } else {
+      debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user override fuzzy lookup');
     }
 
-    // Check built-in templates (fuzzy)
+    // Built-in templates are identical for all users — always safe
     for (final entry in _defaultTemplates.values) {
       if (entry.keywords.isNotEmpty &&
           _allKeywordsMatch(lc, entry.keywords)) {
@@ -193,6 +202,24 @@ class PersonalNutritionMemory {
       protein: protein,
       source:  'personal_exact',
     );
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  /// Wipe all user-added overrides from memory and SharedPreferences.
+  /// Called during logout (step 2 of the account switch sequence).
+  /// After this call:
+  ///   - _userOverrides is empty
+  ///   - _initialized is false (next init() re-reads clean prefs)
+  ///   - personal_nutrition_memory_v1 pref key is removed
+  Future<void> clearAll() async {
+    _userOverrides.clear();
+    _initialized = false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefKey);
+    } catch (_) {}
+    debugPrint('[PersonalMemory] 🗑️  clearAll() complete — user overrides wiped');
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────

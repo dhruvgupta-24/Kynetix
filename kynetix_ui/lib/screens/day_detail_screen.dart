@@ -31,6 +31,22 @@ class DayDetailScreen extends StatefulWidget {
     this.weightContext,
   });
 
+  static MealSection getSectionForTimeAndDate(DateTime now, DateTime targetDate) {
+    final today = DateTime(now.year, now.month, now.day);
+    final targetDateMidnight = DateTime(targetDate.year, targetDate.month, targetDate.day);
+    
+    if (now.hour < 5 && targetDateMidnight.isBefore(today)) {
+      return MealSection.lateNight;
+    }
+    
+    final h = now.hour;
+    if (h < 11) return MealSection.breakfast;
+    if (h < 16) return MealSection.lunch;
+    if (h < 19) return MealSection.eveningSnack;
+    if (h < 23) return MealSection.dinner;
+    return MealSection.lateNight;
+  }
+
   @override
   State<DayDetailScreen> createState() => _DayDetailScreenState();
 }
@@ -290,12 +306,7 @@ class _DayDetailContentState extends State<_DayDetailContent> {
   }
 
   MealSection get _currentSection {
-    final h = DateTime.now().hour;
-    if (h < 11) return MealSection.breakfast;
-    if (h < 16) return MealSection.lunch;
-    if (h < 19) return MealSection.eveningSnack;
-    if (h < 23) return MealSection.dinner;
-    return MealSection.lateNight;
+    return DayDetailScreen.getSectionForTimeAndDate(DateTime.now(), widget.date);
   }
 
   void _quickAddMeal({

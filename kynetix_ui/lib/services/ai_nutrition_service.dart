@@ -261,6 +261,25 @@ class AiNutritionService {
         '${useCal.min.toInt()}–${useCal.max.toInt()} kcal  '
         '${usePro.min.toInt()}–${usePro.max.toInt()}g protein');
 
+    final aiScore = json['mealQualityScore'] as int?;
+    final localScore = NutritionResult.calculateLocalQualityScore(
+      useCal.mid,
+      usePro.mid,
+      canonicalMeal,
+      carbs: carbsTotal?.mid,
+      fat: fatTotal?.mid,
+      fiber: fiberTotal?.mid,
+    );
+
+    if (aiScore != null) {
+      final divergence = (aiScore - localScore).abs();
+      debugPrint('[Scoring] Meal: "$canonicalMeal" | AI Score: $aiScore | Local Score: $localScore | Divergence: $divergence');
+    }
+
+    final aiExplanation = json['mealQualityExplanation'] as String?;
+    final aiPositive = json['mealQualityPositive'] as String?;
+    final aiImprovement = json['mealQualityImprovement'] as String?;
+
     return NutritionResult(
       canonicalMeal: canonicalMeal,
       items:         items,
@@ -281,10 +300,10 @@ class AiNutritionService {
       sugar:          sugarTotal,
       saturatedFat:   satFatTotal,
       sodium:         sodiumTotal,
-      mealQualityScore: json['mealQualityScore'] as int?,
-      mealQualityExplanation: json['mealQualityExplanation'] as String?,
-      mealQualityPositive: json['mealQualityPositive'] as String?,
-      mealQualityImprovement: json['mealQualityImprovement'] as String?,
+      mealQualityScore: localScore,
+      mealQualityExplanation: aiExplanation != null && aiExplanation.isNotEmpty ? aiExplanation : NutritionResult.getLocalQualityExplanation(localScore, canonicalMeal),
+      mealQualityPositive: aiPositive != null && aiPositive.isNotEmpty ? aiPositive : NutritionResult.getLocalQualityPositive(localScore, canonicalMeal),
+      mealQualityImprovement: aiImprovement != null && aiImprovement.isNotEmpty ? aiImprovement : NutritionResult.getLocalQualityImprovement(localScore, canonicalMeal),
     ).normalizedUncertainty();
   }
 
@@ -408,6 +427,16 @@ DETERMINISTIC BASELINES
 - 1 banana: 90 kcal, 1.2g protein
 - 1 brownie (mess/home, medium): ~200–260 kcal, 3–4g protein
 - 1 mango shake (standard, no ice cream): ~230-260 kcal
+
+═══════════════════════════════════════════════════
+MEAL QUALITY SCORING (20-100 Scale)
+═══════════════════════════════════════════════════
+- The meal quality score must be strictly between 20 and 100.
+- 20-50: Junk/highly processed foods, high simple sugars or saturated/refined fats.
+- 50-75: Average/unbalanced meals, moderate nutritional quality.
+- 75-90: Balanced meals, good protein density and micronutrients.
+- 90-100: Exceptional choice, highly nutritious, protein-dense, whole foods.
+- Your explanation, positive, and improvement fields must align with this scoring range.
 
 ═══════════════════════════════════════════════════
 ESTIMATION MODES

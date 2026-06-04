@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
+import '../services/nutrition_hydration_guard.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
@@ -77,6 +78,7 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately
     if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
       debugPrint('[_LoggedInGate] Quick-pass active. Showing AppShell immediately, running background sync.');
+      NutritionHydrationGuard.instance.markComplete(session.user.id);
       if (mounted) {
         setState(() {
           _hasProfile = true;
@@ -160,6 +162,8 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       // 2. Network offline fallback
       if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
         debugPrint('[_LoggedInGate] Falling back to local cache. Session is live, just offline.');
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        NutritionHydrationGuard.instance.markComplete(userId);
         if (mounted) setState(() => _hasProfile = true);
         return;
       }

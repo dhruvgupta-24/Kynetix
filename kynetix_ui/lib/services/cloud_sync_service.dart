@@ -10,6 +10,8 @@ import '../services/eating_pattern_service.dart';
 import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
 
+import '../services/nutrition_hydration_guard.dart';
+
 class CloudSyncService {
   CloudSyncService._();
   static final CloudSyncService instance = CloudSyncService._();
@@ -21,6 +23,7 @@ class CloudSyncService {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
 
+    NutritionHydrationGuard.instance.beginHydration();
     debugPrint('[CloudSyncService] Starting cloud hydration for user: $userId');
 
     try {
@@ -207,6 +210,7 @@ class CloudSyncService {
       }
 
       debugPrint('[CloudSyncService] Hydration completed.');
+      NutritionHydrationGuard.instance.markComplete(userId);
     } catch (e) {
       debugPrint('[CloudSyncService] Error during hydration: $e');
     }

@@ -300,7 +300,14 @@ class NutritionPipeline {
 
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
-    final score = NutritionResult.calculateLocalQualityScore(midCal, midPro, trimmed);
+    final score = NutritionResult.calculateLocalQualityScore(
+      midCal,
+      midPro,
+      trimmed,
+      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
+      fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
+    );
 
     // Record meal context for pattern learning and sync to cloud
     EatingPatternService.instance.recordMealContext(rolledItems);
@@ -840,7 +847,14 @@ class NutritionPipeline {
 
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
-    final score = NutritionResult.calculateLocalQualityScore(midCal, midPro, trimmed);
+    final score = NutritionResult.calculateLocalQualityScore(
+      midCal,
+      midPro,
+      trimmed,
+      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
+      fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
+    );
 
     return NutritionResult(
       canonicalMeal: trimmed,

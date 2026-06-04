@@ -5,6 +5,7 @@ import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/cloud_sync_service.dart';
 import '../services/unit_normalizer.dart';
+import '../services/nutrition_hydration_guard.dart';
 
 // ─── UserMealOverride ─────────────────────────────────────────────────────────
 //
@@ -354,16 +355,23 @@ class UserNutritionMemory {
 
   /// Look up a memory match for [rawInput] (food name only, no quantity/unit).
   ///
+  /// FAIL CLOSED: returns null unless NutritionHydrationGuard is ready for
+  /// the currently authenticated user. This prevents User A's personal
+  /// nutrition corrections from being served to User B during account switches.
+  ///
   /// Returns a [NutritionResult] whose calories/protein are expressed as
   /// PER-UNIT-1 values in the stored canonical unit.
   ///
-  /// The pipeline's [_itemFromMemory] scales the result by parsed.quantity
-  /// (already in the same canonical unit after normalization).
-  ///
   /// Returns null when:
+  ///   - hydration guard is not ready for the current user
   ///   - not ready
   ///   - no match with F1 ≥ 0.98
   NutritionResult? lookup(String rawInput) {
+    // FAIL CLOSED: user-specific correction store
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      debugPrint('[UserNutritionMemory] 🔒 guard not ready — skipping override lookup for "$rawInput"');
+      return null;
+    }
     if (!_ready || _overrides.isEmpty) return null;
 
     final normInput   = FoodNameNormalizer.normalize(rawInput);
@@ -444,8 +452,10 @@ class UserNutritionMemory {
   /// Wipe overrides both in-memory and in local SharedPreferences.
   Future<void> clearAll() async {
     _overrides.clear();
+    _ready = false; // force re-init on next login so init() re-reads clean prefs
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kOverrides);
+    debugPrint('[UserNutritionMemory] 🗑️  clearAll() complete — overrides wiped');
   }
 
   // ── Private ────────────────────────────────────────────────────────────────

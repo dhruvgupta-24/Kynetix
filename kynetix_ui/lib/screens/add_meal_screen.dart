@@ -189,7 +189,14 @@ class _AddMealScreenState extends State<AddMealScreen>
       );
       if (!mounted || vals == null) return;
 
-      final score = NutritionResult.calculateLocalQualityScore(vals.cal, vals.pro, mealName);
+      final score = NutritionResult.calculateLocalQualityScore(
+        vals.cal,
+        vals.pro,
+        mealName,
+        carbs: vals.carbs,
+        fat: vals.fat,
+        fiber: vals.fiber,
+      );
 
       setState(() {
         _result = NutritionResult(
@@ -294,7 +301,14 @@ class _AddMealScreenState extends State<AddMealScreen>
       // Fire-and-forget: sync new correction records to cloud
       CloudSyncService.instance.syncEatingPatternsBackground().ignore();
 
-      final score = NutritionResult.calculateLocalQualityScore(totalCal, totalPro, mealName);
+      final score = NutritionResult.calculateLocalQualityScore(
+        totalCal,
+        totalPro,
+        mealName,
+        carbs: totalCarb,
+        fat: totalFat,
+        fiber: totalFib,
+      );
 
       setState(() {
         _result = NutritionResult(
