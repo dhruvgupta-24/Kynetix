@@ -2,6 +2,11 @@ import 'dart:convert';
 import '../services/mock_estimation_service.dart'
     show NutrientRange, FoodItem, EstimationResult;
 
+double _safe(double v, [int precision = 1]) {
+  if (v.isNaN || v.isInfinite) return 0.0;
+  return double.tryParse(v.toStringAsFixed(precision)) ?? 0.0;
+}
+
 // ─── Estimation mode ──────────────────────────────────────────────────────────
 
 enum EstimationMode {
@@ -136,7 +141,7 @@ class NutritionItem {
     final meaningful = diff >= 5 && (r.max <= 0 || diff / r.max >= 0.04);
     if (meaningful) return r;
     final mid = ((r.min + r.max) / 2);
-    final collapsed = double.parse(mid.toStringAsFixed(1));
+    final collapsed = _safe(mid);
     return NutrientRange(min: collapsed, max: collapsed);
   }
 
@@ -435,7 +440,7 @@ class NutritionResult {
     }
     final remainingCal = (cal - pro * 4).clamp(0.0, double.infinity);
     final carbsGrams = (remainingCal * ratio / 4).clamp(0.0, double.infinity);
-    return NutrientRange(min: double.parse((carbsGrams * 0.9).toStringAsFixed(1)), max: double.parse((carbsGrams * 1.1).toStringAsFixed(1)));
+    return NutrientRange(min: _safe(carbsGrams * 0.9), max: _safe(carbsGrams * 1.1));
   }
 
   static NutrientRange estimateFatLocally(double cal, double pro, String text) {
@@ -448,7 +453,7 @@ class NutritionResult {
     }
     final remainingCal = (cal - pro * 4).clamp(0.0, double.infinity);
     final fatGrams = (remainingCal * ratio / 9).clamp(0.0, double.infinity);
-    return NutrientRange(min: double.parse((fatGrams * 0.9).toStringAsFixed(1)), max: double.parse((fatGrams * 1.1).toStringAsFixed(1)));
+    return NutrientRange(min: _safe(fatGrams * 0.9), max: _safe(fatGrams * 1.1));
   }
 
   static NutrientRange estimateFiberLocally(double cal, String text) {
@@ -461,7 +466,7 @@ class NutritionResult {
     } else if (cal > 500) {
       fiberGrams = 3.0;
     }
-    return NutrientRange(min: double.parse((fiberGrams * 0.8).toStringAsFixed(1)), max: double.parse((fiberGrams * 1.2).toStringAsFixed(1)));
+    return NutrientRange(min: _safe(fiberGrams * 0.8), max: _safe(fiberGrams * 1.2));
   }
 
   static int calculateLocalQualityScore(double cal, double pro, String text) {

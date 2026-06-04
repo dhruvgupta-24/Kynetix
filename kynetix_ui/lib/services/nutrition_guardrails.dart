@@ -267,7 +267,10 @@ class NutritionGuardrails {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  static double _r(double v) => double.parse(v.toStringAsFixed(1));
+  static double _r(double v) {
+    if (v.isNaN || v.isInfinite) return 0.0;
+    return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
+  }
 
   static void _clampUp(double maxFloor, double minFloor, {
     required double calMax,

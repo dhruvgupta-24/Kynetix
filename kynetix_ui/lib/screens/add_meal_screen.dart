@@ -1201,17 +1201,23 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
 
       // Preserve sugar / sat-fat / sodium via proportional scale on original cal.
       final scale = calMid > 0 ? cVal / calMid : 1.0;
+      double safeScale(double val) {
+        final scaled = val * scale;
+        if (scaled.isNaN || scaled.isInfinite) return 0.0;
+        return double.tryParse(scaled.toStringAsFixed(1)) ?? 0.0;
+      }
+
       final sugar = item.sugar != null
-          ? NutrientRange(min: double.parse((item.sugar!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.sugar!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: safeScale(item.sugar!.min),
+                          max: safeScale(item.sugar!.max))
           : null;
       final saturatedFat = item.saturatedFat != null
-          ? NutrientRange(min: double.parse((item.saturatedFat!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.saturatedFat!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: safeScale(item.saturatedFat!.min),
+                          max: safeScale(item.saturatedFat!.max))
           : null;
       final sodium = item.sodium != null
-          ? NutrientRange(min: double.parse((item.sodium!.min * scale).toStringAsFixed(1)),
-                          max: double.parse((item.sodium!.max * scale).toStringAsFixed(1)))
+          ? NutrientRange(min: safeScale(item.sodium!.min),
+                          max: safeScale(item.sodium!.max))
           : null;
 
       updatedItems.add(NutritionItem(

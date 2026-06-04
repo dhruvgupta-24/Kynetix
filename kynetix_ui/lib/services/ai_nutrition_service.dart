@@ -301,7 +301,10 @@ class AiNutritionService {
     return (g.max - s.max).abs() / ref < 0.15;
   }
 
-  double _r(double v) => double.parse(v.toStringAsFixed(1));
+  double _r(double v) {
+    if (v.isNaN || v.isInfinite) return 0.0;
+    return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
+  }
 
   /// Returns the user's portion-anchor instruction for injection into the
   /// DAL/SABZI section of the system prompt.

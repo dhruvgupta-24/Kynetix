@@ -411,6 +411,13 @@ class UserNutritionMemory {
     return null;
   }
 
+  /// Wipe overrides both in-memory and in local SharedPreferences.
+  Future<void> clearAll() async {
+    _overrides.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kOverrides);
+  }
+
   // ── Private ────────────────────────────────────────────────────────────────
 
   Future<void> _persist() async {

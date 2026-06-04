@@ -609,8 +609,11 @@ class HealthService {
     final hi = sorted[(n * 0.90).ceil().clamp(0, n - 1)];
 
     final clipped = sorted.map((v) => v.clamp(lo, hi)).toList();
+    if (clipped.isEmpty) return 0.0;
     final sum = clipped.fold<double>(0, (a, b) => a + b);
-    return double.parse((sum / clipped.length).toStringAsFixed(0));
+    final avg = sum / clipped.length;
+    if (avg.isNaN || avg.isInfinite) return 0.0;
+    return double.tryParse(avg.toStringAsFixed(0)) ?? 0.0;
   }
 
   double _median(List<double> values) {

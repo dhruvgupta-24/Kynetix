@@ -531,7 +531,10 @@ const _unknownQtySpread = 0.08;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-double _rnd(double v) => double.parse(v.toStringAsFixed(1));
+double _rnd(double v) {
+  if (v.isNaN || v.isInfinite) return 0.0;
+  return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
+}
 
 NutrientRange _scale(NutrientRange r, double factor) =>
     NutrientRange(min: _rnd(r.min * factor), max: _rnd(r.max * factor));
@@ -920,7 +923,10 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
     items: matched,
     calories: NutrientRange(min: _rnd(totalCal.min), max: _rnd(totalCal.max)),
     protein: NutrientRange(min: _rnd(totalProt.min), max: _rnd(totalProt.max)),
-    confidence: double.parse(conf.toStringAsFixed(2)),
+    confidence: () {
+      if (conf.isNaN || conf.isInfinite) return 0.0;
+      return double.tryParse(conf.toStringAsFixed(2)) ?? 0.0;
+    }(),
     warnings: warnings,
   );
 

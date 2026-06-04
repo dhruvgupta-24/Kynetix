@@ -347,9 +347,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       label: 'Save Metrics',
                       onTap: () {
                         if (formKey.currentState?.validate() ?? false) {
-                          final age = int.parse(ageCtrl.text);
-                          final height = double.parse(heightCtrl.text);
-                          final weight = double.parse(weightCtrl.text);
+                          final age = int.tryParse(ageCtrl.text) ?? _profile.age;
+                          final height = double.tryParse(heightCtrl.text) ?? _profile.height;
+                          final weight = double.tryParse(weightCtrl.text) ?? _profile.weight;
                           
                           _saveProfile(_profile.copyWith(
                             age: age,
@@ -1641,7 +1641,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 if (formKey.currentState?.validate() ?? false) {
-                  final val = double.parse(ctrl.text.trim());
+                  final val = double.tryParse(ctrl.text.trim()) ?? currentValue;
                   Navigator.pop(ctx);
                   _confirmValueChange(title, currentValue, val, onSave);
                 } else {

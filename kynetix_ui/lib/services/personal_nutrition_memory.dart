@@ -237,7 +237,10 @@ class PersonalNutritionMemory {
     return f1 >= 0.85;
   }
 
-  static double _r(double v) => double.parse(v.toStringAsFixed(1));
+  static double _r(double v) {
+    if (v.isNaN || v.isInfinite) return 0.0;
+    return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
+  }
 
   static String _normalize(String input) => input
       .toLowerCase()

@@ -6,6 +6,7 @@ import '../models/day_log.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
+import '../services/quick_add_service.dart';
 import 'widget_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ class PersistenceService {
       // This makes memory available offline, before cloud hydration runs.
       await UserNutritionMemory.instance.init();
       await EatingPatternService.instance.load();
+      await QuickAddService.instance.init();
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
@@ -142,6 +144,8 @@ class PersistenceService {
     currentUserProfile = null;
     dayLogStore.clear();
     EatingPatternService.instance.resetAll();
+    await QuickAddService.instance.resetAll();
+    await UserNutritionMemory.instance.clearAll();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kProfile);

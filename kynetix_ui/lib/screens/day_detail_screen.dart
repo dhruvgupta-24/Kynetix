@@ -6,12 +6,14 @@ import '../models/coach_insight.dart';
 import '../models/day_log.dart';
 import '../models/day_status.dart';
 import '../models/nutrition_result.dart';
+import '../models/quick_add_item.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/coach_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
+import '../services/quick_add_service.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
@@ -2196,36 +2198,6 @@ class _CoachInsightRow extends StatelessWidget {
 
 // ─── Quick Add item model ─────────────────────────────────────────────────────
 
-class _QuickItem {
-  final String name;
-  final double calories;
-  final double protein;
-  final String emoji;
-  final bool builtIn;
-
-  const _QuickItem({
-    required this.name,
-    required this.calories,
-    required this.protein,
-    this.emoji = '⚡',
-    this.builtIn = false,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'name': name,
-        'calories': calories,
-        'protein': protein,
-        'emoji': emoji,
-      };
-
-  factory _QuickItem.fromJson(Map<String, dynamic> j) => _QuickItem(
-        name:     j['name'] as String,
-        calories: (j['calories'] as num).toDouble(),
-        protein:  (j['protein'] as num).toDouble(),
-        emoji:    j['emoji'] as String? ?? '⚡',
-      );
-}
-
 // ─── Quick Add card ───────────────────────────────────────────────────────────
 
 class _QuickAddCard extends StatefulWidget {
@@ -2243,53 +2215,30 @@ class _QuickAddCard extends StatefulWidget {
 }
 
 class _QuickAddCardState extends State<_QuickAddCard> {
-  static const _prefsKey = 'quick_add_custom_items';
-
-  static const _builtIn = [
-    _QuickItem(name: '1 scoop whey',              calories: 115, protein: 22, emoji: '🥛', builtIn: true),
-    _QuickItem(name: '4 egg whites + 400ml milk', calories: 328, protein: 27, emoji: '🥚', builtIn: true),
+  static final _builtIn = [
+    const QuickAddItem(id: 'builtin_whey', name: '1 scoop whey',              calories: 115, protein: 22, emoji: '🥛', builtIn: true),
+    const QuickAddItem(id: 'builtin_eggs', name: '4 egg whites + 400ml milk', calories: 328, protein: 27, emoji: '🥚', builtIn: true),
   ];
-
-  List<_QuickItem> _custom = [];
 
   @override
   void initState() {
     super.initState();
-    _loadCustomItems();
   }
 
-  Future<void> _loadCustomItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_prefsKey) ?? [];
-    if (mounted) {
-      setState(() {
-        _custom = raw.map((s) {
-          try { return _QuickItem.fromJson(jsonDecode(s) as Map<String, dynamic>); }
-          catch (_) { return null; }
-        }).whereType<_QuickItem>().toList();
-      });
-    }
-  }
-
-  Future<void> _saveCustomItems() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_prefsKey, _custom.map((i) => jsonEncode(i.toJson())).toList());
-  }
-
-  Future<void> _deleteCustomItem(_QuickItem item) async {
-    setState(() => _custom.removeWhere((i) => i.name == item.name));
-    await _saveCustomItems();
+  Future<void> _deleteCustomItem(QuickAddItem item) async {
+    setState(() {}); // trigger rebuild
+    await QuickAddService.instance.deleteItem(item);
   }
 
   Future<void> _openAddCustom() async {
-    final result = await showModalBottomSheet<_QuickItem>(
+    final result = await showModalBottomSheet<QuickAddItem>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const _AddCustomQuickSheet(),
     );
     if (result == null || !mounted) return;
-    final exists = [..._builtIn, ..._custom].any(
+    final exists = [..._builtIn, ...QuickAddService.instance.customItems].any(
       (i) => i.name.toLowerCase() == result.name.toLowerCase(),
     );
     if (exists) {
@@ -2298,13 +2247,13 @@ class _QuickAddCardState extends State<_QuickAddCard> {
       );
       return;
     }
-    setState(() => _custom.add(result));
-    await _saveCustomItems();
+    await QuickAddService.instance.saveItem(result);
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final allItems = [..._builtIn, ..._custom];
+    final allItems = [..._builtIn, ...QuickAddService.instance.customItems];
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E2C),
@@ -2519,7 +2468,8 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
     final pro  = double.tryParse(_proCtrl.text.trim()) ?? _protein  ?? 0;
     final name = _ctrl.text.trim();
     if (name.isEmpty || cal <= 0) return;
-    Navigator.of(context).pop(_QuickItem(
+    Navigator.of(context).pop(QuickAddItem(
+      id: QuickAddService.instance.generateUuid(),
       name: name, calories: cal, protein: pro, emoji: _pickEmoji(name),
     ));
   }

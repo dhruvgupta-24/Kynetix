@@ -7,12 +7,13 @@ import '../services/workout_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/persistence_service.dart';
+import '../services/quick_add_service.dart';
 
 class CloudSyncService {
   CloudSyncService._();
   static final CloudSyncService instance = CloudSyncService._();
 
-  final _supabase = Supabase.instance.client;
+  SupabaseClient get _supabase => Supabase.instance.client;
 
   /// Hydrate local state from Supabase
   Future<void> hydrateFromCloud() async {
@@ -138,6 +139,9 @@ class CloudSyncService {
         );
         await EatingPatternService.instance.save();
       }
+
+      // 6. Sync Quick Adds from Cloud
+      await QuickAddService.instance.syncWithCloud();
 
       debugPrint('[CloudSyncService] Hydration completed.');
     } catch (e) {
