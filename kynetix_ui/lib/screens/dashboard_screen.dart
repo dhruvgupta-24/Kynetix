@@ -243,8 +243,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _initHealth() async {
-    // Ensure the activity has fully transitioned to the foreground before querying Health Connect
-    await Future.delayed(const Duration(seconds: 3));
     final available = await HealthService().isAvailable();
     if (!mounted) return;
     setState(() => _hcAvailable = available);

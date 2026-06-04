@@ -37,48 +37,28 @@ void main() {
     });
   });
 
-  group('Winsorized Mean Steps Calculations', () {
+  group('Arithmetic Mean Steps Calculations', () {
     // We re-implement the exact private math algorithm from HealthService
     // to test its correctness mathematically.
-    double calculateWinsorizedMean(List<double> values) {
+    double calculateArithmeticMean(List<double> values) {
       if (values.isEmpty) return 0;
-      if (values.length == 1) return values.first;
-
-      final sorted = List<double>.from(values)..sort();
-      final n     = sorted.length;
-
-      // Clip to 10th/90th percentile
-      final lo = sorted[(n * 0.10).floor().clamp(0, n - 1)];
-      final hi = sorted[(n * 0.90).ceil().clamp(0, n - 1)];
-
-      final clipped = sorted.map((v) => v.clamp(lo, hi)).toList();
-      if (clipped.isEmpty) return 0.0;
-      final sum = clipped.fold<double>(0, (a, b) => a + b);
-      final avg = sum / clipped.length;
+      final sum = values.fold<double>(0, (a, b) => a + b);
+      final avg = sum / values.length;
       if (avg.isNaN || avg.isInfinite) return 0.0;
       return double.tryParse(avg.toStringAsFixed(0)) ?? 0.0;
     }
 
-    test('Clips outliers correctly for a typical step log', () {
+    test('Computes true arithmetic mean without clipping outliers', () {
       final values10 = [200.0, 6800.0, 7000.0, 7100.0, 7200.0, 7400.0, 7500.0, 8000.0, 8500.0, 25000.0];
-      // Sorted: [200.0, 6800.0, 7000.0, 7100.0, 7200.0, 7400.0, 7500.0, 8000.0, 8500.0, 25000.0]
-      // lo = sorted[1] = 6800.0
-      // hi = sorted[9] = 25000.0
-      // Clipped: [6800.0, 6800.0, 7000.0, 7100.0, 7200.0, 7400.0, 7500.0, 8000.0, 8500.0, 25000.0]
-      // Sum = 91300. Average = 9130.0
-      final result10 = calculateWinsorizedMean(values10);
-      expect(result10, 9130.0);
+      // Sum = 84700. Average = 8470.0 (un-winsorized)
+      final result10 = calculateArithmeticMean(values10);
+      expect(result10, 8470.0);
     });
 
-    test('Handles short lists correctly', () {
+    test('Handles typical lists correctly', () {
       final values3 = [5000.0, 10000.0, 6000.0];
-      // Sorted: 5000, 6000, 10000
-      // n = 3
-      // lo index: (3 * 0.1).floor() = 0 -> 5000
-      // hi index: (3 * 0.9).ceil() = 3 -> clamp to 2 -> 10000
-      // No clipping since range encompasses all elements.
       // Average = (5000 + 6000 + 10000) / 3 = 7000.0
-      final result3 = calculateWinsorizedMean(values3);
+      final result3 = calculateArithmeticMean(values3);
       expect(result3, 7000.0);
     });
   });

@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 
 // ─── WeightReading ───────────────────────────────────────────────────
@@ -489,59 +486,50 @@ class HealthService {
       final results = await Future.wait(stepFutures);
 
       // ── Build ordered per-day lists (most recent = index 0) ──────────────
+      final List<double> last7 = [];
       final List<double> last14 = [];
       final List<double> last30 = [];
       final List<HealthDailyRecord> dailyRecords = [];
-      final List<double> last7 = [];
 
       for (int i = 0; i < daysToFetch; i++) {
         final dayStart = todayStart.subtract(Duration(days: i + 1));
-        final val = (results[i] ?? 0).toDouble();
+        final rawVal = results[i];
 
-        // Only include days with meaningful step data.
-        // < 500 steps = phone not worn / left at home. Excluded to avoid dragging
-        // the average down unfairly.
-        final valid = val >= 500;
+        if (rawVal != null) {
+          final val = rawVal.toDouble();
+          if (i < 7) last7.add(val);
+          if (i < 14) last14.add(val);
+          last30.add(val);
 
-        if (i < 7) {
-          if (valid) last7.add(val);
+          dailyRecords.add(HealthDailyRecord(
+            date: dayStart,
+            steps: val,
+            usedByKynetix: true,
+          ));
+        } else {
+          // Failed daily query (timeout/permission/SDK error) is excluded from averages
+          dailyRecords.add(HealthDailyRecord(
+            date: dayStart,
+            steps: 0.0,
+            usedByKynetix: false,
+          ));
         }
-        if (i < 14) {
-          if (valid) last14.add(val);
-        }
-        last30.add(valid ? val : 0); // keep slot for 30d but mark as 0 if invalid
-
-        dailyRecords.add(HealthDailyRecord(
-          date: dayStart,
-          steps: val,
-          usedByKynetix: valid,
-        ));
       }
 
-      // Filter out the zero placeholders from last30 for averaging.
-      final last30Valid = last30.where((s) => s >= 500).toList();
-
-      // Require at least 5 valid days for 14d, at least 7 for 30d.
-      if (last14.length < 5 && last30Valid.length < 7) {
+      // Require at least 1 successful day to complete sync
+      if (last14.isEmpty && last30.isEmpty) {
         return HealthSyncResult(
           syncedAt: now,
-          error: 'Not enough step data (need at least 5 days). Keep your phone with you.',
+          error: 'No step data available. Verify your Health Connect settings.',
         );
       }
 
-      // ── Winsorize outliers before averaging ──────────────────────────────
-      // Clips extreme values (1 brutal day of hiking OR sick in bed)
-      // to the 5th/95th percentile. The average is then much more stable.
-      final avg7 = last7.length >= 3 ? _winsorizedMean(last7) : null;
-      final avg14 = last14.length >= 5 ? _winsorizedMean(last14) : null;
-      final avg30 = last30Valid.length >= 7 ? _winsorizedMean(last30Valid) : null;
-
-      final median14 = last14.length >= 3 ? _median(last14) : null;
+      // ── Calculate strict arithmetic averages ──────────────────────────────
+      final avg7 = last7.isNotEmpty ? _arithmeticMean(last7) : null;
+      final avg14 = last14.isNotEmpty ? _arithmeticMean(last14) : null;
+      final avg30 = last30.isNotEmpty ? _arithmeticMean(last30) : null;
 
       // ── Weighted effective average ────────────────────────────────────────
-      // 14-day data reflects current habits better (e.g. after a job change,
-      // move to new city). 30-day smooths out anomalous weeks.
-      // Weight: 70% recent (14d), 30% long-term (30d).
       final double? effective;
       if (avg14 != null && avg30 != null) {
         effective = avg14 * 0.70 + avg30 * 0.30;
@@ -549,152 +537,15 @@ class HealthService {
         effective = avg14 ?? avg30;
       }
 
-      // ── Print Detailed Diagnostics Table to Console ──────────────────
-      final queryStart = todayStart.subtract(const Duration(days: 30));
-      debugPrint('=== KYNETIX HEALTH CONNECT STEP AUDIT ===');
-      debugPrint('API Method used: Health.getTotalStepsInInterval() calling native Android HealthConnectClient.aggregate() with StepsRecord.COUNT_TOTAL.');
-      debugPrint('Deduplication flow proof: Each daily step count is mapped directly from Health Connect aggregate result (Android-level deduplication) to Kynetix daily slots. Zero client-side secondary aggregation or summation is performed.');
-      debugPrint('Timezone boundaries: Local timezone is ${now.timeZoneName} (offset: ${now.timeZoneOffset}). Today partial day (${todayStart.toLocal()} onwards) is excluded from averages.');
-      debugPrint('Query Date Range (inclusive): ${queryStart.year}-${queryStart.month.toString().padLeft(2, '0')}-${queryStart.day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
-      debugPrint('7d Window: ${todayStart.subtract(const Duration(days: 7)).year}-${todayStart.subtract(const Duration(days: 7)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 7)).day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
-      debugPrint('14d Window: ${todayStart.subtract(const Duration(days: 14)).year}-${todayStart.subtract(const Duration(days: 14)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 14)).day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
-      debugPrint('30d Window: ${queryStart.year}-${queryStart.month.toString().padLeft(2, '0')}-${queryStart.day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
-      
-      debugPrint('Date        | Raw Steps | Used by Kynetix?');
-      debugPrint('------------+-----------+-----------------');
-      for (var r in dailyRecords) {
-        final dateStr = '${r.date.year}-${r.date.month.toString().padLeft(2, '0')}-${r.date.day.toString().padLeft(2, '0')}';
-        debugPrint('$dateStr  | ${r.steps.toStringAsFixed(0).padLeft(9)} | ${r.usedByKynetix ? "YES" : "NO"}');
-      }
-      debugPrint('----------------------------------------------');
-      debugPrint('7d Average Steps (Winsorized): ${avg7 != null ? avg7.toStringAsFixed(0) : "N/A"}');
-      debugPrint('14d Average Steps (Winsorized): ${avg14 != null ? avg14.toStringAsFixed(0) : "N/A"}');
-      debugPrint('30d Average Steps (Winsorized): ${avg30 != null ? avg30.toStringAsFixed(0) : "N/A"}');
-      debugPrint('Effective Weighted steps: ${effective?.toStringAsFixed(0) ?? "N/A"}');
-      debugPrint('Winsorized formula: Clips values below 10th percentile and above 90th percentile to minimize outlier skew.');
-      
-      debugPrint('=== DEEPER ROOT-CAUSE DISCREPANCY AUDIT ===');
-      debugPrint('Timezone conversion location: Health Connect stores all data points as UTC Instants. Timezone filtering is done at the database query level by converting the local midnight boundary to UTC epoch milliseconds before calling the client.');
-      debugPrint('Verification of query boundaries and overlap:');
-      for (int i = 0; i < 3; i++) {
-        final dayStart = todayStart.subtract(Duration(days: i + 1));
-        final dayEnd   = dayStart.add(const Duration(days: 1));
-        debugPrint('  Day D-${i+1} (${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}):');
-        debugPrint('    Start local: ${dayStart.toLocal()} | Start epoch: ${dayStart.millisecondsSinceEpoch} ms');
-        debugPrint('    End local:   ${dayEnd.toLocal()} | End epoch:   ${dayEnd.millisecondsSinceEpoch} ms');
-        debugPrint('    Overlap check: D-${i+1} ends at exactly the same millisecond D-${i} starts. Zero overlap.');
-      }
-      
-      debugPrint('Verification of raw records & data origins for last 3 completed days:');
-      for (int i = 0; i < 3; i++) {
-        final dayStart = todayStart.subtract(Duration(days: i + 1));
-        final dayEnd   = dayStart.add(const Duration(days: 1));
-        final dateStr = '${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}';
-        
-        try {
-          // Fetch raw step count lists directly from native channel
-          final rawPoints = await _health.getHealthDataFromTypes(
-            types: [HealthDataType.STEPS],
-            startTime: dayStart,
-            endTime: dayEnd,
-          );
-          
-          final Map<String, double> originSums = {};
-          double totalRawSum = 0;
-          for (var p in rawPoints) {
-            final val = (p.value as NumericHealthValue).numericValue.toDouble();
-            final source = p.sourceName; // Fixed: Use sourceName for package name instead of sourceId
-            totalRawSum += val;
-            originSums[source] = (originSums[source] ?? 0) + val;
-          }
-          
-          debugPrint('  $dateStr:');
-          debugPrint('    Raw aggregate steps from native aggregate() (Kynetix Input): ${(results[i] ?? 0).toDouble().toStringAsFixed(0)}');
-          debugPrint('    Flutter Health package transformation check: Flutter Health package returns the native Long value without modification.');
-          debugPrint('    Raw step records found: ${rawPoints.length} (Sum of all raw records: ${totalRawSum.toStringAsFixed(0)})');
-          if (rawPoints.isEmpty) {
-            debugPrint('    No raw records returned from Health Connect.');
-          } else {
-            originSums.forEach((source, sum) {
-              debugPrint('      Origin package: "$source" | Sum of raw steps: ${sum.toStringAsFixed(0)}');
-            });
-            debugPrint('    Reason for discrepancy vs Google Fit:');
-            if (originSums.keys.length > 1) {
-              debugPrint('      [MULTIPLES DETECTED] Multiple origins are writing steps directly to Health Connect. While Google Fit only shows its own merged/tracked steps, Health Connect native aggregate() queries all records. If data source priority/deduplication settings are not prioritized in Android Health Connect settings, this causes Kynetix to return a higher count.');
-            } else if (originSums.containsKey('com.google.android.apps.fitness')) {
-              debugPrint('      Only Google Fit recorded data is present. Discrepancy is likely due to Google Fit displaying a cloud-deduplicated value in the app interface while writing raw sensor data to Health Connect.');
-            } else {
-              debugPrint('      The step records are written by another app ("${originSums.keys.join(', ')}") and not Google Fit. If Google Fit is not showing them, it might be ignoring this source.');
-            }
-          }
-        } catch (e) {
-          debugPrint('    Error querying raw points for $dateStr: $e');
-        }
-      }
-      debugPrint('=========================================');
-
-      // Write audit log file for mismatched dates analysis
-      try {
-        final List<Map<String, dynamic>> auditDays = [];
-        // We query the last 7 completed days to cover June 2, June 1, May 31, etc.
-        for (int i = 0; i < 7; i++) {
-          final dayStart = todayStart.subtract(Duration(days: i + 1));
-          final dayEnd   = dayStart.add(const Duration(days: 1));
-          final dateStr = '${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}';
-          
-          final aggValue = (results[i] ?? 0).toDouble();
-          final List<Map<String, dynamic>> rawRecords = [];
-          
-          final rawPoints = await _health.getHealthDataFromTypes(
-            types: [HealthDataType.STEPS],
-            startTime: dayStart,
-            endTime: dayEnd,
-          );
-          
-          for (var p in rawPoints) {
-            final val = (p.value as NumericHealthValue).numericValue.toDouble();
-            rawRecords.add({
-              'start': p.dateFrom.toLocal().toIso8601String(),
-              'end': p.dateTo.toLocal().toIso8601String(),
-              'value': val,
-              'packageName': p.sourceName, // package name!
-              'recordingMethod': p.recordingMethod.toString(),
-              'metadata': p.metadata ?? {},
-              'uuid': p.uuid,
-            });
-          }
-          
-          auditDays.add({
-            'date': dateStr,
-            'aggregate': aggValue,
-            'records': rawRecords,
-          });
-        }
-        
-        final auditFile = File('/data/data/com.kynetix.app/cache/kynetix_audit.json');
-        await auditFile.writeAsString(
-          jsonEncode({
-            'syncedAt': now.toIso8601String(),
-            'auditDays': auditDays,
-          }),
-          flush: true,
-        );
-        debugPrint('[Audit] Successfully wrote audit details to ${auditFile.path}');
-      } catch (e) {
-        debugPrint('[Audit] Failed to write audit file: $e');
-      }
-
-
-
       return HealthSyncResult(
         dailySteps14d:        last14.isEmpty ? null : last14,
-        dailySteps30d:        last30Valid.isEmpty ? null : last30Valid,
+        dailySteps30d:        last30.isEmpty ? null : last30,
         dailyRecords:         dailyRecords,
         averageDailySteps7d:  avg7,
         effectiveAverageSteps: effective,
         averageDailySteps14d:  avg14,
         averageDailySteps30d:  avg30,
-        medianDailySteps14d:   median14,
+        medianDailySteps14d:   avg14, // median falls back to simple average now
         activityTier: effective != null
             ? _tierFromSteps(effective)
             : ActivityTier.sedentary,
@@ -771,33 +622,13 @@ class HealthService {
     }
   }
 
-  // ── Statistical helpers ───────────────────────────────────────────────────
+  // ── Arithmetic helper ───────────────────────────────────────────────────────
 
-  /// Winsorized mean: clips values below the 10th and above the 90th
-  /// percentile before averaging.  Robust against outlier days.
-  double _winsorizedMean(List<double> values) {
-    if (values.isEmpty) return 0;
-    if (values.length == 1) return values.first;
-
-    final sorted = List<double>.from(values)..sort();
-    final n     = sorted.length;
-
-    // Clip to 10th/90th percentile
-    final lo = sorted[(n * 0.10).floor().clamp(0, n - 1)];
-    final hi = sorted[(n * 0.90).ceil().clamp(0, n - 1)];
-
-    final clipped = sorted.map((v) => v.clamp(lo, hi)).toList();
-    if (clipped.isEmpty) return 0.0;
-    final sum = clipped.fold<double>(0, (a, b) => a + b);
-    final avg = sum / clipped.length;
+  double _arithmeticMean(List<double> values) {
+    if (values.isEmpty) return 0.0;
+    final sum = values.fold<double>(0, (a, b) => a + b);
+    final avg = sum / values.length;
     if (avg.isNaN || avg.isInfinite) return 0.0;
     return double.tryParse(avg.toStringAsFixed(0)) ?? 0.0;
-  }
-
-  double _median(List<double> values) {
-    final sorted = List<double>.from(values)..sort();
-    final mid = sorted.length ~/ 2;
-    if (sorted.length.isOdd) return sorted[mid];
-    return (sorted[mid - 1] + sorted[mid]) / 2;
   }
 }
