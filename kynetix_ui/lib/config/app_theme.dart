@@ -586,8 +586,8 @@ class _KShimmerState extends State<KShimmer>
           shaderCallback: (bounds) {
             final double slide = _controller.value;
             return LinearGradient(
-              begin: const Offset(-1.0, -0.3) as Alignment,
-              end: const Offset(1.0, 0.3) as Alignment,
+              begin: const Alignment(-1.0, -0.3),
+              end: const Alignment(1.0, 0.3),
               colors: const [
                 Color(0xFF1E1E2C),
                 Color(0xFF2E2E3C),
