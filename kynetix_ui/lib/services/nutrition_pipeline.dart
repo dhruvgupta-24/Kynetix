@@ -15,6 +15,7 @@ import '../services/item_parser.dart';
 import '../services/unit_normalizer.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
+import '../services/cloud_sync_service.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -303,8 +304,11 @@ class NutritionPipeline {
     final midPro = (sumProMin + sumProMax) / 2;
     final score = NutritionResult.calculateLocalQualityScore(midCal, midPro, trimmed);
 
-    // Record meal context for pattern learning
+    // Record meal context for pattern learning and sync to cloud
     EatingPatternService.instance.recordMealContext(rolledItems);
+    // Fire-and-forget: upload new contexts to Supabase so they survive device wipes
+    CloudSyncService.instance.syncMealContextsBackground().ignore();
+    CloudSyncService.instance.syncEatingPatternsBackground().ignore();
 
     return NutritionResult(
       canonicalMeal: trimmed,

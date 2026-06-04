@@ -5,6 +5,7 @@ import '../models/day_log.dart';
 import '../models/workout_session.dart';
 import '../services/workout_service.dart';
 import '../services/user_nutrition_memory.dart';
+import '../services/eating_pattern_service.dart';
 import '../services/persistence_service.dart';
 
 class CloudSyncService {
@@ -26,11 +27,15 @@ class CloudSyncService {
         _supabase.from('day_logs').select(),
         _supabase.from('workout_sessions').select(),
         _supabase.from('user_nutrition_memory').select(),
+        _supabase.from('user_eating_patterns').select().order('recorded_at', ascending: true),
+        _supabase.from('user_meal_contexts').select().order('recorded_at', ascending: true),
       ]);
 
       final dayLogsResp = results[0];
       final workoutsResp = results[1];
       final memoryResp = results[2];
+      final patternsResp = results[3];
+      final contextsResp = results[4];
 
       // 1. Process Day Logs
       for (final row in dayLogsResp) {
@@ -116,6 +121,22 @@ class CloudSyncService {
       }
       if (cloudOverrides.isNotEmpty) {
         await UserNutritionMemory.instance.mergeFromCloud(cloudOverrides);
+      }
+
+      // 4. Process Eating Patterns (correction records)
+      if (patternsResp.isNotEmpty) {
+        EatingPatternService.instance.mergeFromCloud(
+          patternsResp.cast<Map<String, dynamic>>(),
+        );
+        await EatingPatternService.instance.save();
+      }
+
+      // 5. Process Meal Contexts
+      if (contextsResp.isNotEmpty) {
+        EatingPatternService.instance.mergeContextsFromCloud(
+          contextsResp.cast<Map<String, dynamic>>(),
+        );
+        await EatingPatternService.instance.save();
       }
 
       debugPrint('[CloudSyncService] Hydration completed.');
@@ -207,6 +228,65 @@ class CloudSyncService {
       }, onConflict: 'user_id, canonical_meal');
     } catch (e) {
       debugPrint('[CloudSyncService] Background memory sync failed: $e');
+    }
+  }
+
+  /// Fire-and-forget sync for new eating pattern correction records.
+  /// Uploads all locally stored records to the cloud (upsert by content).
+  Future<void> syncEatingPatternsBackground() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final records = EatingPatternService.instance.exportForCloudSync();
+      if (records.isEmpty) return;
+
+      // Insert in batches of 50 to avoid request size limits
+      const batchSize = 50;
+      for (int i = 0; i < records.length; i += batchSize) {
+        final batch = records.sublist(i, (i + batchSize).clamp(0, records.length));
+        final rows = batch.map((r) => {
+          'user_id': userId,
+          ...r,
+        }).toList();
+        // Use insert (not upsert) — duplicate check is done client-side during merge
+        await _supabase.from('user_eating_patterns').upsert(
+          rows,
+          onConflict: 'user_id,recorded_at,target_role',
+          ignoreDuplicates: true,
+        );
+      }
+      debugPrint('[CloudSyncService] 🔄 Eating patterns synced (${records.length} records)');
+    } catch (e) {
+      debugPrint('[CloudSyncService] Eating pattern sync failed: $e');
+    }
+  }
+
+  /// Fire-and-forget sync for new meal context records.
+  Future<void> syncMealContextsBackground() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final contexts = EatingPatternService.instance.exportContextsForCloudSync();
+      if (contexts.isEmpty) return;
+
+      const batchSize = 50;
+      for (int i = 0; i < contexts.length; i += batchSize) {
+        final batch = contexts.sublist(i, (i + batchSize).clamp(0, contexts.length));
+        final rows = batch.map((r) => {
+          'user_id': userId,
+          ...r,
+        }).toList();
+        await _supabase.from('user_meal_contexts').upsert(
+          rows,
+          onConflict: 'user_id,recorded_at',
+          ignoreDuplicates: true,
+        );
+      }
+      debugPrint('[CloudSyncService] 🔄 Meal contexts synced (${contexts.length} records)');
+    } catch (e) {
+      debugPrint('[CloudSyncService] Meal context sync failed: $e');
     }
   }
 }

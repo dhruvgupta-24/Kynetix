@@ -8,6 +8,7 @@ import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/item_parser.dart';
 import '../services/persistence_service.dart';
+import '../services/cloud_sync_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -290,6 +291,8 @@ class _AddMealScreenState extends State<AddMealScreen>
       }
 
       await EatingPatternService.instance.save();
+      // Fire-and-forget: sync new correction records to cloud
+      CloudSyncService.instance.syncEatingPatternsBackground().ignore();
 
       final score = NutritionResult.calculateLocalQualityScore(totalCal, totalPro, mealName);
 

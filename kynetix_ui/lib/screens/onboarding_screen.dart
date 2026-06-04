@@ -253,33 +253,48 @@ class UserProfile {
     'carryForwardThreshold': carryForwardThreshold,
   };
 
-  factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
-    name:              j['name']           as String,
-    age:               j['age']            as int,
-    gender:            j['gender']         as String,
-    height:            (j['height']        as num).toDouble(),
-    weight:            (j['weight']        as num).toDouble(),
-    workoutDaysMin:    j['workoutDaysMin'] as int,
-    workoutDaysMax:    j['workoutDaysMax'] as int,
-    goal:              j['goal']           as String,
-    portionAnchor:     j['portionAnchor'] != null
-        ? PortionAnchor.fromJson(j['portionAnchor'] as String)
-        : null,
-    averageDailySteps: j['averageDailySteps'] as int?,
-    healthSyncEnabled: j['healthSyncEnabled'] as bool? ?? false,
-    lastHealthSyncAt:  DateTime.tryParse(j['lastHealthSyncAt'] as String? ?? ''),
-    useCustomTargets:  j['useCustomTargets'] as bool? ?? false,
-    customMaintenanceCalories: (j['customMaintenanceCalories'] as num?)?.toDouble(),
-    customTrainingDayCalories: (j['customTrainingDayCalories'] as num?)?.toDouble(),
-    customRestDayCalories: (j['customRestDayCalories'] as num?)?.toDouble(),
-    customProteinTarget: (j['customProteinTarget'] as num?)?.toDouble(),
-    targetChangeHistory: (j['targetChangeHistory'] as List<dynamic>?)
-            ?.map((e) => TargetChangeRecord.fromJson(e as Map<String, dynamic>))
-            .toList() ??
-        const [],
-    carryForwardEnabled: j['carryForwardEnabled'] as bool? ?? false,
-    carryForwardThreshold: j['carryForwardThreshold'] as int? ?? 100,
-  );
+  factory UserProfile.fromJson(Map<String, dynamic> j) {
+    // Defensive numeric parsing: Supabase can return numeric columns as
+    // String on some legacy rows, and optional fields may be absent entirely.
+    double _d(dynamic v, double fallback) {
+      if (v == null) return fallback;
+      if (v is num) return v.toDouble();
+      return double.tryParse(v.toString()) ?? fallback;
+    }
+    int _i(dynamic v, int fallback) {
+      if (v == null) return fallback;
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v.toString()) ?? fallback;
+    }
+    return UserProfile(
+      name:              (j['name'] as String?) ?? '',
+      age:               _i(j['age'], 25),
+      gender:            (j['gender'] as String?) ?? 'Male',
+      height:            _d(j['height'], 170.0),
+      weight:            _d(j['weight'], 70.0),
+      workoutDaysMin:    _i(j['workoutDaysMin'], 2),
+      workoutDaysMax:    _i(j['workoutDaysMax'], 3),
+      goal:              (j['goal'] as String?) ?? kMaintenance,
+      portionAnchor:     j['portionAnchor'] != null
+          ? PortionAnchor.fromJson(j['portionAnchor'].toString())
+          : null,
+      averageDailySteps: j['averageDailySteps'] != null ? _i(j['averageDailySteps'], 0) : null,
+      healthSyncEnabled: j['healthSyncEnabled'] as bool? ?? false,
+      lastHealthSyncAt:  DateTime.tryParse((j['lastHealthSyncAt'] as String?) ?? ''),
+      useCustomTargets:  j['useCustomTargets'] as bool? ?? false,
+      customMaintenanceCalories: j['customMaintenanceCalories'] != null ? _d(j['customMaintenanceCalories'], 0) : null,
+      customTrainingDayCalories: j['customTrainingDayCalories'] != null ? _d(j['customTrainingDayCalories'], 0) : null,
+      customRestDayCalories: j['customRestDayCalories'] != null ? _d(j['customRestDayCalories'], 0) : null,
+      customProteinTarget: j['customProteinTarget'] != null ? _d(j['customProteinTarget'], 0) : null,
+      targetChangeHistory: (j['targetChangeHistory'] as List<dynamic>?)
+              ?.map((e) => TargetChangeRecord.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      carryForwardEnabled: j['carryForwardEnabled'] as bool? ?? false,
+      carryForwardThreshold: _i(j['carryForwardThreshold'], 100),
+    );
+  }
 
   double get bmi => weight / ((height / 100) * (height / 100));
 }
@@ -395,11 +410,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   double _resolvedHeightCm() {
     if (_useCm) {
-      return double.parse(_heightCmCtrl.text.trim());
+      // Defensive: return fallback if field is empty or non-numeric
+      return double.tryParse(_heightCmCtrl.text.trim()) ?? 170.0;
     }
     final ft = double.tryParse(_heightFtCtrl.text.trim()) ?? 0;
     final inch = double.tryParse(_heightInCtrl.text.trim()) ?? 0;
-    return (ft * 12 + inch) * 2.54;
+    final cm = (ft * 12 + inch) * 2.54;
+    return cm > 0 ? cm : 170.0;
   }
 
   // ── Navigation ───────────────────────────────────────────────────────────────
@@ -435,10 +452,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final opt = _workoutOptions[_workoutIdx];
     currentUserProfile = UserProfile(
       name:           _nameCtrl.text.trim(),
-      age:            int.parse(_ageCtrl.text.trim()),
+      age:            int.tryParse(_ageCtrl.text.trim()) ?? 25,
       gender:         _gender,
       height:         _resolvedHeightCm(),
-      weight:         double.parse(_weightCtrl.text.trim()),
+      weight:         double.tryParse(_weightCtrl.text.trim()) ?? 70.0,
       workoutDaysMin: opt.daysMin,
       workoutDaysMax: opt.daysMax,
       goal:           _goal,

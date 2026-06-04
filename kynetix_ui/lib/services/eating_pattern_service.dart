@@ -390,6 +390,128 @@ class EatingPatternService {
     debugPrint('[EatingPatternService] 🗑️  Reset ALL patterns');
   }
 
+  // ── Cloud Sync ───────────────────────────────────────────────────────────────
+
+  /// Returns all correction records as a flat list for upload to Supabase.
+  /// Each map has: targetRole, contextRole?, pipelineEstimate,
+  ///   userCorrectedCal, ratio, recordedAt (ISO8601 string).
+  List<Map<String, dynamic>> exportForCloudSync() {
+    final result = <Map<String, dynamic>>[];
+    for (final records in _records.values) {
+      for (final r in records) {
+        result.add({
+          'target_role': r.key.targetRole.name,
+          if (r.key.contextRole != null) 'context_role': r.key.contextRole!.name,
+          'pipeline_estimate': r.pipelineEstimate,
+          'user_corrected_cal': r.userCorrectedCal,
+          'ratio': r.ratio,
+          'recorded_at': r.timestamp.toIso8601String(),
+        });
+      }
+    }
+    return result;
+  }
+
+  /// Returns all meal context records as a list for upload to Supabase.
+  List<Map<String, dynamic>> exportContextsForCloudSync() {
+    return _contextRecords
+        .map((r) => {
+              'primary_food_names': r.primaryFoodNames,
+              'primary_total_qty': r.primaryTotalQty,
+              'primary_dominant': r.primaryDominant,
+              'recorded_at': r.timestamp.toIso8601String(),
+            })
+        .toList();
+  }
+
+  /// Merge correction records received from Supabase cloud sync.
+  /// Skips records that are duplicates of existing ones (same timestamp + ratio).
+  void mergeFromCloud(List<Map<String, dynamic>> rows) {
+    int added = 0;
+    for (final row in rows) {
+      try {
+        final targetRoleName = row['target_role'] as String?;
+        if (targetRoleName == null) continue;
+        final targetRole = FoodRole.values.firstWhere(
+          (e) => e.name == targetRoleName,
+          orElse: () => FoodRole.primary,
+        );
+        final contextRoleName = row['context_role'] as String?;
+        final contextRole = contextRoleName != null
+            ? FoodRole.values.firstWhere(
+                (e) => e.name == contextRoleName,
+                orElse: () => FoodRole.primary,
+              )
+            : null;
+        final key = PatternKey(targetRole, contextRole: contextRole);
+        final timestamp = DateTime.tryParse(
+                (row['recorded_at'] ?? row['created_at'] ?? '') as String) ??
+            DateTime.now();
+        final ratio =
+            (row['ratio'] as num?)?.toDouble() ?? 1.0;
+        final pipelineEstimate =
+            (row['pipeline_estimate'] as num?)?.toDouble() ?? 0.0;
+        final userCorrectedCal =
+            (row['user_corrected_cal'] as num?)?.toDouble() ?? 0.0;
+
+        // Skip duplicate (same timestamp within 1 second)
+        final existing = _records[key];
+        final isDuplicate = existing?.any((r) =>
+                r.timestamp.difference(timestamp).inSeconds.abs() < 1) ??
+            false;
+        if (isDuplicate) continue;
+
+        _records.putIfAbsent(key, () => []).add(_CorrectionRecord(
+          key: key,
+          pipelineEstimate: pipelineEstimate,
+          userCorrectedCal: userCorrectedCal,
+          ratio: ratio,
+          timestamp: timestamp,
+        ));
+        added++;
+      } catch (e) {
+        debugPrint('[EatingPatternService] ⚠️  Failed to merge cloud row: $e');
+      }
+    }
+    if (added > 0) {
+      _dirty = true;
+      debugPrint('[EatingPatternService] ☁️  Merged $added records from cloud');
+    }
+  }
+
+  /// Merge meal context records received from Supabase cloud sync.
+  void mergeContextsFromCloud(List<Map<String, dynamic>> rows) {
+    int added = 0;
+    for (final row in rows) {
+      try {
+        final timestamp = DateTime.tryParse(
+                (row['recorded_at'] ?? row['created_at'] ?? '') as String) ??
+            DateTime.now();
+        // Skip duplicates (same timestamp within 1 second)
+        final isDuplicate = _contextRecords.any(
+            (r) => r.timestamp.difference(timestamp).inSeconds.abs() < 1);
+        if (isDuplicate) continue;
+        _contextRecords.add(_MealContextRecord(
+          primaryFoodNames: (row['primary_food_names'] as List<dynamic>?)
+                  ?.map((e) => e as String)
+                  .toList() ??
+              [],
+          primaryTotalQty:
+              (row['primary_total_qty'] as num?)?.toDouble() ?? 1.0,
+          primaryDominant: (row['primary_dominant'] as String?) ?? '',
+          timestamp: timestamp,
+        ));
+        added++;
+      } catch (e) {
+        debugPrint('[EatingPatternService] ⚠️  Failed to merge context row: $e');
+      }
+    }
+    if (added > 0) {
+      _dirty = true;
+      debugPrint('[EatingPatternService] ☁️  Merged $added context records from cloud');
+    }
+  }
+
   // ── Persistence ──────────────────────────────────────────────────────────────
 
   Future<void> load() async {

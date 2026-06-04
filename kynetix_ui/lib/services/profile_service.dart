@@ -46,19 +46,32 @@ class ProfileService {
       }
       
       debugPrint('[ProfileService] Profile successfully fetched and mapped.');
+      // Defensive parsing: Supabase can return null or wrong types for newly
+      // created accounts where not all columns are populated yet.
+      double _d(dynamic v, double fb) {
+        if (v == null) return fb;
+        if (v is num) return v.toDouble();
+        return double.tryParse(v.toString()) ?? fb;
+      }
+      int _i(dynamic v, int fb) {
+        if (v == null) return fb;
+        if (v is int) return v;
+        if (v is num) return v.toInt();
+        return int.tryParse(v.toString()) ?? fb;
+      }
       return UserProfile(
-        name: data['name'] as String,
-        age: data['age'] as int,
-        gender: data['gender'] as String,
-        height: (data['height_cm'] as num).toDouble(),
-        weight: (data['weight_kg'] as num).toDouble(),
-        workoutDaysMin: data['workout_days_min'] as int? ?? 2,
-        workoutDaysMax: data['workout_days_max'] as int? ?? 3,
-        goal: data['goal'] as String,
+        name: (data['name'] as String?) ?? '',
+        age: _i(data['age'], 25),
+        gender: (data['gender'] as String?) ?? 'Male',
+        height: _d(data['height_cm'], 170.0),
+        weight: _d(data['weight_kg'], 70.0),
+        workoutDaysMin: _i(data['workout_days_min'], 2),
+        workoutDaysMax: _i(data['workout_days_max'], 3),
+        goal: (data['goal'] as String?) ?? 'Maintenance',
         averageDailySteps: null, // Keep HealthSync strictly local for now
         healthSyncEnabled: false,
         carryForwardEnabled: data['carry_forward_enabled'] as bool? ?? false,
-        carryForwardThreshold: data['carry_forward_threshold'] as int? ?? 100,
+        carryForwardThreshold: _i(data['carry_forward_threshold'], 100),
       );
     } catch (e) {
       debugPrint('[ProfileService] Exception during profile fetch: $e');
