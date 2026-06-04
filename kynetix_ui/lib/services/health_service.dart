@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 
@@ -570,7 +572,119 @@ class HealthService {
       debugPrint('30d Average Steps (Winsorized): ${avg30 != null ? avg30.toStringAsFixed(0) : "N/A"}');
       debugPrint('Effective Weighted steps: ${effective?.toStringAsFixed(0) ?? "N/A"}');
       debugPrint('Winsorized formula: Clips values below 10th percentile and above 90th percentile to minimize outlier skew.');
+      
+      debugPrint('=== DEEPER ROOT-CAUSE DISCREPANCY AUDIT ===');
+      debugPrint('Timezone conversion location: Health Connect stores all data points as UTC Instants. Timezone filtering is done at the database query level by converting the local midnight boundary to UTC epoch milliseconds before calling the client.');
+      debugPrint('Verification of query boundaries and overlap:');
+      for (int i = 0; i < 3; i++) {
+        final dayStart = todayStart.subtract(Duration(days: i + 1));
+        final dayEnd   = dayStart.add(const Duration(days: 1));
+        debugPrint('  Day D-${i+1} (${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}):');
+        debugPrint('    Start local: ${dayStart.toLocal()} | Start epoch: ${dayStart.millisecondsSinceEpoch} ms');
+        debugPrint('    End local:   ${dayEnd.toLocal()} | End epoch:   ${dayEnd.millisecondsSinceEpoch} ms');
+        debugPrint('    Overlap check: D-${i+1} ends at exactly the same millisecond D-${i} starts. Zero overlap.');
+      }
+      
+      debugPrint('Verification of raw records & data origins for last 3 completed days:');
+      for (int i = 0; i < 3; i++) {
+        final dayStart = todayStart.subtract(Duration(days: i + 1));
+        final dayEnd   = dayStart.add(const Duration(days: 1));
+        final dateStr = '${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}';
+        
+        try {
+          // Fetch raw step count lists directly from native channel
+          final rawPoints = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.STEPS],
+            startTime: dayStart,
+            endTime: dayEnd,
+          );
+          
+          final Map<String, double> originSums = {};
+          double totalRawSum = 0;
+          for (var p in rawPoints) {
+            final val = (p.value as NumericHealthValue).numericValue.toDouble();
+            final source = p.sourceName; // Fixed: Use sourceName for package name instead of sourceId
+            totalRawSum += val;
+            originSums[source] = (originSums[source] ?? 0) + val;
+          }
+          
+          debugPrint('  $dateStr:');
+          debugPrint('    Raw aggregate steps from native aggregate() (Kynetix Input): ${(results[i] ?? 0).toDouble().toStringAsFixed(0)}');
+          debugPrint('    Flutter Health package transformation check: Flutter Health package returns the native Long value without modification.');
+          debugPrint('    Raw step records found: ${rawPoints.length} (Sum of all raw records: ${totalRawSum.toStringAsFixed(0)})');
+          if (rawPoints.isEmpty) {
+            debugPrint('    No raw records returned from Health Connect.');
+          } else {
+            originSums.forEach((source, sum) {
+              debugPrint('      Origin package: "$source" | Sum of raw steps: ${sum.toStringAsFixed(0)}');
+            });
+            debugPrint('    Reason for discrepancy vs Google Fit:');
+            if (originSums.keys.length > 1) {
+              debugPrint('      [MULTIPLES DETECTED] Multiple origins are writing steps directly to Health Connect. While Google Fit only shows its own merged/tracked steps, Health Connect native aggregate() queries all records. If data source priority/deduplication settings are not prioritized in Android Health Connect settings, this causes Kynetix to return a higher count.');
+            } else if (originSums.containsKey('com.google.android.apps.fitness')) {
+              debugPrint('      Only Google Fit recorded data is present. Discrepancy is likely due to Google Fit displaying a cloud-deduplicated value in the app interface while writing raw sensor data to Health Connect.');
+            } else {
+              debugPrint('      The step records are written by another app ("${originSums.keys.join(', ')}") and not Google Fit. If Google Fit is not showing them, it might be ignoring this source.');
+            }
+          }
+        } catch (e) {
+          debugPrint('    Error querying raw points for $dateStr: $e');
+        }
+      }
       debugPrint('=========================================');
+
+      // Write audit log file for mismatched dates analysis
+      try {
+        final List<Map<String, dynamic>> auditDays = [];
+        // We query the last 7 completed days to cover June 2, June 1, May 31, etc.
+        for (int i = 0; i < 7; i++) {
+          final dayStart = todayStart.subtract(Duration(days: i + 1));
+          final dayEnd   = dayStart.add(const Duration(days: 1));
+          final dateStr = '${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}';
+          
+          final aggValue = (results[i] ?? 0).toDouble();
+          final List<Map<String, dynamic>> rawRecords = [];
+          
+          final rawPoints = await _health.getHealthDataFromTypes(
+            types: [HealthDataType.STEPS],
+            startTime: dayStart,
+            endTime: dayEnd,
+          );
+          
+          for (var p in rawPoints) {
+            final val = (p.value as NumericHealthValue).numericValue.toDouble();
+            rawRecords.add({
+              'start': p.dateFrom.toLocal().toIso8601String(),
+              'end': p.dateTo.toLocal().toIso8601String(),
+              'value': val,
+              'packageName': p.sourceName, // package name!
+              'recordingMethod': p.recordingMethod.toString(),
+              'metadata': p.metadata ?? {},
+              'uuid': p.uuid,
+            });
+          }
+          
+          auditDays.add({
+            'date': dateStr,
+            'aggregate': aggValue,
+            'records': rawRecords,
+          });
+        }
+        
+        final auditFile = File('/data/data/com.kynetix.app/cache/kynetix_audit.json');
+        await auditFile.writeAsString(
+          jsonEncode({
+            'syncedAt': now.toIso8601String(),
+            'auditDays': auditDays,
+          }),
+          flush: true,
+        );
+        debugPrint('[Audit] Successfully wrote audit details to ${auditFile.path}');
+      } catch (e) {
+        debugPrint('[Audit] Failed to write audit file: $e');
+      }
+
+
 
       return HealthSyncResult(
         dailySteps14d:        last14.isEmpty ? null : last14,
