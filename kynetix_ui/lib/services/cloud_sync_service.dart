@@ -109,6 +109,11 @@ class CloudSyncService {
           final carbPerUnit = (row['carbohydrates_per_unit'] as num?)?.toDouble();
           final fatPerUnit = (row['fat_per_unit'] as num?)?.toDouble();
           final fiberPerUnit = (row['fiber_per_unit'] as num?)?.toDouble();
+          final updatedAtStr = row['updated_at'] as String?;
+          final savedAt = updatedAtStr != null
+              ? DateTime.tryParse(updatedAtStr) ?? DateTime.now()
+              : DateTime.now();
+          final correctionCount = row['times_used'] as int? ?? 1;
           cloudOverrides.add(UserMealOverride(
             canonicalMeal:     row['canonical_meal'] as String,
             caloriesPerUnit:   calPerUnit,
@@ -118,6 +123,8 @@ class CloudSyncService {
             fiberPerUnit:      fiberPerUnit,
             referenceQuantity: (row['reference_quantity'] as num?)?.toDouble() ?? 1.0,
             referenceUnit:     row['reference_unit'] as String? ?? 'serving',
+            savedAt:           savedAt,
+            correctionCount:   correctionCount,
           ));
         } catch (e) {
           debugPrint('[CloudSyncService] Failed to parse memory row: $e');
@@ -302,7 +309,8 @@ class CloudSyncService {
         // Legacy aliases for backward compat with existing rows/clients
         'calories':          memory.caloriesPerUnit,
         'protein':           memory.proteinPerUnit,
-        'updated_at':        DateTime.now().toIso8601String(),
+        'updated_at':        memory.savedAt.toUtc().toIso8601String(),
+        'times_used':        memory.correctionCount,
       }, onConflict: 'user_id, canonical_meal');
     } catch (e) {
       debugPrint('[CloudSyncService] Background memory sync failed: $e');

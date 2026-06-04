@@ -94,8 +94,6 @@ class NutritionPipeline {
       if (userOverride != null) {
         final storedUnit = UserNutritionMemory.instance.storedUnit(name);
         if (storedUnit != null &&
-            UnitNormalizer.isMetric(storedUnit) &&
-            UnitNormalizer.isMetric(normParsed.unit) &&
             !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
           debugPrint('[Pipeline] ⚠️  unit mismatch: stored=$storedUnit '
               'input=${normParsed.unit} for "$name" — skipping user memory');
@@ -777,8 +775,15 @@ class NutritionPipeline {
 
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
-        final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
-        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+        final storedUnit = UserNutritionMemory.instance.storedUnit(name);
+        if (storedUnit != null &&
+            !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
+          debugPrint('[Pipeline Sync] ⚠️  unit mismatch: stored=$storedUnit '
+              'input=${normParsed.unit} for "$name" — skipping user memory');
+        } else {
+          final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
+          if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+        }
       }
 
       final personalExact = PersonalNutritionMemory.instance.lookupExact(itemStr);

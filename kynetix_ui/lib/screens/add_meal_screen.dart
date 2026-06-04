@@ -253,7 +253,7 @@ class _AddMealScreenState extends State<AddMealScreen>
         totalFat += fatVal;
         totalFib += fibVal;
 
-        final qty = item.quantity.clamp(1.0, double.infinity);
+        final qty = item.quantity > 0.0 ? item.quantity : 1.0;
         final origCal = (origItem.calories.min + origItem.calories.max) / 2;
 
         // Save override if "Remember edits" is checked

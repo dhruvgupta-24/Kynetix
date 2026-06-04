@@ -285,14 +285,44 @@ class UserNutritionMemory {
 
   /// Merge overrides hydrated from cloud into local memory.
   /// Called by CloudSyncService after a successful hydration.
-  /// Cloud values WIN over local for the same food name (cloud is authoritative).
+  /// Uses a bidirectional "newer wins" resolution strategy based on savedAt.
   Future<void> mergeFromCloud(List<UserMealOverride> cloudOverrides) async {
+    final toSyncBack = <UserMealOverride>[];
+
+    // 1. Process cloud entries against local entries
     for (final remote in cloudOverrides) {
-      _overrides.removeWhere((o) => o.canonicalMeal == remote.canonicalMeal);
-      _overrides.add(remote);
+      final existingIndex = _overrides.indexWhere((o) => o.canonicalMeal == remote.canonicalMeal);
+      if (existingIndex != -1) {
+        final local = _overrides[existingIndex];
+        if (local.savedAt.isAfter(remote.savedAt)) {
+          // Local is newer! Keep local, queue upload of local to cloud
+          toSyncBack.add(local);
+        } else {
+          // Cloud is newer (or equal). Overwrite local with remote.
+          _overrides[existingIndex] = remote;
+        }
+      } else {
+        // Not present locally. Add remote.
+        _overrides.add(remote);
+      }
     }
+
+    // 2. Scan for local overrides that are completely missing from cloud (e.g. offline edits)
+    final cloudMeals = cloudOverrides.map((o) => o.canonicalMeal).toSet();
+    for (final local in _overrides) {
+      if (!cloudMeals.contains(local.canonicalMeal)) {
+        toSyncBack.add(local);
+      }
+    }
+
     await _persist();
     debugPrint('[UserNutritionMemory] merged ${cloudOverrides.length} cloud overrides');
+
+    // 3. Sync newer local entries back to cloud asynchronously
+    for (final local in toSyncBack) {
+      debugPrint('[UserNutritionMemory] Syncing newer local override for "${local.canonicalMeal}" back to cloud');
+      CloudSyncService.instance.syncMemoryBackground(local);
+    }
   }
 
   // ── Lookup ─────────────────────────────────────────────────────────────────

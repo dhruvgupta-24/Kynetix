@@ -5,6 +5,7 @@ import 'package:kynetix/services/food_role_classifier.dart';
 import 'package:kynetix/services/eating_pattern_service.dart';
 import 'package:kynetix/services/user_nutrition_memory.dart';
 import 'package:kynetix/services/item_parser.dart';
+import 'package:kynetix/services/nutrition_pipeline.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -208,6 +209,110 @@ void main() {
       expect(sandwichMayo.length, 2);
       expect(sandwichMayo[0].normalizedName, "sandwich");
       expect(sandwichMayo[1].normalizedName, "mayo");
+    });
+  });
+
+  group('Nutrition Intelligence Audit Fix tests', () {
+    test('Fractional quantity scaling behaves correctly', () async {
+      // Clear overrides
+      await UserNutritionMemory.instance.clearAll();
+      
+      // Save an override for "whey protein" with a fractional quantity (0.5)
+      // Total calories is 60 kcal. So per-unit calories should be 60 / 0.5 = 120.
+      await UserNutritionMemory.instance.saveOverride(
+        'whey protein',
+        60.0 / 0.5,
+        12.0 / 0.5,
+        referenceQuantity: 0.5,
+        referenceUnit: 'scoop',
+      );
+
+      final lookupRes = UserNutritionMemory.instance.lookup('whey protein');
+      expect(lookupRes, isNotNull);
+      // Stored per-unit values should be 120 kcal
+      expect(lookupRes!.calories.min, 120.0);
+      expect(lookupRes.protein.min, 24.0);
+
+      // Now query the pipeline with "1 scoop whey protein"
+      final pipelineRes = NutritionPipeline.instance.fastMemoryLookupSync('1 scoop whey protein');
+      expect(pipelineRes, isNotNull);
+      // Scaled by 1 scoop should be 120 kcal
+      expect(pipelineRes!.calories.min, 120.0);
+      expect(pipelineRes.protein.min, 24.0);
+
+      // Now query the pipeline with "0.5 scoop whey protein"
+      final pipelineResHalf = NutritionPipeline.instance.fastMemoryLookupSync('0.5 scoop whey protein');
+      expect(pipelineResHalf, isNotNull);
+      // Scaled by 0.5 scoop should be 60 kcal
+      expect(pipelineResHalf!.calories.min, 60.0);
+      expect(pipelineResHalf.protein.min, 12.0);
+    });
+
+    test('Conflict resolution (newer wins) works correctly', () async {
+      await UserNutritionMemory.instance.clearAll();
+
+      final now = DateTime.now();
+
+      // Create a local override that was updated 5 minutes ago
+      final localOverride = UserMealOverride(
+        canonicalMeal: 'whey protein',
+        caloriesPerUnit: 120.0,
+        proteinPerUnit: 24.0,
+        referenceQuantity: 1.0,
+        referenceUnit: 'scoop',
+        savedAt: now.subtract(const Duration(minutes: 5)),
+      );
+
+      // Save it directly (inject to local memory list to bypass sync calls in saveOverride)
+      await UserNutritionMemory.instance.mergeFromCloud([localOverride]);
+
+      // 1. Remote override is older (updated 10 minutes ago)
+      final remoteOlder = UserMealOverride(
+        canonicalMeal: 'whey protein',
+        caloriesPerUnit: 150.0,
+        proteinPerUnit: 30.0,
+        referenceQuantity: 1.0,
+        referenceUnit: 'scoop',
+        savedAt: now.subtract(const Duration(minutes: 10)),
+      );
+
+      // Merge remote older - local should win!
+      await UserNutritionMemory.instance.mergeFromCloud([remoteOlder]);
+      var lookup = UserNutritionMemory.instance.lookup('whey protein');
+      expect(lookup!.calories.min, 120.0); // Local won!
+
+      // 2. Remote override is newer (updated 1 minute ago)
+      final remoteNewer = UserMealOverride(
+        canonicalMeal: 'whey protein',
+        caloriesPerUnit: 150.0,
+        proteinPerUnit: 30.0,
+        referenceQuantity: 1.0,
+        referenceUnit: 'scoop',
+        savedAt: now.subtract(const Duration(minutes: 1)),
+      );
+
+      // Merge remote newer - cloud should win!
+      await UserNutritionMemory.instance.mergeFromCloud([remoteNewer]);
+      lookup = UserNutritionMemory.instance.lookup('whey protein');
+      expect(lookup!.calories.min, 150.0); // Cloud won!
+    });
+
+    test('Unit category mismatch blocks override and skips to estimation', () async {
+      await UserNutritionMemory.instance.clearAll();
+
+      // Stored unit: 'serving' (non-metric)
+      await UserNutritionMemory.instance.saveOverride(
+        'my custom peanut butter',
+        200.0,
+        8.0,
+        referenceQuantity: 1.0,
+        referenceUnit: 'serving',
+      );
+
+      // Query with metric weight: "40g my custom peanut butter"
+      // Since 'serving' and 'g' are incompatible categories, fast memory lookup should skip it
+      final res = NutritionPipeline.instance.fastMemoryLookupSync('40g my custom peanut butter');
+      expect(res, isNull); // Skipped/returned null because of unit category mismatch!
     });
   });
 }
