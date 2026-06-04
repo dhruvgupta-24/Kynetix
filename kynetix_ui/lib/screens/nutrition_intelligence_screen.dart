@@ -55,11 +55,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
-          'Reset Pattern',
+          'Reset Portion Pattern',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Are you sure you want to reset the learned behavior pattern for "${entry.key}"?',
+          'Are you sure you want to reset the learned portion adjustment pattern for "${entry.key}"?',
           style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
@@ -94,11 +94,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
-          'Delete Food Memory',
+          'Remove Custom Food',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Are you sure you want to delete the customized override for "${override.canonicalMeal}"? It will revert to AI estimates.',
+          'Are you sure you want to remove the custom ingredients for "${override.canonicalMeal}"? It will revert to standard estimates.',
           style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
@@ -109,7 +109,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: KColor.danger),
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -129,11 +129,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         backgroundColor: KColor.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
-          'Reset All Patterns & Memory',
+          'Clear Food Library & Portions',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: const Text(
-          'This will permanently delete all learned eating patterns, customized ingredients, and food memory. This action cannot be undone.',
+          'This will permanently clear all portion history and custom foods in your Food Library. This cannot be undone.',
           style: TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
         ),
         actions: [
@@ -144,7 +144,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: KColor.danger),
-            child: const Text('Reset All', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -160,7 +160,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('All personalizations reset successfully.'),
+            content: Text('All Food Library customizations have been cleared.'),
             backgroundColor: KColor.danger,
           ),
         );
@@ -256,7 +256,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     onPressed: () => _resetPattern(entry),
-                    tooltip: 'Reset pattern',
+                    tooltip: 'Reset Portion Pattern',
                   ),
                 ],
               ),
@@ -272,7 +272,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('SCALAR', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                        const Text('Portion Scale', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                         const SizedBox(height: 4),
                         Row(
                           children: [
@@ -289,20 +289,20 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                                   backgroundColor: KColor.border,
                                   valueColor: AlwaysStoppedAnimation<Color>(color),
                                   minHeight: 4,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 24),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('CONFIDENCE', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Reliability', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                         const SizedBox(height: 4),
                         Row(
                           children: [
@@ -388,7 +388,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         onPressed: () => _deleteOverride(override),
-                        tooltip: 'Delete food memory',
+                        tooltip: 'Remove Custom Food',
                       ),
                     ],
                   ),
@@ -428,11 +428,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildStatRow('Total meals tracked contextually', '${EatingPatternService.instance.totalMealsTracked}'),
+            _buildStatRow('Total meals tracked', '${EatingPatternService.instance.totalMealsTracked}'),
             const Divider(color: KColor.divider, height: 24),
-            _buildStatRow('Most common primary carb base', EatingPatternService.instance.dominantPrimaryFood),
+            _buildStatRow('Common meal base', EatingPatternService.instance.dominantPrimaryFood),
             const Divider(color: KColor.divider, height: 24),
-            _buildStatRow('Avg primary portion per log', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
+            _buildStatRow('Average portion size', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
           ],
         ),
       ),
@@ -504,8 +504,8 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
               Row(
                 children: [
                   _buildTabButton(0, 'All'),
-                  _buildTabButton(1, 'Customized'),
-                  _buildTabButton(2, 'Learned'),
+                  _buildTabButton(1, 'Custom Foods'),
+                  _buildTabButton(2, 'Portion History'),
                 ],
               ),
             ],
@@ -560,47 +560,47 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
 
     if (_selectedTab == 0) {
       // ALL
-      items.add(const _SectionHeader(title: 'LEARNED EATING PATTERNS', emoji: '🧠'));
+      items.add(const _SectionHeader(title: 'PORTION HISTORY', emoji: '🧠'));
       if (patterns.isEmpty) {
-        items.add(const _EmptyState(message: 'No eating patterns learned yet. Correct ingredient estimates via "Edit Ingredients" 3+ times to train the system.'));
+        items.add(const _EmptyState(message: 'No portion patterns learned yet. Edit ingredient estimates on logged meals to build portion history.'));
       } else {
         items.addAll(patterns);
       }
 
-      items.add(const _SectionHeader(title: 'STORED FOOD MEMORY', emoji: '🥛'));
+      items.add(const _SectionHeader(title: 'CUSTOM FOODS', emoji: '🥛'));
       if (filteredOverrides.isEmpty) {
         items.add(_EmptyState(
           message: _searchQuery.isEmpty 
-              ? 'No custom ingredient overrides saved yet. Save corrections with "Remember for next time" checked.' 
-              : 'No matching custom food overrides found.'
+              ? 'No custom foods found. Check "Remember for next time" when saving a meal.' 
+              : 'No matching custom foods found.'
         ));
       } else {
         items.addAll(filteredOverrides);
       }
 
-      items.add(const _SectionHeader(title: 'MEAL CONTEXT INSIGHTS', emoji: '📊'));
+      items.add(const _SectionHeader(title: 'PORTION INSIGHTS', emoji: '📊'));
       items.add(const _InsightsCard());
     } else if (_selectedTab == 1) {
       // CUSTOMIZED
       if (filteredOverrides.isEmpty) {
         items.add(_EmptyState(
           message: _searchQuery.isEmpty 
-              ? 'No custom ingredient overrides saved yet. Save corrections with "Remember for next time" checked.' 
-              : 'No matching custom food overrides found.'
+              ? 'No custom foods found. Check "Remember for next time" when saving a meal.' 
+              : 'No matching custom foods found.'
         ));
       } else {
         items.addAll(filteredOverrides);
       }
     } else if (_selectedTab == 2) {
       // LEARNED PATTERNS
-      items.add(const _SectionHeader(title: 'LEARNED EATING PATTERNS', emoji: '🧠'));
+      items.add(const _SectionHeader(title: 'PORTION HISTORY', emoji: '🧠'));
       if (patterns.isEmpty) {
-        items.add(const _EmptyState(message: 'No eating patterns learned yet. Correct ingredient estimates via "Edit Ingredients" 3+ times to train the system.'));
+        items.add(const _EmptyState(message: 'No portion patterns learned yet. Edit ingredient estimates on logged meals to build portion history.'));
       } else {
         items.addAll(patterns);
       }
 
-      items.add(const _SectionHeader(title: 'MEAL CONTEXT INSIGHTS', emoji: '📊'));
+      items.add(const _SectionHeader(title: 'PORTION INSIGHTS', emoji: '📊'));
       items.add(const _InsightsCard());
     }
 
@@ -612,13 +612,13 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         backgroundColor: KColor.bg,
         surfaceTintColor: Colors.transparent,
         title: const Text(
-          'Nutrition Intelligence',
+          'Food Library',
           style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_sweep_rounded, color: KColor.danger),
-            tooltip: 'Reset all intelligence',
+            tooltip: 'Reset Food Library',
             onPressed: (patterns.isNotEmpty || overrides.isNotEmpty) ? _resetAll : null,
           ),
         ],
@@ -646,7 +646,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                     style: const TextStyle(color: Colors.white, fontSize: 13.5),
                     decoration: InputDecoration(
                       icon: const Icon(Icons.search_rounded, color: KColor.textMuted, size: 18),
-                      hintText: 'Search customized food memory...',
+                      hintText: 'Search custom foods...',
                       hintStyle: const TextStyle(color: KColor.textMuted, fontSize: 13.5),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(vertical: 12),

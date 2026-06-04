@@ -832,7 +832,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         break;
       case ProviderHealth.degraded:
         statusColor = const Color(0xFFFFB347); // Amber
-        statusLabel = 'Degraded (Shared Fallback)';
+        statusLabel = 'Degraded (Backup Server)';
         break;
       case ProviderHealth.setupRequired:
         statusColor = const Color(0xFF9CA3AF); // Gray
@@ -915,9 +915,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Text(
           isConnected
               ? (health == ProviderHealth.operational
-                  ? 'Your personal ChatGPT account is linked and active. Meals are analyzed using your own premium model credits.'
-                  : 'Your personal ChatGPT account is linked but fell back to our shared high-speed OpenRouter pool due to API error.')
-              : 'Meals are analyzed using our shared OpenRouter pool. Connect your ChatGPT account to use your own premium API credits.',
+                  ? 'Your personal AI connection is active. Meals are analyzed using your account credits.'
+                  : 'Your personal AI connection is active but fell back to our backup server due to a connection error.')
+              : 'Meals are analyzed using our shared servers. Connect your account to use your own premium credits.',
           style: TextStyle(
             fontSize: 12,
             color: Colors.white.withValues(alpha: 0.5),
@@ -925,29 +925,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
 
-        const SizedBox(height: 12),
-
-        // Always visible diagnostics
-        _InfoRow(
-          icon: Icons.cloud_queue_rounded,
-          label: 'Active Provider',
-          value: _providerDisplayName(s.activeProvider),
-        ),
-        _InfoRow(
-          icon: Icons.psychology_rounded,
-          label: 'Active Model',
-          value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
-        ),
-        _InfoRow(
-          icon: Icons.access_time_rounded,
-          label: 'Last Used',
-          value: _relativeTime(s.lastUsedAt),
-          isLast: true, // We don't want a bottom border/divider before the expandable Diagnostics section
-        ),
-
         const SizedBox(height: 8),
         
-        // Expandable drawer for Advanced Diagnostics
+        // Expandable drawer for Advanced Diagnostics (Connection Details)
         Theme(
           data: Theme.of(context).copyWith(
             dividerColor: Colors.transparent,
@@ -962,7 +942,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const Icon(Icons.info_outline_rounded, size: 14, color: KColor.textMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'Advanced Diagnostics',
+                  'Connection Details',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -976,6 +956,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const SizedBox(height: 8),
               _InfoRow(
+                icon: Icons.cloud_queue_rounded,
+                label: 'Connected Service',
+                value: _providerDisplayName(s.activeProvider),
+              ),
+              _InfoRow(
+                icon: Icons.psychology_rounded,
+                label: 'Analysis Service',
+                value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
+              ),
+              _InfoRow(
+                icon: Icons.access_time_rounded,
+                label: 'Last Used',
+                value: _relativeTime(s.lastUsedAt),
+              ),
+              _InfoRow(
                 icon: Icons.sync_rounded,
                 label: 'Connection Status',
                 value: isConnected ? 'Connected' : 'Disconnected',
@@ -988,7 +983,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 _InfoRow(
                   icon: Icons.assignment_turned_in_rounded,
-                  label: 'Last Test Gen',
+                  label: 'Last Connection Test',
                   value: s.testGenerationSnippet != null ? '"${s.testGenerationSnippet}"' : '—',
                 ),
                 _InfoRow(
@@ -1000,13 +995,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (s.fallbackReason != null) ...[
                 _InfoRow(
                   icon: Icons.warning_amber_rounded,
-                  label: 'Fallback Reason',
+                  label: 'Backup Reason',
                   value: _fallbackReasonDisplayName(s.fallbackReason),
                 ),
               ],
               _InfoRow(
                 icon: Icons.verified_rounded,
-                label: 'Model Verified',
+                label: 'Engine Verified',
                 value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
                 isLast: true,
               ),
@@ -1020,9 +1015,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _providerDisplayName(String? raw) {
     if (raw == null) return '—';
     return switch (raw) {
-      'user_chatgpt' => 'ChatGPT (Personal)',
-      'openrouter'   => 'OpenRouter (Shared)',
-      'openai'       => 'Kynetix OpenAI',
+      'user_chatgpt' => 'Direct Connection',
+      'openrouter'   => 'Shared Server',
+      'openai'       => 'Direct Connection',
       _              => raw,
     };
   }
@@ -1033,8 +1028,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'account_disconnected' => 'Account Disconnected',
       'token_expired'        => 'Token Expired',
       'refresh_failed'       => 'Refresh Failed',
-      'model_unavailable'    => 'Model Unavailable',
-      'api_error'            => 'API Error (completions failed)',
+      'model_unavailable'    => 'Service Unavailable',
+      'api_error'            => 'Connection Error (analysis failed)',
       _                      => reason,
     };
   }
@@ -1052,13 +1047,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildNutritionIntelligenceCard() {
     return _Section(
-      title: 'Nutrition Intelligence',
+      title: 'Food Library',
       child: Column(
         children: [
           _InfoRow(
             icon: Icons.psychology_rounded,
-            label: 'Nutrition Intelligence',
-            value: 'View learned patterns & memory',
+            label: 'Food Library',
+            value: 'Portion history & custom foods',
             isEditable: true,
             isLast: true,
             onTap: () => Navigator.push(
@@ -1934,7 +1929,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: const Text(
-          'Are you sure you want to log out? Your local caches will be cleared, and you will need to sign in again.',
+          'Are you sure you want to log out? Offline data will be cleared, and you will need to sign in again.',
           style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
         ),
         actions: [

@@ -11,91 +11,91 @@ class AchievementRegistry {
   static final Map<String, ({String title, String description, String emoji, AchievementCategory category})> _metadata = {
     'logged_first_day': (
       title: 'First Step',
-      description: 'Log at least 1 day of meals',
+      description: 'Logged your first meal! The journey begins.',
       emoji: '🌱',
       category: AchievementCategory.consistency,
     ),
     'logged_7_days': (
-      title: 'Week Warrior',
-      description: 'Log at least 7 days of meals',
+      title: 'Consistency Champion',
+      description: 'Tracked your meals for 7 days. Keeping the habit alive!',
       emoji: '📅',
       category: AchievementCategory.consistency,
     ),
     'logged_30_days': (
-      title: 'Consistent Logger',
-      description: 'Log at least 30 days of meals',
+      title: 'Habit Master',
+      description: 'Tracked your meals for 30 days. You\'re building a real habit.',
       emoji: '📊',
       category: AchievementCategory.consistency,
     ),
     'logged_100_days': (
-      title: 'Centurion',
-      description: 'Log at least 100 days of meals',
+      title: 'Lifestyle Legend',
+      description: '100 days of tracking! A lifestyle legend in the making.',
       emoji: '💯',
       category: AchievementCategory.consistency,
     ),
     'protein_target_3_row': (
-      title: 'Protein Streak',
-      description: 'Hit protein target 3 days in a row',
+      title: 'Fuel Streak',
+      description: 'Hit your daily protein goal 3 days in a row!',
       emoji: '⚡',
       category: AchievementCategory.nutrition,
     ),
     'protein_target_7_row': (
-      title: 'Protein Machine',
-      description: 'Hit protein target 7 days in a row',
+      title: 'Protein Powerhouse',
+      description: 'Met your daily protein target 7 days in a row!',
       emoji: '🔋',
       category: AchievementCategory.nutrition,
     ),
     'cal_adherence_week': (
-      title: 'Precision Week',
-      description: 'Calorie adherence ≥90% for a full week',
+      title: 'Perfect Calorie Week',
+      description: 'Kept calories within targets at least 90% of the week.',
       emoji: '🎯',
       category: AchievementCategory.nutrition,
     ),
     'perfect_week': (
       title: 'Perfect Week',
-      description: 'Hit protein AND calorie target every day Mon–Sun',
+      description: 'Hit both calorie and protein targets every single day Mon–Sun!',
       emoji: '✨',
       category: AchievementCategory.nutrition,
     ),
     'gym_3_row': (
-      title: 'Training Streak',
-      description: 'Gym session 3 logged days in a row',
+      title: 'Workout Streak',
+      description: 'Logged workouts 3 days in a row. Dedication in action!',
       emoji: '💪',
       category: AchievementCategory.training,
     ),
     'gym_30_total': (
-      title: 'Iron Regular',
-      description: 'Log 30 gym sessions total',
+      title: 'Gym Habit',
+      description: 'Logged 30 workouts. Building strength, day by day.',
       emoji: '🏋️',
       category: AchievementCategory.training,
     ),
     'gym_100_total': (
-      title: 'Gym Century',
-      description: 'Log 100 gym sessions total',
+      title: 'Iron Dedicated',
+      description: 'Logged 100 workouts. Elite dedication to your training.',
       emoji: '🏆',
       category: AchievementCategory.training,
     ),
     'quality_score_80_week': (
-      title: 'Clean Eater',
-      description: 'Average meal quality score ≥80 for a week',
+      title: 'Mindful Eater',
+      description: 'Averaged a high meal quality score of 80+ for a week.',
       emoji: '🥗',
       category: AchievementCategory.nutrition,
     ),
     'first_monthly_report': (
-      title: 'Data Aware',
-      description: 'Generate your first monthly report',
+      title: 'Milestone Review',
+      description: 'Generated your first monthly review. Let\'s see your progress!',
       emoji: '📈',
       category: AchievementCategory.milestone,
     ),
     'improvement_month': (
-      title: 'Rising',
-      description: 'Show an improving monthly calorie adherence trend',
+      title: 'Steady Progress',
+      description: 'Showed a positive monthly calorie trend. Keep stepping up!',
       emoji: '🚀',
       category: AchievementCategory.milestone,
     ),
     'pb_protein_day': (
       title: 'Protein Peak',
-      description: 'Record your highest protein intake in a single day',
+      description: 'Recorded your highest protein intake in a single day!',
       emoji: '🥩',
       category: AchievementCategory.milestone,
     ),
@@ -359,17 +359,17 @@ class InsightsEngine {
       if (proteinDelta > 0 && (proteinDelta * 100.0) > maxPositive) {
         maxPositive = proteinDelta * 100.0;
         bestMetric = ImprovementMetric.proteinAdherence;
-        label = 'Protein adherence improved most (+${(proteinDelta * 100.0).round()}%)';
+        label = 'Protein target hit rate improved most (+${(proteinDelta * 100.0).round()}%)';
       }
       if (calorieDelta > 0 && (calorieDelta * 100.0) > maxPositive) {
         maxPositive = calorieDelta * 100.0;
         bestMetric = ImprovementMetric.calorieAdherence;
-        label = 'Calorie adherence improved most (+${(calorieDelta * 100.0).round()}%)';
+        label = 'Calorie target hit rate improved most (+${(calorieDelta * 100.0).round()}%)';
       }
       if (loggingDelta > 0 && (loggingDelta * 100.0) > maxPositive) {
         maxPositive = loggingDelta * 100.0;
         bestMetric = ImprovementMetric.loggingConsistency;
-        label = 'Logging consistency improved most (+${(loggingDelta * 100.0).round()}%)';
+        label = 'Tracking consistency improved most (+${(loggingDelta * 100.0).round()}%)';
       }
       if (qualityDelta != null && qualityDelta > 0 && qualityDelta > maxPositive) {
         maxPositive = qualityDelta;
@@ -679,17 +679,17 @@ class InsightsEngine {
       if (proteinDelta > 0 && (proteinDelta * 100.0) > maxPositive) {
         maxPositive = proteinDelta * 100.0;
         bestMetric = ImprovementMetric.proteinAdherence;
-        label = 'Protein adherence improved most (+${(proteinDelta * 100.0).round()}%)';
+        label = 'Protein target hit rate improved most (+${(proteinDelta * 100.0).round()}%)';
       }
       if (calorieDelta > 0 && (calorieDelta * 100.0) > maxPositive) {
         maxPositive = calorieDelta * 100.0;
         bestMetric = ImprovementMetric.calorieAdherence;
-        label = 'Calorie adherence improved most (+${(calorieDelta * 100.0).round()}%)';
+        label = 'Calorie target hit rate improved most (+${(calorieDelta * 100.0).round()}%)';
       }
       if (loggingDelta > 0 && (loggingDelta * 100.0) > maxPositive) {
         maxPositive = loggingDelta * 100.0;
         bestMetric = ImprovementMetric.loggingConsistency;
-        label = 'Logging consistency improved most (+${(loggingDelta * 100.0).round()}%)';
+        label = 'Tracking consistency improved most (+${(loggingDelta * 100.0).round()}%)';
       }
       if (qualityDelta != null && qualityDelta > 0 && qualityDelta > maxPositive) {
         maxPositive = qualityDelta;

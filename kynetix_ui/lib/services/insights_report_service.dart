@@ -354,7 +354,7 @@ class InsightsReportService extends ChangeNotifier {
       final status = await ChatGptLinkService.getStatus();
       if (!status.isConnected) return;
 
-      final systemPrompt = 'You are Kyno, an elite Indian-first fat-loss nutrition coach. Analyze the user\'s weekly report data and write a highly encouraging, 2-3 sentence summary of their week. Focus on consistency, protein adherence, and gym attendance. Be brief, specific, and actionable. Avoid jargon.';
+      final systemPrompt = 'You are Kyno, an elite Indian-first fat-loss nutrition coach. Analyze the user\'s weekly report data and write a highly encouraging, 2-3 sentence summary of their week. Focus on consistency, protein target hit rate, and workout habits. Avoid technical or developer jargon. Do not mention "adherence score", "pipeline", "delta", or "regression" in your summary. Be brief, specific, and actionable.';
       final userPrompt = 'Weekly Report Data:\n'
           '- Week: ${report.weekKey}\n'
           '- Consistency Score: ${report.consistencyScore.score}/100\n'

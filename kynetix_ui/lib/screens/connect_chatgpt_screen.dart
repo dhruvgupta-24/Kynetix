@@ -184,8 +184,8 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           _errorMessage = result.error == 'no_chat_models'
               ? 'No chat-capable models found on this account. API access may not be enabled.'
               : result.error == 'generation_failed'
-                  ? 'Account authenticated but generation failed. Falling back to OpenRouter.'
-                  : result.error ?? 'Model verification failed.';
+                  ? 'Account authenticated but verification failed. Falling back to Kynetix shared servers.'
+                  : result.error ?? 'Verification failed.';
         }
       });
     } catch (e) {
@@ -247,7 +247,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       _FlowStep.idle       => _buildIdleView(),
       _FlowStep.starting   => _buildLoadingView('Starting authentication…'),
       _FlowStep.waitingAndPolling => _buildWaitingAndPollingView(),
-      _FlowStep.verifying  => _buildLoadingView('Discovering available models…'),
+      _FlowStep.verifying  => _buildLoadingView('Setting up analysis service…'),
       _FlowStep.success    => _buildSuccessView(),
       _FlowStep.error      => _buildErrorView(),
     };
@@ -273,7 +273,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         const SizedBox(height: 12),
         Text(
           'Use your own OpenAI/ChatGPT account for AI coaching. '
-          'Your credits, your model, your data.',
+          'Your credits, your custom settings, your data.',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.6),
             fontSize: 14,
@@ -281,13 +281,13 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           ),
         ),
         const SizedBox(height: 28),
-        _buildBenefitRow(Icons.model_training_rounded, 'Newest available model — auto-discovered'),
+        _buildBenefitRow(Icons.model_training_rounded, 'Optimal analysis engine selected automatically'),
         const SizedBox(height: 10),
         _buildBenefitRow(Icons.lock_rounded, 'Your credentials stay server-side only'),
         const SizedBox(height: 10),
         _buildBenefitRow(Icons.credit_card_rounded, 'Your ChatGPT credits, not Kynetix\'s'),
         const SizedBox(height: 10),
-        _buildBenefitRow(Icons.swap_horiz_rounded, 'Falls back to OpenRouter if needed'),
+        _buildBenefitRow(Icons.swap_horiz_rounded, 'Falls back to backup Kynetix server if needed'),
         const SizedBox(height: 36),
         _buildWarningBox(
           icon: Icons.settings_rounded,
@@ -550,13 +550,13 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _reportRow('Selected Model', r.selectedModel ?? '—', highlight: true),
+                _reportRow('Selected AI Engine', r.selectedModel ?? '—', highlight: true),
                 const Divider(color: Color(0xFF2E2E3E), height: 20),
-                _reportRow('Selection Reason', r.selectionReason ?? '—'),
+                _reportRow('Optimization Reason', r.selectionReason ?? '—'),
                 const Divider(color: Color(0xFF2E2E3E), height: 20),
                 _reportRow(
-                  'Chat Models Found',
-                  '${r.chatModelsFound.length} model${r.chatModelsFound.length == 1 ? '' : 's'}',
+                  'Supported AI Engines',
+                  '${r.chatModelsFound.length} engine${r.chatModelsFound.length == 1 ? '' : 's'}',
                 ),
                 if (r.chatModelsFound.isNotEmpty) ...[
                   const SizedBox(height: 8),

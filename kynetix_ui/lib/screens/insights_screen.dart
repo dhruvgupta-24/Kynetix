@@ -265,10 +265,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
           const SizedBox(height: 16),
           const Divider(color: KColor.divider, height: 1),
           const SizedBox(height: 12),
-          _buildMetricRow('Logging Consistency', score.loggingConsistency, '${(score.loggingConsistency * 100).round()}%', KColor.blue),
-          _buildMetricRow('Protein Adherence', score.proteinAdherence, '${(score.proteinAdherence * 100).round()}%', KColor.protein),
-          _buildMetricRow('Calorie Adherence', score.calorieAdherence, '${(score.calorieAdherence * 100).round()}%', KColor.calorie),
-          _buildMetricRow('Gym Attendance', score.gymAttendance, '${(score.gymAttendance * 100).round()}%', KColor.amber),
+          _buildMetricRow('Tracking Consistency', score.loggingConsistency, '${(score.loggingConsistency * 100).round()}%', KColor.blue),
+          _buildMetricRow('Protein Target Hit Rate', score.proteinAdherence, '${(score.proteinAdherence * 100).round()}%', KColor.protein),
+          _buildMetricRow('Calorie Target Hit Rate', score.calorieAdherence, '${(score.calorieAdherence * 100).round()}%', KColor.calorie),
+          _buildMetricRow('Workout Consistency', score.gymAttendance, '${(score.gymAttendance * 100).round()}%', KColor.amber),
           if (score.mealQuality > 0)
             _buildMetricRow('Meal Quality', score.mealQuality, '${(score.mealQuality * 100).round()}', const Color(0xFFA78BFA)),
         ],
@@ -381,7 +381,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('ADVISORY SIGNAL', style: TextStyle(fontSize: 9, color: KColor.amber, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      const Text('Area to Improve', style: TextStyle(fontSize: 9, color: KColor.amber, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                       const SizedBox(height: 2),
                       Text(
                         alert.message,
@@ -558,7 +558,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('GYM ATTENDANCE', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+          const Text('WORKOUT CONSISTENCY', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -680,7 +680,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('DAILY OUTCOMES', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+          const Text('DAILY GOAL STATUS', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           // Horizontal stacked progress bar representing outcomes in the week
           ClipRRect(
@@ -1208,14 +1208,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
           ),
           const Divider(color: KColor.divider, height: 16),
           buildPbRow(
-            'Longest Logging Streak',
+            'Longest Tracking Streak',
             '${pbs.longestLoggingStreak} days',
-            'All-time consecutive logging',
+            'All-time consecutive tracking',
             false,
           ),
           const Divider(color: KColor.divider, height: 16),
           buildPbRow(
-            'Best Week Quality',
+            'Best Weekly Food Quality',
             pbs.bestMealQualityWeekScore != null ? '${pbs.bestMealQualityWeekScore}/100' : '—',
             formatWeekKey(pbs.bestMealQualityWeekKey),
             isBestWeekThisWeek,

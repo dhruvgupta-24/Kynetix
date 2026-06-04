@@ -800,10 +800,9 @@ class _SourcePill extends StatelessWidget {
     };
 
     final label = switch (source) {
-      'memory_exact' => 'Using saved food memory',
+      'memory_exact' => 'Based on your Food Library',
       'cache' || 'memory_recurring' => 'Based on your usual foods',
-      'ai' || 'gemini' => 'AI-assisted estimate',
-      _ => 'Estimated from common foods',
+      _ => 'AI Estimate',
     };
 
     return Row(
@@ -1508,7 +1507,7 @@ class _CorrectionModeSheet extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Enter total meal macros. Affects this entry only. Saves to no memory.',
+                            'Enter total meal macros. Affects this entry only. Will not save this for future meals.',
                             style: TextStyle(
                               fontSize: 11.5,
                               color: const Color(0xFF9CA3AF),
@@ -1552,7 +1551,7 @@ class _CorrectionModeSheet extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Edit each ingredient separately. Saves to ingredient memory and updates eating patterns.',
+                            'Edit each ingredient separately. Updates your Food Library and portion history.',
                             style: TextStyle(
                               fontSize: 11.5,
                               color: const Color(0xFF9CA3AF),
@@ -2170,10 +2169,10 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.memory_rounded, size: 10, color: Color(0xFF52B788)),
+                        Icon(Icons.bookmark_rounded, size: 10, color: Color(0xFF52B788)),
                         SizedBox(width: 4),
                         Text(
-                          'Saves to Ingredient Memory',
+                          'Saves to Food Library',
                           style: TextStyle(
                             fontSize: 9.5,
                             fontWeight: FontWeight.w700,
@@ -2190,7 +2189,7 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: Text(
-                'Correct individual ingredients or adjust split names below. Edits update memory & behavior scalars.',
+                'Correct individual ingredients or adjust portion names below. Edits update your Food Library and portion sizing.',
                 style: TextStyle(fontSize: 11.5, color: Color(0xFF6B7280), height: 1.4),
               ),
             ),

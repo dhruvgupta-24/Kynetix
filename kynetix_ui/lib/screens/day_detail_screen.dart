@@ -992,7 +992,7 @@ class _GymCard extends StatelessWidget {
 
                     // FALLBACK CHIPS
                     const Text(
-                      'Manual Fallback',
+                      'Other Workouts',
                       style: TextStyle(
                         color: Color(0xFF6B7280),
                         fontSize: 12,

@@ -360,7 +360,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _isSignup ? 'Sign up to build your custom nutrition engine.' : 'Sign in to access your nutrition engine.',
+                      _isSignup ? 'Sign up to build your personalized nutrition plan.' : 'Sign in to access your personalized nutrition plan.',
                       style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 15),
                       textAlign: TextAlign.center,
                     ),
