@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 
 // ─── WeightReading ───────────────────────────────────────────────────
@@ -12,6 +13,21 @@ class WeightReading {
     required this.kg,
     required this.recordedAt,
     required this.source,
+  });
+}
+
+// ─── HealthDailyRecord ───────────────────────────────────────────────
+
+/// A daily step log from Health Connect.
+class HealthDailyRecord {
+  final DateTime date;
+  final double steps;
+  final bool usedByKynetix;
+
+  const HealthDailyRecord({
+    required this.date,
+    required this.steps,
+    required this.usedByKynetix,
   });
 }
 
@@ -267,6 +283,12 @@ class HealthSyncResult {
   /// inclusive of the most-recent 14-day window). Null if unavailable.
   final List<double>? dailySteps30d;
 
+  /// List of structured daily records for the 30-day query window.
+  final List<HealthDailyRecord>? dailyRecords;
+
+  /// Simple 7-day average (winsorized, displayed in logs).
+  final double?       averageDailySteps7d;
+
   /// Weighted average: 70% from 14d data, 30% from 30d data.
   /// This is the primary signal passed to the TDEE engine.
   final double?       effectiveAverageSteps;
@@ -291,6 +313,8 @@ class HealthSyncResult {
   const HealthSyncResult({
     this.dailySteps14d,
     this.dailySteps30d,
+    this.dailyRecords,
+    this.averageDailySteps7d,
     this.effectiveAverageSteps,
     this.averageDailySteps14d,
     this.averageDailySteps30d,
@@ -465,8 +489,11 @@ class HealthService {
       // ── Build ordered per-day lists (most recent = index 0) ──────────────
       final List<double> last14 = [];
       final List<double> last30 = [];
+      final List<HealthDailyRecord> dailyRecords = [];
+      final List<double> last7 = [];
 
       for (int i = 0; i < daysToFetch; i++) {
+        final dayStart = todayStart.subtract(Duration(days: i + 1));
         final val = (results[i] ?? 0).toDouble();
 
         // Only include days with meaningful step data.
@@ -474,10 +501,19 @@ class HealthService {
         // the average down unfairly.
         final valid = val >= 500;
 
+        if (i < 7) {
+          if (valid) last7.add(val);
+        }
         if (i < 14) {
           if (valid) last14.add(val);
         }
         last30.add(valid ? val : 0); // keep slot for 30d but mark as 0 if invalid
+
+        dailyRecords.add(HealthDailyRecord(
+          date: dayStart,
+          steps: val,
+          usedByKynetix: valid,
+        ));
       }
 
       // Filter out the zero placeholders from last30 for averaging.
@@ -494,6 +530,7 @@ class HealthService {
       // ── Winsorize outliers before averaging ──────────────────────────────
       // Clips extreme values (1 brutal day of hiking OR sick in bed)
       // to the 5th/95th percentile. The average is then much more stable.
+      final avg7 = last7.length >= 3 ? _winsorizedMean(last7) : null;
       final avg14 = last14.length >= 5 ? _winsorizedMean(last14) : null;
       final avg30 = last30Valid.length >= 7 ? _winsorizedMean(last30Valid) : null;
 
@@ -510,9 +547,36 @@ class HealthService {
         effective = avg14 ?? avg30;
       }
 
+      // ── Print Detailed Diagnostics Table to Console ──────────────────
+      final queryStart = todayStart.subtract(const Duration(days: 30));
+      debugPrint('=== KYNETIX HEALTH CONNECT STEP AUDIT ===');
+      debugPrint('API Method used: Health.getTotalStepsInInterval() calling native Android HealthConnectClient.aggregate() with StepsRecord.COUNT_TOTAL.');
+      debugPrint('Deduplication flow proof: Each daily step count is mapped directly from Health Connect aggregate result (Android-level deduplication) to Kynetix daily slots. Zero client-side secondary aggregation or summation is performed.');
+      debugPrint('Timezone boundaries: Local timezone is ${now.timeZoneName} (offset: ${now.timeZoneOffset}). Today partial day (${todayStart.toLocal()} onwards) is excluded from averages.');
+      debugPrint('Query Date Range (inclusive): ${queryStart.year}-${queryStart.month.toString().padLeft(2, '0')}-${queryStart.day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
+      debugPrint('7d Window: ${todayStart.subtract(const Duration(days: 7)).year}-${todayStart.subtract(const Duration(days: 7)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 7)).day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
+      debugPrint('14d Window: ${todayStart.subtract(const Duration(days: 14)).year}-${todayStart.subtract(const Duration(days: 14)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 14)).day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
+      debugPrint('30d Window: ${queryStart.year}-${queryStart.month.toString().padLeft(2, '0')}-${queryStart.day.toString().padLeft(2, '0')} to ${todayStart.subtract(const Duration(days: 1)).year}-${todayStart.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${todayStart.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}');
+      
+      debugPrint('Date        | Raw Steps | Used by Kynetix?');
+      debugPrint('------------+-----------+-----------------');
+      for (var r in dailyRecords) {
+        final dateStr = '${r.date.year}-${r.date.month.toString().padLeft(2, '0')}-${r.date.day.toString().padLeft(2, '0')}';
+        debugPrint('$dateStr  | ${r.steps.toStringAsFixed(0).padLeft(9)} | ${r.usedByKynetix ? "YES" : "NO"}');
+      }
+      debugPrint('----------------------------------------------');
+      debugPrint('7d Average Steps (Winsorized): ${avg7 != null ? avg7.toStringAsFixed(0) : "N/A"}');
+      debugPrint('14d Average Steps (Winsorized): ${avg14 != null ? avg14.toStringAsFixed(0) : "N/A"}');
+      debugPrint('30d Average Steps (Winsorized): ${avg30 != null ? avg30.toStringAsFixed(0) : "N/A"}');
+      debugPrint('Effective Weighted steps: ${effective?.toStringAsFixed(0) ?? "N/A"}');
+      debugPrint('Winsorized formula: Clips values below 10th percentile and above 90th percentile to minimize outlier skew.');
+      debugPrint('=========================================');
+
       return HealthSyncResult(
         dailySteps14d:        last14.isEmpty ? null : last14,
         dailySteps30d:        last30Valid.isEmpty ? null : last30Valid,
+        dailyRecords:         dailyRecords,
+        averageDailySteps7d:  avg7,
         effectiveAverageSteps: effective,
         averageDailySteps14d:  avg14,
         averageDailySteps30d:  avg30,

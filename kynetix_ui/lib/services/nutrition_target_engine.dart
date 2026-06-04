@@ -114,7 +114,7 @@ class NutritionTargetEngine {
         trainingDayProtein:   protein,
         restDayProtein:       protein,
         healthConnectActive:  health?.hasData == true,
-        effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt(),
+        effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt() ?? profile.averageDailySteps,
       );
     }
 
@@ -127,7 +127,7 @@ class NutritionTargetEngine {
       trainingDayProtein:   _trainingProtein(profile),
       restDayProtein:       _restProtein(profile),
       healthConnectActive:  health?.hasData == true,
-      effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt(),
+      effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt() ?? profile.averageDailySteps,
     );
   }
 
@@ -336,9 +336,17 @@ class NutritionTargetEngine {
   ///
   /// Clamped to ±400 kcal to prevent runaway values from bad sensor data.
   int _stepCorrectionKcal(UserProfile p, HealthSyncResult? health) {
-    if (health == null || !health.hasData) return 0;
+    final double? steps;
+    if (health != null && health.hasData) {
+      steps = health.effectiveAverageSteps;
+    } else if (p.averageDailySteps != null) {
+      steps = p.averageDailySteps!.toDouble();
+    } else {
+      steps = null;
+    }
 
-    final steps    = health.effectiveAverageSteps!;
+    if (steps == null) return 0;
+
     const baseline = 7000.0; // steps already in the activity multiplier
     const strideKm = 0.00075; // avg stride length in km
     const metFactor = 0.55;   // kcal per kg per km (conservative walking pace)

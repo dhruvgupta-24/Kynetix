@@ -775,8 +775,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildTargets() {
     final plan = _weeklyPlan;
-    final stepOffset = plan.healthConnectActive && plan.effectiveStepsPerDay != null
-        ? _stepOffsetLabel(plan.effectiveStepsPerDay!)
+    final stepOffset = plan.effectiveStepsPerDay != null
+        ? _stepOffsetLabel(plan.effectiveStepsPerDay!, _profile)
         : null;
 
     return Padding(
@@ -813,14 +813,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// Produces a human-readable step-correction note (matches engine bands).
-  static String _stepOffsetLabel(int steps) {
-    if (steps < 3000)  return '▼ −150 kcal from step history';
-    if (steps < 5000)  return '▼ −75 kcal  from step history';
-    if (steps < 7500)  return '✓ Step history confirms baseline';
-    if (steps < 10000) return '▲ +100 kcal from step history';
-    if (steps < 12000) return '▲ +180 kcal from step history';
-    return '▲ +250 kcal from step history';
+  /// Produces a human-readable step-correction note using the dynamic engine formula.
+  static String _stepOffsetLabel(int steps, UserProfile profile) {
+    const baseline = 7000.0;
+    const strideKm = 0.00075;
+    const metFactor = 0.55;
+    final kcalPerStep = profile.weight * strideKm * metFactor;
+    final offset = ((steps - baseline) * kcalPerStep).clamp(-400.0, 400.0).round();
+
+    if (offset == 0) {
+      return '✓ Step history confirms baseline';
+    } else if (offset > 0) {
+      return '▲ +$offset kcal from step history';
+    } else {
+      return '▼ −${offset.abs()} kcal from step history';
+    }
   }
 
   // ── Streak ────────────────────────────────────────────────────────────────────
