@@ -6,6 +6,7 @@ import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/nutrition_hydration_guard.dart';
+import '../services/workout_service.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
@@ -91,9 +92,12 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           'cache owned by $cachedOwnerId, current user is ${session.user.id}. '
           'Wiping local cache.');
       await PersistenceService.reset();
+      // Also wipe workout data — it belongs to the previous account.
+      await WorkoutService.instance.clearAll();
     } else if (cachedOwnerId == null && currentUserProfile != null) {
       debugPrint('[_LoggedInGate] 🚨 ORPHANED CACHE: profile exists but no owner ID. Wiping local cache.');
       await PersistenceService.reset();
+      await WorkoutService.instance.clearAll();
     }
 
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately

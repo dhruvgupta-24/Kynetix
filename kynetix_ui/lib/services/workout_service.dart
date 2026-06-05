@@ -31,9 +31,16 @@ class WorkoutService extends ChangeNotifier {
   List<WorkoutSession> _sessions = [];
   List<Exercise> _customExercises = [];
   WorkoutSession? _draftSession;
+  /// Persisted start time of the active draft session for crash-recovery timer.
+  DateTime? _draftStartedAt;
   bool _setupDone = false;
   bool _ready = false;
   DateTime _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // ── Write-queue fields ────────────────────────────────────────────────────
+  // Prevents concurrent _persist() calls from overwriting each other.
+  bool _persisting = false;
+  bool _pendingPersist = false;
 
   // ── Public read API ──────────────────────────────────────────────────────
 
@@ -43,6 +50,11 @@ class WorkoutService extends ChangeNotifier {
   List<WorkoutSession> get sessions => List.unmodifiable(_sessions);
 
   WorkoutSession? get draftSession => _draftSession;
+
+  /// The DateTime at which the current draft workout was started.
+  /// Persisted so the session timer can be reconstructed after a crash or
+  /// force-stop — compute elapsed as DateTime.now().difference(draftStartedAt).
+  DateTime? get draftStartedAt => _draftStartedAt;
 
   bool get isReady => _ready;
   bool get isSetupDone => _setupDone;
@@ -657,8 +669,13 @@ class WorkoutService extends ChangeNotifier {
     CloudSyncService.instance.syncWorkoutBackground(session);
   }
 
-  Future<void> saveDraftSession(WorkoutSession session) async {
+  Future<void> saveDraftSession(
+    WorkoutSession session, {
+    DateTime? startedAt,
+  }) async {
     _draftSession = session;
+    // Only set startedAt on first save (crash recovery: preserve original start time).
+    _draftStartedAt ??= startedAt ?? DateTime.now();
     await _persist();
     notifyListeners();
   }
@@ -666,6 +683,7 @@ class WorkoutService extends ChangeNotifier {
   Future<void> clearDraftSession() async {
     if (_draftSession == null) return;
     _draftSession = null;
+    _draftStartedAt = null;
     await _persist();
     notifyListeners();
   }
@@ -743,6 +761,13 @@ class WorkoutService extends ChangeNotifier {
             debugPrint('[WorkoutService] draftSession parse error: $e — ignoring');
           }
         }
+        if (data['draftStartedAt'] != null) {
+          try {
+            _draftStartedAt = DateTime.parse(data['draftStartedAt'] as String);
+          } catch (e) {
+            debugPrint('[WorkoutService] draftStartedAt parse error: $e');
+          }
+        }
       }
     } catch (e) {
       // Only a total JSON decode failure reaches here — individual field
@@ -752,6 +777,7 @@ class WorkoutService extends ChangeNotifier {
       _sessions = [];
       _customExercises = [];
       _draftSession = null;
+      _draftStartedAt = null;
       _setupDone = false;
       _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     }
@@ -760,12 +786,16 @@ class WorkoutService extends ChangeNotifier {
   }
 
   /// Wipes all workout splits, logged sessions, custom exercises, drafts, and setup configuration.
+  /// Must be called during account switching (owner ID mismatch) so stale local
+  /// data from a previous user is not shown to the newly authenticated user.
   Future<void> clearAll() async {
     _split = null;
     _sessions = [];
     _customExercises = [];
     _draftSession = null;
+    _draftStartedAt = null;
     _setupDone = false;
+    _ready = false;
     _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -773,12 +803,21 @@ class WorkoutService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[WorkoutService] Clear data failed: $e');
     }
+    _ready = true;
     notifyListeners();
   }
 
   // ── Persistence ──────────────────────────────────────────────────────────
 
   Future<void> _persist() async {
+    // Write-queue: if already persisting, set pending flag and return.
+    // The in-flight persist will re-run once it finishes, picking up the
+    // latest state — preventing concurrent writes from racing.
+    if (_persisting) {
+      _pendingPersist = true;
+      return;
+    }
+    _persisting = true;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
@@ -790,10 +829,20 @@ class WorkoutService extends ChangeNotifier {
           'sessions': _sessions.map((s) => s.toJson()).toList(),
           'customExercises': _customExercises.map((e) => e.toJson()).toList(),
           if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
+          if (_draftStartedAt != null)
+            'draftStartedAt': _draftStartedAt!.toIso8601String(),
         }),
       );
     } catch (e) {
       debugPrint('[WorkoutService] persist error: $e');
+    } finally {
+      _persisting = false;
+      if (_pendingPersist) {
+        _pendingPersist = false;
+        // One deferred re-persist to capture any writes that arrived during
+        // the in-flight write.
+        await _persist();
+      }
     }
   }
 

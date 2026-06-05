@@ -122,7 +122,14 @@ class NutritionHydrationGuard {
   set currentUserIdOverride(String? id) => _currentUserIdOverride = id;
 
   /// The active user ID, respecting test overrides.
-  String? get currentUserId => _currentUserIdOverride ?? Supabase.instance.client.auth.currentUser?.id;
+  String? get currentUserId {
+    if (_currentUserIdOverride != null) return _currentUserIdOverride;
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Convenience getter — reads the current Supabase auth user and checks ownership.
   /// Use this in production lookup code for brevity.

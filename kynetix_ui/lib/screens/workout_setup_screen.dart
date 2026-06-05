@@ -1,7 +1,34 @@
 import 'package:flutter/material.dart';
-
+import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
+
+// ─── Training Onboarding Questionnaire Enums ────────────────────────────────
+
+enum TrainingExperience {
+  beginner('Beginner', 'New to structured lifting or resuming after a break.', '👶'),
+  intermediate('Intermediate', 'Consistent lifting for 1–3 years with structured progression.', '💪'),
+  advanced('Advanced', '3+ years of serious training, optimizing for minor gains.', '🏋️');
+
+  final String label;
+  final String description;
+  final String emoji;
+  const TrainingExperience(this.label, this.description, this.emoji);
+}
+
+enum TrainingGoal {
+  buildMuscle('Build Muscle', 'Focus on hypertrophy, moderate/high volume, and metabolic stress.', '🍗'),
+  buildStrength('Build Strength', 'Focus on heavy compound lifts, lower reps, and neural drive.', '⚡'),
+  loseFat('Lose Fat', 'Focus on calorie burn, muscle retention, and training density.', '🔥'),
+  generalFitness('General Fitness', 'Focus on athletic capacity, core strength, and joint health.', '🏃');
+
+  final String label;
+  final String description;
+  final String emoji;
+  const TrainingGoal(this.label, this.description, this.emoji);
+}
+
+// ─── WorkoutSetupScreen ───────────────────────────────────────────────────────
 
 class WorkoutSetupScreen extends StatefulWidget {
   final bool editMode;
@@ -13,7 +40,17 @@ class WorkoutSetupScreen extends StatefulWidget {
 }
 
 class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
+  // Steps:
+  //   0: Experience Level Selection
+  //   1: Training Days Selection
+  //   2: Training Goal Selection
+  //   3: Split Recommendation Page
+  //   4: Customize Day Names & Exercises (was step 1 in legacy code)
   int _step = 0;
+
+  TrainingExperience _experience = TrainingExperience.intermediate;
+  int _daysPerWeek = 4;
+  TrainingGoal _goal = TrainingGoal.buildMuscle;
 
   final Map<int, bool> _selectedDays = {
     1: true,
@@ -51,6 +88,13 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.editMode) {
+      _step = 4; // Skip directly to customization step when editing existing split
+    }
+    _initDefaultFields();
+  }
+
+  void _initDefaultFields() {
     final existing = WorkoutService.instance.split;
     for (int wd = 1; wd <= 7; wd++) {
       final existingDay = existing.dayFor(wd);
@@ -77,12 +121,110 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
   int get _trainingDayCount => _selectedDays.values.where((v) => v).length;
 
-  void _next() {
-    if (_trainingDayCount == 0) {
-      _showSnack('Select at least one training day.');
-      return;
+  // ── Recommendation Engine ──────────────────────────────────────────────────
+
+  WorkoutSplit _generateRecommendedSplit() {
+    final days = List.generate(7, (i) {
+      final wd = i + 1;
+      return SplitDay(weekday: wd, name: 'Rest Day', exercises: const []);
+    });
+
+    final allEx = deduplicatedLibrary;
+    Exercise? findEx(String id) => allEx.where((e) => e.id == id).firstOrNull;
+
+    if (_daysPerWeek == 3) {
+      final fullBodyEx = [
+        findEx('bench_press'),
+        findEx('seated_cable_row'),
+        findEx('db_shoulder_press'),
+        findEx('leg_press'),
+        findEx('bb_curl'),
+      ].whereType<Exercise>().toList();
+      days[0] = SplitDay(weekday: 1, name: 'Full Body A', exercises: fullBodyEx);
+      days[2] = SplitDay(weekday: 3, name: 'Full Body B', exercises: fullBodyEx);
+      days[4] = SplitDay(weekday: 5, name: 'Full Body C', exercises: fullBodyEx);
+    } else if (_daysPerWeek == 4) {
+      final upperEx = [
+        findEx('bench_press'),
+        findEx('lat_pulldown'),
+        findEx('db_shoulder_press'),
+        findEx('seated_cable_row'),
+        findEx('tri_pushdown'),
+        findEx('bb_curl'),
+      ].whereType<Exercise>().toList();
+      final lowerEx = [
+        findEx('leg_press'),
+        findEx('rdl'),
+        findEx('leg_curl'),
+        findEx('calf_raise'),
+      ].whereType<Exercise>().toList();
+      days[0] = SplitDay(weekday: 1, name: 'Upper Day A', exercises: upperEx);
+      days[1] = SplitDay(weekday: 2, name: 'Lower Day A', exercises: lowerEx);
+      days[3] = SplitDay(weekday: 4, name: 'Upper Day B', exercises: upperEx);
+      days[4] = SplitDay(weekday: 5, name: 'Lower Day B', exercises: lowerEx);
+    } else if (_daysPerWeek == 5) {
+      days[0] = SplitDay(weekday: 1, name: 'Push', exercises: exerciseLibraryByDay['Push']!);
+      days[1] = SplitDay(weekday: 2, name: 'Pull', exercises: exerciseLibraryByDay['Pull']!);
+      days[2] = SplitDay(weekday: 3, name: 'Legs', exercises: exerciseLibraryByDay['Legs']!);
+      final upperEx = [
+        findEx('bench_press'),
+        findEx('lat_pulldown'),
+        findEx('db_shoulder_press'),
+        findEx('seated_cable_row'),
+      ].whereType<Exercise>().toList();
+      final lowerEx = [
+        findEx('leg_press'),
+        findEx('rdl'),
+        findEx('leg_curl'),
+      ].whereType<Exercise>().toList();
+      days[4] = SplitDay(weekday: 5, name: 'Upper', exercises: upperEx);
+      days[5] = SplitDay(weekday: 6, name: 'Lower', exercises: lowerEx);
+    } else {
+      days[0] = SplitDay(weekday: 1, name: 'Chest + Triceps', exercises: exerciseLibraryByDay['Chest + Triceps']!);
+      days[1] = SplitDay(weekday: 2, name: 'Back + Biceps', exercises: exerciseLibraryByDay['Back + Biceps']!);
+      days[2] = SplitDay(weekday: 3, name: 'Shoulders', exercises: exerciseLibraryByDay['Shoulders']!);
+      days[3] = SplitDay(weekday: 4, name: 'Legs', exercises: exerciseLibraryByDay['Legs']!);
+      days[4] = SplitDay(weekday: 5, name: 'Push', exercises: exerciseLibraryByDay['Push']!);
+      days[5] = SplitDay(weekday: 6, name: 'Pull', exercises: exerciseLibraryByDay['Pull']!);
     }
-    setState(() => _step = 1);
+
+    return WorkoutSplit(
+      id: 'recommended_${DateTime.now().millisecondsSinceEpoch}',
+      name: '${_daysPerWeek}-Day Recommended Split',
+      days: days,
+    );
+  }
+
+  void _applyRecommendation(WorkoutSplit split) {
+    setState(() {
+      for (int wd = 1; wd <= 7; wd++) {
+        final d = split.dayFor(wd);
+        if (d != null && !d.isRestDay) {
+          _selectedDays[wd] = true;
+          _nameControllers[wd]!.text = d.name;
+          _dayExercises[wd] = List.from(d.exercises);
+        } else {
+          _selectedDays[wd] = false;
+          _nameControllers[wd]!.text = 'Rest Day';
+          _dayExercises[wd] = [];
+        }
+      }
+      _step = 4;
+    });
+  }
+
+  // ── Navigation Logic ───────────────────────────────────────────────────────
+
+  void _goBack() {
+    if (_step > 0) {
+      setState(() => _step--);
+    }
+  }
+
+  void _goForward() {
+    if (_step < 4) {
+      setState(() => _step++);
+    }
   }
 
   Future<void> _finish() async {
@@ -110,12 +252,6 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     if (mounted) {
       Navigator.of(context).pop(true);
     }
-  }
-
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: const Color(0xFF1E1E2C)),
-    );
   }
 
   void _removeExercise(int weekday, Exercise ex) {
@@ -153,114 +289,366 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     }
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
+      backgroundColor: KColor.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
+        backgroundColor: KColor.bg,
         surfaceTintColor: Colors.transparent,
-        leading: _step == 1
+        leading: _step > 0 && !widget.editMode
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () => setState(() => _step = 0),
+                onPressed: _goBack,
               )
-            : (widget.editMode
-                  ? IconButton(
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.white,
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                    )
-                  : null),
+            : IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
         title: Text(
           widget.editMode ? 'Edit Training Split' : 'Set Up Training',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
+          style: KText.h2.copyWith(color: Colors.white, fontSize: 16),
         ),
       ),
-      body: _step == 0 ? _buildDaySelection() : _buildDayNames(),
+      body: _buildCurrentStep(),
     );
   }
 
-  Widget _buildDaySelection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Training days',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '$_trainingDayCount day${_trainingDayCount == 1 ? '' : 's'} selected',
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 14),
-              ),
-            ],
+  Widget _buildCurrentStep() {
+    return switch (_step) {
+      0 => _buildExperienceStep(),
+      1 => _buildDaysStep(),
+      2 => _buildGoalStep(),
+      3 => _buildRecommendationStep(),
+      4 => _buildCustomizeStep(),
+      _ => const SizedBox(),
+    };
+  }
+
+  // ── Step 0: Experience ────────────────────────────────────────────────────
+
+  Widget _buildExperienceStep() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Experience level', style: KText.h1.copyWith(color: Colors.white)),
+          const SizedBox(height: 8),
+          Text(
+            'We will use this to recommend progression jumps and volume guidelines.',
+            style: KText.body.copyWith(color: KColor.textSecondary),
           ),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: GridView.builder(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 7,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 6,
-                childAspectRatio: 0.72,
+          const SizedBox(height: 24),
+          Expanded(
+            child: ListView(
+              children: TrainingExperience.values.map((exp) {
+                final selected = _experience == exp;
+                return GestureDetector(
+                  onTap: () => setState(() => _experience = exp),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: selected ? const Color(0xFF132F23) : KColor.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: selected ? KColor.green : KColor.border,
+                        width: selected ? 1.5 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(exp.emoji, style: const TextStyle(fontSize: 28)),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                exp.label,
+                                style: KText.bodyMedium.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                exp.description,
+                                style: KText.caption.copyWith(color: KColor.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (selected)
+                          const Icon(Icons.check_circle_rounded, color: KColor.green, size: 20),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: KButton(
+              label: 'Continue',
+              icon: Icons.arrow_forward_rounded,
+              onTap: _goForward,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Step 1: Days ──────────────────────────────────────────────────────────
+
+  Widget _buildDaysStep() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('How many days?', style: KText.h1.copyWith(color: Colors.white)),
+          const SizedBox(height: 8),
+          Text(
+            'How many days per week can you consistently commit to training?',
+            style: KText.body.copyWith(color: KColor.textSecondary),
+          ),
+          const SizedBox(height: 28),
+          Expanded(
+            child: Center(
+              child: Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [3, 4, 5, 6].map((days) {
+                  final selected = _daysPerWeek == days;
+                  return GestureDetector(
+                    onTap: () => setState(() => _daysPerWeek = days),
+                    child: Container(
+                      width: 140,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        color: selected ? const Color(0xFF132F23) : KColor.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected ? KColor.green : KColor.border,
+                          width: selected ? 1.5 : 1.0,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$days',
+                            style: KText.display.copyWith(
+                              color: selected ? KColor.green : Colors.white,
+                              fontSize: 40,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Days / week',
+                            style: KText.caption.copyWith(color: KColor.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
-              itemCount: 7,
-              itemBuilder: (_, i) {
-                final wd = i + 1;
-                final selected = _selectedDays[wd] == true;
-                return _DayToggleTile(
-                  dayLabel: _shortDays[wd]!,
-                  selected: selected,
-                  onTap: () => setState(() => _selectedDays[wd] = !selected),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: KButton(
+              label: 'Continue',
+              icon: Icons.arrow_forward_rounded,
+              onTap: _goForward,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Step 2: Goal ──────────────────────────────────────────────────────────
+
+  Widget _buildGoalStep() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Primary focus', style: KText.h1.copyWith(color: Colors.white)),
+          const SizedBox(height: 8),
+          Text(
+            'This drives default exercise selections and compound rep-range strategies.',
+            style: KText.body.copyWith(color: KColor.textSecondary),
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: ListView(
+              children: TrainingGoal.values.map((goal) {
+                final selected = _goal == goal;
+                return GestureDetector(
+                  onTap: () => setState(() => _goal = goal),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: selected ? const Color(0xFF132F23) : KColor.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: selected ? KColor.green : KColor.border,
+                        width: selected ? 1.5 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(goal.emoji, style: const TextStyle(fontSize: 28)),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                goal.label,
+                                style: KText.bodyMedium.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                goal.description,
+                                style: KText.caption.copyWith(color: KColor.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (selected)
+                          const Icon(Icons.check_circle_rounded, color: KColor.green, size: 20),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: KButton(
+              label: 'See Recommendation',
+              icon: Icons.arrow_forward_rounded,
+              onTap: _goForward,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Step 3: Recommendation ────────────────────────────────────────────────
+
+  Widget _buildRecommendationStep() {
+    final split = _generateRecommendedSplit();
+    final splitDays = split.days.where((d) => !d.isRestDay).toList();
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Recommended Split', style: KText.h1.copyWith(color: Colors.white)),
+          const SizedBox(height: 6),
+          Text(
+            'Based on your inputs, this program offers optimal volume and recovery overlap.',
+            style: KText.body.copyWith(color: KColor.textSecondary),
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: ListView.builder(
+              itemCount: splitDays.length,
+              itemBuilder: (context, i) {
+                final d = splitDays[i];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: KColor.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: KColor.border, width: 0.5),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: KColor.bg,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _shortDays[d.weekday]!,
+                          style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              d.name,
+                              style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${d.exercises.length} exercises planned',
+                              style: KText.caption.copyWith(color: KColor.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-          child: SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              onPressed: _next,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D6A4F),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+          Row(
+            children: [
+              Expanded(
+                child: KButton(
+                  label: 'Use Recommended',
+                  onTap: () => _applyRecommendation(split),
                 ),
               ),
-              child: const Text(
-                'Next →',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              const SizedBox(width: 12),
+              Expanded(
+                child: KButton(
+                  label: 'Manual Select',
+                  outlined: true,
+                  onTap: () {
+                    setState(() {
+                      _step = 4;
+                    });
+                  },
+                ),
               ),
-            ),
+            ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildDayNames() {
+  // ── Step 4: Customize Days & Exercises ────────────────────────────────────
+
+  Widget _buildCustomizeStep() {
     final trainingDays = [
       for (int wd = 1; wd <= 7; wd++)
         if (_selectedDays[wd] == true) wd,
@@ -268,24 +656,83 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
     return Column(
       children: [
+        // Day selector grid inside customizer for convenience
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Customize Split Days',
+                style: KText.h3.copyWith(color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 40,
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 7,
+                    crossAxisSpacing: 6,
+                    childAspectRatio: 1.25,
+                  ),
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: 7,
+                  itemBuilder: (_, i) {
+                    final wd = i + 1;
+                    final selected = _selectedDays[wd] == true;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _selectedDays[wd] = !selected;
+                          if (!selected && _dayExercises[wd]!.isEmpty) {
+                            // Seed default exercises if newly selected training day
+                            _dayExercises[wd] = List.of(
+                              exerciseLibraryByDay[_defaultNames[wd] ?? ''] ?? const [],
+                            );
+                          }
+                        });
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: selected ? const Color(0xFF132F23) : KColor.surface,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: selected ? KColor.green : KColor.border,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            _shortDays[wd]!,
+                            style: KText.caption.copyWith(
+                              color: selected ? Colors.white : KColor.textMuted,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             children: [
-              const Text(
-                'Name your days',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+              if (trainingDays.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Center(
+                    child: Text(
+                      'No training days selected above.\nSelect at least one day to begin.',
+                      textAlign: TextAlign.center,
+                      style: KText.body.copyWith(color: KColor.textMuted),
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Add, reorder, or remove exercises for each day.',
-                style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
-              ),
-              const SizedBox(height: 20),
               for (final wd in trainingDays) _buildDayCard(wd),
             ],
           ),
@@ -294,23 +741,9 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
           child: SizedBox(
             width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              onPressed: _finish,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D6A4F),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: Text(
-                widget.editMode ? 'Save Split' : 'Start Training →',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+            child: KButton(
+              label: widget.editMode ? 'Save Split' : 'Start Training',
+              onTap: _trainingDayCount == 0 ? null : _finish,
             ),
           ),
         ),
@@ -323,9 +756,9 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
+        color: KColor.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E2E3E)),
+        border: Border.all(color: KColor.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -338,16 +771,16 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                    color: KColor.green.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Center(
                     child: Text(
                       _shortDays[weekday]!,
-                      style: const TextStyle(
-                        color: Color(0xFF52B788),
-                        fontSize: 10,
+                      style: KText.caption.copyWith(
+                        color: KColor.green,
                         fontWeight: FontWeight.w800,
+                        fontSize: 10,
                       ),
                     ),
                   ),
@@ -356,37 +789,38 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                 Expanded(
                   child: TextField(
                     controller: _nameControllers[weekday],
-                    style: const TextStyle(
+                    style: KText.bodyMedium.copyWith(
                       color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
                     ),
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.zero,
                       hintText: 'Day name',
-                      hintStyle: TextStyle(color: Color(0xFF4B5563)),
+                      hintStyle: TextStyle(color: KColor.textMuted),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(color: Color(0xFF2E2E3E), height: 1),
+          const Divider(color: KColor.border, height: 1),
           if (exercises.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Row(
-                children: const [
-                  Icon(
+                children: [
+                  const Icon(
                     Icons.drag_indicator_rounded,
-                    color: Color(0xFF4B5563),
+                    color: KColor.textMuted,
                     size: 16,
                   ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Drag to change the order used in future workouts',
-                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 11.5),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Drag handle to change order in future workouts',
+                      style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10.5),
+                    ),
                   ),
                 ],
               ),
@@ -406,22 +840,19 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                     : '${ex.muscleGroup} • ${ex.repRangeLabel}';
                 return ListTile(
                   key: ValueKey('${weekday}_${ex.id}'),
-                  contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                  contentPadding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
                   leading: const Icon(
                     Icons.fitness_center_rounded,
-                    color: Color(0xFF4B5563),
-                    size: 18,
+                    color: KColor.textMuted,
+                    size: 16,
                   ),
                   title: Text(
                     ex.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13),
                   ),
                   subtitle: Text(
                     subtitle,
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 11,
-                    ),
+                    style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 10.5),
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -430,8 +861,8 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                         onPressed: () => _removeExercise(weekday, ex),
                         icon: const Icon(
                           Icons.remove_circle_outline_rounded,
-                          color: Color(0xFF4B5563),
-                          size: 18,
+                          color: KColor.textMuted,
+                          size: 16,
                         ),
                       ),
                       ReorderableDragStartListener(
@@ -440,8 +871,8 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                           padding: EdgeInsets.symmetric(horizontal: 8),
                           child: Icon(
                             Icons.drag_handle_rounded,
-                            color: Color(0xFF6B7280),
-                            size: 20,
+                            color: KColor.textMuted,
+                            size: 18,
                           ),
                         ),
                       ),
@@ -452,22 +883,22 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
             ),
           InkWell(
             onTap: () => _addExercise(weekday),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.add_circle_outline_rounded,
-                    color: Color(0xFF52B788),
+                    color: KColor.green,
                     size: 18,
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     'Add exercise',
-                    style: TextStyle(
-                      color: Color(0xFF52B788),
+                    style: KText.bodyMedium.copyWith(
+                      color: KColor.green,
+                      fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -480,54 +911,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
   }
 }
 
-class _DayToggleTile extends StatelessWidget {
-  final String dayLabel;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _DayToggleTile({
-    required this.dayLabel,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFF2D6A4F) : const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: selected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
-        ),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (selected)
-              const Icon(
-                Icons.check_rounded,
-                color: Color(0xFF52B788),
-                size: 16,
-              ),
-            const SizedBox(height: 2),
-            Text(
-              dayLabel,
-              style: TextStyle(
-                color: selected ? Colors.white : const Color(0xFF6B7280),
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
+// ─── _ExercisePickerSheet ────────────────────────────────────────────────────
 
 class _ExercisePickerSheet extends StatefulWidget {
   final List<Exercise> exercises;
@@ -564,7 +948,7 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFF4B5563),
+                color: KColor.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -579,9 +963,9 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
                 hintText: 'Search exercises...',
                 prefixIcon: const Icon(
                   Icons.search_rounded,
-                  color: Color(0xFF6B7280),
+                  color: KColor.textMuted,
                 ),
-                fillColor: const Color(0xFF2E2E3E),
+                fillColor: KColor.surface,
                 filled: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -591,7 +975,7 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
             ),
           ),
           _CreateCustomTile(onCreated: (ex) => Navigator.of(context).pop(ex)),
-          const Divider(height: 1, color: Color(0xFF2E2E3E)),
+          const Divider(height: 1, color: KColor.border),
           Expanded(
             child: ListView.builder(
               controller: controller,
@@ -602,18 +986,15 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
                 return ListTile(
                   title: Text(
                     ex.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13.5),
                   ),
                   subtitle: Text(
                     '${ex.muscleGroup}${isCustom ? ' (custom)' : ''}',
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 12,
-                    ),
+                    style: KText.caption.copyWith(color: KColor.textMuted),
                   ),
                   trailing: const Icon(
                     Icons.add_rounded,
-                    color: Color(0xFF52B788),
+                    color: KColor.green,
                   ),
                   onTap: () => Navigator.of(context).pop(ex),
                 );
@@ -626,6 +1007,18 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
   }
 }
 
+Future<Exercise?> showCreateCustomExerciseSheet(BuildContext context) {
+  return showModalBottomSheet<Exercise>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF1A1A28),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => const _CreateCustomExerciseSheet(),
+  );
+}
+
 class _CreateCustomTile extends StatelessWidget {
   final ValueChanged<Exercise> onCreated;
 
@@ -634,15 +1027,7 @@ class _CreateCustomTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: () async {
-      final ex = await showModalBottomSheet<Exercise>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: const Color(0xFF1A1A28),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => const _CreateCustomExerciseSheet(),
-      );
+      final ex = await showCreateCustomExerciseSheet(context);
       if (ex != null) {
         onCreated(ex);
       }
@@ -655,49 +1040,39 @@ class _CreateCustomTile extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+              color: KColor.green.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
               Icons.add_rounded,
-              color: Color(0xFF52B788),
+              color: KColor.green,
               size: 20,
             ),
           ),
           const SizedBox(width: 12),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '+ Add Custom Exercise',
-                style: TextStyle(
-                  color: Color(0xFF52B788),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '+ Add Custom Exercise',
+                  style: KText.bodyMedium.copyWith(
+                    color: KColor.green,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              Text(
-                'Save your own exercise and use it everywhere',
-                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-              ),
-            ],
+                Text(
+                  'Save your own exercise and use it everywhere',
+                  style: KText.caption.copyWith(color: KColor.textMuted),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     ),
   );
 }
-
-Future<Exercise?> showCreateCustomExerciseSheet(BuildContext context) =>
-    showModalBottomSheet<Exercise>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1A1A28),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => const _CreateCustomExerciseSheet(),
-    );
 
 class _CreateCustomExerciseSheet extends StatefulWidget {
   const _CreateCustomExerciseSheet();
@@ -801,24 +1176,20 @@ class _CreateCustomExerciseSheetState
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4B5563),
+                  color: KColor.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Custom Exercise',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
+              style: KText.h2.copyWith(color: Colors.white),
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Saved permanently and available in split setup, logging, and history.',
-              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              style: KText.caption.copyWith(color: KColor.textSecondary),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -828,9 +1199,9 @@ class _CreateCustomExerciseSheetState
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 labelText: 'Exercise name (e.g. Preacher Curl)',
-                labelStyle: const TextStyle(color: Color(0xFF6B7280)),
+                labelStyle: const TextStyle(color: KColor.textSecondary),
                 filled: true,
-                fillColor: const Color(0xFF1E1E2C),
+                fillColor: KColor.surface,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -838,21 +1209,16 @@ class _CreateCustomExerciseSheetState
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(
-                    color: Color(0xFF52B788),
+                    color: KColor.green,
                     width: 1.5,
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'DEFAULT REP RANGE (OPTIONAL)',
-              style: TextStyle(
-                color: Color(0xFF9CA3AF),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
+              style: KText.label.copyWith(fontSize: 10),
             ),
             const SizedBox(height: 10),
             Row(
@@ -864,9 +1230,9 @@ class _CreateCustomExerciseSheetState
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'Min reps',
-                      labelStyle: const TextStyle(color: Color(0xFF6B7280)),
+                      labelStyle: const TextStyle(color: KColor.textSecondary),
                       filled: true,
-                      fillColor: const Color(0xFF1E1E2C),
+                      fillColor: KColor.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -882,9 +1248,9 @@ class _CreateCustomExerciseSheetState
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       labelText: 'Max reps',
-                      labelStyle: const TextStyle(color: Color(0xFF6B7280)),
+                      labelStyle: const TextStyle(color: KColor.textSecondary),
                       filled: true,
-                      fillColor: const Color(0xFF1E1E2C),
+                      fillColor: KColor.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -903,10 +1269,10 @@ class _CreateCustomExerciseSheetState
               decoration: InputDecoration(
                 labelText: 'Notes or cue (optional)',
                 hintText: 'Example: chest-supported, use 10 to 15 reps',
-                labelStyle: const TextStyle(color: Color(0xFF6B7280)),
-                hintStyle: const TextStyle(color: Color(0xFF4B5563)),
+                labelStyle: const TextStyle(color: KColor.textSecondary),
+                hintStyle: const TextStyle(color: KColor.textMuted),
                 filled: true,
-                fillColor: const Color(0xFF1E1E2C),
+                fillColor: KColor.surface,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -914,14 +1280,9 @@ class _CreateCustomExerciseSheetState
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'MUSCLE GROUP',
-              style: TextStyle(
-                color: Color(0xFF9CA3AF),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
+              style: KText.label.copyWith(fontSize: 10),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -939,21 +1300,17 @@ class _CreateCustomExerciseSheetState
                     ),
                     decoration: BoxDecoration(
                       color: selected
-                          ? const Color(0xFF2D6A4F).withValues(alpha: 0.2)
-                          : const Color(0xFF1E1E2C),
+                          ? KColor.green.withValues(alpha: 0.15)
+                          : KColor.surface,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: selected
-                            ? const Color(0xFF52B788)
-                            : const Color(0xFF2E2E3E),
+                        color: selected ? KColor.green : KColor.border,
                       ),
                     ),
                     child: Text(
                       g,
                       style: TextStyle(
-                        color: selected
-                            ? const Color(0xFF52B788)
-                            : const Color(0xFF9CA3AF),
+                        color: selected ? KColor.green : KColor.textSecondary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
@@ -963,14 +1320,9 @@ class _CreateCustomExerciseSheetState
               }).toList(),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'EXERCISE TYPE',
-              style: TextStyle(
-                color: Color(0xFF9CA3AF),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-              ),
+              style: KText.label.copyWith(fontSize: 10),
             ),
             const SizedBox(height: 10),
             for (final opt in _typeOptions)
@@ -985,13 +1337,11 @@ class _CreateCustomExerciseSheetState
                   ),
                   decoration: BoxDecoration(
                     color: _type == opt.type
-                        ? const Color(0xFF2D6A4F).withValues(alpha: 0.18)
-                        : const Color(0xFF1E1E2C),
+                        ? KColor.green.withValues(alpha: 0.15)
+                        : KColor.surface,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: _type == opt.type
-                          ? const Color(0xFF52B788)
-                          : const Color(0xFF2E2E3E),
+                      color: _type == opt.type ? KColor.green : KColor.border,
                     ),
                   ),
                   child: Row(
@@ -1004,20 +1354,14 @@ class _CreateCustomExerciseSheetState
                           children: [
                             Text(
                               opt.label,
-                              style: TextStyle(
-                                color: _type == opt.type
-                                    ? Colors.white
-                                    : const Color(0xFF9CA3AF),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
+                              style: KText.bodyMedium.copyWith(
+                                color: _type == opt.type ? Colors.white : KColor.textSecondary,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                             Text(
                               opt.hint,
-                              style: const TextStyle(
-                                color: Color(0xFF4B5563),
-                                fontSize: 11,
-                              ),
+                              style: KText.caption.copyWith(color: KColor.textMuted),
                             ),
                           ],
                         ),
@@ -1025,7 +1369,7 @@ class _CreateCustomExerciseSheetState
                       if (_type == opt.type)
                         const Icon(
                           Icons.check_circle_rounded,
-                          color: Color(0xFF52B788),
+                          color: KColor.green,
                           size: 18,
                         ),
                     ],
@@ -1035,32 +1379,9 @@ class _CreateCustomExerciseSheetState
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        'Save Exercise',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+              child: KButton(
+                label: 'Save Exercise',
+                onTap: _saving ? null : _save,
               ),
             ),
           ],

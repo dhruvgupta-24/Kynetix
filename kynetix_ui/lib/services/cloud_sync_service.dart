@@ -72,13 +72,15 @@ class CloudSyncService {
       await PersistenceService.saveDayLogs();
 
       // 2. Process Workouts
-      // Only merge if not already present
-      bool updatedWorkouts = false;
+      // Only add sessions that are not already in local storage.
+      // Historical sessions are immutable — never overwrite existing local entries.
       for (final row in workoutsResp) {
         final id = row['id'] as String;
         // Avoid overwriting local history if it exists, or just accept cloud as truth
         final exists = WorkoutService.instance.sessions.any((s) => s.id == id);
         if (!exists) {
+          // Sessions are write-once and immutable. We only add sessions that
+          // are not already in local storage. WorkoutService owns ordering.
           final session = WorkoutSession(
             id: row['id'],
             date: DateTime.parse(row['date'] as String),
@@ -89,13 +91,8 @@ class CloudSyncService {
             durationMinutes: row['duration_minutes'] as int?,
             entries: (row['entries_json'] as List<dynamic>?)?.map((e) => ExerciseEntry.fromJson(e)).toList() ?? [],
           );
-          WorkoutService.instance.sessions.add(session);
-          updatedWorkouts = true;
+          await WorkoutService.instance.saveSession(session);
         }
-      }
-      if (updatedWorkouts) {
-        // WorkoutService internally manages state, but we'll sort them.
-        WorkoutService.instance.sessions.sort((a, b) => b.date.compareTo(a.date));
       }
 
       // 3. Process Nutrition Memory
