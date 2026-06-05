@@ -37,6 +37,9 @@ class WorkoutService extends ChangeNotifier {
   bool _ready = false;
   DateTime _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  final Map<String, int> _additionAcceptedCounts = {};
+  final Map<String, int> _additionIgnoredCounts = {};
+
   // ── Write-queue fields ────────────────────────────────────────────────────
   // Prevents concurrent _persist() calls from overwriting each other.
   bool _persisting = false;
@@ -362,12 +365,7 @@ class WorkoutService extends ChangeNotifier {
   String exerciseProgressNote(Exercise exercise, String splitDayName) {
     final last = lastEntryFor(exercise.id, splitDayName);
     final trend = exerciseTrendDelta(exercise.id);
-    final hint = progressionHint(
-      last,
-      exercise,
-      targetRepsMin: exercise.targetRepMin,
-      targetRepsMax: exercise.targetRepMax,
-    );
+    final hint = progressionHint(last, exercise);
     if (last == null) {
       return 'Use a controlled first session and find a stable working weight.';
     }
@@ -388,6 +386,45 @@ class WorkoutService extends ChangeNotifier {
       if (e.exercise.id == exerciseId && !e.isEmpty) return e;
     }
     return null;
+  }
+
+  /// Analyzes history for a given split day and returns any exercises that have
+  /// been manually/temporarily added in a high percentage of recent sessions,
+  /// recommending that they be added permanently.
+  List<({Exercise exercise, int count, int totalSessions})> getRecurringAdditions(
+      String splitDayName) {
+    final relevantSessions = _sessions
+        .where((s) => s.splitDayName == splitDayName && !s.isEmpty)
+        .toList();
+    if (relevantSessions.length < 3) return [];
+
+    final countMap = <String, int>{};
+    final exerciseMap = <String, Exercise>{};
+
+    // Look at last 6 sessions of this split day
+    final recentSessions = relevantSessions.reversed.take(6).toList();
+    for (final s in recentSessions) {
+      for (final e in s.entries) {
+        if (e.isTemporaryAddition) {
+          countMap[e.exercise.id] = (countMap[e.exercise.id] ?? 0) + 1;
+          exerciseMap[e.exercise.id] = e.exercise;
+        }
+      }
+    }
+
+    final result = <({Exercise exercise, int count, int totalSessions})>[];
+    countMap.forEach((id, count) {
+      // Recommend if added in at least 3 of recent sessions
+      if (count >= 3) {
+        result.add((
+          exercise: exerciseMap[id]!,
+          count: count,
+          totalSessions: recentSessions.length,
+        ));
+      }
+    });
+
+    return result;
   }
 
   /// All-time best set for an exercise (highest estimated 1RM).
@@ -495,15 +532,10 @@ class WorkoutService extends ChangeNotifier {
 
   String progressionHint(
     ExerciseEntry? lastEntry,
-    Exercise exercise, {
-    int? targetRepsMin,
-    int? targetRepsMax,
-  }) {
-    final repMin = targetRepsMin ?? exercise.targetRepMin;
-    final repMax = targetRepsMax ?? exercise.targetRepMax;
-
+    Exercise exercise,
+  ) {
     if (lastEntry == null || lastEntry.isEmpty) {
-      return '💡 First time — start light and focus on form';
+      return '💡 First time — start light and focus on form to establish a baseline.';
     }
 
     // Prioritise true working sets. Fall back to superset working sets if needed.
@@ -515,65 +547,28 @@ class WorkoutService extends ChangeNotifier {
         : lastEntry.sets.where((s) => s.isMainWorkingSet).toList();
     if (sets.isEmpty) {
       // Last session had only warm-ups logged — treat as first time
-      return '💡 No working sets last time — find your working weight';
+      return '💡 No working sets last time — find your working weight baseline today.';
     }
 
     final topW = sets.map((s) => s.weight).reduce(max);
-    final avgReps =
-        sets.fold<double>(0, (sum, s) => sum + s.reps) / sets.length;
-    final allTop = sets.every((s) => s.reps >= repMax);
-    final allMin = sets.every((s) => s.reps >= repMin);
-    final missed = sets.any((s) => s.reps < repMin - 1);
+    final topReps = sets.map((s) => s.reps).reduce(max);
 
-    if (missed) return '→ Same weight — hit all reps before progressing';
-    if (!allMin) return '→ Keep same weight and beat reps next time';
-    if (!allTop && avgReps >= repMin + ((repMax - repMin) / 2)) {
-      return '→ This looks like a stable working weight — try one more rep before adding load';
-    }
-    if (!allTop) return '→ Push reps — aim for $repMax on your working sets';
+    final type = exercise.type;
+    final increment = type == ExerciseType.barbellCompound
+        ? 2.5
+        : type == ExerciseType.dumbbell
+            ? 2.0
+            : type == ExerciseType.cableMachine
+                ? 5.0
+                : 2.0;
 
-    // All working sets hit top range — type-specific progression
-    switch (exercise.type) {
-      case ExerciseType.barbellCompound:
-        final next = topW + 2.5;
-        return '↑ You can likely increase weight next session — try ${next.toStringAsFixed(1)} kg';
-
-      case ExerciseType.dumbbell:
-        final next = topW + 2.0;
-        return '↑ Strong session — move to ${next.toStringAsFixed(1)} kg dumbbells if form stays clean';
-
-      case ExerciseType.cableMachine:
-        final next = topW + 5.0;
-        return '↑ You can likely add a plate next time — try ${next.toStringAsFixed(0)} kg';
-
-      case ExerciseType.isolation:
-        // Check if same weight for 2 consecutive sessions before adding load
-        final history = historyFor(exercise.id, limit: 2);
-        final repeatedAtSameWeight =
-            history.length >= 2 &&
-            history[0].entry.sets.isNotEmpty &&
-            history[1].entry.sets.isNotEmpty &&
-            (history[0].entry.sets.map((s) => s.weight).reduce(max) -
-                        history[1].entry.sets.map((s) => s.weight).reduce(max))
-                    .abs() <
-                0.5;
-        if (repeatedAtSameWeight) {
-          final next = topW + 2.5;
-          return '↑ Consistent at this load — step up to ${next.toStringAsFixed(1)} kg next time';
-        }
-        return '→ Good isolation working weight — match or beat reps once more before adding load';
-
-      case ExerciseType.bodyweight:
-        // Bodyweight: beat reps twice, then suggest adding load
-        final history2 = historyFor(exercise.id, limit: 2);
-        final bothMaxReps =
-            history2.length >= 2 &&
-            history2[0].entry.sets.every((s) => s.reps >= repMax) &&
-            history2[1].entry.sets.every((s) => s.reps >= repMax);
-        if (bothMaxReps) {
-          return '↑ Add resistance — try a plate or resistance band next time';
-        }
-        return '→ Push for $repMax clean reps before adding load';
+    if (topReps >= 10) {
+      final next = topW + increment;
+      return '↑ Exceeded previous performance. Try increasing weight to ${next.toStringAsFixed(next == next.truncateToDouble() ? 0 : 1)} kg next session.';
+    } else if (topReps < 6) {
+      return '→ Weight was heavy last session ($topReps reps). Keep load at ${topW.toStringAsFixed(topW == topW.truncateToDouble() ? 0 : 1)} kg and focus on building reps.';
+    } else {
+      return '→ Aim to match or beat ${topReps + 1} reps at ${topW.toStringAsFixed(topW == topW.truncateToDouble() ? 0 : 1)} kg next session.';
     }
   }
 
@@ -614,6 +609,29 @@ class WorkoutService extends ChangeNotifier {
         )
         .join(', ');
     return 'Last: $parts';
+  }
+
+  void trackRecommendationAccepted(String exerciseId, String splitDayName) {
+    final key = '$splitDayName:$exerciseId';
+    _additionAcceptedCounts[key] = (_additionAcceptedCounts[key] ?? 0) + 1;
+    _persist();
+    notifyListeners();
+  }
+
+  void trackRecommendationIgnored(String exerciseId, String splitDayName) {
+    final key = '$splitDayName:$exerciseId';
+    _additionIgnoredCounts[key] = (_additionIgnoredCounts[key] ?? 0) + 1;
+    _persist();
+    notifyListeners();
+  }
+
+  double getRecommendationAcceptanceRate(String exerciseId, String splitDayName) {
+    final key = '$splitDayName:$exerciseId';
+    final accepted = _additionAcceptedCounts[key] ?? 0;
+    final ignored = _additionIgnoredCounts[key] ?? 0;
+    final total = accepted + ignored;
+    if (total == 0) return 0.0;
+    return accepted / total;
   }
 
   // ── Custom exercise write API ─────────────────────────────────────────────
@@ -764,6 +782,28 @@ class WorkoutService extends ChangeNotifier {
             debugPrint('[WorkoutService] draftStartedAt parse error: $e');
           }
         }
+        if (data['additionAcceptedCounts'] != null) {
+          try {
+            final map = data['additionAcceptedCounts'] as Map<String, dynamic>;
+            _additionAcceptedCounts.clear();
+            map.forEach((k, v) {
+              if (v is int) _additionAcceptedCounts[k] = v;
+            });
+          } catch (e) {
+            debugPrint('[WorkoutService] additionAcceptedCounts parse error: $e');
+          }
+        }
+        if (data['additionIgnoredCounts'] != null) {
+          try {
+            final map = data['additionIgnoredCounts'] as Map<String, dynamic>;
+            _additionIgnoredCounts.clear();
+            map.forEach((k, v) {
+              if (v is int) _additionIgnoredCounts[k] = v;
+            });
+          } catch (e) {
+            debugPrint('[WorkoutService] additionIgnoredCounts parse error: $e');
+          }
+        }
       }
     } catch (e) {
       // Only a total JSON decode failure reaches here — individual field
@@ -793,6 +833,8 @@ class WorkoutService extends ChangeNotifier {
     _setupDone = false;
     _ready = false;
     _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _additionAcceptedCounts.clear();
+    _additionIgnoredCounts.clear();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kData);
@@ -827,6 +869,8 @@ class WorkoutService extends ChangeNotifier {
           if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
           if (_draftStartedAt != null)
             'draftStartedAt': _draftStartedAt!.toIso8601String(),
+          'additionAcceptedCounts': _additionAcceptedCounts,
+          'additionIgnoredCounts': _additionIgnoredCounts,
         }),
       );
     } catch (e) {

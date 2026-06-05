@@ -69,6 +69,14 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   final Map<String, double> _scrollOffsets = {};
   String _sessionNotes = '';
 
+  // Execution tracking maps
+  final Map<String, bool> _skippedExercises = {};
+  final Map<String, String> _skipReasons = {};
+  final Map<String, bool> _substitutedExercises = {};
+  final Map<String, String> _substitutedForIds = {};
+  final Map<String, String> _substitutedForNames = {};
+  final Map<String, bool> _temporaryAdditions = {};
+
   final _service = WorkoutService.instance;
   late DateTime _startTime;
 
@@ -112,6 +120,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           if (matchingEntry.notes != null) {
             _exerciseNotes[ex.id] = matchingEntry.notes!;
           }
+          // Restore draft execution state
+          _skippedExercises[ex.id] = matchingEntry.isSkipped;
+          if (matchingEntry.skipReason != null) {
+            _skipReasons[ex.id] = matchingEntry.skipReason!;
+          }
+          _substitutedExercises[ex.id] = matchingEntry.isSubstitution;
+          if (matchingEntry.substitutedForExerciseId != null) {
+            _substitutedForIds[ex.id] = matchingEntry.substitutedForExerciseId!;
+          }
+          if (matchingEntry.substitutedForExerciseName != null) {
+            _substitutedForNames[ex.id] = matchingEntry.substitutedForExerciseName!;
+          }
+          _temporaryAdditions[ex.id] = matchingEntry.isTemporaryAddition;
         }
       }
 
@@ -171,6 +192,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       'sessionNotes': _sessionNotes,
       'exerciseNotes': _exerciseNotes,
       'scrollOffsets': _scrollOffsets,
+      'sessionExercises': _sessionExercises.map((e) => e.toJson()).toList(),
+      'skippedExercises': _skippedExercises,
+      'skipReasons': _skipReasons,
+      'substitutedExercises': _substitutedExercises,
+      'substitutedForIds': _substitutedForIds,
+      'substitutedForNames': _substitutedForNames,
+      'temporaryAdditions': _temporaryAdditions,
     };
     await prefs.setString('kynetix_workout_recovery', jsonEncode(recoveryData));
     _saveDraftSessionState();
@@ -183,6 +211,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       try {
         final data = jsonDecode(recoveryJson) as Map<String, dynamic>;
         setState(() {
+          final rawExercises = data['sessionExercises'] as List<dynamic>?;
+          if (rawExercises != null) {
+            _sessionExercises = rawExercises
+                .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
+                .toList();
+          }
+
           _selectedIndex = (data['selectedIndex'] as int? ?? 0).clamp(0, _sessionExercises.length - 1);
           
           final setTypeMap = data['setTypeSelections'] as Map<String, dynamic>?;
@@ -231,6 +266,36 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
             });
           }
 
+          final skipped = data['skippedExercises'] as Map<String, dynamic>?;
+          if (skipped != null) {
+            skipped.forEach((k, v) => _skippedExercises[k] = v as bool);
+          }
+
+          final skipReasons = data['skipReasons'] as Map<String, dynamic>?;
+          if (skipReasons != null) {
+            skipReasons.forEach((k, v) => _skipReasons[k] = v as String);
+          }
+
+          final subbed = data['substitutedExercises'] as Map<String, dynamic>?;
+          if (subbed != null) {
+            subbed.forEach((k, v) => _substitutedExercises[k] = v as bool);
+          }
+
+          final subbedIds = data['substitutedForIds'] as Map<String, dynamic>?;
+          if (subbedIds != null) {
+            subbedIds.forEach((k, v) => _substitutedForIds[k] = v as String);
+          }
+
+          final subbedNames = data['substitutedForNames'] as Map<String, dynamic>?;
+          if (subbedNames != null) {
+            subbedNames.forEach((k, v) => _substitutedForNames[k] = v as String);
+          }
+
+          final tempAdditions = data['temporaryAdditions'] as Map<String, dynamic>?;
+          if (tempAdditions != null) {
+            tempAdditions.forEach((k, v) => _temporaryAdditions[k] = v as bool);
+          }
+
           final timerStartedAt = data['timerStartedAt'] as String?;
           if (timerStartedAt != null) {
             final parsed = DateTime.tryParse(timerStartedAt);
@@ -252,14 +317,20 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _saveDraftSessionState() {
-    if (_isSaving || _isDiscarding || _totalSets == 0) return;
+    if (_isSaving || _isDiscarding) return;
     final entries = _sessionExercises
-        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty)
         .map((ex) => ExerciseEntry(
               exercise: ex,
-              sets: _sets[ex.id]!,
+              sets: _sets[ex.id] ?? [],
               notes: _exerciseNotes[ex.id],
+              isSkipped: _skippedExercises[ex.id] ?? false,
+              skipReason: _skipReasons[ex.id],
+              isSubstitution: _substitutedExercises[ex.id] ?? false,
+              substitutedForExerciseId: _substitutedForIds[ex.id],
+              substitutedForExerciseName: _substitutedForNames[ex.id],
+              isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
             ))
+        .where((entry) => !entry.isEmpty)
         .toList();
     if (entries.isEmpty) return;
 
@@ -273,6 +344,231 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       notes: _sessionNotes,
     );
     _service.saveDraftSession(draft, startedAt: _startTime);
+  }
+
+  // ── Execution Handling Operations ────────────────────────────────────────
+
+  void _skipExercise(String exerciseId, String reason) {
+    setState(() {
+      _skippedExercises[exerciseId] = true;
+      _skipReasons[exerciseId] = reason;
+      _sets[exerciseId] = []; // Clear sets on skip
+    });
+    _spawnFloatingText('Exercise Skipped');
+    HapticFeedback.mediumImpact();
+    _updateLiveScore();
+    _saveRecoveryState();
+  }
+
+  void _undoSkip(String exerciseId) {
+    setState(() {
+      _skippedExercises[exerciseId] = false;
+      _skipReasons.remove(exerciseId);
+    });
+    HapticFeedback.lightImpact();
+    _updateLiveScore();
+    _saveRecoveryState();
+  }
+
+  void _replaceExercise(String originalId, Exercise replacement) {
+    final idx = _sessionExercises.indexWhere((e) => e.id == originalId);
+    if (idx == -1) return;
+    
+    setState(() {
+      _skippedExercises[originalId] = true;
+      _skipReasons[originalId] = 'Substituted';
+      _substitutedExercises[originalId] = true;
+      
+      final repId = replacement.id;
+      _sets[repId] = [];
+      _setTypeSelections[repId] = SetType.normal;
+      _rpeSelections[repId] = 8.0;
+      _weightSelections[repId] = 40.0;
+      _repsSelections[repId] = 10;
+      
+      _substitutedExercises[repId] = true;
+      _substitutedForIds[repId] = originalId;
+      final originalEx = _sessionExercises[idx];
+      _substitutedForNames[repId] = originalEx.name;
+      
+      _sessionExercises.insert(idx + 1, replacement);
+      _selectedIndex = idx + 1;
+    });
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.animateToPage(
+          _selectedIndex,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
+    _spawnFloatingText('Substituted');
+    HapticFeedback.mediumImpact();
+    _updateLiveScore();
+    _saveRecoveryState();
+  }
+
+  void _undoReplacement(String originalId) {
+    final idx = _sessionExercises.indexWhere((e) => _substitutedForIds[e.id] == originalId);
+    setState(() {
+      _skippedExercises[originalId] = false;
+      _skipReasons.remove(originalId);
+      _substitutedExercises.remove(originalId);
+      
+      if (idx != -1) {
+        final replacement = _sessionExercises[idx];
+        _sessionExercises.removeAt(idx);
+        _sets.remove(replacement.id);
+        _weightSelections.remove(replacement.id);
+        _repsSelections.remove(replacement.id);
+        _rpeSelections.remove(replacement.id);
+        _setTypeSelections.remove(replacement.id);
+        _substitutedExercises.remove(replacement.id);
+        _substitutedForIds.remove(replacement.id);
+        _substitutedForNames.remove(replacement.id);
+      }
+      
+      final originalIdx = _sessionExercises.indexWhere((e) => e.id == originalId);
+      if (originalIdx != -1) {
+        _selectedIndex = originalIdx;
+      }
+    });
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+    });
+    HapticFeedback.lightImpact();
+    _updateLiveScore();
+    _saveRecoveryState();
+  }
+
+  Future<void> _addExtraExercise(Exercise relativeTo, bool before) async {
+    final currentIds = _sessionExercises.map((e) => e.id).toSet();
+    final available = _service.allExercises
+        .where((e) => !currentIds.contains(e.id))
+        .toList();
+    
+    final picked = await showModalBottomSheet<Exercise>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _SessionExercisePickerSheet(exercises: available),
+    );
+
+    if (!mounted || picked == null) return;
+    
+    final relIdx = _sessionExercises.indexOf(relativeTo);
+    if (relIdx == -1) return;
+    
+    final insertIdx = before ? relIdx : relIdx + 1;
+    
+    setState(() {
+      _sessionExercises.insert(insertIdx, picked);
+      _sets[picked.id] = [];
+      _setTypeSelections[picked.id] = SetType.normal;
+      _rpeSelections[picked.id] = 8.0;
+      _weightSelections[picked.id] = 40.0;
+      _repsSelections[picked.id] = 10;
+      _temporaryAdditions[picked.id] = true;
+      _selectedIndex = insertIdx;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+    });
+    _saveRecoveryState();
+  }
+
+  Future<void> _showReplacementPicker(String originalId) async {
+    final currentIds = _sessionExercises.map((e) => e.id).toSet();
+    final available = _service.allExercises
+        .where((e) => !currentIds.contains(e.id))
+        .toList();
+
+    final picked = await showModalBottomSheet<Exercise>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _SessionExercisePickerSheet(exercises: available),
+    );
+
+    if (picked != null) {
+      _replaceExercise(originalId, picked);
+    }
+  }
+
+  void _showReorderSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return _ReorderExercisesSheet(
+          exercises: _sessionExercises,
+          onReorder: (oldIndex, newIndex) {
+            setState(() {
+              if (oldIndex < newIndex) {
+                newIndex -= 1;
+              }
+              final Exercise item = _sessionExercises.removeAt(oldIndex);
+              _sessionExercises.insert(newIndex, item);
+              
+              if (_selectedIndex == oldIndex) {
+                _selectedIndex = newIndex;
+              } else if (oldIndex < _selectedIndex && newIndex >= _selectedIndex) {
+                _selectedIndex -= 1;
+              } else if (oldIndex > _selectedIndex && newIndex <= _selectedIndex) {
+                _selectedIndex += 1;
+              }
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_pageController.hasClients) {
+                _pageController.jumpToPage(_selectedIndex);
+              }
+            });
+            _saveRecoveryState();
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _addExercisePermanently(Exercise exercise) async {
+    final currentSplit = _service.split;
+    final days = currentSplit.days.map((day) {
+      if (day.name == widget.splitDay.name) {
+        if (!day.exercises.any((e) => e.id == exercise.id)) {
+          return day.copyWith(exercises: [...day.exercises, exercise]);
+        }
+      }
+      return day;
+    }).toList();
+    
+    final updatedSplit = currentSplit.copyWith(days: days);
+    await _service.saveSplit(updatedSplit);
+    
+    // Track recommendation acceptance
+    _service.trackRecommendationAccepted(exercise.id, widget.splitDay.name);
+    
+    setState(() {
+      _temporaryAdditions[exercise.id] = false;
+    });
+    
+    _spawnFloatingText('Added to ${widget.splitDay.name}!');
+    HapticFeedback.heavyImpact();
   }
 
   // ── Getters & Stats ──────────────────────────────────────────────────────
@@ -292,7 +588,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   double get _completionProgress {
     if (_sessionExercises.isEmpty) return 0.0;
-    final completedCount = _sessionExercises.where((ex) => (_sets[ex.id] ?? []).isNotEmpty).length;
+    final completedCount = _sessionExercises
+        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty || (_skippedExercises[ex.id] == true))
+        .length;
     return completedCount / _sessionExercises.length;
   }
 
@@ -303,7 +601,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     }
     
     // 1. Completion of exercises (up to 30 points)
-    final completedCount = _sessionExercises.where((ex) => (_sets[ex.id] ?? []).isNotEmpty).length;
+    final completedCount = _sessionExercises
+        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty || (_skippedExercises[ex.id] == true))
+        .length;
     final completionScore = (completedCount / _sessionExercises.length) * 30;
     
     // 2. Volume score (up to 30 points)
@@ -312,12 +612,17 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final volumeScore = lastVolume > 0 ? (currentVolume / lastVolume * 30).clamp(0.0, 30.0) : 15.0;
     
     // 3. Set completion score (up to 25 points)
-    double targetSetsScore = 0.0;
+    // Reward logging sets: based on logging sets vs standard baseline (3 sets per non-skipped exercise)
+    double loggedSetsScore = 0.0;
+    int activeExercises = 0;
     for (final ex in _sessionExercises) {
+      final isSkipped = _skippedExercises[ex.id] ?? false;
+      if (isSkipped) continue;
+      activeExercises++;
       final logged = (_sets[ex.id] ?? []).length;
-      targetSetsScore += (logged / ex.targetSets.toDouble()).clamp(0.0, 1.0);
+      loggedSetsScore += (logged / 3.0).clamp(0.0, 1.0);
     }
-    final setsScore = _sessionExercises.isNotEmpty ? (targetSetsScore / _sessionExercises.length) * 25 : 0.0;
+    final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25 : 25.0;
     
     // 4. PRs score (up to 15 points)
     int prCount = 0;
@@ -350,7 +655,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final isPr = previousBest == null || newSet.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
 
     setState(() {
-      _sets[ex.id]!.add(newSet);
+      (_sets[ex.id] ??= []).add(newSet);
     });
 
     _spawnFloatingText('+1 Set\n+${(w * r).toStringAsFixed(0)} kg');
@@ -363,15 +668,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _triggerPRNotification(w, r, newSet.estimatedOneRepMax);
     }
 
-    // Auto-advance to next exercise if all planned sets completed
-    final completedSets = _sets[ex.id]!.length;
-    if (completedSets >= ex.targetSets && _selectedIndex < _sessionExercises.length - 1) {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          _pageController.nextPage(duration: const Duration(milliseconds: 400), curve: Curves.easeOutCubic);
-        }
-      });
-    }
   }
 
   void _triggerPRNotification(double weight, int reps, double e1rm) {
@@ -428,17 +724,27 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // ── Completion Screen & Finish ───────────────────────────────────────────
 
   Future<void> _finish() async {
-    if (_totalSets == 0) {
-      _showSnack('Log at least one set before finishing.');
+    final entries = _sessionExercises
+        .map((ex) => ExerciseEntry(
+              exercise: ex,
+              sets: _sets[ex.id] ?? [],
+              notes: _exerciseNotes[ex.id],
+              isSkipped: _skippedExercises[ex.id] ?? false,
+              skipReason: _skipReasons[ex.id],
+              isSubstitution: _substitutedExercises[ex.id] ?? false,
+              substitutedForExerciseId: _substitutedForIds[ex.id],
+              substitutedForExerciseName: _substitutedForNames[ex.id],
+              isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
+            ))
+        .where((entry) => !entry.isEmpty)
+        .toList();
+
+    if (entries.isEmpty) {
+      _showSnack('Log at least one set or skip/substitute an exercise before finishing.');
       return;
     }
 
     setState(() => _isSaving = true);
-
-    final entries = _sessionExercises
-        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty)
-        .map((ex) => ExerciseEntry(exercise: ex, sets: _sets[ex.id]!))
-        .toList();
 
     final session = WorkoutSession(
       id: 'ws_${DateTime.now().millisecondsSinceEpoch}',
@@ -447,7 +753,17 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       splitDayWeekday: widget.splitDay.weekday == 0 ? null : widget.splitDay.weekday,
       wasManuallySelected: widget.wasManuallySelected,
       entries: entries,
+      notes: _sessionNotes,
+      durationMinutes: DateTime.now().difference(_startTime).inMinutes,
     );
+
+    // Track ignored recommendations for temporary additions that were not made permanent
+    for (final ex in _sessionExercises) {
+      if (_temporaryAdditions[ex.id] == true &&
+          _service.getRecurringAdditions(widget.splitDay.name).any((re) => re.exercise.id == ex.id)) {
+        _service.trackRecommendationIgnored(ex.id, widget.splitDay.name);
+      }
+    }
 
     await _service.saveSession(session);
 
@@ -716,6 +1032,22 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               },
                               onDuplicateSets: _duplicateLastSet,
                               onOpenHistory: () => _openHistory(ex),
+                              isSkipped: _skippedExercises[ex.id] ?? false,
+                              skipReason: _skipReasons[ex.id],
+                              isSubstitution: _substitutedExercises[ex.id] ?? false,
+                              substitutedForName: _substitutedForNames[ex.id],
+                              isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
+                              isRecurringAddition: _service
+                                  .getRecurringAdditions(widget.splitDay.name)
+                                  .any((re) => re.exercise.id == ex.id),
+                              splitDayName: widget.splitDay.name,
+                              onSkipExercise: (reason) => _skipExercise(ex.id, reason),
+                              onUndoSkip: () => _undoSkip(ex.id),
+                              onReplaceExercise: (replacement) => _showReplacementPicker(ex.id),
+                              onAddExtraExercise: (relativeTo, before) => _addExtraExercise(relativeTo, before),
+                              onReorderExercises: _showReorderSheet,
+                              onUndoReplacement: () => _undoReplacement(ex.id),
+                              onAddPermanently: () => _addExercisePermanently(ex),
                             );
                           },
                         );
@@ -729,13 +1061,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
             ),
 
             // Pinned Bottom Command Center Dock
-            Positioned(
+             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: _BottomDockWidget(
                 exercises: _sessionExercises,
                 sets: _sets,
+                skippedExercises: _skippedExercises,
+                substitutedExercises: _substitutedExercises,
+                temporaryAdditions: _temporaryAdditions,
                 selectedIndex: _selectedIndex,
                 onPrevious: () {
                   if (_selectedIndex > 0) {
@@ -750,6 +1085,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 onLogSet: _logSet,
                 onAddExercise: _addExerciseToSession,
                 onRemoveExercise: () => _removeExerciseFromSession(_selectedIndex),
+                onSelectExercise: (index) {
+                  setState(() => _selectedIndex = index);
+                  _pageController.jumpToPage(index);
+                },
               ),
             ),
 
@@ -963,6 +1302,24 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onDuplicateSets;
   final VoidCallback onOpenHistory;
 
+  // Execution tracking properties
+  final bool isSkipped;
+  final String? skipReason;
+  final bool isSubstitution;
+  final String? substitutedForName;
+  final bool isTemporaryAddition;
+  final bool isRecurringAddition;
+  final String splitDayName;
+
+  // Execution callbacks
+  final Function(String) onSkipExercise;
+  final VoidCallback onUndoSkip;
+  final Function(Exercise) onReplaceExercise;
+  final Function(Exercise, bool) onAddExtraExercise;
+  final VoidCallback onReorderExercises;
+  final VoidCallback onUndoReplacement;
+  final VoidCallback onAddPermanently;
+
   const _ExerciseWorkoutPage({
     required this.exercise,
     required this.sets,
@@ -983,6 +1340,20 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.onRemoveSet,
     required this.onDuplicateSets,
     required this.onOpenHistory,
+    required this.isSkipped,
+    required this.skipReason,
+    required this.isSubstitution,
+    this.substitutedForName,
+    required this.isTemporaryAddition,
+    required this.isRecurringAddition,
+    required this.splitDayName,
+    required this.onSkipExercise,
+    required this.onUndoSkip,
+    required this.onReplaceExercise,
+    required this.onAddExtraExercise,
+    required this.onReorderExercises,
+    required this.onUndoReplacement,
+    required this.onAddPermanently,
   });
 
   @override
@@ -1001,6 +1372,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   double? _selectedRpe;
   late SetType _selectedSetType;
   bool _showGlowPulse = false;
+  bool _showCues = false;
 
   // Cache dial options
   final List<double> _weightOptions = List.generate(701, (i) => i * 0.5); // 0.0 to 350.0 kg
@@ -1051,15 +1423,46 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       final wIndex = (_selectedWeight / 0.5).round().clamp(0, 700);
       final rIndex = (_selectedReps - 1).clamp(0, 99);
 
-      _weightScrollController.jumpToItem(wIndex);
-      _repsScrollController.jumpToItem(rIndex);
+      if (_weightScrollController.hasClients) {
+        _weightScrollController.jumpToItem(wIndex);
+      }
+      if (_repsScrollController.hasClients) {
+        _repsScrollController.jumpToItem(rIndex);
+      }
 
       _notesController.text = widget.initialNotes;
       _sessionNotesController.text = widget.sessionNotes;
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(widget.initialScrollOffset);
       }
-    } else if (widget.sets.length > oldWidget.sets.length) {
+    } else {
+      // Exercise is the same, but values might have restored asynchronously
+      if (_selectedWeight != widget.initialWeight) {
+        _selectedWeight = widget.initialWeight;
+        final wIndex = (_selectedWeight / 0.5).round().clamp(0, 700);
+        if (_weightScrollController.hasClients) {
+          _weightScrollController.jumpToItem(wIndex);
+        }
+      }
+      if (_selectedReps != widget.initialReps) {
+        _selectedReps = widget.initialReps;
+        final rIndex = (_selectedReps - 1).clamp(0, 99);
+        if (_repsScrollController.hasClients) {
+          _repsScrollController.jumpToItem(rIndex);
+        }
+      }
+      if (_selectedRpe != widget.initialRpe) {
+        _selectedRpe = widget.initialRpe;
+      }
+      if (_selectedSetType != widget.initialSetType) {
+        _selectedSetType = widget.initialSetType;
+      }
+      if (_scrollController.hasClients && _scrollController.offset != widget.initialScrollOffset) {
+        _scrollController.jumpTo(widget.initialScrollOffset);
+      }
+    }
+
+    if (widget.sets.length > oldWidget.sets.length) {
       setState(() {
         _showGlowPulse = true;
       });
@@ -1104,27 +1507,131 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   void _adjustWeight(double delta) {
     final newW = (_selectedWeight + delta).clamp(0.0, 350.0);
     final index = (newW / 0.5).round();
-    _weightScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
+    if (_weightScrollController.hasClients) {
+      _weightScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
+    }
   }
 
   void _adjustReps(int delta) {
     final newR = (_selectedReps + delta).clamp(1, 100);
     final index = newR - 1;
-    _repsScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
+    if (_repsScrollController.hasClients) {
+      _repsScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
+    }
+  }
+
+  void _showActionsMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _ExerciseActionsSheet(
+        exercise: widget.exercise,
+        isSkipped: widget.isSkipped,
+        isSubstitution: widget.isSubstitution,
+        isTemporaryAddition: widget.isTemporaryAddition,
+        onSkip: widget.onSkipExercise,
+        onUndoSkip: widget.onUndoSkip,
+        onReplace: () => widget.onReplaceExercise(widget.exercise),
+        onReorder: widget.onReorderExercises,
+        onAddBefore: () => widget.onAddExtraExercise(widget.exercise, true),
+        onAddAfter: () => widget.onAddExtraExercise(widget.exercise, false),
+        onUndoReplacement: widget.onUndoReplacement,
+      ),
+    );
+  }
+
+  Widget _buildSkippedBanner() {
+    final isSub = widget.skipReason == 'Substituted';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141624).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: KColor.border, width: 0.5),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            isSub ? Icons.swap_horiz_rounded : Icons.block_rounded,
+            color: isSub ? KColor.blue : KColor.danger,
+            size: 44,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            isSub ? 'EXERCISE SUBSTITUTED' : 'EXERCISE SKIPPED',
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isSub 
+                ? 'Replaced by another exercise in this session.' 
+                : 'Reason: ${widget.skipReason ?? "Not specified"}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: KColor.textMuted, fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: isSub ? widget.onUndoReplacement : widget.onUndoSkip,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: Text(isSub ? 'Undo Substitution' : 'Re-enable Exercise'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E1E2C),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              side: const BorderSide(color: Color(0xFF3E3E50), width: 0.5),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final hint = WorkoutService.instance.progressionHint(widget.lastEntry, widget.exercise);
+    if (widget.isSkipped) {
+      if (widget.isWideLayout) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 5,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: _buildHeroSection(),
+              ),
+            ),
+            Expanded(
+              flex: 5,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: _buildSkippedBanner(),
+              ),
+            ),
+          ],
+        );
+      } else {
+        return ListView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          children: [
+            _buildHeroSection(),
+            const SizedBox(height: 14),
+            _buildSkippedBanner(),
+          ],
+        );
+      }
+    }
 
     final leftCol = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildHeroSection(),
-        const SizedBox(height: 12),
-        _buildVisualTorsoCuesCard(),
-        const SizedBox(height: 12),
-        _buildCoachingBanner(hint),
       ],
     );
 
@@ -1133,11 +1640,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       children: [
         _buildDialConsolePanel(),
         const SizedBox(height: 12),
-        _buildSetTypeAndRpeSelectors(),
-        const SizedBox(height: 16),
-        _buildLoggedSetsCardsSection(),
-        const SizedBox(height: 16),
-        _buildSessionNotesCard(),
+        _buildLoggedSetsAndSessionNotesJournal(),
       ],
     );
 
@@ -1175,28 +1678,179 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     }
   }
 
-  Widget _buildSessionNotesCard() {
+  Widget _buildLoggedSetsAndSessionNotesJournal() {
+    final setsList = widget.sets;
+    final totalVol = setsList.fold(0.0, (s, e) => s + e.volume);
+
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF141624).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: KColor.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'LOGGED SETS (${setsList.length})',
+                style: const TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+              ),
+              if (setsList.isNotEmpty)
+                Text(
+                  'Volume: ${totalVol.toStringAsFixed(0)} kg',
+                  style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          
+          if (setsList.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: Text(
+                  'No sets logged yet. Complete a set below to begin.',
+                  style: TextStyle(color: KColor.textMuted, fontSize: 12),
+                ),
+              ),
+            )
+          else ...[
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: setsList.length,
+              separatorBuilder: (context, index) => const Divider(color: KColor.border, height: 1),
+              itemBuilder: (context, i) {
+                final s = setsList[i];
+                final previousBest = WorkoutService.instance.bestSetBefore(widget.exercise.id, DateTime.now());
+                final isPr = previousBest == null || s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+
+                return TweenAnimationBuilder<double>(
+                  key: ValueKey(s.hashCode ^ i),
+                  tween: Tween<double>(begin: 0.0, end: 1.0),
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutBack,
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: 0.92 + (value * 0.08),
+                      child: Opacity(
+                        opacity: value,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      children: [
+                        // Set number badge
+                        Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: isPr ? KColor.amber.withValues(alpha: 0.15) : const Color(0xFF13131F),
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            '${i + 1}',
+                            style: TextStyle(
+                              color: isPr ? KColor.amber : KColor.textSecondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Weight x Reps
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${s.reps} reps',
+                                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                    decoration: BoxDecoration(
+                                      color: _setTypeColor(s.setType).withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    child: Text(
+                                      s.setType.shortLabel,
+                                      style: TextStyle(
+                                        color: _setTypeColor(s.setType),
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (s.rpe != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  'RPE ${s.rpe} • ${s.volume.toStringAsFixed(0)} kg volume',
+                                  style: const TextStyle(color: KColor.textMuted, fontSize: 10),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (isPr) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: KColor.amber.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: KColor.amber.withValues(alpha: 0.3), width: 0.5),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.workspace_premium_rounded, color: KColor.amber, size: 10),
+                                SizedBox(width: 3),
+                                Text('PR', style: TextStyle(color: KColor.amber, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        GestureDetector(
+                          onTap: () => widget.onRemoveSet(i),
+                          child: const Icon(Icons.remove_circle_rounded, color: Color(0xFF3B3B4F), size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+          
+          const Divider(color: KColor.border, height: 1),
+          const SizedBox(height: 12),
+          
+          // Unified Session Notes at the bottom of the list
           const Row(
             children: [
               Icon(Icons.edit_note_rounded, color: KColor.textSecondary, size: 18),
               SizedBox(width: 8),
               Text(
                 'WORKOUT SESSION NOTES',
-                style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                style: TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           TextField(
             controller: _sessionNotesController,
             maxLines: 2,
@@ -1228,59 +1882,151 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
         ? widget.sets.map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}×${s.reps}').join(', ')
         : 'None';
 
-    // Projected target
-    String projectedStr = 'Pending';
-    final lastTop = widget.lastEntry?.topSet;
-    if (lastTop != null) {
-      final nextWeight = lastTop.weight + (widget.exercise.type == ExerciseType.barbellCompound ? 2.5 : 2.0);
-      projectedStr = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)}kg × ${widget.exercise.targetRepMin}';
-    } else {
-      projectedStr = '40kg × ${widget.exercise.targetRepMin}';
-    }
-
     // Sparkline historical data
     final sparkData = widget.history.reversed
         .map((h) => h.entry.topWorkingSet?.estimatedOneRepMax ?? h.entry.topSet?.estimatedOneRepMax ?? 0.0)
         .where((val) => val > 0.0)
         .toList();
 
-    // Progression coaching logic
+    // Progression Coach Decision Engine (Objective History-Based)
     final lastTopSet = widget.lastEntry?.topSet;
-    String recSet = '';
-    String recReason = '';
+    final currentSets = widget.sets;
+    final bestEver = WorkoutService.instance.bestSetEver(widget.exercise.id);
     
-    if (widget.exercise.type == ExerciseType.bodyweight) {
-      recSet = 'Bodyweight × Max Reps';
-      recReason = widget.lastEntry != null 
-          ? 'Completed ${widget.lastEntry!.topSet?.reps ?? 10} reps last session. Focus on pushing past failure today.'
-          : 'First bodyweight training session. Find your max repetition baseline.';
-    } else if (lastTopSet != null) {
-      final targetMax = widget.exercise.targetRepMax;
-      final targetMin = widget.exercise.targetRepMin;
-      
-      if (lastTopSet.reps >= targetMax) {
-        final step = (widget.exercise.type == ExerciseType.barbellCompound) ? 2.5 : 2.0;
-        final newWeight = lastTopSet.weight + step;
-        recSet = '${newWeight.toStringAsFixed(newWeight == newWeight.truncateToDouble() ? 0 : 1)} kg × $targetMin reps';
-        recReason = 'You hit $targetMax reps last workout (target achieved). Stepping up by +$step kg today.';
-      } else if (lastTopSet.reps < targetMin) {
-        recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × $targetMin reps';
-        recReason = 'Previous session was below target range ($targetMin reps). Keep same weight and focus on control.';
-      } else {
-        recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × $targetMax reps';
-        recReason = 'You completed ${lastTopSet.reps} reps last session. Aim to reach the max target of $targetMax reps before weight jump.';
+    // Calculate typical trends from history
+    double totalSetsCount = 0;
+    int sessionsWithSetsCount = 0;
+    List<int> workingRepsList = [];
+    List<double> workingWeightsList = [];
+    for (final h in widget.history) {
+      final entry = h.entry;
+      if (entry.isSkipped) continue;
+      final sets = entry.sets;
+      if (sets.isEmpty) continue;
+      totalSetsCount += sets.length;
+      sessionsWithSetsCount++;
+      for (final s in sets) {
+        if (s.isMainWorkingSet) {
+          workingRepsList.add(s.reps);
+          workingWeightsList.add(s.weight);
+        }
       }
-    } else {
-      recSet = '40 kg × ${widget.exercise.targetRepMin} reps';
-      recReason = 'No historical log. Establish your starting volume baseline today.';
+    }
+    double typicalSets = 0;
+    int typicalRepMin = 0;
+    int typicalRepMax = 0;
+    double typicalWeight = 0.0;
+    if (sessionsWithSetsCount > 0) {
+      typicalSets = totalSetsCount / sessionsWithSetsCount;
+    }
+    if (workingRepsList.isNotEmpty) {
+      workingRepsList.sort();
+      typicalRepMin = workingRepsList.first;
+      typicalRepMax = workingRepsList.last;
+    }
+    if (workingWeightsList.isNotEmpty) {
+      typicalWeight = workingWeightsList.reduce((a, b) => a + b) / workingWeightsList.length;
     }
 
+    final typicalSetsStr = typicalSets > 0 ? '${typicalSets.toStringAsFixed(0)} sets' : '';
+    final typicalWeightStr = typicalWeight > 0 ? '${typicalWeight.toStringAsFixed(typicalWeight == typicalWeight.truncateToDouble() ? 0 : 1)}kg' : '';
+    final typicalRepsStr = (typicalRepMin > 0 && typicalRepMax > 0)
+        ? (typicalRepMin == typicalRepMax ? '$typicalRepMin reps' : '$typicalRepMin-$typicalRepMax reps')
+        : '';
+    String typicalTrendStr = 'None';
+    if (typicalWeightStr.isNotEmpty) {
+      typicalTrendStr = '$typicalWeightStr × $typicalRepsStr';
+      if (typicalSetsStr.isNotEmpty) {
+        typicalTrendStr += ' ($typicalSetsStr)';
+      }
+    }
+
+    String recSet = '';
+    String recReason = '';
+
+    final type = widget.exercise.type;
+    final increment = type == ExerciseType.barbellCompound
+        ? 2.5
+        : type == ExerciseType.dumbbell
+            ? 2.0
+            : type == ExerciseType.cableMachine
+                ? 5.0
+                : 2.0;
+
+    if (currentSets.isEmpty) {
+      if (lastTopSet != null) {
+        if (lastTopSet.reps >= 10) {
+          final nextWeight = lastTopSet.weight + increment;
+          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+          recReason = 'You completed ${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg last session, exceeding typical volume. Increase weight to $recSet.';
+        } else if (lastTopSet.reps < 6) {
+          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+          recReason = 'Last session was relatively heavy (${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg). Keep weight here and focus on building reps.';
+        } else {
+          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 10 reps';
+          recReason = 'You completed ${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg last session. Strive to hit 10 reps before adding weight.';
+        }
+      } else if (bestEver != null) {
+        recSet = '${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+        recReason = 'Establishing baseline. Lifetime best is ${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps}. Start at or slightly below this to gauge today\'s strength.';
+      } else {
+        final startW = type == ExerciseType.barbellCompound ? 40.0 : 15.0;
+        recSet = '${startW.toStringAsFixed(0)} kg × 8 reps';
+        recReason = 'No previous session logs found. Establish your starting volume baseline today around $recSet.';
+      }
+    } else {
+      final currentWorkingSets = currentSets.where((s) => s.isMainWorkingSet).toList();
+      final currentTopSet = currentWorkingSets.isNotEmpty
+          ? currentWorkingSets.reduce((a, b) => a.estimatedOneRepMax >= b.estimatedOneRepMax ? a : b)
+          : currentSets.last;
+
+      if (lastTopSet != null) {
+        if (currentTopSet.weight > lastTopSet.weight ||
+            (currentTopSet.weight == lastTopSet.weight && currentTopSet.reps > lastTopSet.reps)) {
+          final nextWeight = currentTopSet.weight + increment;
+          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+          recReason = 'You exceeded your previous session performance (${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps) by hitting ${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${currentTopSet.reps} reps today. Increase weight to $recSet.';
+        } else if (currentTopSet.weight == lastTopSet.weight && currentTopSet.reps == lastTopSet.reps) {
+          recSet = '${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${(currentTopSet.reps + 1)} reps';
+          recReason = 'You matched your previous performance (${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps). Push for one more rep at this weight.';
+        } else {
+          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps';
+          recReason = 'Working set completed. Focus on recovery and try to match your previous session best ($recSet).';
+        }
+      } else if (bestEver != null) {
+        if (currentTopSet.weight > bestEver.weight ||
+            (currentTopSet.weight == bestEver.weight && currentTopSet.reps > bestEver.reps)) {
+          final nextWeight = currentTopSet.weight + increment;
+          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+          recReason = 'New Lifetime Best! You exceeded your previous record of ${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps} reps. Recommend stepping up to $recSet.';
+        } else {
+          recSet = '${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps} reps';
+          recReason = 'Set logged. Strive to match your lifetime best of $recSet today.';
+        }
+      } else {
+        if (currentTopSet.reps >= 10) {
+          final nextWeight = currentTopSet.weight + increment;
+          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
+          recReason = 'Strong set of ${currentTopSet.reps} reps. Increase load to $recSet to build intensity.';
+        } else {
+          recSet = '${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 10 reps';
+          recReason = 'Set logged. Focus on matching this weight on subsequent sets and strive for 10 reps.';
+        }
+      }
+    }
+
+    String exTypeLabel = switch (widget.exercise.type) {
+      ExerciseType.barbellCompound => 'Barbell Compound',
+      ExerciseType.dumbbell => 'Dumbbell',
+      ExerciseType.cableMachine => 'Cable Machine',
+      ExerciseType.isolation => 'Isolation',
+      ExerciseType.bodyweight => 'Bodyweight',
+    };
+
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KColor.surface.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: KColor.border, width: 0.5),
+      padding: EdgeInsets.zero,
+      decoration: const BoxDecoration(
+        color: Colors.transparent,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1292,39 +2038,72 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (widget.isSubstitution)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: KColor.blue.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '🔄 REPLACING ${widget.substitutedForName?.toUpperCase()}',
+                            style: const TextStyle(color: KColor.blue, fontSize: 8.5, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
                     Text(
                       widget.exercise.name,
                       style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900),
                     ),
                     Text(
-                      '${widget.exercise.muscleGroup} • target: ${widget.exercise.targetSets} sets • ${widget.exercise.repRangeLabel}',
+                      '${widget.exercise.muscleGroup} • $exTypeLabel',
                       style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.insights_rounded, color: KColor.green, size: 22),
-                onPressed: widget.onOpenHistory,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.insights_rounded, color: KColor.green, size: 22),
+                    onPressed: widget.onOpenHistory,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.tune_rounded, color: KColor.textSecondary, size: 22),
+                    onPressed: _showActionsMenu,
+                  ),
+                ],
               ),
             ],
           ),
           const SizedBox(height: 14),
           Row(
             children: [
-              _buildHeroStatCol('LAST SESSION', lastStr, KColor.textSecondary),
-              _buildHeroStatCol('BEST SET', bestStr, KColor.amber),
-              _buildHeroStatCol('CURRENT SETS', currentStr, KColor.green),
-              _buildHeroStatCol('PROJECTED 1RM', projectedStr, KColor.blue),
+              _buildHeroStatCol('Last Session', lastStr, KColor.textSecondary),
+              _buildHeroStatCol('Typical Trend', typicalTrendStr, KColor.blue),
+              _buildHeroStatCol('Lifetime Best', bestStr, KColor.amber),
+              _buildHeroStatCol('Current Session', currentStr, KColor.green),
             ],
           ),
           const SizedBox(height: 14),
+          
+          // Recommended Next Set Card
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFB347).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.15), width: 0.8),
+              color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.3), width: 1.0),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFFFB347).withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  spreadRadius: 1,
+                )
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1334,7 +2113,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                     const Icon(Icons.offline_bolt_rounded, color: Color(0xFFFFB347), size: 14),
                     const SizedBox(width: 6),
                     Text(
-                      'RECOMMENDED NEXT SET: $recSet',
+                      'Recommended Next Set: $recSet',
                       style: const TextStyle(color: Color(0xFFFFB347), fontSize: 11, fontWeight: FontWeight.w900),
                     ),
                   ],
@@ -1347,6 +2126,59 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ],
             ),
           ),
+
+          // Temporary Exercise Permanent addition recommendation
+          if (widget.isRecurringAddition && widget.isTemporaryAddition) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: KColor.green.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: KColor.green.withValues(alpha: 0.15), width: 1.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: KColor.green.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  )
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded, color: KColor.green, size: 14),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'RECURRING TEMPORARY ADDITION',
+                        style: TextStyle(color: KColor.green, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'You added ${widget.exercise.name} in several recent ${widget.splitDayName} sessions. Add it permanently to this split program?',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: widget.onAddPermanently,
+                    style: TextButton.styleFrom(
+                      backgroundColor: KColor.green.withValues(alpha: 0.12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Add Permanently', style: TextStyle(color: KColor.green, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           if (sparkData.length >= 2) ...[
             const SizedBox(height: 14),
             const Divider(color: KColor.border, height: 1),
@@ -1384,96 +2216,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     );
   }
 
-  // ── Stylized Torso Visual Card ────────────────────────────────────────────
-
-  Widget _buildVisualTorsoCuesCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF141624).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 44,
-                height: 60,
-                child: CustomPaint(
-                  painter: _AnatomicalSilhouettePainter(widget.exercise.muscleGroup),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('EXECUTION CUES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 3),
-                    Text(
-                      widget.exercise.notes?.trim().isNotEmpty == true
-                          ? widget.exercise.notes!.trim()
-                          : 'Maintain alignment, control the eccentric phase, and focus on the stretch-mediated hypertrophy.',
-                      style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35, fontStyle: FontStyle.italic),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          const Divider(color: KColor.border, height: 1),
-          const SizedBox(height: 8),
-          const Text('EXERCISE NOTES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _notesController,
-            maxLines: 2,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-            decoration: const InputDecoration(
-              hintText: 'Tap to add setup details (e.g., seat height, machine settings)...',
-              hintStyle: TextStyle(color: KColor.textMuted, fontSize: 11),
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-
-  Widget _buildCoachingBanner(String hint) {
-    if (hint.isEmpty) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF13131F),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.psychology_rounded, color: KColor.green, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              hint,
-              style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // Cues and silhouette are integrated directly inside Unified Console card
 
   // ── Wheel Dials selectors (Change 1) ──────────────────────────────────────
 
@@ -1651,6 +2394,167 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ),
             ],
           ),
+
+          const SizedBox(height: 16),
+          const Divider(color: KColor.border, height: 1),
+          const SizedBox(height: 12),
+
+          // Set Type Selector Segmented chips
+          _SetTypeSelector(
+            selected: _selectedSetType,
+            onChanged: (type) {
+              setState(() {
+                _selectedSetType = type;
+              });
+              widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, type);
+            },
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: KColor.border, height: 1),
+          const SizedBox(height: 12),
+
+          // Collapsible Cues & Advanced Metrics button
+          InkWell(
+            onTap: () {
+              setState(() {
+                _showCues = !_showCues;
+              });
+              HapticFeedback.selectionClick();
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _showCues ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                    color: KColor.textSecondary,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _showCues ? 'HIDE CUES, ANATOMY & ADVANCED METRICS' : 'SHOW CUES, ANATOMY & ADVANCED METRICS',
+                    style: const TextStyle(
+                      color: KColor.textSecondary,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Expandable cues, anatomy and RPE panel
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 44,
+                        height: 60,
+                        child: CustomPaint(
+                          painter: _AnatomicalSilhouettePainter(widget.exercise.muscleGroup),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('EXECUTION CUES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 3),
+                            Text(
+                              widget.exercise.notes?.trim().isNotEmpty == true
+                                  ? widget.exercise.notes!.trim()
+                                  : 'Maintain alignment, control the eccentric phase, and focus on the stretch-mediated hypertrophy.',
+                              style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35, fontStyle: FontStyle.italic),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(color: KColor.border, height: 1),
+                  const SizedBox(height: 12),
+
+                  // Moved RPE Selector Snapping scale inside advanced drawer
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('RATE OF PERCEIVED EXERTION (RPE)', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [6.0, 7.0, 8.0, 8.5, 9.0, 9.5, 10.0].map((val) {
+                      final isSel = _selectedRpe == val;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                          child: GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setState(() {
+                                _selectedRpe = val;
+                              });
+                              widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: isSel ? KColor.green : const Color(0xFF13131F),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSel ? KColor.green : KColor.border,
+                                  width: 0.5,
+                                ),
+                              ),
+                              child: Text(
+                                val.toString().replaceAll('.0', ''),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: isSel ? Colors.white : KColor.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+
+                  const SizedBox(height: 12),
+                  const Divider(color: KColor.border, height: 1),
+                  const SizedBox(height: 10),
+                  const Text('EXERCISE NOTES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _notesController,
+                    maxLines: 2,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      hintText: 'Tap to add setup details (e.g., seat height, machine settings)...',
+                      hintStyle: TextStyle(color: KColor.textMuted, fontSize: 11),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            crossFadeState: _showCues ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+          ),
         ],
       ),
     );
@@ -1658,231 +2562,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   // ── Set Type & RPE selectors ──────────────────────────────────────────────
 
-  Widget _buildSetTypeAndRpeSelectors() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SetTypeSelector(
-          selected: _selectedSetType,
-          onChanged: (type) {
-            setState(() {
-              _selectedSetType = type;
-            });
-            widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, type);
-          },
-        ),
-        const SizedBox(height: 12),
-        const Text('RATE OF PERCEIVED EXERTION (RPE)', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: KColor.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: KColor.border, width: 0.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Snapping target scale', style: TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold)),
-                  Text(
-                    _selectedRpe == null ? 'None' : 'RPE $_selectedRpe — ${_rpeDescription(_selectedRpe!)}',
-                    style: const TextStyle(color: KColor.green, fontSize: 10.5, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [6.0, 7.0, 8.0, 8.5, 9.0, 9.5, 10.0].map((val) {
-                  final isSel = _selectedRpe == val;
-                  return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                      child: GestureDetector(
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() {
-                            _selectedRpe = val;
-                          });
-                          widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isSel ? KColor.green : const Color(0xFF13131F),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSel ? KColor.green : KColor.border,
-                              width: 0.5,
-                            ),
-                          ),
-                          child: Text(
-                            val.toString().replaceAll('.0', ''),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: isSel ? Colors.white : KColor.textSecondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Logged sets list ──────────────────────────────────────────────────────
-
-  Widget _buildLoggedSetsCardsSection() {
-    if (widget.sets.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'LOGGED SETS (${widget.sets.length})',
-              style: const TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
-            ),
-            Text(
-              'Total Volume: ${widget.sets.fold(0.0, (s, e) => s + e.volume).toStringAsFixed(0)} kg',
-              style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: widget.sets.length,
-          itemBuilder: (context, i) {
-            final s = widget.sets[i];
-            final previousBest = WorkoutService.instance.bestSetBefore(widget.exercise.id, DateTime.now());
-            final isPr = previousBest == null || s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
-
-            return TweenAnimationBuilder<double>(
-              key: ValueKey(s.hashCode ^ i),
-              tween: Tween<double>(begin: 0.0, end: 1.0),
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutBack,
-              builder: (context, value, child) {
-                return Transform.scale(
-                  scale: 0.92 + (value * 0.08),
-                  child: Opacity(
-                    opacity: value,
-                    child: child,
-                  ),
-                );
-              },
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: KColor.surface.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: isPr ? KColor.amber.withValues(alpha: 0.3) : KColor.border, width: 0.8),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: isPr ? KColor.amber.withValues(alpha: 0.15) : const Color(0xFF13131F),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        '${i + 1}',
-                        style: TextStyle(
-                          color: isPr ? KColor.amber : KColor.textSecondary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${s.reps} reps',
-                                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w800),
-                              ),
-                              const SizedBox(width: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: _setTypeColor(s.setType).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  s.setType.shortLabel,
-                                  style: TextStyle(
-                                    color: _setTypeColor(s.setType),
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (s.rpe != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              'RPE ${s.rpe} • ${s.volume.toStringAsFixed(0)} kg volume',
-                              style: const TextStyle(color: KColor.textMuted, fontSize: 10.5),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (isPr) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: KColor.amber.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: KColor.amber.withValues(alpha: 0.3), width: 0.5),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(Icons.workspace_premium_rounded, color: KColor.amber, size: 12),
-                            SizedBox(width: 4),
-                            Text('PR', style: TextStyle(color: KColor.amber, fontSize: 9, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    GestureDetector(
-                      onTap: () => widget.onRemoveSet(i),
-                      child: const Icon(Icons.remove_circle_rounded, color: Color(0xFF3B3B4F), size: 18),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
+  // Deleted _buildSetTypeAndRpeSelectors and _buildLoggedSetsCardsSection (integrated into Unified Console and Training Journal cards)
 
   Color _setTypeColor(SetType type) => switch (type) {
     SetType.normal => KColor.green,
@@ -1998,21 +2678,39 @@ class _DialAdjusterBtn extends StatelessWidget {
 
 // ─── Set Type Selector segmented chips ──────────────────────────────────────
 
-class _SetTypeSelector extends StatelessWidget {
+// ─── Set Type Selector segmented chips ──────────────────────────────────────
+
+class _SetTypeSelector extends StatefulWidget {
   final SetType selected;
   final ValueChanged<SetType> onChanged;
   const _SetTypeSelector({required this.selected, required this.onChanged});
 
   @override
+  State<_SetTypeSelector> createState() => _SetTypeSelectorState();
+}
+
+class _SetTypeSelectorState extends State<_SetTypeSelector> {
+  bool _showAll = false;
+
+  @override
   Widget build(BuildContext context) {
-    final options = [
-      SetType.normal,
-      SetType.warmUp,
-      SetType.dropSet,
-      SetType.supersetA,
-      SetType.supersetB,
-      SetType.burnout,
-    ];
+    final forceShowSelected = widget.selected != SetType.normal && widget.selected != SetType.warmUp;
+    final displayAll = _showAll || forceShowSelected;
+
+    final visibleOptions = displayAll
+        ? [
+            SetType.normal,
+            SetType.warmUp,
+            SetType.dropSet,
+            SetType.supersetA,
+            SetType.supersetB,
+            SetType.burnout,
+          ]
+        : [
+            SetType.normal,
+            SetType.warmUp,
+          ];
+
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
@@ -2020,15 +2718,15 @@ class _SetTypeSelector extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: KColor.border, width: 0.5),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: options.map((type) {
-            final isSelected = selected == type;
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...visibleOptions.map((type) {
+            final isSelected = widget.selected == type;
             return GestureDetector(
               onTap: () {
                 HapticFeedback.selectionClick();
-                onChanged(type);
+                widget.onChanged(type);
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
@@ -2047,8 +2745,38 @@ class _SetTypeSelector extends StatelessWidget {
                 ),
               ),
             );
-          }).toList(),
-        ),
+          }),
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                _showAll = !_showAll;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              color: Colors.transparent,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    displayAll ? ' Less' : ' + More',
+                    style: const TextStyle(
+                      color: KColor.blue,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Icon(
+                    displayAll ? Icons.keyboard_arrow_left_rounded : Icons.keyboard_arrow_right_rounded,
+                    color: KColor.blue,
+                    size: 14,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2059,22 +2787,30 @@ class _SetTypeSelector extends StatelessWidget {
 class _BottomDockWidget extends StatelessWidget {
   final List<Exercise> exercises;
   final Map<String, List<SetEntry>> sets;
+  final Map<String, bool> skippedExercises;
+  final Map<String, bool> substitutedExercises;
+  final Map<String, bool>? temporaryAdditions;
   final int selectedIndex;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onLogSet;
   final VoidCallback onAddExercise;
   final VoidCallback onRemoveExercise;
+  final ValueChanged<int> onSelectExercise;
 
   const _BottomDockWidget({
     required this.exercises,
     required this.sets,
+    required this.skippedExercises,
+    required this.substitutedExercises,
+    this.temporaryAdditions,
     required this.selectedIndex,
     required this.onPrevious,
     required this.onNext,
     required this.onLogSet,
     required this.onAddExercise,
     required this.onRemoveExercise,
+    required this.onSelectExercise,
   });
 
   String _truncateName(String name, int maxLen) {
@@ -2086,8 +2822,8 @@ class _BottomDockWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final activeEx = exercises[selectedIndex];
     final loggedList = sets[activeEx.id] ?? [];
-    final targetSets = activeEx.targetSets;
-    final isDone = loggedList.length >= targetSets;
+    final isSkipped = skippedExercises[activeEx.id] ?? false;
+    final canLog = !isSkipped;
 
     final hasPrev = selectedIndex > 0;
     final hasNext = selectedIndex < exercises.length - 1;
@@ -2111,27 +2847,99 @@ class _BottomDockWidget extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 1. Progress Dots representing Exercise-level completion
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(exercises.length, (idx) {
-              final ex = exercises[idx];
-              final lSets = sets[ex.id]?.length ?? 0;
-              final done = lSets >= ex.targetSets;
-              final active = idx == selectedIndex;
+          // 1. Horizontal scrollable progress pills representing Exercise-level completion
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(exercises.length, (idx) {
+                final ex = exercises[idx];
+                final lSets = sets[ex.id]?.length ?? 0;
+                
+                final skipped = skippedExercises[ex.id] ?? false;
+                final sub = substitutedExercises[ex.id] ?? false;
+                final added = temporaryAdditions != null ? (temporaryAdditions![ex.id] ?? false) : false;
+                final completed = lSets > 0 && !skipped;
+                final active = idx == selectedIndex;
 
-              return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: active ? 16 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: done 
+                String displayLabel = '';
+                if (skipped) {
+                  displayLabel = sub ? '🔄 Replaced' : '🚫 Skipped';
+                } else {
+                  final prefix = added ? '➕ ' : (lSets > 0 ? '✓ ' : '');
+                  displayLabel = '$prefix$lSets set${lSets == 1 ? "" : "s"}';
+                }
+
+                Color bgColor;
+                Color textColor;
+                BorderSide border;
+
+                if (active) {
+                  bgColor = completed 
+                      ? KColor.green.withValues(alpha: 0.2) 
+                      : (skipped 
+                          ? (sub ? KColor.blue.withValues(alpha: 0.2) : KColor.danger.withValues(alpha: 0.2)) 
+                          : KColor.blue.withValues(alpha: 0.2));
+                  textColor = completed 
                       ? KColor.green 
-                      : (active ? KColor.blue : const Color(0xFF2E2E3E)),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              );
-            }),
+                      : (skipped 
+                          ? (sub ? KColor.blue : KColor.danger) 
+                          : KColor.blue);
+                  border = BorderSide(color: textColor, width: 1.5);
+                } else {
+                  bgColor = skipped
+                      ? (sub ? KColor.blue.withValues(alpha: 0.08) : KColor.danger.withValues(alpha: 0.08))
+                      : (completed ? KColor.green.withValues(alpha: 0.08) : const Color(0xFF1E1E2C));
+                  textColor = skipped
+                      ? (sub ? KColor.blue : KColor.danger)
+                      : (completed ? KColor.green : KColor.textSecondary);
+                  border = BorderSide(
+                    color: skipped
+                        ? (sub ? KColor.blue.withValues(alpha: 0.2) : KColor.danger.withValues(alpha: 0.2))
+                        : (completed ? KColor.green.withValues(alpha: 0.2) : const Color(0xFF2E2E3E)),
+                    width: 0.8,
+                  );
+                }
+
+                return GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onSelectExercise(idx);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.fromBorderSide(border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 10,
+                            fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          displayLabel,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
           ),
           const SizedBox(height: 12),
 
@@ -2219,24 +3027,28 @@ class _BottomDockWidget extends StatelessWidget {
                 child: SizedBox(
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: onLogSet,
+                    onPressed: canLog ? onLogSet : null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isDone ? const Color(0xFF1B6A47) : KColor.green,
+                      backgroundColor: isSkipped
+                          ? const Color(0xFF1F1F2E)
+                          : KColor.green,
                       foregroundColor: Colors.white,
                       shadowColor: KColor.green.withValues(alpha: 0.4),
-                      elevation: isDone ? 0 : 8,
+                      elevation: isSkipped ? 0 : 8,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
-                        side: isDone ? const BorderSide(color: KColor.green, width: 1.0) : BorderSide.none,
+                        side: BorderSide.none,
                       ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.add_task_rounded, size: 18),
+                        Icon(isSkipped ? Icons.block_rounded : Icons.add_task_rounded, size: 18),
                         const SizedBox(width: 8),
                         Text(
-                          isDone ? 'LOG EXTRA SET' : 'LOG SET ${loggedList.length + 1}',
+                          isSkipped
+                              ? 'EXERCISE SKIPPED'
+                              : 'LOG SET ${loggedList.length + 1}',
                           style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 0.5),
                         ),
                       ],
@@ -2261,6 +3073,240 @@ class _BottomDockWidget extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Exercise Actions Bottom Sheet ──────────────────────────────────────────
+
+class _ExerciseActionsSheet extends StatelessWidget {
+  final Exercise exercise;
+  final bool isSkipped;
+  final bool isSubstitution;
+  final bool isTemporaryAddition;
+  final Function(String) onSkip;
+  final VoidCallback onUndoSkip;
+  final VoidCallback onReplace;
+  final VoidCallback onReorder;
+  final VoidCallback onAddBefore;
+  final VoidCallback onAddAfter;
+  final VoidCallback onUndoReplacement;
+
+  const _ExerciseActionsSheet({
+    required this.exercise,
+    required this.isSkipped,
+    required this.isSubstitution,
+    required this.isTemporaryAddition,
+    required this.onSkip,
+    required this.onUndoSkip,
+    required this.onReplace,
+    required this.onReorder,
+    required this.onAddBefore,
+    required this.onAddAfter,
+    required this.onUndoReplacement,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Text(
+              'ACTIONS: ${exercise.name.toUpperCase()}',
+              style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF2E2E3E)),
+          if (!isSkipped) ...[
+            ListTile(
+              leading: const Icon(Icons.block_rounded, color: KColor.danger),
+              title: const Text('Skip Exercise', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+              subtitle: const Text('Remove from active sets for today', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showSkipReasonsSheet(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.swap_horiz_rounded, color: KColor.blue),
+              title: const Text('Replace Exercise (Substitute)', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+              subtitle: const Text('Substitute with another exercise', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+              onTap: () {
+                Navigator.of(context).pop();
+                onReplace();
+              },
+            ),
+          ] else ...[
+            ListTile(
+              leading: const Icon(Icons.refresh_rounded, color: KColor.green),
+              title: Text(isSubstitution ? 'Undo Substitution' : 'Re-enable Exercise', style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+              onTap: () {
+                Navigator.of(context).pop();
+                if (isSubstitution) {
+                  onUndoReplacement();
+                } else {
+                  onUndoSkip();
+                }
+              },
+            ),
+          ],
+          ListTile(
+            leading: const Icon(Icons.reorder_rounded, color: KColor.textSecondary),
+            title: const Text('Reorder Exercises', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+            subtitle: const Text('Drag and drop the exercise sequence', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+            onTap: () {
+              Navigator.of(context).pop();
+              onReorder();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.arrow_upward_rounded, color: KColor.textSecondary),
+            title: const Text('Add Exercise Before', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+            onTap: () {
+              Navigator.of(context).pop();
+              onAddBefore();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.arrow_downward_rounded, color: KColor.textSecondary),
+            title: const Text('Add Exercise After', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+            onTap: () {
+              Navigator.of(context).pop();
+              onAddAfter();
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  void _showSkipReasonsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        final reasons = [
+          'Equipment Busy',
+          'Injury / Pain',
+          'Time Constraint',
+          'Intentional Deload',
+          'Other',
+        ];
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Text(
+                  'SELECT SKIP REASON: ${exercise.name.toUpperCase()}',
+                  style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFF2E2E3E)),
+              ...reasons.map((r) => ListTile(
+                title: Text(r, style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onSkip(r);
+                },
+              )),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Reorder Exercises Bottom Sheet ─────────────────────────────────────────
+
+class _ReorderExercisesSheet extends StatefulWidget {
+  final List<Exercise> exercises;
+  final Function(int, int) onReorder;
+
+  const _ReorderExercisesSheet({
+    required this.exercises,
+    required this.onReorder,
+  });
+
+  @override
+  State<_ReorderExercisesSheet> createState() => _ReorderExercisesSheetState();
+}
+
+class _ReorderExercisesSheetState extends State<_ReorderExercisesSheet> {
+  late List<Exercise> _localExercises;
+
+  @override
+  void initState() {
+    super.initState();
+    _localExercises = List.from(widget.exercises);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return Container(
+      height: media.size.height * 0.6,
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 20, 16, 10),
+            child: Row(
+              children: [
+                Icon(Icons.drag_indicator_rounded, color: KColor.blue, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'DRAG & DROP TO REORDER WORKOUT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF2E2E3E)),
+          Expanded(
+            child: ReorderableListView.builder(
+              itemCount: _localExercises.length,
+              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (oldIndex < newIndex) {
+                    newIndex -= 1;
+                  }
+                  final item = _localExercises.removeAt(oldIndex);
+                  _localExercises.insert(newIndex, item);
+                });
+                widget.onReorder(oldIndex, newIndex);
+              },
+              itemBuilder: (context, idx) {
+                final ex = _localExercises[idx];
+                return ListTile(
+                  key: ValueKey(ex.id),
+                  title: Text(ex.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  subtitle: Text(ex.muscleGroup, style: const TextStyle(color: KColor.textMuted, fontSize: 11)),
+                  trailing: const Icon(Icons.drag_handle_rounded, color: KColor.textSecondary),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -2859,17 +3905,6 @@ class _HistoryRow extends StatelessWidget {
       ),
     );
   }
-}
-
-String _rpeDescription(double rpe) {
-  if (rpe >= 10) return 'Max Effort (0 reps left)';
-  if (rpe >= 9.5) return 'Hard (~0.5 reps left)';
-  if (rpe >= 9) return '1 rep left';
-  if (rpe >= 8.5) return '1.5 reps left';
-  if (rpe >= 8) return '2 reps left';
-  if (rpe >= 7.5) return '2.5 reps left';
-  if (rpe >= 7) return '3 reps left';
-  return 'Warm-up / Light effort';
 }
 
 // ─── Custom Fullscreen Completion Dashboard ──────────────────────────────────

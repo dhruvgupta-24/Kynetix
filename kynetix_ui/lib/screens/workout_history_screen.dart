@@ -1350,12 +1350,15 @@ class _ExerciseAnalyticsList extends StatelessWidget {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
-        // Find recent history values for line chart
-        final history = WorkoutService.instance.historyFor(info.exercise.id, limit: 10);
+        // Find recent history values for line chart, excluding skipped entries
+        final history = WorkoutService.instance.historyFor(info.exercise.id, limit: 10)
+            .where((h) => !h.entry.isSkipped)
+            .toList();
         final values = history.reversed
-            .map((h) => h.entry.topProgressionSet?.estimatedOneRepMax ?? h.entry.topWorkingSet?.estimatedOneRepMax ?? 0.0)
+            .map((h) => h.entry.topProgressionSet?.estimatedOneRepMax ?? h.entry.topWorkingSet?.estimatedOneRepMax ?? h.entry.topSet?.estimatedOneRepMax ?? 0.0)
             .toList();
         final dates = history.reversed.map((h) => h.date).toList();
+        final entriesList = history.reversed.map((h) => h.entry).toList();
 
         return DraggableScrollableSheet(
           initialChildSize: 0.75,
@@ -1455,7 +1458,7 @@ class _ExerciseAnalyticsList extends StatelessWidget {
                     ),
                   )
                 else
-                  _InteractiveLineChart(values: values, dates: dates),
+                  _InteractiveLineChart(values: values, dates: dates, entries: entriesList),
                 const SizedBox(height: 32),
               ],
             );
@@ -1498,7 +1501,8 @@ class _DetailStatBox extends StatelessWidget {
 class _InteractiveLineChart extends StatefulWidget {
   final List<double> values;
   final List<DateTime> dates;
-  const _InteractiveLineChart({required this.values, required this.dates});
+  final List<ExerciseEntry>? entries;
+  const _InteractiveLineChart({required this.values, required this.dates, this.entries});
 
   @override
   State<_InteractiveLineChart> createState() => _InteractiveLineChartState();
@@ -1533,9 +1537,30 @@ class _InteractiveLineChartState extends State<_InteractiveLineChart> {
                     color: KColor.greenDark,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(
-                    '${_formatDate(widget.dates[_selectedIndex!])}: ${widget.values[_selectedIndex!].toStringAsFixed(1)} kg',
-                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${_formatDate(widget.dates[_selectedIndex!])}: ${widget.values[_selectedIndex!].toStringAsFixed(1)} kg',
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                      if (widget.entries != null && _selectedIndex! < widget.entries!.length) ...[
+                        if (widget.entries![_selectedIndex!].isSubstitution) ...[
+                          const SizedBox(height: 2),
+                          const Text(
+                            '🔄 Substituted',
+                            style: TextStyle(color: KColor.blue, fontSize: 8.5, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                        if (widget.entries![_selectedIndex!].isTemporaryAddition) ...[
+                          const SizedBox(height: 2),
+                          const Text(
+                            '➕ Manually Added',
+                            style: TextStyle(color: KColor.amber, fontSize: 8.5, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ]
+                    ],
                   ),
                 ),
               )
@@ -1554,6 +1579,7 @@ class _InteractiveLineChartState extends State<_InteractiveLineChart> {
                 painter: _LineChartPainter(
                   values: widget.values,
                   selectedIndex: _selectedIndex,
+                  entries: widget.entries,
                 ),
               ),
             ),
@@ -1582,7 +1608,8 @@ class _InteractiveLineChartState extends State<_InteractiveLineChart> {
 class _LineChartPainter extends CustomPainter {
   final List<double> values;
   final int? selectedIndex;
-  _LineChartPainter({required this.values, required this.selectedIndex});
+  final List<ExerciseEntry>? entries;
+  _LineChartPainter({required this.values, required this.selectedIndex, this.entries});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1646,13 +1673,23 @@ class _LineChartPainter extends CustomPainter {
     final dotPaint = Paint()
       ..color = KColor.surface
       ..style = PaintingStyle.fill;
-    final dotStrokePaint = Paint()
-      ..color = KColor.green
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
 
     for (int i = 0; i < points.length; i++) {
       final isSelected = selectedIndex == i;
+      Color dotColor = KColor.green;
+      if (entries != null && i < entries!.length) {
+        final ent = entries![i];
+        if (ent.isSubstitution) {
+          dotColor = KColor.blue;
+        } else if (ent.isTemporaryAddition) {
+          dotColor = KColor.amber;
+        }
+      }
+      final dotStrokePaint = Paint()
+        ..color = dotColor
+        ..strokeWidth = 1.5
+        ..style = PaintingStyle.stroke;
+
       canvas.drawCircle(points[i], isSelected ? 5.5 : 3.5, dotPaint);
       canvas.drawCircle(
         points[i],
@@ -2806,7 +2843,7 @@ class _ExerciseDetailCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final topSet = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
     final prevBest = service.bestSetBefore(entry.exercise.id, sessionDate);
-    final isPr = topSet != null &&
+    final isPr = !entry.isSkipped && topSet != null &&
         (prevBest == null || topSet.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01);
 
     return Container(
@@ -2823,68 +2860,132 @@ class _ExerciseDetailCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  entry.exercise.name,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.exercise.name,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      entry.exercise.muscleGroup,
+                      style: const TextStyle(color: KColor.textMuted, fontSize: 10),
+                    ),
+                  ],
                 ),
               ),
-              if (isPr)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFB347).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: const Text(
-                    '🏆 New PR',
-                    style: TextStyle(color: Color(0xFFFFB347), fontSize: 9, fontWeight: FontWeight.w700),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Text(
-            entry.exercise.muscleGroup,
-            style: const TextStyle(color: KColor.textMuted, fontSize: 10),
-          ),
-          const SizedBox(height: 8),
-          // Set list
-          for (final set in entry.sets) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
+              const SizedBox(width: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                alignment: WrapAlignment.end,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                    decoration: BoxDecoration(
-                      color: _setTypeColor(set.setType).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(4),
+                  if (entry.isSkipped)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        entry.skipReason != null && entry.skipReason!.isNotEmpty
+                            ? '🚫 Skipped: ${entry.skipReason}'
+                            : '🚫 Skipped',
+                        style: const TextStyle(color: Colors.red, fontSize: 9, fontWeight: FontWeight.w700),
+                      ),
                     ),
-                    child: Text(
-                      set.setType.shortLabel,
-                      style: TextStyle(color: _setTypeColor(set.setType), fontSize: 8.5, fontWeight: FontWeight.w700),
+                  if (entry.isSubstitution)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: KColor.blue.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        entry.substitutedForExerciseName != null
+                            ? '🔄 Substituted for ${entry.substitutedForExerciseName}'
+                            : '🔄 Substituted',
+                        style: const TextStyle(color: KColor.blue, fontSize: 9, fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${set.weight.toStringAsFixed(set.weight == set.weight.truncateToDouble() ? 0 : 1)} kg × ${set.reps} reps',
-                    style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                  ),
-                  if (set.rpe != null) ...[
-                    const SizedBox(width: 8),
-                    Text('RPE ${set.rpe!.toStringAsFixed(1)}', style: const TextStyle(color: KColor.textMuted, fontSize: 10)),
-                  ],
-                  const Spacer(),
-                  Text('${set.estimatedOneRepMax.toStringAsFixed(1)} e1RM', style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+                  if (entry.isTemporaryAddition)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: KColor.green.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text(
+                        '➕ Manually Added',
+                        style: TextStyle(color: KColor.green, fontSize: 9, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  if (isPr)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFB347).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text(
+                        '🏆 New PR',
+                        style: TextStyle(color: Color(0xFFFFB347), fontSize: 9, fontWeight: FontWeight.w700),
+                      ),
+                    ),
                 ],
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (entry.isSkipped)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                'Exercise was skipped during workout session.',
+                style: TextStyle(color: KColor.textMuted, fontSize: 11, fontStyle: FontStyle.italic),
+              ),
+            )
+          else ...[
+            // Set list
+            for (final set in entry.sets) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: _setTypeColor(set.setType).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        set.setType.shortLabel,
+                        style: TextStyle(color: _setTypeColor(set.setType), fontSize: 8.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${set.weight.toStringAsFixed(set.weight == set.weight.truncateToDouble() ? 0 : 1)} kg × ${set.reps} reps',
+                      style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
+                    ),
+                    if (set.rpe != null) ...[
+                      const SizedBox(width: 8),
+                      Text('RPE ${set.rpe!.toStringAsFixed(1)}', style: const TextStyle(color: KColor.textMuted, fontSize: 10)),
+                    ],
+                    const Spacer(),
+                    Text('${set.estimatedOneRepMax.toStringAsFixed(1)} e1RM', style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+                  ],
+                ),
+              ),
+            ],
+            // Volume sparkline for this exercise
+            const SizedBox(height: 6),
+            _ExerciseSparkline(exerciseId: entry.exercise.id, service: service),
           ],
-          // Volume sparkline for this exercise
-          const SizedBox(height: 6),
-          _ExerciseSparkline(exerciseId: entry.exercise.id, service: service),
         ],
       ),
     );

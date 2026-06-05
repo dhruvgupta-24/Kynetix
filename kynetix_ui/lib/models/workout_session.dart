@@ -105,13 +105,27 @@ class ExerciseEntry {
   final List<SetEntry> sets;
   final String?        notes;
 
+  // Planned vs Executed State tracking fields
+  final bool isSkipped;
+  final String? skipReason;
+  final bool isSubstitution;
+  final String? substitutedForExerciseId;
+  final String? substitutedForExerciseName;
+  final bool isTemporaryAddition;
+
   const ExerciseEntry({
     required this.exercise,
     required this.sets,
     this.notes,
+    this.isSkipped = false,
+    this.skipReason,
+    this.isSubstitution = false,
+    this.substitutedForExerciseId,
+    this.substitutedForExerciseName,
+    this.isTemporaryAddition = false,
   });
 
-  bool get isEmpty => sets.isEmpty;
+  bool get isEmpty => sets.isEmpty && !isSkipped;
 
   double get totalVolume => sets.fold(0, (sum, s) => sum + s.volume);
 
@@ -148,6 +162,12 @@ class ExerciseEntry {
         'exercise': exercise.toJson(),
         'sets':     sets.map((s) => s.toJson()).toList(),
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes,
+        'isSkipped': isSkipped,
+        if (skipReason != null) 'skipReason': skipReason,
+        'isSubstitution': isSubstitution,
+        if (substitutedForExerciseId != null) 'substitutedForExerciseId': substitutedForExerciseId,
+        if (substitutedForExerciseName != null) 'substitutedForExerciseName': substitutedForExerciseName,
+        'isTemporaryAddition': isTemporaryAddition,
       };
 
   factory ExerciseEntry.fromJson(Map<String, dynamic> j) => ExerciseEntry(
@@ -156,6 +176,12 @@ class ExerciseEntry {
             .map((s) => SetEntry.fromJson(s as Map<String, dynamic>))
             .toList(),
         notes:    j['notes'] as String?,
+        isSkipped: j['isSkipped'] as bool? ?? false,
+        skipReason: j['skipReason'] as String?,
+        isSubstitution: j['isSubstitution'] as bool? ?? false,
+        substitutedForExerciseId: j['substitutedForExerciseId'] as String?,
+        substitutedForExerciseName: j['substitutedForExerciseName'] as String?,
+        isTemporaryAddition: j['isTemporaryAddition'] as bool? ?? false,
       );
 }
 

@@ -167,6 +167,7 @@ class WorkoutHistoryViewModel {
     int totalPrs = 0;
     for (final session in filtered) {
       for (final entry in session.entries) {
+        if (entry.isSkipped) continue;
         final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
         if (top == null) continue;
         final prevBest = service.bestSetBefore(entry.exercise.id, session.date);
@@ -186,7 +187,7 @@ class WorkoutHistoryViewModel {
 
     for (final session in filtered) {
       for (final entry in session.entries) {
-        if (entry.isEmpty) continue;
+        if (entry.isEmpty || entry.isSkipped) continue;
         final muscle = entry.exercise.muscleGroup.trim().toLowerCase();
         final setsCount = entry.sets.length;
         final vol = entry.workingVolume;
@@ -236,7 +237,7 @@ class WorkoutHistoryViewModel {
     final muscleLastTrained = <String, DateTime>{};
     for (final session in all) {
       for (final entry in session.entries) {
-        if (entry.isEmpty) continue;
+        if (entry.isEmpty || entry.isSkipped) continue;
         final currentLast = muscleLastTrained[entry.exercise.muscleGroup];
         if (currentLast == null || session.date.isAfter(currentLast)) {
           muscleLastTrained[entry.exercise.muscleGroup] = session.date;
@@ -279,7 +280,7 @@ class WorkoutHistoryViewModel {
     final exerciseCounts = <String, int>{};
     for (final session in filtered) {
       for (final entry in session.entries) {
-        if (entry.isEmpty) continue;
+        if (entry.isEmpty || entry.isSkipped) continue;
         exerciseCounts[entry.exercise.name] = (exerciseCounts[entry.exercise.name] ?? 0) + 1;
       }
     }
@@ -344,7 +345,7 @@ class WorkoutHistoryViewModel {
     final uniqueExercises = <String, Exercise>{};
     for (final session in all) {
       for (final entry in session.entries) {
-        if (!entry.isEmpty) {
+        if (!entry.isEmpty && !entry.isSkipped) {
           uniqueExercises[entry.exercise.id] = entry.exercise;
         }
       }
@@ -352,7 +353,7 @@ class WorkoutHistoryViewModel {
 
     final exerciseAnalytics = <ExerciseAnalyticInfo>[];
     for (final exercise in uniqueExercises.values) {
-      final exSessions = all.where((s) => s.entries.any((e) => e.exercise.id == exercise.id && !e.isEmpty)).toList();
+      final exSessions = all.where((s) => s.entries.any((e) => e.exercise.id == exercise.id && !e.isEmpty && !e.isSkipped)).toList();
       if (exSessions.isEmpty) continue;
 
       final lifetimeVolume = exSessions.fold<double>(0.0, (sum, s) {
