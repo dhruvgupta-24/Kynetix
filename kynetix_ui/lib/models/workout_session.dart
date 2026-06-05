@@ -230,6 +230,8 @@ class ExerciseDelta {
   }
 }
 
+enum WorkoutStatus { active, completed, partial, abandoned }
+
 // ─── WorkoutSession ───────────────────────────────────────────────────────────
 
 class WorkoutSession {
@@ -241,6 +243,8 @@ class WorkoutSession {
   final List<ExerciseEntry>  entries;
   final String?              notes;
   final int?                 durationMinutes;
+  final WorkoutStatus        status;
+  final List<Exercise>?      plannedExercises;
 
   const WorkoutSession({
     required this.id,
@@ -251,6 +255,8 @@ class WorkoutSession {
     required this.entries,
     this.notes,
     this.durationMinutes,
+    this.status = WorkoutStatus.completed,
+    this.plannedExercises,
   });
 
   // ── Computed stats ──────────────────────────────────────────────────────────
@@ -295,6 +301,9 @@ class WorkoutSession {
         'entries':              entries.map((e) => e.toJson()).toList(),
         if (notes != null) 'notes': notes,
         if (durationMinutes != null) 'durationMinutes': durationMinutes,
+        'status':               status.name,
+        if (plannedExercises != null)
+          'plannedExercises':   plannedExercises!.map((e) => e.toJson()).toList(),
       };
 
   factory WorkoutSession.fromJson(Map<String, dynamic> j) => WorkoutSession(
@@ -308,5 +317,18 @@ class WorkoutSession {
             .toList(),
         notes:           j['notes']           as String?,
         durationMinutes: j['durationMinutes'] as int?,
+        status:          _parseStatus(j['status'] as String?),
+        plannedExercises: (j['plannedExercises'] as List<dynamic>?)
+            ?.map((e) => Exercise.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
+
+  static WorkoutStatus _parseStatus(String? name) {
+    if (name == null) return WorkoutStatus.completed;
+    try {
+      return WorkoutStatus.values.byName(name);
+    } catch (_) {
+      return WorkoutStatus.completed;
+    }
+  }
 }

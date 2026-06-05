@@ -5,6 +5,7 @@ import '../models/workout_session.dart';
 import '../models/workout_history_view_model.dart';
 import '../services/workout_service.dart';
 import '../services/achievement_engine.dart' show AchievementInfo;
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── WorkoutHistoryScreen ─────────────────────────────────────────────────────
 //
@@ -2029,6 +2030,8 @@ class _SessionTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      _buildStatusBadge(session.status),
                       if (prs > 0) ...[
                         const SizedBox(width: 6),
                         Container(
@@ -2071,6 +2074,49 @@ class _SessionTile extends StatelessWidget {
             ),
             const Icon(Icons.chevron_right_rounded, color: KColor.textMuted, size: 16),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(WorkoutStatus status) {
+    Color color;
+    Color bgColor;
+    String label;
+    switch (status) {
+      case WorkoutStatus.completed:
+        color = KColor.green;
+        bgColor = KColor.green.withValues(alpha: 0.15);
+        label = 'Completed';
+        break;
+      case WorkoutStatus.partial:
+        color = const Color(0xFFFFB347);
+        bgColor = const Color(0xFFFFB347).withValues(alpha: 0.15);
+        label = 'Partial';
+        break;
+      case WorkoutStatus.abandoned:
+        color = KColor.textMuted;
+        bgColor = KColor.border.withValues(alpha: 0.15);
+        label = 'Abandoned';
+        break;
+      case WorkoutStatus.active:
+        color = KColor.blue;
+        bgColor = KColor.blue.withValues(alpha: 0.15);
+        label = 'Active';
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -2119,11 +2165,147 @@ class SessionDetailPage extends StatefulWidget {
 
 class _SessionDetailPageState extends State<SessionDetailPage> {
   late WorkoutSession _currentSession;
+  bool _enableRpeTracking = false;
 
   @override
   void initState() {
     super.initState();
     _currentSession = widget.session;
+    _loadRpeSetting();
+  }
+
+  void _loadRpeSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _enableRpeTracking = prefs.getBool('enable_rpe_tracking') ?? false;
+      });
+    }
+  }
+
+  Widget _buildStatusBadge(WorkoutStatus status) {
+    Color color;
+    Color bgColor;
+    String label;
+    switch (status) {
+      case WorkoutStatus.completed:
+        color = KColor.green;
+        bgColor = KColor.green.withValues(alpha: 0.15);
+        label = 'Completed';
+        break;
+      case WorkoutStatus.partial:
+        color = const Color(0xFFFFB347);
+        bgColor = const Color(0xFFFFB347).withValues(alpha: 0.15);
+        label = 'Partial';
+        break;
+      case WorkoutStatus.abandoned:
+        color = KColor.textMuted;
+        bgColor = KColor.border.withValues(alpha: 0.15);
+        label = 'Abandoned';
+        break;
+      case WorkoutStatus.active:
+        color = KColor.blue;
+        bgColor = KColor.blue.withValues(alpha: 0.15);
+        label = 'Active';
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildPlannedList() {
+    final list = _currentSession.plannedExercises;
+    if (list == null || list.isEmpty) {
+      final fallback = _currentSession.entries
+          .where((e) => !e.isTemporaryAddition && !e.isSubstitution)
+          .map((e) => e.exercise)
+          .toList();
+      if (fallback.isEmpty) {
+        return [const Text('No plan recorded', style: TextStyle(color: KColor.textMuted, fontSize: 11))];
+      }
+      return List.generate(fallback.length, (index) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            '${index + 1}. ${fallback[index].name}',
+            style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, height: 1.3),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      });
+    }
+    return List.generate(list.length, (index) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          '${index + 1}. ${list[index].name}',
+          style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, height: 1.3),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    });
+  }
+
+  List<Widget> _buildExecutedList() {
+    int displayIndex = 1;
+    return _currentSession.entries.map((entry) {
+      final name = entry.exercise.name;
+      String statusText = '';
+      Color statusColor = Colors.white;
+      
+      if (entry.isSkipped) {
+        statusText = ' (Skipped)';
+        statusColor = KColor.danger;
+      } else if (entry.isTemporaryAddition) {
+        statusText = ' (Added)';
+        statusColor = KColor.green;
+      } else if (entry.isSubstitution) {
+        statusText = ' (Replaced)';
+        statusColor = KColor.blue;
+      }
+      
+      final idx = displayIndex++;
+      
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: RichText(
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          text: TextSpan(
+            style: const TextStyle(fontSize: 11.5, height: 1.3),
+            children: [
+              TextSpan(
+                text: '$idx. $name',
+                style: TextStyle(
+                  color: entry.isSkipped ? KColor.textMuted : Colors.white,
+                  decoration: entry.isSkipped ? TextDecoration.lineThrough : null,
+                ),
+              ),
+              if (statusText.isNotEmpty)
+                TextSpan(
+                  text: statusText,
+                  style: TextStyle(color: statusColor, fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
+        ),
+      );
+    }).toList();
   }
 
   String _formatDate(DateTime d) {
@@ -2143,9 +2325,15 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
       appBar: AppBar(
         backgroundColor: KColor.surface,
         surfaceTintColor: Colors.transparent,
-        title: Text(
-          _currentSession.splitDayName,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+        title: Row(
+          children: [
+            Text(
+              _currentSession.splitDayName,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+            ),
+            const SizedBox(width: 8),
+            _buildStatusBadge(_currentSession.status),
+          ],
         ),
         leading: const BackButton(color: KColor.textSecondary),
         actions: [
@@ -2204,7 +2392,68 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
             ),
           ),
           const SizedBox(height: 16),
+          
+          // Planned vs Executed Structure Section
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: KColor.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Planned vs. Executed Structure',
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Planned Workout Column
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'PLANNED WORKOUT',
+                              style: TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                            ),
+                            const SizedBox(height: 8),
+                            ..._buildPlannedList(),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const VerticalDivider(width: 1, thickness: 0.8, color: Color(0xFF2E2E3E)),
+                      const SizedBox(width: 12),
+                      // Executed Workout Column
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'EXECUTED WORKOUT',
+                              style: TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                            ),
+                            const SizedBox(height: 8),
+                            ..._buildExecutedList(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          
           _buildProgressionContext(),
+          const SizedBox(height: 16),
 
           // Exercise breakdown timeline
           const Text(
@@ -2213,11 +2462,13 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
           ),
           const SizedBox(height: 10),
           for (final entry in _currentSession.entries)
-            if (!entry.isEmpty)
+            if (!entry.isEmpty || entry.isSkipped || entry.isSubstitution)
               _ExerciseDetailCard(
                 entry: entry,
                 service: widget.service,
                 sessionDate: _currentSession.date,
+                splitDayName: _currentSession.splitDayName,
+                enableRpeTracking: _enableRpeTracking,
               ),
         ],
       ),
@@ -2478,6 +2729,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
   late final TextEditingController _notesCtrl;
   late List<ExerciseEntry> _entries;
   late DateTime _date;
+  bool _enableRpeTracking = false;
 
   @override
   void initState() {
@@ -2485,6 +2737,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
     _durationCtrl = TextEditingController(text: widget.session.durationMinutes?.toString() ?? '45');
     _notesCtrl = TextEditingController(text: widget.session.notes ?? '');
     _date = widget.session.date;
+    _loadRpeSetting();
 
     // Deep copy entries list
     _entries = widget.session.entries.map((e) {
@@ -2494,6 +2747,15 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
         notes: e.notes,
       );
     }).toList();
+  }
+
+  void _loadRpeSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _enableRpeTracking = prefs.getBool('enable_rpe_tracking') ?? false;
+      });
+    }
   }
 
   @override
@@ -2658,18 +2920,20 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                               },
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: _EditTextField(
-                              key: ValueKey('ex-$exIdx-set-$setIdx-rpe'),
-                              label: 'RPE',
-                              initialValue: set.rpe?.toString() ?? '',
-                              onChanged: (val) {
-                                final r = double.tryParse(val);
-                                entry.sets[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: r, setType: set.setType);
-                              },
+                          if (_enableRpeTracking) ...[
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: _EditTextField(
+                                key: ValueKey('ex-$exIdx-set-$setIdx-rpe'),
+                                label: 'RPE',
+                                initialValue: set.rpe?.toString() ?? '',
+                                onChanged: (val) {
+                                  final r = double.tryParse(val);
+                                  entry.sets[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: r, setType: set.setType);
+                                },
+                              ),
                             ),
-                          ),
+                          ],
                           const SizedBox(width: 6),
                           DropdownButton<SetType>(
                             value: set.setType,
@@ -2832,11 +3096,15 @@ class _ExerciseDetailCard extends StatelessWidget {
   final ExerciseEntry entry;
   final WorkoutService service;
   final DateTime sessionDate;
+  final String splitDayName;
+  final bool enableRpeTracking;
 
   const _ExerciseDetailCard({
     required this.entry,
     required this.service,
     required this.sessionDate,
+    required this.splitDayName,
+    required this.enableRpeTracking,
   });
 
   @override
@@ -2924,6 +3192,20 @@ class _ExerciseDetailCard extends StatelessWidget {
                         style: TextStyle(color: KColor.green, fontSize: 9, fontWeight: FontWeight.w700),
                       ),
                     ),
+                  if (!entry.isSkipped && entry.sets.isNotEmpty) ...[
+                    if (entry.sets.length < service.typicalSetsForExercise(entry.exercise.id, splitDayName))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFB347).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Text(
+                          '⚠ Partial',
+                          style: TextStyle(color: Color(0xFFFFB347), fontSize: 9, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                  ],
                   if (isPr)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2972,7 +3254,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                       '${set.weight.toStringAsFixed(set.weight == set.weight.truncateToDouble() ? 0 : 1)} kg × ${set.reps} reps',
                       style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
                     ),
-                    if (set.rpe != null) ...[
+                    if (enableRpeTracking && set.rpe != null) ...[
                       const SizedBox(width: 8),
                       Text('RPE ${set.rpe!.toStringAsFixed(1)}', style: const TextStyle(color: KColor.textMuted, fontSize: 10)),
                     ],

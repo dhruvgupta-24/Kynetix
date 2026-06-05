@@ -427,6 +427,216 @@ class WorkoutService extends ChangeNotifier {
     return result;
   }
 
+  /// Calculates typical sets performed for an exercise in a given split day
+  int typicalSetsForExercise(String exerciseId, String splitDayName) {
+    final relevantSessions = _sessions
+        .where((s) => s.splitDayName == splitDayName && !s.isEmpty)
+        .toList();
+    if (relevantSessions.isEmpty) {
+      // Fallback: look at the exercise in all sessions
+      final allSessionsWithEx = _sessions
+          .where((s) => !s.isEmpty && s.entries.any((e) => e.exercise.id == exerciseId && !e.isSkipped))
+          .toList();
+      if (allSessionsWithEx.isEmpty) return 3; // Default typical sets
+      final totalSets = allSessionsWithEx.fold<int>(0, (sum, s) {
+        final entry = s.entries.firstWhere((e) => e.exercise.id == exerciseId);
+        return sum + entry.sets.length;
+      });
+      return (totalSets / allSessionsWithEx.length).round();
+    }
+
+    int totalSets = 0;
+    int sessionsCount = 0;
+    for (final s in relevantSessions) {
+      for (final e in s.entries) {
+        if (e.exercise.id == exerciseId && !e.isSkipped && e.sets.isNotEmpty) {
+          totalSets += e.sets.length;
+          sessionsCount++;
+        }
+      }
+    }
+    if (sessionsCount == 0) return 3; // Default typical sets
+    return (totalSets / sessionsCount).round();
+  }
+
+  /// Recommends removing an exercise if it has been skipped in >= 5 of the last 10 sessions.
+  List<({Exercise exercise, int count, int totalSessions})> getRecurringSkips(
+      String splitDayName) {
+    final relevantSessions = _sessions
+        .where((s) => s.splitDayName == splitDayName && !s.isEmpty)
+        .toList();
+    if (relevantSessions.length < 5) return [];
+
+    final countMap = <String, int>{};
+    final exerciseMap = <String, Exercise>{};
+
+    // Look at last 10 sessions of this split day
+    final recentSessions = relevantSessions.reversed.take(10).toList();
+    for (final s in recentSessions) {
+      for (final e in s.entries) {
+        if (e.isSkipped) {
+          countMap[e.exercise.id] = (countMap[e.exercise.id] ?? 0) + 1;
+          exerciseMap[e.exercise.id] = e.exercise;
+        }
+      }
+    }
+
+    final result = <({Exercise exercise, int count, int totalSessions})>[];
+    countMap.forEach((id, count) {
+      if (count >= 5) {
+        result.add((
+          exercise: exerciseMap[id]!,
+          count: count,
+          totalSessions: recentSessions.length,
+        ));
+      }
+    });
+
+    return result;
+  }
+
+  /// Recommends replacing a planned exercise with a substitution if substituted in >= 4 of the last 7 sessions.
+  List<({Exercise original, Exercise replacement, int count, int totalSessions})> getRecurringSubstitutions(
+      String splitDayName) {
+    final relevantSessions = _sessions
+        .where((s) => s.splitDayName == splitDayName && !s.isEmpty)
+        .toList();
+    if (relevantSessions.length < 4) return [];
+
+    // Key format: "originalId:replacementId" -> count
+    final countMap = <String, int>{};
+    final originalMap = <String, Exercise>{};
+    final replacementMap = <String, Exercise>{};
+
+    final recentSessions = relevantSessions.reversed.take(7).toList();
+    for (final s in recentSessions) {
+      for (final e in s.entries) {
+        if (e.isSubstitution && e.substitutedForExerciseId != null) {
+          final origId = e.substitutedForExerciseId!;
+          final repId = e.exercise.id;
+          final key = '$origId:$repId';
+          countMap[key] = (countMap[key] ?? 0) + 1;
+          
+          // Find the original exercise reference
+          Exercise? origExercise;
+          for (final sd in split.days) {
+            for (final ex in sd.exercises) {
+              if (ex.id == origId) {
+                origExercise = ex;
+                break;
+              }
+            }
+            if (origExercise != null) break;
+          }
+          if (origExercise == null) {
+            origExercise = Exercise(
+              id: origId,
+              name: e.substitutedForExerciseName ?? 'Unknown Exercise',
+              muscleGroup: e.exercise.muscleGroup,
+              type: e.exercise.type,
+            );
+          }
+
+          originalMap[key] = origExercise;
+          replacementMap[key] = e.exercise;
+        }
+      }
+    }
+
+    final result = <({Exercise original, Exercise replacement, int count, int totalSessions})>[];
+    countMap.forEach((key, count) {
+      if (count >= 4) {
+        result.add((
+          original: originalMap[key]!,
+          replacement: replacementMap[key]!,
+          count: count,
+          totalSessions: recentSessions.length,
+        ));
+      }
+    });
+
+    return result;
+  }
+
+  /// Recommends updating exercise order if executed in a different sequence in >= 3 of the last 5 sessions.
+  List<({List<Exercise> newOrder, int count})> getReorderRecommendations(
+      String splitDayName) {
+    final splitDay = split.days.firstWhere(
+      (d) => d.name == splitDayName,
+      orElse: () => customWorkoutDay(),
+    );
+    if (splitDay.exercises.length < 2) return [];
+
+    final relevantSessions = _sessions
+        .where((s) => s.splitDayName == splitDayName && !s.isEmpty)
+        .toList();
+    if (relevantSessions.length < 3) return [];
+
+    final recentSessions = relevantSessions.reversed.take(5).toList();
+    
+    int reorderedSessionsCount = 0;
+    final positionSums = <String, double>{};
+    final positionCounts = <String, int>{};
+
+    for (final s in recentSessions) {
+      final executedCoreIds = s.entries
+          .where((e) => !e.isSkipped && splitDay.exercises.any((se) => se.id == e.exercise.id))
+          .map((e) => e.exercise.id)
+          .toList();
+
+      if (executedCoreIds.length >= 2) {
+        final plannedIndices = executedCoreIds
+            .map((id) => splitDay.exercises.indexWhere((se) => se.id == id))
+            .toList();
+        
+        bool isReordered = false;
+        for (int i = 0; i < plannedIndices.length - 1; i++) {
+          if (plannedIndices[i] > plannedIndices[i + 1]) {
+            isReordered = true;
+            break;
+          }
+        }
+        if (isReordered) {
+          reorderedSessionsCount++;
+        }
+      }
+
+      for (int i = 0; i < executedCoreIds.length; i++) {
+        final id = executedCoreIds[i];
+        positionSums[id] = (positionSums[id] ?? 0.0) + i;
+        positionCounts[id] = (positionCounts[id] ?? 0) + 1;
+      }
+    }
+
+    if (reorderedSessionsCount >= 3) {
+      final sortedExercises = List<Exercise>.from(splitDay.exercises);
+      
+      sortedExercises.sort((a, b) {
+        final avgA = positionCounts.containsKey(a.id)
+            ? (positionSums[a.id]! / positionCounts[a.id]!)
+            : splitDay.exercises.indexOf(a).toDouble();
+        final avgB = positionCounts.containsKey(b.id)
+            ? (positionSums[b.id]! / positionCounts[b.id]!)
+            : splitDay.exercises.indexOf(b).toDouble();
+        return avgA.compareTo(avgB);
+      });
+
+      bool orderChanged = false;
+      for (int i = 0; i < splitDay.exercises.length; i++) {
+        if (splitDay.exercises[i].id != sortedExercises[i].id) {
+          orderChanged = true;
+          break;
+        }
+      }
+
+      if (orderChanged) {
+        return [(newOrder: sortedExercises, count: reorderedSessionsCount)];
+      }
+    }
+
+    return [];
+  }
+
   /// All-time best set for an exercise (highest estimated 1RM).
   SetEntry? bestSetEver(String exerciseId) {
     SetEntry? best;

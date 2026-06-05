@@ -91,6 +91,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // Completion State
   bool _showCompletionScreen = false;
   late WorkoutSession _completedSessionSummary;
+  bool _enableRpeTracking = false;
 
   @override
   void initState() {
@@ -99,6 +100,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     
     _startTime = widget.draftSession?.date ?? DateTime.now();
     _pageController = PageController(initialPage: _selectedIndex);
+    _loadRpeSetting();
 
     final draft = widget.draftSession;
     if (draft != null) {
@@ -151,6 +153,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _restoreState().then((_) {
       _updateLiveScore();
     });
+  }
+
+  void _loadRpeSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _enableRpeTracking = prefs.getBool('enable_rpe_tracking') ?? false;
+      });
+    }
   }
 
   Timer? _debounceTimer;
@@ -330,7 +341,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               substitutedForExerciseName: _substitutedForNames[ex.id],
               isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
             ))
-        .where((entry) => !entry.isEmpty)
         .toList();
     if (entries.isEmpty) return;
 
@@ -568,7 +578,125 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     });
     
     _spawnFloatingText('Added to ${widget.splitDay.name}!');
-    HapticFeedback.heavyImpact();
+  }
+
+  Future<void> _replaceExercisePermanently(Exercise original, Exercise replacement) async {
+    final currentSplit = _service.split;
+    final days = currentSplit.days.map((day) {
+      if (day.name == widget.splitDay.name) {
+        final idx = day.exercises.indexWhere((e) => e.id == original.id);
+        if (idx != -1) {
+          final list = List<Exercise>.from(day.exercises);
+          list[idx] = replacement;
+          return day.copyWith(exercises: list);
+        }
+      }
+      return day;
+    }).toList();
+    
+    final updatedSplit = currentSplit.copyWith(days: days);
+    await _service.saveSplit(updatedSplit);
+    
+    setState(() {
+      final idx = _sessionExercises.indexWhere((e) => e.id == replacement.id);
+      if (idx != -1) {
+        _substitutedExercises[replacement.id] = false;
+        _substitutedForIds.remove(replacement.id);
+        _substitutedForNames.remove(replacement.id);
+      }
+      _sessionExercises.removeWhere((e) => e.id == original.id);
+      _sets.remove(original.id);
+      _weightSelections.remove(original.id);
+      _repsSelections.remove(original.id);
+      _rpeSelections.remove(original.id);
+      _setTypeSelections.remove(original.id);
+      
+      if (_selectedIndex >= _sessionExercises.length) {
+        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+    });
+
+    _spawnFloatingText('Updated split permanently!');
+    await _saveRecoveryState();
+  }
+
+  Future<void> _removeExercisePermanently(Exercise exercise) async {
+    final currentSplit = _service.split;
+    final days = currentSplit.days.map((day) {
+      if (day.name == widget.splitDay.name) {
+        final list = List<Exercise>.from(day.exercises)..removeWhere((e) => e.id == exercise.id);
+        return day.copyWith(exercises: list);
+      }
+      return day;
+    }).toList();
+    
+    final updatedSplit = currentSplit.copyWith(days: days);
+    await _service.saveSplit(updatedSplit);
+
+    setState(() {
+      _sessionExercises.removeWhere((e) => e.id == exercise.id);
+      _sets.remove(exercise.id);
+      _weightSelections.remove(exercise.id);
+      _repsSelections.remove(exercise.id);
+      _rpeSelections.remove(exercise.id);
+      _setTypeSelections.remove(exercise.id);
+      _skippedExercises.remove(exercise.id);
+      _skipReasons.remove(exercise.id);
+      
+      if (_selectedIndex >= _sessionExercises.length) {
+        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+    });
+
+    _spawnFloatingText('Removed permanently!');
+    await _saveRecoveryState();
+  }
+
+  Future<void> _applyReorderPermanently(List<Exercise> newOrder) async {
+    final currentSplit = _service.split;
+    final days = currentSplit.days.map((day) {
+      if (day.name == widget.splitDay.name) {
+        return day.copyWith(exercises: newOrder);
+      }
+      return day;
+    }).toList();
+    
+    final updatedSplit = currentSplit.copyWith(days: days);
+    await _service.saveSplit(updatedSplit);
+
+    setState(() {
+      final newOrderIds = newOrder.map((e) => e.id).toList();
+      _sessionExercises.sort((a, b) {
+        final idxA = newOrderIds.indexOf(a.id);
+        final idxB = newOrderIds.indexOf(b.id);
+        if (idxA != -1 && idxB != -1) return idxA.compareTo(idxB);
+        if (idxA != -1) return -1;
+        if (idxB != -1) return 1;
+        return 0;
+      });
+      _selectedIndex = 0;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+    });
+
+    _spawnFloatingText('Reordered split sequence!');
+    await _saveRecoveryState();
   }
 
   // ── Getters & Stats ──────────────────────────────────────────────────────
@@ -641,7 +769,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   // ── Logging Operations ───────────────────────────────────────────────────
 
-  void _logSet() {
+  Future<void> _logSet() async {
     final ex = _currentExercise;
     final w = _weightSelections[ex.id] ?? 40.0;
     final r = _repsSelections[ex.id] ?? 10;
@@ -658,16 +786,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       (_sets[ex.id] ??= []).add(newSet);
     });
 
+    _updateLiveScore();
+    await _saveRecoveryState();
+
     _spawnFloatingText('+1 Set\n+${(w * r).toStringAsFixed(0)} kg');
     HapticFeedback.mediumImpact();
-    _updateLiveScore();
-    _saveRecoveryState();
 
     if (isPr) {
       HapticFeedback.heavyImpact();
       _triggerPRNotification(w, r, newSet.estimatedOneRepMax);
     }
-
   }
 
   void _triggerPRNotification(double weight, int reps, double e1rm) {
@@ -744,6 +872,38 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       return;
     }
 
+    final statusResult = await showDialog<WorkoutStatus>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: KColor.border, width: 0.5),
+        ),
+        title: const Text('End Workout Session', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Choose how you want to save this session. If you intentionally cut it short, choose Partial.',
+          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(WorkoutStatus.partial),
+            child: const Text('Finish As Partial', style: TextStyle(color: Color(0xFFFFB347))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(WorkoutStatus.completed),
+            child: const Text('Finish Workout', style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (statusResult == null) return;
+
     setState(() => _isSaving = true);
 
     final session = WorkoutSession(
@@ -755,6 +915,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       entries: entries,
       notes: _sessionNotes,
       durationMinutes: DateTime.now().difference(_startTime).inMinutes,
+      status: statusResult,
+      plannedExercises: widget.splitDay.exercises,
     );
 
     // Track ignored recommendations for temporary additions that were not made permanent
@@ -885,6 +1047,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         _pageController.jumpToPage(_selectedIndex);
       }
     });
+    _saveRecoveryState();
   }
 
   Future<void> _removeExerciseFromSession(int index) async {
@@ -935,6 +1098,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         _pageController.jumpToPage(_selectedIndex);
       }
     });
+    _saveRecoveryState();
   }
 
   void _openHistory(Exercise ex) {
@@ -997,6 +1161,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                             final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
                             final history = _service.historyFor(ex.id, limit: 5);
 
+                            final recurringSubs = _service.getRecurringSubstitutions(widget.splitDay.name);
+                            final subMatch = recurringSubs.where((s) => s.original.id == ex.id).firstOrNull;
+                            final replacementEx = subMatch?.replacement;
+
+                            final recurringSkips = _service.getRecurringSkips(widget.splitDay.name);
+                            final isRecSkip = recurringSkips.any((s) => s.exercise.id == ex.id);
+
+                            final reorderRecs = _service.getReorderRecommendations(widget.splitDay.name);
+                            final reorderOrder = reorderRecs.isNotEmpty ? reorderRecs.first.newOrder : null;
+
                             return _ExerciseWorkoutPage(
                               exercise: ex,
                               sets: setsList,
@@ -1048,6 +1222,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               onReorderExercises: _showReorderSheet,
                               onUndoReplacement: () => _undoReplacement(ex.id),
                               onAddPermanently: () => _addExercisePermanently(ex),
+                              enableRpeTracking: _enableRpeTracking,
+                              recurringSubstitutionReplacement: replacementEx,
+                              isRecurringSkip: isRecSkip,
+                              reorderRecommendation: reorderOrder,
+                              onReplacePermanently: () => _replaceExercisePermanently(ex, replacementEx!),
+                              onRemovePermanently: () => _removeExercisePermanently(ex),
+                              onApplyReorder: () => _applyReorderPermanently(reorderOrder!),
                             );
                           },
                         );
@@ -1072,6 +1253,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 substitutedExercises: _substitutedExercises,
                 temporaryAdditions: _temporaryAdditions,
                 selectedIndex: _selectedIndex,
+                splitDayName: widget.splitDay.name,
                 onPrevious: () {
                   if (_selectedIndex > 0) {
                     _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
@@ -1310,6 +1492,10 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final bool isTemporaryAddition;
   final bool isRecurringAddition;
   final String splitDayName;
+  final bool enableRpeTracking;
+  final Exercise? recurringSubstitutionReplacement;
+  final bool isRecurringSkip;
+  final List<Exercise>? reorderRecommendation;
 
   // Execution callbacks
   final Function(String) onSkipExercise;
@@ -1319,6 +1505,9 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onReorderExercises;
   final VoidCallback onUndoReplacement;
   final VoidCallback onAddPermanently;
+  final VoidCallback onReplacePermanently;
+  final VoidCallback onRemovePermanently;
+  final VoidCallback onApplyReorder;
 
   const _ExerciseWorkoutPage({
     required this.exercise,
@@ -1347,6 +1536,10 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.isTemporaryAddition,
     required this.isRecurringAddition,
     required this.splitDayName,
+    required this.enableRpeTracking,
+    required this.recurringSubstitutionReplacement,
+    required this.isRecurringSkip,
+    required this.reorderRecommendation,
     required this.onSkipExercise,
     required this.onUndoSkip,
     required this.onReplaceExercise,
@@ -1354,6 +1547,9 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.onReorderExercises,
     required this.onUndoReplacement,
     required this.onAddPermanently,
+    required this.onReplacePermanently,
+    required this.onRemovePermanently,
+    required this.onApplyReorder,
   });
 
   @override
@@ -1795,13 +1991,13 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                                   ),
                                 ],
                               ),
-                              if (s.rpe != null) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  'RPE ${s.rpe} • ${s.volume.toStringAsFixed(0)} kg volume',
-                                  style: const TextStyle(color: KColor.textMuted, fontSize: 10),
-                                ),
-                              ],
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.enableRpeTracking && s.rpe != null
+                                    ? 'RPE ${s.rpe} • ${s.volume.toStringAsFixed(0)} kg volume'
+                                    : '${s.volume.toStringAsFixed(0)} kg volume',
+                                style: const TextStyle(color: KColor.textMuted, fontSize: 10),
+                              ),
                             ],
                           ),
                         ),
@@ -2179,6 +2375,162 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             ),
           ],
 
+          // Recurring Substitution recommendation card
+          if (widget.recurringSubstitutionReplacement != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: KColor.blue.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: KColor.blue.withValues(alpha: 0.15), width: 1.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: KColor.blue.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  )
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded, color: KColor.blue, size: 14),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'RECURRING SUBSTITUTION DETECTED',
+                        style: TextStyle(color: KColor.blue, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Replace ${widget.exercise.name} with ${widget.recurringSubstitutionReplacement!.name} in your split?',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: widget.onReplacePermanently,
+                    style: TextButton.styleFrom(
+                      backgroundColor: KColor.blue.withValues(alpha: 0.12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Replace Permanently', style: TextStyle(color: KColor.blue, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Recurring Skip recommendation card
+          if (widget.isRecurringSkip) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: KColor.danger.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: KColor.danger.withValues(alpha: 0.15), width: 1.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: KColor.danger.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  )
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded, color: KColor.danger, size: 14),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'FREQUENT SKIP DETECTED',
+                        style: TextStyle(color: KColor.danger, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'You frequently skip ${widget.exercise.name}. Remove it from this split?',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: widget.onRemovePermanently,
+                    style: TextButton.styleFrom(
+                      backgroundColor: KColor.danger.withValues(alpha: 0.12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Remove Permanently', style: TextStyle(color: KColor.danger, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Reorder recommendation card
+          if (widget.reorderRecommendation != null && widget.exercise.id == widget.reorderRecommendation!.first.id) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFB347).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.15), width: 1.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFFB347).withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  )
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFB347), size: 14),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'REORDER SEQUENCING DETECTED',
+                        style: TextStyle(color: Color(0xFFFFB347), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Update exercise order to match your actual training sequence?',
+                    style: TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: widget.onApplyReorder,
+                    style: TextButton.styleFrom(
+                      backgroundColor: const Color(0xFFFFB347).withValues(alpha: 0.12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Update Order', style: TextStyle(color: Color(0xFFFFB347), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           if (sparkData.length >= 2) ...[
             const SizedBox(height: 14),
             const Divider(color: KColor.border, height: 1),
@@ -2434,7 +2786,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    _showCues ? 'HIDE CUES, ANATOMY & ADVANCED METRICS' : 'SHOW CUES, ANATOMY & ADVANCED METRICS',
+                    widget.enableRpeTracking
+                        ? (_showCues ? 'HIDE CUES, ANATOMY & ADVANCED METRICS' : 'SHOW CUES, ANATOMY & ADVANCED METRICS')
+                        : (_showCues ? 'HIDE CUES & ANATOMY' : 'SHOW CUES & ANATOMY'),
                     style: const TextStyle(
                       color: KColor.textSecondary,
                       fontSize: 9.5,
@@ -2482,55 +2836,55 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  const Divider(color: KColor.border, height: 1),
-                  const SizedBox(height: 12),
-
-                  // Moved RPE Selector Snapping scale inside advanced drawer
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('RATE OF PERCEIVED EXERTION (RPE)', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [6.0, 7.0, 8.0, 8.5, 9.0, 9.5, 10.0].map((val) {
-                      final isSel = _selectedRpe == val;
-                      return Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                          child: GestureDetector(
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              setState(() {
-                                _selectedRpe = val;
-                              });
-                              widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isSel ? KColor.green : const Color(0xFF13131F),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isSel ? KColor.green : KColor.border,
-                                  width: 0.5,
+                  if (widget.enableRpeTracking) ...[
+                    const SizedBox(height: 12),
+                    const Divider(color: KColor.border, height: 1),
+                    const SizedBox(height: 12),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('RATE OF PERCEIVED EXERTION (RPE)', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [6.0, 7.0, 8.0, 8.5, 9.0, 9.5, 10.0].map((val) {
+                        final isSel = _selectedRpe == val;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                            child: GestureDetector(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                setState(() {
+                                  _selectedRpe = val;
+                                });
+                                widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: isSel ? KColor.green : const Color(0xFF13131F),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isSel ? KColor.green : KColor.border,
+                                    width: 0.5,
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                val.toString().replaceAll('.0', ''),
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: isSel ? Colors.white : KColor.textSecondary,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                                child: Text(
+                                  val.toString().replaceAll('.0', ''),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: isSel ? Colors.white : KColor.textSecondary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
 
                   const SizedBox(height: 12),
                   const Divider(color: KColor.border, height: 1),
@@ -2791,6 +3145,7 @@ class _BottomDockWidget extends StatelessWidget {
   final Map<String, bool> substitutedExercises;
   final Map<String, bool>? temporaryAdditions;
   final int selectedIndex;
+  final String splitDayName;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onLogSet;
@@ -2805,6 +3160,7 @@ class _BottomDockWidget extends StatelessWidget {
     required this.substitutedExercises,
     this.temporaryAdditions,
     required this.selectedIndex,
+    required this.splitDayName,
     required this.onPrevious,
     required this.onNext,
     required this.onLogSet,
@@ -2859,15 +3215,24 @@ class _BottomDockWidget extends StatelessWidget {
                 final skipped = skippedExercises[ex.id] ?? false;
                 final sub = substitutedExercises[ex.id] ?? false;
                 final added = temporaryAdditions != null ? (temporaryAdditions![ex.id] ?? false) : false;
-                final completed = lSets > 0 && !skipped;
                 final active = idx == selectedIndex;
 
                 String displayLabel = '';
                 if (skipped) {
-                  displayLabel = sub ? '🔄 Replaced' : '🚫 Skipped';
+                  displayLabel = sub ? '🔄 Replace' : '🚫 Skip';
+                } else if (added) {
+                  displayLabel = '➕ Added';
+                } else if (lSets > 0) {
+                  final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
+                  if (lSets < typical) {
+                    displayLabel = '⚠ Partial';
+                  } else {
+                    final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
+                    displayLabel = '✓ $truncatedName';
+                  }
                 } else {
-                  final prefix = added ? '➕ ' : (lSets > 0 ? '✓ ' : '');
-                  displayLabel = '$prefix$lSets set${lSets == 1 ? "" : "s"}';
+                  final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
+                  displayLabel = truncatedName;
                 }
 
                 Color bgColor;
@@ -2875,28 +3240,48 @@ class _BottomDockWidget extends StatelessWidget {
                 BorderSide border;
 
                 if (active) {
-                  bgColor = completed 
-                      ? KColor.green.withValues(alpha: 0.2) 
-                      : (skipped 
-                          ? (sub ? KColor.blue.withValues(alpha: 0.2) : KColor.danger.withValues(alpha: 0.2)) 
-                          : KColor.blue.withValues(alpha: 0.2));
-                  textColor = completed 
-                      ? KColor.green 
-                      : (skipped 
-                          ? (sub ? KColor.blue : KColor.danger) 
-                          : KColor.blue);
+                  if (skipped) {
+                    textColor = sub ? KColor.blue : KColor.danger;
+                  } else if (added) {
+                    textColor = KColor.green;
+                  } else if (lSets > 0) {
+                    final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
+                    textColor = lSets < typical ? const Color(0xFFFFB347) : KColor.green;
+                  } else {
+                    textColor = KColor.blue;
+                  }
+                  bgColor = textColor.withValues(alpha: 0.2);
                   border = BorderSide(color: textColor, width: 1.5);
                 } else {
+                  if (skipped) {
+                    textColor = sub ? KColor.blue : KColor.danger;
+                  } else if (added) {
+                    textColor = KColor.green;
+                  } else if (lSets > 0) {
+                    final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
+                    textColor = lSets < typical ? const Color(0xFFFFB347) : KColor.green;
+                  } else {
+                    textColor = KColor.textSecondary;
+                  }
                   bgColor = skipped
                       ? (sub ? KColor.blue.withValues(alpha: 0.08) : KColor.danger.withValues(alpha: 0.08))
-                      : (completed ? KColor.green.withValues(alpha: 0.08) : const Color(0xFF1E1E2C));
-                  textColor = skipped
-                      ? (sub ? KColor.blue : KColor.danger)
-                      : (completed ? KColor.green : KColor.textSecondary);
+                      : (added 
+                          ? KColor.green.withValues(alpha: 0.08) 
+                          : (lSets > 0 
+                              ? (lSets < WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName) 
+                                  ? const Color(0xFFFFB347).withValues(alpha: 0.08) 
+                                  : KColor.green.withValues(alpha: 0.08))
+                              : const Color(0xFF1E1E2C)));
                   border = BorderSide(
                     color: skipped
                         ? (sub ? KColor.blue.withValues(alpha: 0.2) : KColor.danger.withValues(alpha: 0.2))
-                        : (completed ? KColor.green.withValues(alpha: 0.2) : const Color(0xFF2E2E3E)),
+                        : (added 
+                            ? KColor.green.withValues(alpha: 0.2) 
+                            : (lSets > 0 
+                                ? (lSets < WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName) 
+                                    ? const Color(0xFFFFB347).withValues(alpha: 0.2) 
+                                    : KColor.green.withValues(alpha: 0.2))
+                                : const Color(0xFF2E2E3E))),
                     width: 0.8,
                   );
                 }
@@ -2908,33 +3293,19 @@ class _BottomDockWidget extends StatelessWidget {
                   },
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: bgColor,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.fromBorderSide(border),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 10,
-                            fontWeight: active ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          displayLabel,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      displayLabel,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 10.5,
+                        fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                      ),
                     ),
                   ),
                 );

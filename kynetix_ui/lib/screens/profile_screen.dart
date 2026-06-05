@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
@@ -52,10 +53,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _aiStatusLoading = true;
   bool _aiDisconnecting = false;
 
+  bool _enableRpeTracking = false;
+
   @override
   void initState() {
     super.initState();
     _loadAiStatus();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _enableRpeTracking = prefs.getBool('enable_rpe_tracking') ?? false;
+      });
+    }
   }
 
   Future<void> _loadAiStatus() async {
@@ -450,6 +463,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           _buildGoalCard(),
           const SizedBox(height: 16),
+          _buildLiftingMetricsCard(),
+          const SizedBox(height: 16),
           _buildNutritionTargetsCard(),
           const SizedBox(height: 16),
           _buildHealthCard(),
@@ -642,6 +657,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
             isLast: true,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLiftingMetricsCard() {
+    return _Section(
+      title: 'Advanced Lifting Metrics',
+      child: SwitchListTile(
+        title: const Text(
+          'Enable RPE Tracking',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: const Text(
+          'Rate of Perceived Exertion (1-10 scale) for sets',
+          style: TextStyle(
+            color: KColor.textMuted,
+            fontSize: 12,
+          ),
+        ),
+        value: _enableRpeTracking,
+        activeColor: KColor.green,
+        activeTrackColor: KColor.green.withValues(alpha: 0.2),
+        inactiveTrackColor: const Color(0xFF1F1F2F),
+        contentPadding: EdgeInsets.zero,
+        onChanged: (val) async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('enable_rpe_tracking', val);
+          setState(() {
+            _enableRpeTracking = val;
+          });
+        },
       ),
     );
   }
