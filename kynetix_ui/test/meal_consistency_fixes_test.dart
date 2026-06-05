@@ -10,6 +10,8 @@ import 'package:kynetix/screens/onboarding_screen.dart' show UserProfile, curren
 import 'package:kynetix/services/nutrition_hydration_guard.dart';
 import 'package:kynetix/services/meal_memory.dart';
 import 'package:kynetix/services/nutrition_target_engine.dart';
+import 'package:kynetix/services/user_nutrition_memory.dart';
+import 'package:kynetix/services/personal_nutrition_memory.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,10 +25,16 @@ void main() {
   });
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'cached_owner_user_id_v1': 'test-user-uuid',
+    });
     NutritionHydrationGuard.instance.reset();
     NutritionHydrationGuard.instance.currentUserIdOverride = 'test-user-uuid';
     NutritionHydrationGuard.instance.markComplete('test-user-uuid');
+    await UserNutritionMemory.instance.clearAll();
+    await UserNutritionMemory.instance.init();
+    await PersonalNutritionMemory.instance.clearAll();
+    await PersonalNutritionMemory.instance.init();
     await MealMemory.instance.clearAll();
     await MealMemory.instance.init();
     dayLogStore.clear();

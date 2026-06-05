@@ -176,7 +176,7 @@ enum MealSection {
 
 class MealEntry {
   final String           rawInput;
-  final NutritionResult  result;
+  final NutritionResult  _result;
   final DateTime         addedAt;
   final MealSection      section;
   final int              dayOfWeek;
@@ -186,9 +186,11 @@ class MealEntry {
   final String           finalSavedInput;
   final bool             userCorrected;
 
+  NutritionResult get result => _result.rebuildFromIngredientsAndOverrides();
+
   const MealEntry({
     required this.rawInput,
-    required this.result,
+    required NutritionResult result,
     required this.addedAt,
     required this.section,
     required this.dayOfWeek,
@@ -197,7 +199,7 @@ class MealEntry {
     this.editCount = 0,
     required this.finalSavedInput,
     this.userCorrected = false,
-  });
+  }) : _result = result;
 
   MealEntry copyWith({
     String? rawInput,
@@ -212,7 +214,7 @@ class MealEntry {
     bool? userCorrected,
   }) => MealEntry(
     rawInput: rawInput ?? this.rawInput,
-    result: result ?? this.result,
+    result: result ?? this._result,
     addedAt: addedAt ?? this.addedAt,
     section: section ?? this.section,
     dayOfWeek: dayOfWeek ?? this.dayOfWeek,
@@ -222,6 +224,7 @@ class MealEntry {
     finalSavedInput: finalSavedInput ?? this.finalSavedInput,
     userCorrected: userCorrected ?? this.userCorrected,
   );
+
 
   double get calMid  => (result.calories.min + result.calories.max) / 2;
   double get protMid => (result.protein.min  + result.protein.max)  / 2;

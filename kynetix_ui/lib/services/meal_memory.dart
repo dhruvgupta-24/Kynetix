@@ -235,7 +235,7 @@ class MealMemory {
     entry.updatedAt = DateTime.now();
     // Persist async (fire-and-forget)
     _persist().ignore();
-    return entry.result.copyWith(source: 'cache');
+    return entry.result.copyWith(source: 'cache').rebuildFromIngredientsAndOverrides();
   }
 
   /// Exact known foods / saved defaults have highest priority.
@@ -260,7 +260,7 @@ class MealMemory {
       // Serve only if it exists in the bootstrap set (no user-learned contamination)
       final boot = _knownFoods[key];
       if (boot != null && _bootstrapKeys.contains(key)) {
-        return boot.copyWith(source: 'memory_exact');
+        return boot.copyWith(source: 'memory_exact').rebuildFromIngredientsAndOverrides();
       }
       return null;
     }
@@ -269,7 +269,7 @@ class MealMemory {
     // Otherwise, it is user-learned, so we MUST check the cache owner ID.
     if (_bootstrapKeys.contains(key)) {
       final boot = _knownFoods[key];
-      if (boot != null) return boot.copyWith(source: 'memory_exact');
+      if (boot != null) return boot.copyWith(source: 'memory_exact').rebuildFromIngredientsAndOverrides();
     }
 
     // DEFENSE-IN-DEPTH: cache-level ownership verification for user-learned known food
@@ -281,10 +281,10 @@ class MealMemory {
     }
 
     final exact = _knownFoods[key];
-    if (exact != null) return exact.copyWith(source: 'memory_exact');
+    if (exact != null) return exact.copyWith(source: 'memory_exact').rebuildFromIngredientsAndOverrides();
     // Conservative alias fallback
     final alias = _lookupByTokenSubset(_knownFoods, key);
-    return alias?.copyWith(source: 'memory_exact');
+    return alias?.copyWith(source: 'memory_exact').rebuildFromIngredientsAndOverrides();
   }
 
   /// Recurring memory = previously confirmed full-meal matches.
@@ -314,8 +314,9 @@ class MealMemory {
     aliasEntry.timesUsed++;
     aliasEntry.updatedAt = DateTime.now();
     _persist().ignore();
-    return aliasEntry.result.copyWith(source: 'cache');
+    return aliasEntry.result.copyWith(source: 'cache').rebuildFromIngredientsAndOverrides();
   }
+
 
   /// Stores an AI result as a low-trust candidate first.
   /// Promotion to recurring memory happens only after repeated stable encounters.

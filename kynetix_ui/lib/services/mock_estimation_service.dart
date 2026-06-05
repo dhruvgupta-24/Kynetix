@@ -552,10 +552,18 @@ bool _hasWord(List<String> tokens, Iterable<String> words) =>
   if (idx > 0) {
     final n = double.tryParse(tokens[idx - 1]);
     if (n != null && n > 0 && n < 20) return (n, true);
+    if (idx > 1 && _coverageFillerTokens.contains(tokens[idx - 1])) {
+      final n2 = double.tryParse(tokens[idx - 2]);
+      if (n2 != null && n2 > 0 && n2 < 20) return (n2, true);
+    }
   }
   if (idx < tokens.length - 1) {
     final n = double.tryParse(tokens[idx + 1]);
     if (n != null && n > 0 && n < 20) return (n, true);
+    if (idx < tokens.length - 2 && _coverageFillerTokens.contains(tokens[idx + 1])) {
+      final n2 = double.tryParse(tokens[idx + 2]);
+      if (n2 != null && n2 > 0 && n2 < 20) return (n2, true);
+    }
   }
   return (1.0, false);
 }

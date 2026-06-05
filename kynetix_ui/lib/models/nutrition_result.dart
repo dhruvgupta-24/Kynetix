@@ -1,6 +1,9 @@
 import 'dart:convert';
 import '../services/mock_estimation_service.dart'
     show NutrientRange, FoodItem, EstimationResult;
+import '../services/user_nutrition_memory.dart';
+import '../services/unit_normalizer.dart';
+
 
 double _safe(double v, [int precision = 1]) {
   if (v.isNaN || v.isInfinite) return 0.0;
@@ -364,9 +367,113 @@ class NutritionResult {
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser,
-        userCorrected:  userCorrected,
       );
   }
+
+  NutritionResult rebuildFromIngredientsAndOverrides() {
+    if (items.isEmpty) return this;
+
+    bool hasOverride = false;
+    final updatedItems = <NutritionItem>[];
+
+    for (final item in items) {
+      final override = UserNutritionMemory.instance.lookup(item.name);
+      final storedUnit = UserNutritionMemory.instance.storedUnit(item.name);
+      
+      if (override != null &&
+          (storedUnit == null || UnitNormalizer.sameCategory(storedUnit, item.unit))) {
+        hasOverride = true;
+        final scale = item.quantity.clamp(0.0, double.infinity);
+        final finalScale = scale > 0 ? scale : 1.0;
+
+        final calVal = override.calories.min * finalScale;
+        final proVal = override.protein.min * finalScale;
+        final carbVal = override.carbohydrates != null ? override.carbohydrates!.min * finalScale : null;
+        final fatVal = override.fat != null ? override.fat!.min * finalScale : null;
+        final fiberVal = override.fiber != null ? override.fiber!.min * finalScale : null;
+
+        updatedItems.add(NutritionItem(
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          estimated: false,
+          mode: item.mode,
+          calories: NutrientRange(min: calVal, max: calVal),
+          protein: NutrientRange(min: proVal, max: proVal),
+          carbohydrates: carbVal != null ? NutrientRange(min: carbVal, max: carbVal) : null,
+          fat: fatVal != null ? NutrientRange(min: fatVal, max: fatVal) : null,
+          fiber: fiberVal != null ? NutrientRange(min: fiberVal, max: fiberVal) : null,
+          sugar: item.sugar,
+          saturatedFat: item.saturatedFat,
+          sodium: item.sodium,
+        ));
+      } else {
+        updatedItems.add(item);
+      }
+    }
+
+    if (!hasOverride) return this;
+
+    double sumCalMin = 0, sumCalMax = 0;
+    double sumProMin = 0, sumProMax = 0;
+    double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax;
+
+    for (final item in updatedItems) {
+      sumCalMin += item.calories.min;
+      sumCalMax += item.calories.max;
+      sumProMin += item.protein.min;
+      sumProMax += item.protein.max;
+
+      if (item.carbohydrates != null) {
+        carbMin = (carbMin ?? 0) + item.carbohydrates!.min;
+        carbMax = (carbMax ?? 0) + item.carbohydrates!.max;
+      }
+      if (item.fat != null) {
+        fatMin = (fatMin ?? 0) + item.fat!.min;
+        fatMax = (fatMax ?? 0) + item.fat!.max;
+      }
+      if (item.fiber != null) {
+        fibMin = (fibMin ?? 0) + item.fiber!.min;
+        fibMax = (fibMax ?? 0) + item.fiber!.max;
+      }
+    }
+
+    final midCal = (sumCalMin + sumCalMax) / 2;
+    final midPro = (sumProMin + sumProMax) / 2;
+    final score = NutritionResult.calculateLocalQualityScore(
+      midCal,
+      midPro,
+      canonicalMeal,
+      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
+      fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
+    );
+
+    return NutritionResult(
+      canonicalMeal: canonicalMeal,
+      items: updatedItems,
+      calories: NutrientRange(min: sumCalMin, max: sumCalMax),
+      protein: NutrientRange(min: sumProMin, max: sumProMax),
+      confidence: 1.0,
+      warnings: const [],
+      source: 'user_override',
+      createdAt: createdAt,
+      fallbackReason: null,
+      carbohydrates: carbMin != null ? NutrientRange(min: carbMin, max: carbMax!) : null,
+      fat: fatMin != null ? NutrientRange(min: fatMin, max: fatMax!) : null,
+      fiber: fibMin != null ? NutrientRange(min: fibMin, max: fibMax!) : null,
+      sugar: sugar,
+      saturatedFat: saturatedFat,
+      sodium: sodium,
+      mealQualityScore: score,
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, canonicalMeal),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
+      macrosLockedByUser: true,
+      userCorrected: true,
+    );
+  }
+
 
   double get primaryCaloriesEstimate => ((calories.min + calories.max) / 2);
   double get primaryProteinEstimate => ((protein.min + protein.max) / 2);
@@ -849,7 +956,7 @@ class NutritionResult {
       mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
       macrosLockedByUser: locked,
       userCorrected: userCorr,
-    ).normalizedUncertainty();
+    ).normalizedUncertainty().rebuildFromIngredientsAndOverrides();
   }
 
   String toJsonString() => jsonEncode(toJson());

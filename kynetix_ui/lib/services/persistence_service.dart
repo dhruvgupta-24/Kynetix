@@ -62,6 +62,17 @@ class PersistenceService {
             jsonDecode(profileRaw) as Map<String, dynamic>);
       }
 
+      // One-time quarantine: wipe legacy memory stores that may contain
+      // pre-normalization corrupted values (total calories stored without
+      // per-unit division, then double-scaled by _itemFromMemory).
+      await _quarantineLegacyMemory(prefs);
+
+      // Load recurring nutrition memory from SharedPreferences first so it is ready for day log loading.
+      await UserNutritionMemory.instance.init();
+      await EatingPatternService.instance.load();
+      await QuickAddService.instance.init();
+      await InsightsReportService.instance.init();
+
       final logsRaw = prefs.getString(_kDayLogs);
       if (logsRaw != null) {
         final map = jsonDecode(logsRaw) as Map<String, dynamic>;
@@ -70,17 +81,6 @@ class PersistenceService {
               DayLog.fromJson(e.value as Map<String, dynamic>);
         }
       }
-      // One-time quarantine: wipe legacy memory stores that may contain
-      // pre-normalization corrupted values (total calories stored without
-      // per-unit division, then double-scaled by _itemFromMemory).
-      await _quarantineLegacyMemory(prefs);
-
-      // Load recurring nutrition memory from SharedPreferences.
-      // This makes memory available offline, before cloud hydration runs.
-      await UserNutritionMemory.instance.init();
-      await EatingPatternService.instance.load();
-      await QuickAddService.instance.init();
-      await InsightsReportService.instance.init();
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
       _onboardingDone = false;
