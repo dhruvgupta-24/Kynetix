@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/nutrition_result.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_pipeline.dart';
+import '../services/meal_memory.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
@@ -189,36 +190,16 @@ class _AddMealScreenState extends State<AddMealScreen>
       );
       if (!mounted || vals == null) return;
 
-      final score = NutritionResult.calculateLocalQualityScore(
-        vals.cal,
-        vals.pro,
-        mealName,
-        carbs: vals.carbs,
-        fat: vals.fat,
-        fiber: vals.fiber,
-      );
-
       setState(() {
-        _result = NutritionResult(
+        _result = NutritionResult.createCustom(
           canonicalMeal: mealName,
-          items: const [], // whole meal only has no sub-items
-          calories: NutrientRange(min: vals.cal, max: vals.cal),
-          protein: NutrientRange(min: vals.pro, max: vals.pro),
-          carbohydrates: NutrientRange(min: vals.carbs, max: vals.carbs),
-          fat: NutrientRange(min: vals.fat, max: vals.fat),
-          fiber: NutrientRange(min: vals.fiber, max: vals.fiber),
-          sugar: _result?.sugar,
-          saturatedFat: _result?.saturatedFat,
-          sodium: _result?.sodium,
-          mealQualityScore: score,
-          mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
-          mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
-          mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
-          confidence: 0.99,
-          warnings: const [],
+          calories: vals.cal,
+          protein: vals.pro,
+          carbohydrates: vals.carbs,
+          fat: vals.fat,
+          fiber: vals.fiber,
           source: 'user_override',
-          createdAt: DateTime.now(),
-          macrosLockedByUser: true,
+          userCorrected: true,
         );
         _lastLockedText = mealName;
       });
@@ -311,26 +292,16 @@ class _AddMealScreenState extends State<AddMealScreen>
       );
 
       setState(() {
-        _result = NutritionResult(
+        _result = NutritionResult.createCustom(
           canonicalMeal: mealName,
-          items: vals,
-          calories: NutrientRange(min: totalCal, max: totalCal),
-          protein: NutrientRange(min: totalPro, max: totalPro),
-          carbohydrates: NutrientRange(min: totalCarb, max: totalCarb),
-          fat: NutrientRange(min: totalFat, max: totalFat),
-          fiber: NutrientRange(min: totalFib, max: totalFib),
-          sugar: _result?.sugar,
-          saturatedFat: _result?.saturatedFat,
-          sodium: _result?.sodium,
-          mealQualityScore: score,
-          mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, mealName),
-          mealQualityPositive: NutritionResult.getLocalQualityPositive(score, mealName),
-          mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, mealName),
-          confidence: 0.99,
-          warnings: const [],
+          calories: totalCal,
+          protein: totalPro,
+          carbohydrates: totalCarb,
+          fat: totalFat,
+          fiber: totalFib,
           source: 'user_override',
-          createdAt: DateTime.now(),
-          macrosLockedByUser: true,
+          userCorrected: true,
+          items: vals,
         );
         _lastLockedText = mealName;
       });
@@ -349,9 +320,11 @@ class _AddMealScreenState extends State<AddMealScreen>
         edited: true,
         editCount: widget.initialEntry!.editCount + 1,
         finalSavedInput: text.isNotEmpty ? text : widget.initialEntry!.finalSavedInput,
+        userCorrected: true,
       );
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
-      await PersistenceService.saveDayLogs();
+      await MealMemory.instance.store(entry.rawInput, entry.result);
+      await PersistenceService.saveDay(widget.date);
       if (mounted) {
         Navigator.of(context).pop(entry);
       }
@@ -400,12 +373,15 @@ class _AddMealScreenState extends State<AddMealScreen>
       edited: isEdited,
       editCount: (widget.initialEntry?.editCount ?? 0) + (widget.initialEntry != null ? 1 : 0),
       finalSavedInput: text,
+      userCorrected: widget.initialEntry?.userCorrected ?? (_result?.userCorrected ?? false),
     );
     if (widget.initialEntry != null) {
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
     } else {
       logFor(widget.date).add(widget.section, entry);
     }
+    await MealMemory.instance.store(entry.rawInput, entry.result);
+    await PersistenceService.saveDay(widget.date);
     if (!mounted) return;
     Navigator.of(context).pop(entry);
   }
@@ -713,7 +689,10 @@ class _ResultPreview extends StatelessWidget {
               ),
               const SizedBox(height: 14),
             ],
-            _ConfidenceBar(confidence: result.confidence),
+            _ConfidenceBar(
+              confidence: result.confidence,
+              isManual: result.userCorrected || result.macrosLockedByUser || result.source == 'user_override',
+            ),
             if ((result.coachSummary ?? '').isNotEmpty) ...[
               const SizedBox(height: 14),
               Text(
@@ -977,7 +956,8 @@ class _MacroChip extends StatelessWidget {
 
 class _ConfidenceBar extends StatelessWidget {
   final double confidence;
-  const _ConfidenceBar({required this.confidence});
+  final bool isManual;
+  const _ConfidenceBar({required this.confidence, this.isManual = false});
 
   Color _color() {
     if (confidence >= 0.75) return const Color(0xFF52B788);
@@ -987,6 +967,35 @@ class _ConfidenceBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isManual) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF60A5FA).withOpacity(0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: const Color(0xFF60A5FA).withOpacity(0.4),
+            width: 1.0,
+          ),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.edit_rounded, size: 14, color: Color(0xFF60A5FA)),
+            SizedBox(width: 6),
+            Text(
+              'Manually Edited',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF60A5FA),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1183,9 +1192,7 @@ class _FixEstimateSheetState extends State<_FixEstimateSheet> {
     if (totalCal > 0 && impliedCal > 0) {
       final deviation = ((impliedCal - totalCal) / totalCal).abs();
       if (deviation > 0.15) {
-        warning = 'Macro totals imply ~${impliedCal.toStringAsFixed(0)} kcal but '
-            'you entered ${totalCal.toStringAsFixed(0)} kcal. '
-            'Check your values — protein×4 + carbs×4 + fat×9 should equal calories.';
+        warning = "Please check your calories and macros.";
       }
     }
     if (warning != _validationWarning) setState(() => _validationWarning = warning);
@@ -1912,9 +1919,7 @@ class _IngredientEditSheetState extends State<_IngredientEditSheet> {
         if (calSum > 0 && impliedCal > 0) {
           final deviation = ((impliedCal - calSum) / calSum).abs();
           if (deviation > 0.15) {
-            _validationWarning = 'Macro totals imply ~${impliedCal.toStringAsFixed(0)} kcal but '
-                'running total is ${calSum.toStringAsFixed(0)} kcal. '
-                'protein×4 + carbs×4 + fat×9 should equal calories.';
+            _validationWarning = "Please check your calories and macros.";
           } else {
             _validationWarning = null;
           }

@@ -158,8 +158,12 @@ class PersistenceService {
     } catch (_) {}
   }
 
-  /// Convenience alias — saves all logs (a single JSON blob is atomic).
-  static Future<void> saveDay(DateTime _) => saveDayLogs();
+  static Future<void> saveDay(DateTime date) async {
+    await saveDayLogs();
+    if (currentUserProfile != null) {
+      InsightsReportService.instance.recomputeForDate(date, currentUserProfile!).ignore();
+    }
+  }
 
   /// Wipe all persisted data (for settings / reset flow).
   ///

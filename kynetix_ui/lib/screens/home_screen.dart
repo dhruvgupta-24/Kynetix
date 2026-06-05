@@ -326,7 +326,10 @@ class _HomeResultCard extends StatelessWidget {
           value: proLabel,
         ),
         const SizedBox(height: 20),
-        _ConfidenceBar(confidence: result.confidence),
+        _ConfidenceBar(
+          confidence: result.confidence,
+          isManual: result.userCorrected || result.macrosLockedByUser || result.source == 'user_override',
+        ),
         if (userWarnings.isNotEmpty) ...[
           const SizedBox(height: 20),
           const Divider(color: Color(0xFF2E2E3E), height: 1),
@@ -389,7 +392,8 @@ class _NutrientRow extends StatelessWidget {
 
 class _ConfidenceBar extends StatelessWidget {
   final double confidence;
-  const _ConfidenceBar({required this.confidence});
+  final bool isManual;
+  const _ConfidenceBar({required this.confidence, this.isManual = false});
 
   Color _barColor() {
     if (confidence >= 0.75) return const Color(0xFF52B788);
@@ -399,6 +403,35 @@ class _ConfidenceBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isManual) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF60A5FA).withOpacity(0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: const Color(0xFF60A5FA).withOpacity(0.4),
+            width: 1.0,
+          ),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.edit_rounded, size: 14, color: Color(0xFF60A5FA)),
+            SizedBox(width: 6),
+            Text(
+              'Manually Edited',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF60A5FA),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final pct = (confidence * 100).toInt();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

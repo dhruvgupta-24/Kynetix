@@ -400,6 +400,98 @@ class InsightsReportService extends ChangeNotifier {
     }
   }
 
+  Future<void> recomputeForDate(DateTime date, UserProfile profile) async {
+    final wKey = InsightsEngine.weekKeyOf(date);
+    final mKey = InsightsEngine.monthKeyOf(date);
+    final yKey = date.year.toString();
+
+    final sessions = WorkoutService.instance.sessions;
+
+    // 1. Recompute affected week report
+    final weekKeys = _weekly.keys.toSet()..add(wKey);
+    final sortedWeeks = weekKeys.toList()..sort();
+    final idx = sortedWeeks.indexOf(wKey);
+    WeeklyReport? priorWeek;
+    if (idx > 0) {
+      priorWeek = _weekly[sortedWeeks[idx - 1]];
+    }
+    final newWeekReport = InsightsEngine.computeWeek(
+      weekKey: wKey,
+      profile: profile,
+      logs: dayLogStore,
+      sessions: sessions,
+      priorWeek: priorWeek,
+    );
+    if (newWeekReport != null) {
+      _weekly[wKey] = newWeekReport;
+    } else {
+      _weekly.remove(wKey);
+    }
+
+    // 2. Recompute affected month report
+    final monthKeys = _monthly.keys.toSet()..add(mKey);
+    final sortedMonths = monthKeys.toList()..sort();
+    final mIdx = sortedMonths.indexOf(mKey);
+    MonthlyReport? priorMonth;
+    if (mIdx > 0) {
+      priorMonth = _monthly[sortedMonths[mIdx - 1]];
+    }
+    final newMonthReport = InsightsEngine.computeMonth(
+      monthKey: mKey,
+      profile: profile,
+      logs: dayLogStore,
+      sessions: sessions,
+      priorMonth: priorMonth,
+    );
+    if (newMonthReport != null) {
+      _monthly[mKey] = newMonthReport;
+    } else {
+      _monthly.remove(mKey);
+    }
+
+    // 3. Recompute affected year report
+    final newYearReport = InsightsEngine.computeYear(
+      yearKey: yKey,
+      profile: profile,
+      logs: dayLogStore,
+      monthlyCache: _monthly,
+    );
+    if (newYearReport != null) {
+      _yearly[yKey] = newYearReport;
+    } else {
+      _yearly.remove(yKey);
+    }
+
+    // 4. Personal Bests
+    _personalBests = InsightsEngine.computePersonalBests(
+      profile: profile,
+      logs: dayLogStore,
+      weeklyCache: _weekly,
+      monthlyCache: _monthly,
+    );
+
+    // 5. Achievements
+    _achievements = InsightsEngine.evaluateAchievements(
+      logs: dayLogStore,
+      profile: profile,
+      sessions: sessions,
+      existingAchievements: _achievements,
+      weeklyReports: _weekly.values.toList()..sort((a, b) => a.weekKey.compareTo(b.weekKey)),
+      monthlyReports: _monthly.values.toList()..sort((a, b) => a.monthKey.compareTo(b.monthKey)),
+      currentPBs: _personalBests,
+    );
+
+    _lastComputed = DateTime.now();
+    await _save();
+    notifyListeners();
+
+    // Trigger AI summary generation if connected and latest weekly report exists
+    final latestW = latestWeekly();
+    if (latestW != null && latestW.weekKey == wKey) {
+      _generateAiSummaryIfNeeded(latestW, profile).ignore();
+    }
+  }
+
   String _currentWeekKey() => InsightsEngine.weekKeyOf(DateTime.now());
   String _currentMonthKey() => InsightsEngine.monthKeyOf(DateTime.now());
   String _currentYearKey() => DateTime.now().year.toString();

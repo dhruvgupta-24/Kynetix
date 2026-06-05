@@ -12,6 +12,7 @@ import '../services/coach_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/meal_memory.dart';
 import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
 import '../services/workout_service.dart';
@@ -277,7 +278,7 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     setState(() {
       _log = logFor(widget.date);
     });
-    PersistenceService.saveDayLogs().ignore();
+    PersistenceService.saveDay(widget.date).ignore();
   }
 
   Future<void> _openAddMeal(MealSection section) async {
@@ -316,9 +317,6 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     MealSection? section,
   }) {
     final sec = section ?? _currentSection;
-    final carbs = NutritionResult.estimateCarbsLocally(calories, protein, name);
-    final fat = NutritionResult.estimateFatLocally(calories, protein, name);
-    final fiber = NutritionResult.estimateFiberLocally(calories, name);
     final entry = MealEntry(
       rawInput:        name,
       finalSavedInput: name,
@@ -326,34 +324,15 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       addedAt:         DateTime.now(),
       dayOfWeek:       widget.date.weekday,
       parsedFoods:     [name],
-      result: NutritionResult(
+      result: NutritionResult.createCustom(
         canonicalMeal: name,
-        items: [
-          NutritionItem(
-            name:      name,
-            quantity:  1,
-            unit:      'serving',
-            estimated: false,
-            mode:      EstimationMode.packagedKnown,
-            calories:  NutrientRange(min: calories, max: calories),
-            protein:   NutrientRange(min: protein,  max: protein),
-            carbohydrates: carbs,
-            fat:           fat,
-            fiber:         fiber,
-          ),
-        ],
-        calories:   NutrientRange(min: calories, max: calories),
-        protein:    NutrientRange(min: protein,  max: protein),
-        carbohydrates: carbs,
-        fat:           fat,
-        fiber:         fiber,
-        confidence: 1.0,
-        warnings:   const [],
-        source:     'quick_add',
-        createdAt:  DateTime.now(),
+        calories: calories,
+        protein: protein,
+        source: 'quick_add',
       ),
     );
     _log.add(sec, entry);
+    MealMemory.instance.store(name, entry.result).ignore();
     _refresh();
     kHapticMedium();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1707,9 +1686,9 @@ class _EntryTile extends StatelessWidget {
                                     : const Color(0xFFEF4444)),
                           ),
                         ],
-                        if (entry.edited || entry.result.macrosLockedByUser) ...[
+                        if (entry.edited || entry.result.macrosLockedByUser || entry.userCorrected || entry.result.userCorrected) ...[
                           const SizedBox(width: 6),
-                          const _MacroBadge('Edited', Color(0xFF60A5FA)),
+                          const _MacroBadge('Manually Edited', Color(0xFF60A5FA)),
                         ],
                       ],
                     ),
@@ -1791,7 +1770,7 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                         ),
                       ),
                       // ── Edited macros indicator ─────────────────────────────
-                      if (entry.result.macrosLockedByUser) ...[
+                      if (entry.result.macrosLockedByUser || entry.result.userCorrected || entry.userCorrected) ...[
                         const SizedBox(height: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1806,10 +1785,10 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.lock_rounded, size: 9, color: Color(0xFF60A5FA)),
+                              Icon(Icons.edit_rounded, size: 9.5, color: Color(0xFF60A5FA)),
                               SizedBox(width: 4),
                               Text(
-                                'Manually Edited — using custom values',
+                                'Manually Edited',
                                 style: TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w700,

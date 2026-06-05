@@ -211,6 +211,7 @@ class NutritionResult {
   /// When true the user has manually edited one or more macros.
   /// The pipeline MUST NOT overwrite any macro on a locked result.
   final bool                macrosLockedByUser;
+  final bool                userCorrected;
 
   const NutritionResult({
     required this.canonicalMeal,
@@ -238,6 +239,7 @@ class NutritionResult {
     this.mealQualityPositive,
     this.mealQualityImprovement,
     this.macrosLockedByUser = false,
+    this.userCorrected = false,
   });
 
   NutritionResult copyWith({
@@ -256,6 +258,7 @@ class NutritionResult {
     String? mealQualityPositive,
     String? mealQualityImprovement,
     bool? macrosLockedByUser,
+    bool? userCorrected,
   }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
@@ -282,6 +285,7 @@ class NutritionResult {
         mealQualityPositive: mealQualityPositive ?? this.mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement ?? this.mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser ?? this.macrosLockedByUser,
+        userCorrected:  userCorrected ?? this.userCorrected,
       );
 
   /// Guardrails-specific copy — replaces macros + warnings without touching items.
@@ -326,6 +330,7 @@ class NutritionResult {
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser,
+        userCorrected:  userCorrected,
       );
   }
 
@@ -359,6 +364,7 @@ class NutritionResult {
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser,
+        userCorrected:  userCorrected,
       );
   }
 
@@ -606,7 +612,6 @@ class NutritionResult {
     return 'Control portion size to align perfectly with your daily targets.';
   }
 
-  /// Build a NutritionResult from the legacy local fallback.
   factory NutritionResult.fromEstimationResult(
     EstimationResult r,
     String rawInput,
@@ -654,6 +659,71 @@ class NutritionResult {
       mealQualityExplanation: getLocalQualityExplanation(score, rawInput),
       mealQualityPositive: getLocalQualityPositive(score, rawInput),
       mealQualityImprovement: getLocalQualityImprovement(score, rawInput),
+      userCorrected: false,
+    );
+  }
+
+  factory NutritionResult.createCustom({
+    required String canonicalMeal,
+    required double calories,
+    required double protein,
+    double? carbohydrates,
+    double? fat,
+    double? fiber,
+    required String source,
+    bool userCorrected = false,
+    List<NutritionItem>? items,
+  }) {
+    final carbsRange = carbohydrates != null
+        ? NutrientRange(min: carbohydrates, max: carbohydrates)
+        : estimateCarbsLocally(calories, protein, canonicalMeal);
+    final fatRange = fat != null
+        ? NutrientRange(min: fat, max: fat)
+        : estimateFatLocally(calories, protein, canonicalMeal);
+    final fiberRange = fiber != null
+        ? NutrientRange(min: fiber, max: fiber)
+        : estimateFiberLocally(calories, canonicalMeal);
+
+    final score = calculateLocalQualityScore(
+      calories,
+      protein,
+      canonicalMeal,
+      carbs: carbsRange.mid,
+      fat: fatRange.mid,
+      fiber: fiberRange.mid,
+    );
+
+    return NutritionResult(
+      canonicalMeal: canonicalMeal,
+      items: items ?? [
+        NutritionItem(
+          name:      canonicalMeal,
+          quantity:  1,
+          unit:      'serving',
+          estimated: false,
+          mode:      EstimationMode.packagedKnown,
+          calories:  NutrientRange(min: calories, max: calories),
+          protein:   NutrientRange(min: protein,  max: protein),
+          carbohydrates: carbsRange,
+          fat:           fatRange,
+          fiber:         fiberRange,
+        ),
+      ],
+      calories:      NutrientRange(min: calories, max: calories),
+      protein:       NutrientRange(min: protein,  max: protein),
+      confidence:    1.0,
+      warnings:      const [],
+      source:        source,
+      createdAt:     DateTime.now(),
+      carbohydrates: carbsRange,
+      fat:            fatRange,
+      fiber:          fiberRange,
+      mealQualityScore: score,
+      mealQualityExplanation: getLocalQualityExplanation(score, canonicalMeal),
+      mealQualityPositive: getLocalQualityPositive(score, canonicalMeal),
+      mealQualityImprovement: getLocalQualityImprovement(score, canonicalMeal),
+      macrosLockedByUser: userCorrected,
+      userCorrected: userCorrected,
     );
   }
 
@@ -685,6 +755,7 @@ class NutritionResult {
         if (mealQualityPositive != null) 'mealQualityPositive': mealQualityPositive,
         if (mealQualityImprovement != null) 'mealQualityImprovement': mealQualityImprovement,
         if (macrosLockedByUser) 'macrosLockedByUser': true,
+        if (userCorrected) 'userCorrected': true,
       };
 
   factory NutritionResult.fromJson(Map<String, dynamic> j) {
@@ -726,6 +797,7 @@ class NutritionResult {
     }
 
     final locked = j['macrosLockedByUser'] as bool? ?? false;
+    final userCorr = j['userCorrected'] as bool? ?? false;
     final carbsRange = j['carbohydrates'] != null
         ? NutritionItem._range(j['carbohydrates'])
         : (locked ? null : NutrientRange(min: carbMin, max: carbMax));
@@ -776,6 +848,7 @@ class NutritionResult {
       mealQualityPositive: j['mealQualityPositive'] as String? ?? NutritionResult.getLocalQualityPositive(score, canonicalMeal),
       mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
       macrosLockedByUser: locked,
+      userCorrected: userCorr,
     ).normalizedUncertainty();
   }
 

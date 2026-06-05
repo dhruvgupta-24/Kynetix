@@ -184,6 +184,7 @@ class MealEntry {
   final bool             edited;
   final int              editCount;
   final String           finalSavedInput;
+  final bool             userCorrected;
 
   const MealEntry({
     required this.rawInput,
@@ -195,6 +196,7 @@ class MealEntry {
     this.edited = false,
     this.editCount = 0,
     required this.finalSavedInput,
+    this.userCorrected = false,
   });
 
   MealEntry copyWith({
@@ -207,6 +209,7 @@ class MealEntry {
     bool? edited,
     int? editCount,
     String? finalSavedInput,
+    bool? userCorrected,
   }) => MealEntry(
     rawInput: rawInput ?? this.rawInput,
     result: result ?? this.result,
@@ -217,6 +220,7 @@ class MealEntry {
     edited: edited ?? this.edited,
     editCount: editCount ?? this.editCount,
     finalSavedInput: finalSavedInput ?? this.finalSavedInput,
+    userCorrected: userCorrected ?? this.userCorrected,
   );
 
   double get calMid  => (result.calories.min + result.calories.max) / 2;
@@ -232,19 +236,24 @@ class MealEntry {
     'editCount': editCount,
     'finalSavedInput': finalSavedInput,
     'result':   result.toJson(),
+    'userCorrected': userCorrected || result.userCorrected,
   };
 
-  factory MealEntry.fromJson(Map<String, dynamic> j) => MealEntry(
-    rawInput: j['rawInput'] as String? ?? '',
-    addedAt:  DateTime.tryParse(j['addedAt'] as String? ?? '') ?? DateTime.now(),
-    section: MealSection.values.byName(j['section'] as String? ?? MealSection.breakfast.name),
-    dayOfWeek: j['dayOfWeek'] as int? ?? DateTime.now().weekday,
-    parsedFoods: List<String>.from(j['parsedFoods'] as List<dynamic>? ?? const []),
-    edited: j['edited'] as bool? ?? false,
-    editCount: j['editCount'] as int? ?? 0,
-    finalSavedInput: j['finalSavedInput'] as String? ?? j['rawInput'] as String? ?? '',
-    result:   NutritionResult.fromJson(j['result'] as Map<String, dynamic>? ?? {}),
-  );
+  factory MealEntry.fromJson(Map<String, dynamic> j) {
+    final res = NutritionResult.fromJson(j['result'] as Map<String, dynamic>? ?? {});
+    return MealEntry(
+      rawInput: j['rawInput'] as String? ?? '',
+      addedAt:  DateTime.tryParse(j['addedAt'] as String? ?? '') ?? DateTime.now(),
+      section: MealSection.values.byName(j['section'] as String? ?? MealSection.breakfast.name),
+      dayOfWeek: j['dayOfWeek'] as int? ?? DateTime.now().weekday,
+      parsedFoods: List<String>.from(j['parsedFoods'] as List<dynamic>? ?? const []),
+      edited: j['edited'] as bool? ?? false,
+      editCount: j['editCount'] as int? ?? 0,
+      finalSavedInput: j['finalSavedInput'] as String? ?? j['rawInput'] as String? ?? '',
+      result:   res,
+      userCorrected: j['userCorrected'] as bool? ?? res.userCorrected,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
