@@ -285,11 +285,18 @@ class NutritionGuardrails {
 
   // ── Milk type-aware baselines ─────────────────────────────────────────────
   // Default: Indian toned milk (Amul Toned) = 58 kcal/100ml, 3.4g/100ml.
+  //
+  // Sources (FSSAI / Amul published nutrition data):
+  //   skim / fat-free        → 36 kcal/100ml
+  //   double-toned / low-fat → 46 kcal/100ml
+  //   toned milk (default)   → 58 kcal/100ml
+  //   full cream             → 65 kcal/100ml
+  //   buffalo / whole milk   → 117 kcal/100ml  (~6–7% fat vs 3% for toned)
 
   static double _milkKcalPerMl(String lc) {
     if (_containsAny(lc, ['skim', 'skimmed', 'fat free', '0%'])) return 0.36;
     if (_containsAny(lc, ['double toned', 'double-toned', 'low fat'])) return 0.46;
-    if (_containsAny(lc, ['buffalo', 'full fat', 'whole milk'])) return 0.72;
+    if (_containsAny(lc, ['buffalo', 'full fat', 'whole milk'])) return 1.17; // Amul Buffalo Milk: 117 kcal/100ml
     if (_containsAny(lc, ['full cream', 'fullcream'])) return 0.65;
     return 0.58;
   }

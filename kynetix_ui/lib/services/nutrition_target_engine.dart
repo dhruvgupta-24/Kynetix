@@ -37,6 +37,14 @@ class WeeklyTargetPlan {
   final bool   healthConnectActive;
   final int?   effectiveStepsPerDay;
 
+  /// Daily fiber target in grams.
+  ///
+  /// Derived from the IOM / Academy of Nutrition and Dietetics guideline:
+  ///   14 g of fiber per 1,000 kcal consumed
+  ///   (Institute of Medicine, Dietary Reference Intakes, 2005).
+  /// Clamped to [20, 60] g to protect edge cases (very-low or very-high TDEE).
+  final double fiberTargetG;
+
   const WeeklyTargetPlan({
     required this.maintenanceCalories,
     required this.avgDailyCalories,
@@ -46,6 +54,7 @@ class WeeklyTargetPlan {
     required this.trainingDayProtein,
     required this.restDayProtein,
     required this.healthConnectActive,
+    required this.fiberTargetG,
     this.effectiveStepsPerDay,
   });
 }
@@ -104,16 +113,18 @@ class NutritionTargetEngine {
       final customTrainCal = profile.customTrainingDayCalories ?? trainCal;
       final customRestCal = profile.customRestDayCalories ?? restCal;
       final protein = profile.customProteinTarget ?? avgProt;
+      final avgCal  = _r((customTrainCal + customRestCal) / 2);
 
       return WeeklyTargetPlan(
         maintenanceCalories:  maintenance,
-        avgDailyCalories:     _r((customTrainCal + customRestCal) / 2),
+        avgDailyCalories:     avgCal,
         avgDailyProtein:      protein,
         trainingDayCalories:  customTrainCal,
         restDayCalories:      customRestCal,
         trainingDayProtein:   protein,
         restDayProtein:       protein,
         healthConnectActive:  health?.hasData == true,
+        fiberTargetG:         _fiberTarget(avgCal),
         effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt() ?? profile.averageDailySteps,
       );
     }
@@ -127,6 +138,7 @@ class NutritionTargetEngine {
       trainingDayProtein:   _trainingProtein(profile),
       restDayProtein:       _restProtein(profile),
       healthConnectActive:  health?.hasData == true,
+      fiberTargetG:         _fiberTarget(avgCal),
       effectiveStepsPerDay: health?.effectiveAverageSteps?.toInt() ?? profile.averageDailySteps,
     );
   }
@@ -327,7 +339,7 @@ class NutritionTargetEngine {
   ///   • Energy cost of walking ≈ 0.5–0.6 kcal per kg per km.
   ///   • Average stride ≈ 0.75 m → 1 step ≈ 0.00075 km.
   ///   • kcal/step = weight_kg × 0.00075 × 0.55 ≈ weight × 0.000413
-  ///   • At 65 kg: 0.04 kcal/step  (independently validated against DLW studies)
+  ///   • At 65 kg: 0.0268 kcal/step  (65 × 0.00075 × 0.55; validated against DLW studies)
   ///   • At 80 kg: 0.033 kcal/step (heavier → same stride, more energy)
   ///
   /// The "baseline" is 7,000 steps — the approximate step count already
@@ -407,6 +419,18 @@ class NutritionTargetEngine {
 
   /// Absolute minimum daily calorie target.
   double _calFloor(UserProfile p) => _r(_bmr(p) + 200);
+
+  /// Daily fiber target derived from the IOM 14 g per 1,000 kcal guideline.
+  ///
+  /// Source: Institute of Medicine, Dietary Reference Intakes for Energy,
+  /// Carbohydrate, Fiber, Fat, Fatty Acids, Cholesterol, Protein, and Amino
+  /// Acids. National Academies Press, 2005, p. 339.
+  ///
+  /// Clamped to [20, 60] g to handle edge cases:
+  ///   - Floor 20 g: ensures a minimum target for very-low-calorie entries.
+  ///   - Cap   60 g: avoids unrealistically high targets on extremely high calorie intakes.
+  double _fiberTarget(double avgDailyCalories) =>
+      (14.0 * avgDailyCalories / 1000).clamp(20.0, 60.0);
 
   double _r(double v) => (v * 10).round() / 10;
 }

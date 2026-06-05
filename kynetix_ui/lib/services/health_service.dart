@@ -298,7 +298,11 @@ class HealthSyncResult {
   /// Simple 30-day average (displayed in UI).
   final double?       averageDailySteps30d;
 
-  /// Median step count from the 14-day window (outlier-robust estimate).
+  /// 14-day average step count (arithmetic mean of available days).
+  ///
+  /// Named for historical reasons — this was previously intended to store a
+  /// median but now stores the plain mean. The effective average ([effectiveAverageSteps])
+  /// is the primary signal used by the calorie engine.
   final double?       medianDailySteps14d;
 
   /// Weight readings from the last 90 days (most recent first).
@@ -361,9 +365,11 @@ class HealthSyncResult {
 
   /// Science-based step-to-calorie offset vs a 7,000-step sedentary baseline.
   ///
-  /// Formula: kcal ≈ steps × (bodyWeight_kg × 0.000415)
-  ///   • 0.04 kcal/step at ~65 kg (validated against doubly-labelled water studies)
-  ///   • Baseline is 7,000 steps (~280 kcal for 65 kg) — typical desk person
+  /// Formula: kcal ≈ steps × (bodyWeight_kg × strideKm × metFactor)
+  ///   = steps × (bodyWeight_kg × 0.00075 × 0.55)
+  ///   = steps × (bodyWeight_kg × 0.000413)
+  ///   • At 65 kg: 0.0268 kcal/step (validated against doubly-labelled water studies)
+  ///   • Baseline is 7,000 steps (≈280 kcal for 65 kg) — typical desk person
   ///   • The offset is how many MORE or FEWER calories vs baseline
   ///
   /// Because we don't know user weight here, we use a conservative 65 kg proxy.
@@ -372,7 +378,7 @@ class HealthSyncResult {
     final steps = effectiveAverageSteps;
     if (steps == null) return 0;
     const baseline = 7000.0;
-    const kcalPerStep = 0.04; // at 65 kg
+    const kcalPerStep = 0.0268; // 65 kg × 0.00075 km/step × 0.55 kcal/kg/km
     return ((steps - baseline) * kcalPerStep).round();
   }
 }
@@ -445,8 +451,7 @@ class HealthService {
   ///   1. Fetches ALL step data points for the last 30 days in ONE batch call.
   ///   2. Aggregates points into per-calendar-day totals.
   ///   3. Filters out wear-gap days (< 500 steps) — too low to be real data.
-  ///   4. Trims outliers (Winsorize at 5th/95th percentile) before averaging.
-  ///   5. Computes 14-day and 30-day averages plus a weighted effective steps.
+  ///   4. Computes 14-day and 30-day arithmetic averages plus a weighted effective steps.
   ///
   /// Timezone note: [DateTime.now()] returns the device's local time.
   /// [getTotalStepsInInterval] passes DateTime objects to Health Connect, which
@@ -545,7 +550,7 @@ class HealthService {
         effectiveAverageSteps: effective,
         averageDailySteps14d:  avg14,
         averageDailySteps30d:  avg30,
-        medianDailySteps14d:   avg14, // median falls back to simple average now
+        medianDailySteps14d:   avg14, // stores avg14; median not implemented
         activityTier: effective != null
             ? _tierFromSteps(effective)
             : ActivityTier.sedentary,

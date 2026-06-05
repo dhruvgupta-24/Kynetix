@@ -602,6 +602,12 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     );
   }
 
+  double get _targetFiber {
+    final profile = currentUserProfile;
+    if (profile == null) return 30.0;
+    return NutritionTargetEngine().weeklyPlan(profile, health: widget.health).fiberTargetG;
+  }
+
   @override
   Widget build(BuildContext context) {
     final target = _dayTarget;
@@ -646,6 +652,7 @@ class _DayDetailContentState extends State<_DayDetailContent> {
           log: _log,
           targetCal: target?.calories ?? 2000.0,
           targetPro: target?.protein ?? 130.0,
+          targetFiber: _targetFiber,
         ),
         const SizedBox(height: 12),
 

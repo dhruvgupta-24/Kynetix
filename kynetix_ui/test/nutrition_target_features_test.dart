@@ -90,4 +90,45 @@ void main() {
       expect(target.note, contains('Manual Override'));
     });
   });
+
+  group('NutritionTargetEngine - Fiber Targets', () {
+    test('Should calculate fiber target as 14g per 1,000 kcal of average daily calories', () {
+      final engine = NutritionTargetEngine();
+      final plan = engine.weeklyPlan(baseProfile.copyWith(
+        useCustomTargets: true,
+        customMaintenanceCalories: 2000.0,
+        customTrainingDayCalories: 2000.0,
+        customRestDayCalories: 2000.0,
+      ));
+
+      // 2000 kcal * 14 / 1000 = 28.0 g
+      expect(plan.fiberTargetG, 28.0);
+    });
+
+    test('Should clamp fiber target to a floor of 20g for very low calorie levels', () {
+      final engine = NutritionTargetEngine();
+      final plan = engine.weeklyPlan(baseProfile.copyWith(
+        useCustomTargets: true,
+        customMaintenanceCalories: 1200.0,
+        customTrainingDayCalories: 1200.0,
+        customRestDayCalories: 1200.0,
+      ));
+
+      // 1200 kcal * 14 / 1000 = 16.8 g -> clamp floor to 20.0 g
+      expect(plan.fiberTargetG, 20.0);
+    });
+
+    test('Should clamp fiber target to a ceiling of 60g for very high calorie levels', () {
+      final engine = NutritionTargetEngine();
+      final plan = engine.weeklyPlan(baseProfile.copyWith(
+        useCustomTargets: true,
+        customMaintenanceCalories: 5000.0,
+        customTrainingDayCalories: 5000.0,
+        customRestDayCalories: 5000.0,
+      ));
+
+      // 5000 kcal * 14 / 1000 = 70.0 g -> clamp ceiling to 60.0 g
+      expect(plan.fiberTargetG, 60.0);
+    });
+  });
 }

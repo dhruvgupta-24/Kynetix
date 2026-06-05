@@ -380,6 +380,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double get _consumedProtein  => _selectedLog.totalProteinMid;
   double get _targetCalories   => _effectiveDayTarget?.calories ?? _weeklyPlan.avgDailyCalories;
   double get _targetProtein    => _effectiveDayTarget?.protein  ?? _weeklyPlan.avgDailyProtein;
+  double get _targetFiber      => _weeklyPlan.fiberTargetG;
   double get _remainingCalories => (_targetCalories - _consumedCalories).clamp(0, double.infinity);
   double get _remainingProtein  => (_targetProtein  - _consumedProtein ).clamp(0, double.infinity);
 
@@ -769,6 +770,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             log: _selectedLog,
             targetCal: _targetCalories,
             targetPro: _targetProtein,
+            targetFiber: _targetFiber,
           ),
         ],
       ),
@@ -2864,12 +2866,14 @@ class AdditionalMacrosCard extends StatefulWidget {
   final DayLog log;
   final double targetCal;
   final double targetPro;
+  final double targetFiber;
 
   const AdditionalMacrosCard({
     super.key,
     required this.log,
     required this.targetCal,
     required this.targetPro,
+    required this.targetFiber,
   });
 
   @override
@@ -2884,7 +2888,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
     if (widget.log.isEmpty) return const SizedBox.shrink();
 
     // Standardized Targets
-    final targetFiber = 30.0;
+    final targetFiber = widget.targetFiber;
     final remainingCal = (widget.targetCal - widget.targetPro * 4).clamp(0.0, double.infinity);
     final targetFat = remainingCal * 0.35 / 9;
     final targetCarbs = remainingCal * 0.65 / 4;
