@@ -642,11 +642,7 @@ class WorkoutService extends ChangeNotifier {
   // ── Write API ────────────────────────────────────────────────────────────
 
   Future<void> saveSession(WorkoutSession session) async {
-    _sessions.removeWhere(
-      (s) =>
-          _dateKey(s.date) == _dateKey(session.date) &&
-          s.splitDayName == session.splitDayName,
-    );
+    _sessions.removeWhere((s) => s.id == session.id);
     _sessions.add(session);
 
     if (_sessions.length > _maxSessions) {

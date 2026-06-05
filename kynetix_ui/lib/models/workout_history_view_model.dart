@@ -2,6 +2,7 @@ import 'dart:math' show max;
 import '../models/workout_session.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
+import '../services/achievement_engine.dart' show AchievementInfo, AchievementEngine;
 
 enum TimeRangeFilter {
   last7Days,
@@ -38,19 +39,39 @@ class WorkoutHistoryViewModel {
   final String mostTrainedMuscle;
   final String mostPerformedExercise;
 
+  // ── Chronological Grouped Sessions
+  final Map<String, List<WorkoutSession>> chronologicalGroups;
+
   // ── Heatmap Data
   final List<HeatmapDay> heatmapDays;
   final double maxDailyVolume;
+  final double percentileVolume90;
 
   // ── Muscle Analytics
   final Map<String, int> muscleFrequencies;
   final Map<String, double> muscleVolumes;
   final double pushPullRatio; // 0.0 to 1.0 (pushSets / total)
   final double upperLowerRatio; // 0.0 to 1.0 (upperSets / total)
+  final double pushPullBalanceScore; // 0.0 to 100.0
+  final String pushPullBalanceLabel;
+  final double upperLowerBalanceScore; // 0.0 to 100.0
+  final String upperLowerBalanceLabel;
   final List<MuscleNeglectInfo> neglectedMuscles;
 
   // ── Exercise Analytics
   final List<ExerciseAnalyticInfo> exerciseAnalytics;
+
+  // ── Consistency Analytics
+  final double workoutsPerWeek;
+  final double averageDaysBetweenWorkouts;
+  final int missedPlannedWorkouts;
+  final String mostCommonTrainingDay;
+
+  // ── Exercise Rankings
+  final ExerciseAnalyticInfo? mostTrainedExercise;
+  final ExerciseAnalyticInfo? highestVolumeExercise;
+  final ExerciseAnalyticInfo? strongestExercise;
+  final ExerciseAnalyticInfo? fastestGrowingExercise;
 
   // ── Achievements
   final List<AchievementInfo> achievements;
@@ -69,14 +90,28 @@ class WorkoutHistoryViewModel {
     required this.totalPrs,
     required this.mostTrainedMuscle,
     required this.mostPerformedExercise,
+    required this.chronologicalGroups,
     required this.heatmapDays,
     required this.maxDailyVolume,
+    required this.percentileVolume90,
     required this.muscleFrequencies,
     required this.muscleVolumes,
     required this.pushPullRatio,
     required this.upperLowerRatio,
+    required this.pushPullBalanceScore,
+    required this.pushPullBalanceLabel,
+    required this.upperLowerBalanceScore,
+    required this.upperLowerBalanceLabel,
     required this.neglectedMuscles,
     required this.exerciseAnalytics,
+    required this.workoutsPerWeek,
+    required this.averageDaysBetweenWorkouts,
+    required this.missedPlannedWorkouts,
+    required this.mostCommonTrainingDay,
+    this.mostTrainedExercise,
+    this.highestVolumeExercise,
+    this.strongestExercise,
+    this.fastestGrowingExercise,
     required this.achievements,
   });
 
@@ -84,6 +119,7 @@ class WorkoutHistoryViewModel {
   factory WorkoutHistoryViewModel.compute({
     required WorkoutService service,
     required TimeRangeFilter filter,
+    int? heatmapYear,
   }) {
     // 1. Get all non-empty sessions sorted oldest-to-newest for chronological stats
     final all = service.sessions.where((s) => !s.isEmpty).toList()
@@ -181,6 +217,21 @@ class WorkoutHistoryViewModel {
     final totalUpperLower = upperSets + lowerSets;
     final upperLowerRatio = totalUpperLower == 0 ? 0.5 : upperSets / totalUpperLower;
 
+    // Muscle balance scores (100 is perfectly symmetric, decreases as it skews)
+    final pushPullBalanceScore = totalPushPull == 0 ? 100.0 : (100.0 - (pushPullRatio - 0.5).abs() * 200.0).clamp(0.0, 100.0);
+    final pushPullBalanceLabel = pushPullBalanceScore >= 90
+        ? 'Perfect Symmetry'
+        : pushPullBalanceScore >= 75
+            ? 'Good Balance'
+            : 'Imbalanced training';
+
+    final upperLowerBalanceScore = totalUpperLower == 0 ? 100.0 : (100.0 - (upperLowerRatio - 0.5).abs() * 200.0).clamp(0.0, 100.0);
+    final upperLowerBalanceLabel = upperLowerBalanceScore >= 90
+        ? 'Perfect Symmetry'
+        : upperLowerBalanceScore >= 75
+            ? 'Good Balance'
+            : 'Imbalanced training';
+
     // Neglect Detection: Days since last trained
     final muscleLastTrained = <String, DateTime>{};
     for (final session in all) {
@@ -241,12 +292,16 @@ class WorkoutHistoryViewModel {
       }
     });
 
-    // 7. Heatmap calculations (Last 52 weeks, aligned to Mon-Sun grids)
+    // 7. Heatmap calculations (Year-based Mon-Sun grid)
     final heatmapDays = <HeatmapDay>[];
     double maxDailyVolume = 0.0;
 
-    final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
-    final startDate = startOfWeek.subtract(const Duration(days: 364)); // 52 weeks ago Mon
+    final year = heatmapYear ?? now.year;
+    final yearStart = DateTime(year, 1, 1);
+    final yearEnd = DateTime(year, 12, 31);
+    final startMonday = yearStart.subtract(Duration(days: yearStart.weekday - 1));
+    final endSunday = yearEnd.add(Duration(days: 7 - yearEnd.weekday));
+    final limitDate = year == now.year ? today : endSunday;
 
     // Group sessions by exact date key YYYY-MM-DD
     final sessionsByDate = <String, List<WorkoutSession>>{};
@@ -255,9 +310,9 @@ class WorkoutHistoryViewModel {
       sessionsByDate.putIfAbsent(key, () => []).add(s);
     }
 
-    for (int i = 0; i <= 370; i++) {
-      final date = startDate.add(Duration(days: i));
-      if (date.isAfter(today)) break; // stop at today
+    final daysToGenerate = limitDate.difference(startMonday).inDays;
+    for (int i = 0; i <= daysToGenerate; i++) {
+      final date = startMonday.add(Duration(days: i));
       final key = _dateKey(date);
       final daysSessions = sessionsByDate[key] ?? [];
       final vol = daysSessions.fold<double>(0.0, (sum, s) => sum + s.totalWorkingVolume);
@@ -268,6 +323,21 @@ class WorkoutHistoryViewModel {
         sessions: daysSessions,
         totalVolume: vol,
       ));
+    }
+
+    // 90th percentile daily volume calculation for scaling colors
+    final activeVolumes = heatmapDays
+        .map((d) => d.totalVolume)
+        .where((v) => v > 0)
+        .toList()
+      ..sort();
+    double percentileVolume90 = 0.0;
+    if (activeVolumes.isNotEmpty) {
+      final index = (activeVolumes.length * 0.9).floor().clamp(0, activeVolumes.length - 1);
+      percentileVolume90 = activeVolumes[index];
+    }
+    if (percentileVolume90 <= 0.0) {
+      percentileVolume90 = maxDailyVolume > 0 ? maxDailyVolume : 1000.0;
     }
 
     // 8. Exercise Analytics
@@ -328,9 +398,11 @@ class WorkoutHistoryViewModel {
       // Smart Dynamic Insights
       final insightsList = <String>[];
       final daysSinceTrained = today.difference(lastSession.date).inDays;
-      if (daysSinceTrained > 10) {
+      if (daysSinceTrained >= 7) {
         insightsList.add('${exercise.name} has not been trained in $daysSinceTrained days.');
-      } else if (prev30DayTrendPct > 5.0) {
+      }
+      
+      if (prev30DayTrendPct > 5.0) {
         insightsList.add('${exercise.name} volume is up ${prev30DayTrendPct.toStringAsFixed(0)}% over the last 30 days.');
       } else if (prev30DayTrendPct < -5.0) {
         insightsList.add('${exercise.name} volume is down ${prev30DayTrendPct.abs().toStringAsFixed(0)}% over the last 30 days.');
@@ -354,60 +426,141 @@ class WorkoutHistoryViewModel {
       ));
     }
 
-    // 9. Achievements List
-    final totalAllTimeWorkouts = all.length;
-    final totalAllTimeVolume = all.fold<double>(0.0, (sum, s) => sum + s.totalWorkingVolume);
-    final totalAllTimePrs = all.fold<int>(0, (sum, s) {
-      int sPr = 0;
-      for (final entry in s.entries) {
-        final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
-        if (top == null) continue;
-        final prevBest = service.bestSetBefore(entry.exercise.id, s.date);
-        if (prevBest == null || top.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01) {
-          sPr++;
+    // Evaluate rankings
+    ExerciseAnalyticInfo? mostTrained;
+    ExerciseAnalyticInfo? highestVolume;
+    ExerciseAnalyticInfo? strongest;
+    ExerciseAnalyticInfo? fastestGrowing;
+
+    for (final info in exerciseAnalytics) {
+      if (mostTrained == null || info.totalSessions > mostTrained.totalSessions) {
+        mostTrained = info;
+      }
+      if (highestVolume == null || info.lifetimeVolume > highestVolume.lifetimeVolume) {
+        highestVolume = info;
+      }
+      if (strongest == null || info.bestE1rm > strongest.bestE1rm) {
+        strongest = info;
+      }
+      if (info.currentTrend > 0.0) {
+        if (fastestGrowing == null || info.currentTrend > fastestGrowing.currentTrend) {
+          fastestGrowing = info;
         }
       }
-      return sum + sPr;
-    });
+    }
 
-    final achievements = [
-      AchievementInfo(
-        title: 'First Workout',
-        description: 'Completed your very first logged session.',
-        icon: '🚀',
-        achieved: totalAllTimeWorkouts >= 1,
-      ),
-      AchievementInfo(
-        title: '7-Day Streak',
-        description: 'Trained on 7 consecutive days.',
-        icon: '🔥',
-        achieved: longestStreak >= 7,
-      ),
-      AchievementInfo(
-        title: '30-Day Streak',
-        description: 'Trained on 30 consecutive days.',
-        icon: '👑',
-        achieved: longestStreak >= 30,
-      ),
-      AchievementInfo(
-        title: 'Century Club',
-        description: 'Logged 100 total workouts.',
-        icon: '💯',
-        achieved: totalAllTimeWorkouts >= 100,
-      ),
-      AchievementInfo(
-        title: 'Heavy Lifter',
-        description: 'Moved 10,000 kg of working volume.',
-        icon: '🏋️',
-        achieved: totalAllTimeVolume >= 10000.0,
-      ),
-      AchievementInfo(
-        title: 'Record Breaker',
-        description: 'Achieved your first Personal Record.',
-        icon: '🏆',
-        achieved: totalAllTimePrs >= 1,
-      ),
-    ];
+    // Evaluate Consistency Metrics
+    double filterWeeks = 1.0;
+    DateTime filterStartDate = today;
+    switch (filter) {
+      case TimeRangeFilter.last7Days:
+        filterStartDate = today.subtract(const Duration(days: 7));
+        filterWeeks = 1.0;
+      case TimeRangeFilter.last30Days:
+        filterStartDate = today.subtract(const Duration(days: 30));
+        filterWeeks = 30.0 / 7.0;
+      case TimeRangeFilter.last90Days:
+        filterStartDate = today.subtract(const Duration(days: 90));
+        filterWeeks = 90.0 / 7.0;
+      case TimeRangeFilter.thisYear:
+        filterStartDate = DateTime(now.year, 1, 1);
+        final elapsedDays = today.difference(filterStartDate).inDays + 1;
+        filterWeeks = max(1.0, elapsedDays / 7.0);
+      case TimeRangeFilter.allTime:
+        filterStartDate = all.isEmpty ? today : all.first.date;
+        final elapsedDays = today.difference(filterStartDate).inDays + 1;
+        filterWeeks = max(1.0, elapsedDays / 7.0);
+    }
+    final workoutsPerWeek = totalWorkouts / filterWeeks;
+
+    // Average days between workouts
+    double averageDaysBetweenWorkouts = 0.0;
+    if (filtered.length >= 2) {
+      int totalGapDays = 0;
+      for (int i = 1; i < filtered.length; i++) {
+        totalGapDays += filtered[i].date.difference(filtered[i - 1].date).inDays;
+      }
+      averageDaysBetweenWorkouts = totalGapDays / (filtered.length - 1);
+    }
+
+    // Missed planned workouts
+    int missedPlannedWorkouts = 0;
+    final normalizedFilterStartDate = DateTime(filterStartDate.year, filterStartDate.month, filterStartDate.day);
+    final plannedTrainingWeekdays = service.trainingDays.map((d) => d.weekday).toSet();
+    final sessionDateKeys = all.map((s) => _dateKey(s.date)).toSet();
+
+    if (plannedTrainingWeekdays.isNotEmpty) {
+      final daysDiff = today.difference(normalizedFilterStartDate).inDays;
+      for (int i = 0; i <= daysDiff; i++) {
+        final dateToCheck = normalizedFilterStartDate.add(Duration(days: i));
+        if (dateToCheck.isAfter(today)) break;
+        if (plannedTrainingWeekdays.contains(dateToCheck.weekday)) {
+          if (!sessionDateKeys.contains(_dateKey(dateToCheck))) {
+            missedPlannedWorkouts++;
+          }
+        }
+      }
+    }
+
+    // Most common training day
+    final weekdayCounts = <int, int>{};
+    for (final s in filtered) {
+      final wd = s.date.weekday;
+      weekdayCounts[wd] = (weekdayCounts[wd] ?? 0) + 1;
+    }
+    int bestWd = -1;
+    int maxWdCount = -1;
+    weekdayCounts.forEach((wd, count) {
+      if (count > maxWdCount) {
+        maxWdCount = count;
+        bestWd = wd;
+      }
+    });
+    final mostCommonTrainingDay = bestWd == -1
+        ? 'N/A'
+        : switch (bestWd) {
+            1 => 'Monday',
+            2 => 'Tuesday',
+            3 => 'Wednesday',
+            4 => 'Thursday',
+            5 => 'Friday',
+            6 => 'Saturday',
+            7 => 'Sunday',
+            _ => 'N/A',
+          };
+
+    // Evaluate Grouped Sessions for Sessions Tab
+    final chronologicalGroups = <String, List<WorkoutSession>>{
+      'Today': [],
+      'Yesterday': [],
+      'This Week': [],
+      'Last Week': [],
+      'Older': [],
+    };
+
+    final yesterday = today.subtract(const Duration(days: 1));
+    final thisMonday = today.subtract(Duration(days: today.weekday - 1));
+    final lastMonday = thisMonday.subtract(const Duration(days: 7));
+
+    for (final s in all.reversed) {
+      final sDate = DateTime(s.date.year, s.date.month, s.date.day);
+      if (sDate == today) {
+        chronologicalGroups['Today']!.add(s);
+      } else if (sDate == yesterday) {
+        chronologicalGroups['Yesterday']!.add(s);
+      } else if (!sDate.isBefore(thisMonday)) {
+        chronologicalGroups['This Week']!.add(s);
+      } else if (!sDate.isBefore(lastMonday)) {
+        chronologicalGroups['Last Week']!.add(s);
+      } else {
+        chronologicalGroups['Older']!.add(s);
+      }
+    }
+
+    chronologicalGroups.removeWhere((key, list) => list.isEmpty);
+
+    // Evaluate Achievements
+    final achievements = AchievementEngine.evaluate(all, service);
 
     return WorkoutHistoryViewModel(
       filter: filter,
@@ -423,14 +576,28 @@ class WorkoutHistoryViewModel {
       totalPrs: totalPrs,
       mostTrainedMuscle: mostTrainedMuscle,
       mostPerformedExercise: mostPerformedExercise,
+      chronologicalGroups: chronologicalGroups,
       heatmapDays: heatmapDays,
       maxDailyVolume: maxDailyVolume,
+      percentileVolume90: percentileVolume90,
       muscleFrequencies: muscleFreqs,
       muscleVolumes: muscleVols,
       pushPullRatio: pushPullRatio,
       upperLowerRatio: upperLowerRatio,
+      pushPullBalanceScore: pushPullBalanceScore,
+      pushPullBalanceLabel: pushPullBalanceLabel,
+      upperLowerBalanceScore: upperLowerBalanceScore,
+      upperLowerBalanceLabel: upperLowerBalanceLabel,
       neglectedMuscles: neglectedMuscles,
       exerciseAnalytics: exerciseAnalytics,
+      workoutsPerWeek: workoutsPerWeek,
+      averageDaysBetweenWorkouts: averageDaysBetweenWorkouts,
+      missedPlannedWorkouts: missedPlannedWorkouts,
+      mostCommonTrainingDay: mostCommonTrainingDay,
+      mostTrainedExercise: mostTrained,
+      highestVolumeExercise: highestVolume,
+      strongestExercise: strongest,
+      fastestGrowingExercise: fastestGrowing,
       achievements: achievements,
     );
   }
@@ -551,19 +718,5 @@ class ExerciseAnalyticInfo {
     required this.prev30DayTrendPct,
     required this.lastPerformed,
     required this.insights,
-  });
-}
-
-class AchievementInfo {
-  final String title;
-  final String description;
-  final String icon;
-  final bool achieved;
-
-  AchievementInfo({
-    required this.title,
-    required this.description,
-    required this.icon,
-    required this.achieved,
   });
 }

@@ -2,9 +2,9 @@ import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/workout_session.dart';
-import '../models/workout_split.dart';
 import '../models/workout_history_view_model.dart';
 import '../services/workout_service.dart';
+import '../services/achievement_engine.dart' show AchievementInfo;
 
 // ─── WorkoutHistoryScreen ─────────────────────────────────────────────────────
 //
@@ -14,7 +14,7 @@ import '../services/workout_service.dart';
 // Tabs:
 //   1. Analytics — Bento stats grid, contribution heatmap, achievements,
 //                  muscle group balance, and exercise trends.
-//   2. Sessions  — Chronological list grouped by week with calendar strip
+//   2. Sessions  — Chronological list grouped by week/period with calendar strip
 //                  and search functionality.
 
 class WorkoutHistoryScreen extends StatefulWidget {
@@ -28,12 +28,10 @@ class _WorkoutHistoryScreenState extends State<WorkoutHistoryScreen>
     with SingleTickerProviderStateMixin {
   final _svc = WorkoutService.instance;
 
-  // Selected calendar date (null = show all)
-  DateTime? _selectedDate;
   // Selected time filter
   TimeRangeFilter _selectedFilter = TimeRangeFilter.last30Days;
-  // Search query for sessions
-  String _searchQuery = '';
+  // Selected heatmap year
+  int _selectedHeatmapYear = DateTime.now().year;
 
   late final TabController _tabCtrl;
   WorkoutHistoryViewModel? _cachedVm;
@@ -64,6 +62,7 @@ class _WorkoutHistoryScreenState extends State<WorkoutHistoryScreen>
     _cachedVm ??= WorkoutHistoryViewModel.compute(
       service: _svc,
       filter: _selectedFilter,
+      heatmapYear: _selectedHeatmapYear,
     );
     return _cachedVm!;
   }
@@ -106,30 +105,22 @@ class _WorkoutHistoryScreenState extends State<WorkoutHistoryScreen>
           children: [
             _AnalyticsTab(
               vm: vm,
+              selectedHeatmapYear: _selectedHeatmapYear,
               onFilterChanged: (filter) {
                 setState(() {
                   _selectedFilter = filter;
                   _cachedVm = null; // Invalidate cache
                 });
               },
+              onHeatmapYearChanged: (year) {
+                setState(() {
+                  _selectedHeatmapYear = year;
+                  _cachedVm = null; // Invalidate cache
+                });
+              },
             ),
             _SessionsTab(
               vm: vm,
-              selectedDate: _selectedDate,
-              onDateSelected: (date) {
-                setState(() {
-                  _selectedDate = _selectedDate != null &&
-                          _dateKey(_selectedDate!) == _dateKey(date)
-                      ? null
-                      : date;
-                });
-              },
-              searchQuery: _searchQuery,
-              onSearchChanged: (val) {
-                setState(() {
-                  _searchQuery = val;
-                });
-              },
               service: _svc,
             ),
           ],
@@ -138,19 +129,21 @@ class _WorkoutHistoryScreenState extends State<WorkoutHistoryScreen>
     );
   }
 
-  static String _dateKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
 
 // ─── Analytics Tab ────────────────────────────────────────────────────────────
 
 class _AnalyticsTab extends StatelessWidget {
   final WorkoutHistoryViewModel vm;
+  final int selectedHeatmapYear;
   final ValueChanged<TimeRangeFilter> onFilterChanged;
+  final ValueChanged<int> onHeatmapYearChanged;
 
   const _AnalyticsTab({
     required this.vm,
+    required this.selectedHeatmapYear,
     required this.onFilterChanged,
+    required this.onHeatmapYearChanged,
   });
 
   @override
@@ -158,8 +151,8 @@ class _AnalyticsTab extends StatelessWidget {
     if (vm.allSessions.isEmpty) {
       return const Center(
         child: _EmptyHistoryPlaceholder(
-          title: 'No analytics data yet',
-          subtitle: 'Log your first workout to generate insights and track progression.',
+          title: 'No workouts logged yet',
+          subtitle: 'Log your first workout session to unlock progression charts and dashboard analytics.',
           ctaText: 'Start First Workout',
         ),
       );
@@ -270,11 +263,24 @@ class _AnalyticsTab extends StatelessWidget {
 
         // Workout heatmap contribution graph
         const Text(
-          'Workout Consistency',
+          'Workout Consistency Heatmap',
           style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
-        _HeatmapGrid(vm: vm),
+        _HeatmapGrid(
+          vm: vm,
+          selectedYear: selectedHeatmapYear,
+          onYearChanged: onHeatmapYearChanged,
+        ),
+        const SizedBox(height: 20),
+
+        // Consistency Analytics Dashboard Card
+        const Text(
+          'Behavioral Consistency Dashboard',
+          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        _ConsistencyDashboardCard(vm: vm),
         const SizedBox(height: 20),
 
         // Muscle Analytics & neglect detection
@@ -287,12 +293,38 @@ class _AnalyticsTab extends StatelessWidget {
         const SizedBox(height: 20),
 
         // Achievements Section
-        const Text(
-          'Unlocked Achievements',
-          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Achievements & Milestones',
+              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: KColor.greenDark.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: KColor.green.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                '${vm.achievements.where((a) => a.achieved).length} of ${vm.achievements.length} Unlocked',
+                style: const TextStyle(color: KColor.green, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         _AchievementsList(achievements: vm.achievements),
+        const SizedBox(height: 20),
+
+        // Exercise Rankings Card
+        const Text(
+          'Exercise Rankings',
+          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        _ExerciseRankingsCard(vm: vm),
         const SizedBox(height: 20),
 
         // Exercise progression trends directory
@@ -310,58 +342,76 @@ class _AnalyticsTab extends StatelessWidget {
 
 // ─── Sessions Tab ─────────────────────────────────────────────────────────────
 
-class _SessionsTab extends StatelessWidget {
+class _SessionsTab extends StatefulWidget {
   final WorkoutHistoryViewModel vm;
-  final DateTime? selectedDate;
-  final ValueChanged<DateTime> onDateSelected;
-  final String searchQuery;
-  final ValueChanged<String> onSearchChanged;
   final WorkoutService service;
 
   const _SessionsTab({
     required this.vm,
-    required this.selectedDate,
-    required this.onDateSelected,
-    required this.searchQuery,
-    required this.onSearchChanged,
     required this.service,
   });
+
+  @override
+  State<_SessionsTab> createState() => _SessionsTabState();
+}
+
+class _SessionsTabState extends State<_SessionsTab> {
+  DateTime? _selectedDate;
+  String _searchQuery = '';
 
   static String _dateKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+  static String _weekdayName(int weekday) => const [
+        '', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+      ][weekday];
+
   @override
   Widget build(BuildContext context) {
-    // Filter sessions by search query and selected date
-    final query = searchQuery.trim().toLowerCase();
-    final searchFiltered = vm.allSessions.where((s) {
-      // Date filter
-      if (selectedDate != null) {
-        if (_dateKey(s.date) != _dateKey(selectedDate!)) return false;
-      }
-      // Query filter
-      if (query.isEmpty) return true;
-      if (s.splitDayName.toLowerCase().contains(query)) return true;
-      if (s.entries.any((e) => e.exercise.name.toLowerCase().contains(query))) return true;
-      return false;
-    }).toList();
+    final query = _searchQuery.trim().toLowerCase();
+    final filteredGroups = <String, List<WorkoutSession>>{};
 
-    // Group by week
-    final grouped = <String, List<WorkoutSession>>{};
-    for (final s in searchFiltered) {
-      final monday = s.date.subtract(Duration(days: s.date.weekday - 1));
-      final key = _dateKey(monday);
-      grouped.putIfAbsent(key, () => []).add(s);
-    }
+    widget.vm.chronologicalGroups.forEach((groupName, sessions) {
+      final filteredList = sessions.where((s) {
+        // Date filter
+        if (_selectedDate != null) {
+          if (_dateKey(s.date) != _dateKey(_selectedDate!)) return false;
+        }
+        // Query filter
+        if (query.isEmpty) return true;
+        if (s.splitDayName.toLowerCase().contains(query)) return true;
+        if (s.entries.any((e) => e.exercise.name.toLowerCase().contains(query))) return true;
+        if (widget.service.split.name.toLowerCase().contains(query)) return true;
+        final wdName = _weekdayName(s.date.weekday).toLowerCase();
+        if (wdName.contains(query)) return true;
+        if (s.notes?.toLowerCase().contains(query) ?? false) return true;
+        return false;
+      }).toList();
+
+      if (filteredList.isNotEmpty) {
+        filteredGroups[groupName] = filteredList;
+      }
+    });
+
+    final orderedKeys = ['Today', 'Yesterday', 'This Week', 'Last Week', 'Older']
+        .where((k) => filteredGroups.containsKey(k))
+        .toList();
 
     return CustomScrollView(
       slivers: [
         // Calendar mini-strip
         SliverToBoxAdapter(
           child: _CalendarStrip(
-            sessions: vm.allSessions,
-            selectedDate: selectedDate,
-            onDateSelected: onDateSelected,
+            sessions: widget.vm.allSessions,
+            selectedDate: _selectedDate,
+            onDateSelected: (date) {
+              setState(() {
+                _selectedDate = _selectedDate != null &&
+                        _dateKey(_selectedDate!) == _dateKey(date)
+                    ? null
+                    : date;
+              });
+            },
           ),
         ),
         // Search bar
@@ -369,12 +419,26 @@ class _SessionsTab extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
-              onChanged: onSearchChanged,
+              onChanged: (val) {
+                setState(() {
+                  _searchQuery = val;
+                });
+              },
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'Search by exercise, split name...',
+                hintText: 'Search by exercise, split, day, notes...',
                 hintStyle: const TextStyle(color: KColor.textMuted),
                 prefixIcon: const Icon(Icons.search_rounded, color: KColor.textMuted, size: 18),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, color: KColor.textMuted, size: 16),
+                        onPressed: () {
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
                 filled: true,
                 fillColor: KColor.surface,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -390,7 +454,7 @@ class _SessionsTab extends StatelessWidget {
             ),
           ),
         ),
-        if (vm.allSessions.isEmpty)
+        if (widget.vm.allSessions.isEmpty)
           const SliverFillRemaining(
             child: Center(
               child: _EmptyHistoryPlaceholder(
@@ -400,7 +464,7 @@ class _SessionsTab extends StatelessWidget {
               ),
             ),
           )
-        else if (grouped.isEmpty)
+        else if (orderedKeys.isEmpty)
           SliverFillRemaining(
             child: Center(
               child: Column(
@@ -408,17 +472,29 @@ class _SessionsTab extends StatelessWidget {
                 children: [
                   const Icon(Icons.event_busy_rounded, color: KColor.textMuted, size: 48),
                   const SizedBox(height: 12),
-                  Text(
-                    'No sessions match search/filters',
-                    style: TextStyle(color: KColor.textSecondary, fontSize: 14),
+                  const Text(
+                    'No sessions match search or filters',
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 8),
-                  TextButton(
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Try widening your search terms or clearing selected calendar date.',
+                    style: TextStyle(color: KColor.textMuted, fontSize: 11),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: KColor.green,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
                     onPressed: () {
-                      onSearchChanged('');
-                      if (selectedDate != null) onDateSelected(selectedDate!);
+                      setState(() {
+                        _searchQuery = '';
+                        _selectedDate = null;
+                      });
                     },
-                    child: const Text('Clear search & filters', style: TextStyle(color: KColor.green)),
+                    child: const Text('Clear Search & Filters', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   ),
                 ],
               ),
@@ -428,18 +504,15 @@ class _SessionsTab extends StatelessWidget {
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, i) {
-                final keys = grouped.keys.toList()..sort((a, b) => b.compareTo(a));
-                if (i >= keys.length) return null;
-                final weekKey = keys[i];
-                final sessions = grouped[weekKey]!;
-                final monday = DateTime.parse(weekKey);
-                return _WeekGroup(
-                  monday: monday,
+                final key = orderedKeys[i];
+                final sessions = filteredGroups[key]!;
+                return _SessionGroupSection(
+                  title: key,
                   sessions: sessions,
-                  service: service,
+                  service: widget.service,
                 );
               },
-              childCount: grouped.length,
+              childCount: orderedKeys.length,
             ),
           ),
         const SliverPadding(padding: EdgeInsets.only(bottom: 48)),
@@ -617,11 +690,16 @@ class _HighlightInfoRow extends StatelessWidget {
   }
 }
 
-// ─── Heatmap Contribution Graph ───────────────────────────────────────────────
-
 class _HeatmapGrid extends StatefulWidget {
   final WorkoutHistoryViewModel vm;
-  const _HeatmapGrid({required this.vm});
+  final int selectedYear;
+  final ValueChanged<int> onYearChanged;
+
+  const _HeatmapGrid({
+    required this.vm,
+    required this.selectedYear,
+    required this.onYearChanged,
+  });
 
   @override
   State<_HeatmapGrid> createState() => _HeatmapGridState();
@@ -638,6 +716,16 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
         _scroll.jumpTo(_scroll.position.maxScrollExtent);
       }
     });
+  }
+
+  void _jumpToMonth(int month) {
+    final days = widget.vm.heatmapDays;
+    int dayIdx = days.indexWhere((d) => d.date.month == month && d.date.year == widget.selectedYear);
+    if (dayIdx != -1) {
+      final colIdx = (dayIdx / 7).floor();
+      final offset = (colIdx * 14.0).clamp(0.0, _scroll.position.maxScrollExtent);
+      _scroll.animateTo(offset, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    }
   }
 
   @override
@@ -662,7 +750,53 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Weekly Logs', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left_rounded, color: Colors.white, size: 20),
+                    onPressed: () => widget.onYearChanged(widget.selectedYear - 1),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                  ),
+                  Text(
+                    '${widget.selectedYear}',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 20),
+                    onPressed: widget.selectedYear >= DateTime.now().year
+                        ? null
+                        : () => widget.onYearChanged(widget.selectedYear + 1),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+              PopupMenuButton<int>(
+                icon: const Icon(Icons.calendar_month_rounded, color: KColor.green, size: 18),
+                color: KColor.surface,
+                tooltip: 'Jump to Month',
+                onSelected: _jumpToMonth,
+                itemBuilder: (context) {
+                  final months = [
+                    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+                  ];
+                  return List.generate(12, (index) {
+                    return PopupMenuItem<int>(
+                      value: index + 1,
+                      child: Text(months[index], style: const TextStyle(color: Colors.white, fontSize: 12)),
+                    );
+                  });
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Weekly Logs', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
               Row(
                 children: [
                   const Text('Less ', style: TextStyle(color: KColor.textMuted, fontSize: 9)),
@@ -694,10 +828,10 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                   child: Column(
                     children: col.map((day) {
                       final hasWorkout = day.sessions.isNotEmpty;
-                      final maxVol = widget.vm.maxDailyVolume;
+                      final refVol = widget.vm.percentileVolume90;
                       double relative = 0;
-                      if (hasWorkout && maxVol > 0) {
-                        relative = day.totalVolume / maxVol;
+                      if (hasWorkout && refVol > 0) {
+                        relative = (day.totalVolume / refVol).clamp(0.0, 1.0);
                       }
 
                       Color cellColor;
@@ -789,9 +923,14 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                   final prCount = s.entries.fold<int>(0, (sum, entry) {
                     final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
                     if (top == null) return sum;
-                    final prev = widget.vm.allSessions.any((p) => p.date.isBefore(s.date) && p.entries.any((e) => e.exercise.id == entry.exercise.id && (e.topProgressionSet?.estimatedOneRepMax ?? 0) >= top.estimatedOneRepMax));
-                    return sum + (prev ? 0 : 1);
+                    final prev = WorkoutService.instance.bestSetBefore(entry.exercise.id, s.date);
+                    final isPr = prev == null || top.estimatedOneRepMax > prev.estimatedOneRepMax + 0.01;
+                    return sum + (isPr ? 1 : 0);
                   });
+
+                  final workoutProgramName = s.splitDayWeekday == null
+                      ? 'Custom Workout'
+                      : WorkoutService.instance.split.name;
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -807,12 +946,27 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(s.splitDayName, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    workoutProgramName,
+                                    style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    s.splitDayName,
+                                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ),
                             if (prCount > 0)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFFFB347).withOpacity(0.15),
+                                  color: const Color(0xFFFFB347).withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text('🏆 $prCount PRs', style: const TextStyle(color: Color(0xFFFFB347), fontSize: 10, fontWeight: FontWeight.bold)),
@@ -1024,8 +1178,6 @@ class _BalanceBar extends StatelessWidget {
   }
 }
 
-// ─── Achievements Section ─────────────────────────────────────────────────────
-
 class _AchievementsList extends StatelessWidget {
   final List<AchievementInfo> achievements;
   const _AchievementsList({required this.achievements});
@@ -1033,14 +1185,18 @@ class _AchievementsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 72,
+      height: 90,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: achievements.length,
         itemBuilder: (context, i) {
           final item = achievements[i];
+          final progressRatio = item.targetProgress > 0
+              ? (item.currentProgress / item.targetProgress).clamp(0.0, 1.0)
+              : 0.0;
+
           return Container(
-            width: 140,
+            width: 150,
             margin: const EdgeInsets.only(right: 8),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -1048,14 +1204,14 @@ class _AchievementsList extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: item.achieved
-                    ? KColor.green.withOpacity(0.3)
+                    ? KColor.green.withValues(alpha: 0.3)
                     : KColor.border.withValues(alpha: 0.3),
               ),
             ),
             child: Row(
               children: [
                 Opacity(
-                  opacity: item.achieved ? 1.0 : 0.25,
+                  opacity: item.achieved ? 1.0 : 0.3,
                   child: Text(item.icon, style: const TextStyle(fontSize: 24)),
                 ),
                 const SizedBox(width: 8),
@@ -1074,7 +1230,7 @@ class _AchievementsList extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1),
                       Text(
                         item.description,
                         style: TextStyle(
@@ -1083,6 +1239,27 @@ class _AchievementsList extends StatelessWidget {
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      if (!item.achieved && item.targetProgress > 0) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: progressRatio,
+                            minHeight: 3,
+                            backgroundColor: KColor.bg,
+                            valueColor: const AlwaysStoppedAnimation<Color>(KColor.green),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                      Text(
+                        item.progressLabel,
+                        style: TextStyle(
+                          color: item.achieved ? KColor.green : KColor.textMuted,
+                          fontSize: 7.5,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -1677,34 +1854,19 @@ class _CalendarStripState extends State<_CalendarStrip> {
       ][m];
 }
 
-// ─── Week Group ───────────────────────────────────────────────────────────────
+// ─── Session Group Section ───────────────────────────────────────────────────
 
-class _WeekGroup extends StatelessWidget {
-  final DateTime monday;
+class _SessionGroupSection extends StatelessWidget {
+  final String title;
   final List<WorkoutSession> sessions;
   final WorkoutService service;
 
-  const _WeekGroup({
-    required this.monday,
+  const _SessionGroupSection({
+    required this.title,
     required this.sessions,
     required this.service,
   });
 
-  String _weekLabel() {
-    final now = DateTime.now();
-    final thisMonday = now.subtract(Duration(days: now.weekday - 1));
-    final thisKey = '${thisMonday.year}-${thisMonday.month}-${thisMonday.day}';
-    final monKey = '${monday.year}-${monday.month}-${monday.day}';
-    if (thisKey == monKey) return 'This week';
-    final lastMonday = thisMonday.subtract(const Duration(days: 7));
-    final lastKey = '${lastMonday.year}-${lastMonday.month}-${lastMonday.day}';
-    if (lastKey == monKey) return 'Last week';
-    return '${_shortMonth(monday.month)} ${monday.day}';
-  }
-
-  static String _shortMonth(int m) =>
-      ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
 
   @override
   Widget build(BuildContext context) {
@@ -1715,17 +1877,17 @@ class _WeekGroup extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(0, 12, 0, 6),
+            padding: const EdgeInsets.fromLTRB(0, 14, 0, 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _weekLabel(),
+                  title.toUpperCase(),
                   style: const TextStyle(
-                    color: KColor.textSecondary,
+                    color: KColor.green,
                     fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
                   ),
                 ),
                 Text(
@@ -2005,6 +2167,7 @@ class _SessionDetailPageState extends State<_SessionDetailPage> {
             ),
           ),
           const SizedBox(height: 16),
+          _buildProgressionContext(),
 
           // Exercise breakdown timeline
           const Text(
@@ -2021,6 +2184,143 @@ class _SessionDetailPageState extends State<_SessionDetailPage> {
               ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProgressionContext() {
+    WorkoutSession? prevSession;
+    final sameSplitSessions = widget.service.sessionsForSplitDay(_currentSession.splitDayName);
+    for (final s in sameSplitSessions) {
+      if (s.date.isBefore(_currentSession.date)) {
+        prevSession = s;
+        break;
+      }
+    }
+
+    int prCount = 0;
+    for (final entry in _currentSession.entries) {
+      final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
+      if (top == null) continue;
+      final prevBest = widget.service.bestSetBefore(entry.exercise.id, _currentSession.date);
+      final isPr = prevBest == null || top.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01;
+      if (isPr) prCount++;
+    }
+
+    if (prevSession == null && prCount == 0) {
+      return const SizedBox.shrink();
+    }
+
+    final double curVol = _currentSession.totalWorkingVolume;
+    final double prevVol = prevSession?.totalWorkingVolume ?? 0;
+    final double volDiff = curVol - prevVol;
+    final double volDiffPct = prevVol > 0 ? (volDiff / prevVol * 100) : 0;
+
+    final int curSets = _currentSession.totalSets;
+    final int prevSets = prevSession?.totalSets ?? 0;
+    final int setsDiff = curSets - prevSets;
+    final double setsDiffPct = prevSets > 0 ? (setsDiff.toDouble() / prevSets * 100) : 0;
+
+    final int? curDur = _currentSession.durationMinutes;
+    final int? prevDur = prevSession?.durationMinutes;
+    final int durDiff = (curDur != null && prevDur != null) ? (curDur - prevDur) : 0;
+    final double durDiffPct = (prevDur != null && prevDur > 0) ? (durDiff.toDouble() / prevDur * 100) : 0;
+
+    String formatSign(double val) => val >= 0 ? '+${val.toStringAsFixed(0)}%' : '${val.toStringAsFixed(0)}%';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Progression Context',
+          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: KColor.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (prevSession != null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'vs. Last ${_currentSession.splitDayName} Session',
+                      style: const TextStyle(color: KColor.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '${prevSession.date.day}/${prevSession.date.month}/${prevSession.date.year}',
+                      style: const TextStyle(color: KColor.textSecondary, fontSize: 10),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _ProgressionIndicatorCard(
+                      title: 'Volume',
+                      pctText: formatSign(volDiffPct),
+                      detailText: '${volDiff.abs().toStringAsFixed(0)} kg ${volDiff >= 0 ? 'more' : 'less'}',
+                      isPositive: volDiff >= 0,
+                    ),
+                    const SizedBox(width: 8),
+                    _ProgressionIndicatorCard(
+                      title: 'Sets',
+                      pctText: formatSign(setsDiffPct),
+                      detailText: '${setsDiff.abs()} set${setsDiff.abs() == 1 ? '' : 's'} ${setsDiff >= 0 ? 'more' : 'less'}',
+                      isPositive: setsDiff >= 0,
+                    ),
+                    if (curDur != null && prevDur != null) ...[
+                      const SizedBox(width: 8),
+                      _ProgressionIndicatorCard(
+                        title: 'Duration',
+                        pctText: formatSign(durDiffPct),
+                        detailText: '${durDiff.abs()} min ${durDiff >= 0 ? 'longer' : 'shorter'}',
+                        isPositive: durDiff >= 0,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+              if (prCount > 0) ...[
+                if (prevSession != null) ...[
+                  const SizedBox(height: 12),
+                  const Divider(color: KColor.border, height: 1),
+                  const SizedBox(height: 12),
+                ],
+                Row(
+                  children: [
+                    const Text('🏆', style: TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$prCount Personal Record${prCount == 1 ? '' : 's'} broken!',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 1),
+                          const Text(
+                            'You pushed past your lifetime limits in this session. Keep building!',
+                            style: TextStyle(color: KColor.textMuted, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 
@@ -2041,6 +2341,70 @@ class _SessionDetailPageState extends State<_SessionDetailPage> {
         );
       }
     }
+  }
+}
+
+class _ProgressionIndicatorCard extends StatelessWidget {
+  final String title;
+  final String pctText;
+  final String detailText;
+  final bool isPositive;
+
+  const _ProgressionIndicatorCard({
+    required this.title,
+    required this.pctText,
+    required this.detailText,
+    required this.isPositive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayColor = isPositive ? KColor.green : Colors.red;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: KColor.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: KColor.border.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                  color: displayColor,
+                  size: 14,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  pctText,
+                  style: TextStyle(
+                    color: displayColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              detailText,
+              style: const TextStyle(color: KColor.textSecondary, fontSize: 8),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -2235,6 +2599,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _EditTextField(
+                              key: ValueKey('ex-$exIdx-set-$setIdx-weight'),
                               label: 'kg',
                               initialValue: set.weight.toString(),
                               onChanged: (val) {
@@ -2246,6 +2611,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                           const SizedBox(width: 6),
                           Expanded(
                             child: _EditTextField(
+                              key: ValueKey('ex-$exIdx-set-$setIdx-reps'),
                               label: 'reps',
                               initialValue: set.reps.toString(),
                               onChanged: (val) {
@@ -2257,6 +2623,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                           const SizedBox(width: 6),
                           Expanded(
                             child: _EditTextField(
+                              key: ValueKey('ex-$exIdx-set-$setIdx-rpe'),
                               label: 'RPE',
                               initialValue: set.rpe?.toString() ?? '',
                               onChanged: (val) {
@@ -2357,28 +2724,59 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
   }
 }
 
-class _EditTextField extends StatelessWidget {
+class _EditTextField extends StatefulWidget {
   final String label;
   final String initialValue;
   final ValueChanged<String> onChanged;
 
   const _EditTextField({
+    super.key,
     required this.label,
     required this.initialValue,
     required this.onChanged,
   });
 
   @override
+  State<_EditTextField> createState() => _EditTextFieldState();
+}
+
+class _EditTextFieldState extends State<_EditTextField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void didUpdateWidget(_EditTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialValue != oldWidget.initialValue && widget.initialValue != _controller.text) {
+      _controller.text = widget.initialValue;
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 32,
       child: TextField(
-        controller: TextEditingController(text: initialValue)..selection = TextSelection.fromPosition(TextPosition(offset: initialValue.length)),
-        keyboardType: TextInputType.number,
-        onChanged: onChanged,
+        controller: _controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        onChanged: widget.onChanged,
         style: const TextStyle(color: Colors.white, fontSize: 11),
         decoration: InputDecoration(
-          labelText: label,
+          labelText: widget.label,
           labelStyle: const TextStyle(color: KColor.textMuted, fontSize: 9),
           filled: true,
           fillColor: KColor.bg,
@@ -2543,6 +2941,255 @@ class _ExerciseSparkline extends StatelessWidget {
                 .toList(),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _ConsistencyDashboardCard extends StatelessWidget {
+  final WorkoutHistoryViewModel vm;
+  const _ConsistencyDashboardCard({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: KColor.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.analytics_outlined, color: KColor.green, size: 16),
+              const SizedBox(width: 8),
+              const Text('Consistency Metrics', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _ConsistencyMetricBox(
+                title: 'Workouts/Week',
+                value: vm.workoutsPerWeek.toStringAsFixed(1),
+                icon: Icons.calendar_today_rounded,
+                color: const Color(0xFF60A5FA),
+              ),
+              const SizedBox(width: 8),
+              _ConsistencyMetricBox(
+                title: 'Avg Day Gap',
+                value: vm.averageDaysBetweenWorkouts == 0
+                    ? 'N/A'
+                    : '${vm.averageDaysBetweenWorkouts.toStringAsFixed(1)}d',
+                icon: Icons.hourglass_empty_rounded,
+                color: const Color(0xFF34D399),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _ConsistencyMetricBox(
+                title: 'Missed Sessions',
+                value: '${vm.missedPlannedWorkouts}',
+                icon: Icons.event_busy_rounded,
+                color: const Color(0xFFEF4444),
+                subtitle: 'Planned days missed',
+              ),
+              const SizedBox(width: 8),
+              _ConsistencyMetricBox(
+                title: 'Top Training Day',
+                value: vm.mostCommonTrainingDay,
+                icon: Icons.star_border_rounded,
+                color: const Color(0xFFFFB347),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConsistencyMetricBox extends StatelessWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final String? subtitle;
+
+  const _ConsistencyMetricBox({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: KColor.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: KColor.border.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 14),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 1),
+                    Text(subtitle!, style: const TextStyle(color: KColor.textSecondary, fontSize: 7)),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ExerciseRankingsCard extends StatelessWidget {
+  final WorkoutHistoryViewModel vm;
+  const _ExerciseRankingsCard({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasRankings = vm.mostTrainedExercise != null ||
+        vm.highestVolumeExercise != null ||
+        vm.strongestExercise != null;
+
+    if (!hasRankings) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: KColor.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+        ),
+        child: const Center(
+          child: Text(
+            'Log some workouts with exercises to see rankings.',
+            style: TextStyle(color: KColor.textMuted, fontSize: 11),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: KColor.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.star_rounded, color: Color(0xFFFFD700), size: 16),
+              const SizedBox(width: 8),
+              const Text('Exercise Records & Rankings', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (vm.mostTrainedExercise != null)
+            _RankingRow(
+              medal: '🏃',
+              title: 'Most Trained',
+              exerciseName: vm.mostTrainedExercise!.exercise.name,
+              score: '${vm.mostTrainedExercise!.totalSessions} sessions',
+            ),
+          if (vm.highestVolumeExercise != null) ...[
+            const SizedBox(height: 10),
+            _RankingRow(
+              medal: '🏋️',
+              title: 'Highest Volume',
+              exerciseName: vm.highestVolumeExercise!.exercise.name,
+              score: '${(vm.highestVolumeExercise!.lifetimeVolume / 1000).toStringAsFixed(1)}k kg',
+            ),
+          ],
+          if (vm.strongestExercise != null) ...[
+            const SizedBox(height: 10),
+            _RankingRow(
+              medal: '💪',
+              title: 'Strongest (Best 1RM)',
+              exerciseName: vm.strongestExercise!.exercise.name,
+              score: '${vm.strongestExercise!.bestE1rm.toStringAsFixed(1)} kg',
+            ),
+          ],
+          if (vm.fastestGrowingExercise != null) ...[
+            const SizedBox(height: 10),
+            _RankingRow(
+              medal: '⚡',
+              title: 'Fastest Growing',
+              exerciseName: vm.fastestGrowingExercise!.exercise.name,
+              score: '+${vm.fastestGrowingExercise!.currentTrend.toStringAsFixed(1)} kg recently',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RankingRow extends StatelessWidget {
+  final String medal;
+  final String title;
+  final String exerciseName;
+  final String score;
+
+  const _RankingRow({
+    required this.medal,
+    required this.title,
+    required this.exerciseName,
+    required this.score,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(medal, style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 1),
+              Text(exerciseName, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+        Text(score, style: const TextStyle(color: KColor.green, fontSize: 11, fontWeight: FontWeight.bold)),
       ],
     );
   }
