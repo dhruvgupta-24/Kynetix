@@ -22,6 +22,7 @@ class WorkoutDashboardViewModel {
   final int totalSetsThisWeek;
   final int currentStreak;
   final List<String> musclesThisWeek;
+  final int totalPrsAllTime;
 
   // ── Split completion ─────────────────────────────────────────────────────────
   final Map<String, bool> splitCompletion;
@@ -51,6 +52,7 @@ class WorkoutDashboardViewModel {
     required this.totalSetsThisWeek,
     required this.currentStreak,
     required this.musclesThisWeek,
+    required this.totalPrsAllTime,
     required this.splitCompletion,
     required this.trainingDaysInSplit,
     required this.completedDaysThisWeek,
@@ -77,12 +79,26 @@ class WorkoutDashboardViewModel {
       RecoveryInput(sessions: svc.sessions.toList()),
     );
 
+    // Compute total PRs all-time
+    int totalPrs = 0;
+    for (final session in svc.sessions) {
+      for (final entry in session.entries) {
+        final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
+        if (top == null) continue;
+        final prevBest = svc.bestSetBefore(entry.exercise.id, session.date);
+        if (prevBest == null || top.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01) {
+          totalPrs++;
+        }
+      }
+    }
+
     return WorkoutDashboardViewModel(
       workoutsThisWeek: svc.workoutsThisWeek,
       totalVolumeThisWeek: svc.totalVolumeThisWeek,
       totalSetsThisWeek: svc.totalSetsThisWeek,
       currentStreak: svc.currentStreak,
       musclesThisWeek: svc.muscleGroupsTrainedThisWeek,
+      totalPrsAllTime: totalPrs,
       splitCompletion: completion,
       trainingDaysInSplit: trainingDays,
       completedDaysThisWeek: completedDays,

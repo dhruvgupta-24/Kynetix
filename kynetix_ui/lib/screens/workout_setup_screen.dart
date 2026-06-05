@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
@@ -47,6 +48,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
   //   3: Split Recommendation Page
   //   4: Customize Day Names & Exercises (was step 1 in legacy code)
   int _step = 0;
+  int _activeCustomizingWeekday = 1;
 
   TrainingExperience _experience = TrainingExperience.intermediate;
   int _daysPerWeek = 4;
@@ -190,7 +192,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
     return WorkoutSplit(
       id: 'recommended_${DateTime.now().millisecondsSinceEpoch}',
-      name: '${_daysPerWeek}-Day Recommended Split',
+      name: '$_daysPerWeek-Day Recommended Split',
       days: days,
     );
   }
@@ -649,101 +651,42 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
   // ── Step 4: Customize Days & Exercises ────────────────────────────────────
 
   Widget _buildCustomizeStep() {
-    final trainingDays = [
-      for (int wd = 1; wd <= 7; wd++)
-        if (_selectedDays[wd] == true) wd,
-    ];
+    final activeWd = _activeCustomizingWeekday;
 
     return Column(
       children: [
-        // Day selector grid inside customizer for convenience
+        // Pinned Segmented Weekday Tabs
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Customize Split Days',
-                style: KText.h3.copyWith(color: Colors.white),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 40,
-                child: GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 7,
-                    crossAxisSpacing: 6,
-                    childAspectRatio: 1.25,
-                  ),
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: 7,
-                  itemBuilder: (_, i) {
-                    final wd = i + 1;
-                    final selected = _selectedDays[wd] == true;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedDays[wd] = !selected;
-                          if (!selected && _dayExercises[wd]!.isEmpty) {
-                            // Seed default exercises if newly selected training day
-                            _dayExercises[wd] = List.of(
-                              exerciseLibraryByDay[_defaultNames[wd] ?? ''] ?? const [],
-                            );
-                          }
-                        });
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: selected ? const Color(0xFF132F23) : KColor.surface,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: selected ? KColor.green : KColor.border,
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            _shortDays[wd]!,
-                            style: KText.caption.copyWith(
-                              color: selected ? Colors.white : KColor.textMuted,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: _buildWeekdayTabs(),
         ),
+        
+        // Active tab configuration area
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            children: [
-              if (trainingDays.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 40),
-                  child: Center(
-                    child: Text(
-                      'No training days selected above.\nSelect at least one day to begin.',
-                      textAlign: TextAlign.center,
-                      style: KText.body.copyWith(color: KColor.textMuted),
-                    ),
-                  ),
-                ),
-              for (final wd in trainingDays) _buildDayCard(wd),
-            ],
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              children: [
+                _buildActiveDayCard(activeWd),
+              ],
+            ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-          child: SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: widget.editMode ? 'Save Split' : 'Start Training',
-              onTap: _trainingDayCount == 0 ? null : _finish,
+
+        // Sticky anchored button area
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: KButton(
+                label: widget.editMode ? 'Save Split' : 'Start Training',
+                onTap: _trainingDayCount == 0 ? null : () {
+                  HapticFeedback.mediumImpact();
+                  _finish();
+                },
+              ),
             ),
           ),
         ),
@@ -751,161 +694,405 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     );
   }
 
-  Widget _buildDayCard(int weekday) {
-    final exercises = _dayExercises[weekday] ?? [];
+  Widget _buildWeekdayTabs() {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: KColor.border, width: 0.5),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: KColor.green.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(
-                      _shortDays[weekday]!,
-                      style: KText.caption.copyWith(
-                        color: KColor.green,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 10,
+      child: Row(
+        children: List.generate(7, (i) {
+          final wd = i + 1;
+          final isActive = _activeCustomizingWeekday == wd;
+          final isTraining = _selectedDays[wd] == true;
+
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  _activeCustomizingWeekday = wd;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: isActive
+                      ? const LinearGradient(
+                          colors: [KColor.green, Color(0xFF1B6A47)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: KColor.green.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _shortDays[wd]!,
+                      style: TextStyle(
+                        color: isActive 
+                            ? Colors.white 
+                            : (isTraining ? Colors.white70 : KColor.textMuted),
+                        fontWeight: isActive ? FontWeight.w800 : FontWeight.bold,
+                        fontSize: 12,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    // Small training indicator dot
+                    Container(
+                      width: 4,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isTraining 
+                            ? (isActive ? Colors.white : KColor.green)
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildActiveDayCard(int weekday) {
+    final isTraining = _selectedDays[weekday] == true;
+    final exercises = _dayExercises[weekday] ?? [];
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SizeTransition(
+          sizeFactor: anim,
+          axisAlignment: 0.0,
+          child: child,
+        ),
+      ),
+      child: Container(
+        key: ValueKey('${weekday}_$isTraining'),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isTraining ? KColor.surface : const Color(0xFF141624),
+          gradient: isTraining 
+              ? null 
+              : const LinearGradient(
+                  colors: [Color(0xFF1A1F36), Color(0xFF0F101A)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isTraining 
+                ? KColor.border 
+                : KColor.blue.withValues(alpha: 0.2), 
+            width: 0.5,
+          ),
+          boxShadow: isTraining 
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isTraining ? 'Training Day Split' : 'Scheduled Rest Day',
+                        style: KText.h2.copyWith(color: Colors.white, fontSize: 16),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _defaultNames[weekday]!,
+                        style: KText.caption.copyWith(color: KColor.textMuted),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _nameControllers[weekday],
-                    style: KText.bodyMedium.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      hintText: 'Day name',
-                      hintStyle: TextStyle(color: KColor.textMuted),
-                    ),
-                  ),
+                Switch(
+                  value: isTraining,
+                  activeThumbColor: KColor.green,
+                  activeTrackColor: KColor.green.withValues(alpha: 0.2),
+                  inactiveThumbColor: KColor.textMuted,
+                  inactiveTrackColor: KColor.border,
+                  onChanged: (val) {
+                    HapticFeedback.lightImpact();
+                    setState(() {
+                      _selectedDays[weekday] = val;
+                      if (val && _dayExercises[weekday]!.isEmpty) {
+                        _dayExercises[weekday] = List.of(
+                          exerciseLibraryByDay[_defaultNames[weekday] ?? ''] ?? const [],
+                        );
+                      }
+                    });
+                  },
                 ),
               ],
             ),
-          ),
-          const Divider(color: KColor.border, height: 1),
-          if (exercises.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Row(
+            const SizedBox(height: 12),
+            const Divider(color: KColor.border, height: 1),
+            const SizedBox(height: 16),
+            if (isTraining) ...[
+              Text(
+                'SPLIT DAY NAME',
+                style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _nameControllers[weekday],
+                style: KText.bodyMedium.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Chest + Triceps',
+                  hintStyle: const TextStyle(color: KColor.textMuted),
+                  fillColor: KColor.bg,
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(
-                    Icons.drag_indicator_rounded,
-                    color: KColor.textMuted,
-                    size: 16,
+                  Text(
+                    'EXERCISES PLAN',
+                    style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Drag handle to change order in future workouts',
-                      style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10.5),
+                  if (exercises.isNotEmpty)
+                    Text(
+                      '${exercises.length} Exercises',
+                      style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
                     ),
-                  ),
                 ],
               ),
-            ),
-          if (exercises.isNotEmpty)
-            ReorderableListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              buildDefaultDragHandles: false,
-              onReorder: (oldIdx, newIdx) =>
-                  _reorderExercise(weekday, oldIdx, newIdx),
-              itemCount: exercises.length,
-              itemBuilder: (_, index) {
-                final ex = exercises[index];
-                final subtitle = ex.notes?.trim().isNotEmpty == true
-                    ? '${ex.muscleGroup} • ${ex.repRangeLabel} • ${ex.notes!.trim()}'
-                    : '${ex.muscleGroup} • ${ex.repRangeLabel}';
-                return ListTile(
-                  key: ValueKey('${weekday}_${ex.id}'),
-                  contentPadding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
-                  leading: const Icon(
-                    Icons.fitness_center_rounded,
-                    color: KColor.textMuted,
-                    size: 16,
-                  ),
-                  title: Text(
-                    ex.name,
-                    style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    subtitle,
-                    style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 10.5),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+              const SizedBox(height: 10),
+              if (exercises.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                  alignment: Alignment.center,
+                  child: Column(
                     children: [
-                      IconButton(
-                        onPressed: () => _removeExercise(weekday, ex),
-                        icon: const Icon(
-                          Icons.remove_circle_outline_rounded,
-                          color: KColor.textMuted,
-                          size: 16,
+                      const Icon(Icons.fitness_center_rounded, color: KColor.textMuted, size: 32),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No Exercises Planned',
+                        style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tap "Add exercise" below to build this day split.',
+                        style: KText.caption.copyWith(color: KColor.textMuted),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.drag_indicator_rounded, color: KColor.textMuted, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Drag handle to change exercise ordering',
+                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  onReorder: (oldIdx, newIdx) => _reorderExercise(weekday, oldIdx, newIdx),
+                  itemCount: exercises.length,
+                  itemBuilder: (_, index) {
+                    final ex = exercises[index];
+                    final subtitle = ex.notes?.trim().isNotEmpty == true
+                        ? '${ex.muscleGroup} • ${ex.repRangeLabel} • ${ex.notes!.trim()}'
+                        : '${ex.muscleGroup} • ${ex.repRangeLabel}';
+                    return Container(
+                      key: ValueKey('${weekday}_${ex.id}'),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: KColor.bg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: KColor.border, width: 0.5),
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+                        leading: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: KColor.surface,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${index + 1}',
+                              style: KText.caption.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          ex.name,
+                          style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          subtitle,
+                          style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 10.5),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () {
+                                HapticFeedback.lightImpact();
+                                _removeExercise(weekday, ex);
+                              },
+                              icon: const Icon(
+                                Icons.remove_circle_outline_rounded,
+                                color: KColor.danger,
+                                size: 18,
+                              ),
+                            ),
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: Icon(
+                                  Icons.drag_handle_rounded,
+                                  color: KColor.textMuted,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      ReorderableDragStartListener(
-                        index: index,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            color: KColor.textMuted,
-                            size: 18,
-                          ),
+                    );
+                  },
+                ),
+              ],
+              const SizedBox(height: 8),
+              InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  _addExercise(weekday);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: KColor.green.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KColor.green.withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.add_circle_outline_rounded,
+                        color: KColor.green,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Add Exercise',
+                        style: KText.bodyMedium.copyWith(
+                          color: KColor.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.5,
                         ),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          InkWell(
-            onTap: () => _addExercise(weekday),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.add_circle_outline_rounded,
-                    color: KColor.green,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Add exercise',
-                    style: KText.bodyMedium.copyWith(
-                      color: KColor.green,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ],
+            ] else ...[
+              // Rest Day Recovery Placeholder Card (No Nesting, beautifully customized)
+              Center(
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: KColor.blue.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: KColor.blue.withValues(alpha: 0.2),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.spa_rounded,
+                          color: KColor.blue,
+                          size: 36,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Rest & Recovery',
+                      style: KText.h2.copyWith(color: Colors.white, fontSize: 18),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Scheduled Rest Day — muscles grow when you rest, not when you lift. Use this day to focus on sleep, quality nutrition, hydration, and light mobility work to return stronger.',
+                      style: KText.body.copyWith(
+                        color: KColor.textSecondary,
+                        height: 1.5,
+                        fontSize: 13,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

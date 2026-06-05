@@ -1930,7 +1930,7 @@ class _SessionTile extends StatelessWidget {
     return GestureDetector(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => _SessionDetailPage(session: session, service: service),
+          builder: (_) => SessionDetailPage(session: session, service: service),
         ),
       ),
       child: Container(
@@ -2070,17 +2070,17 @@ class _StatChip extends StatelessWidget {
 
 // ─── Session Detail & Edit Page ───────────────────────────────────────────────
 
-class _SessionDetailPage extends StatefulWidget {
+class SessionDetailPage extends StatefulWidget {
   final WorkoutSession session;
   final WorkoutService service;
 
-  const _SessionDetailPage({required this.session, required this.service});
+  const SessionDetailPage({super.key, required this.session, required this.service});
 
   @override
-  State<_SessionDetailPage> createState() => _SessionDetailPageState();
+  State<SessionDetailPage> createState() => _SessionDetailPageState();
 }
 
-class _SessionDetailPageState extends State<_SessionDetailPage> {
+class _SessionDetailPageState extends State<SessionDetailPage> {
   late WorkoutSession _currentSession;
 
   @override
