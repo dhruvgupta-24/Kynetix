@@ -2454,6 +2454,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
       return ExerciseEntry(
         exercise: e.exercise,
         sets: List<SetEntry>.from(e.sets),
+        notes: e.notes,
       );
     }).toList();
   }

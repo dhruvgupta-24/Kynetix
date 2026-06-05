@@ -103,10 +103,12 @@ class SetEntry {
 class ExerciseEntry {
   final Exercise       exercise;
   final List<SetEntry> sets;
+  final String?        notes;
 
   const ExerciseEntry({
     required this.exercise,
     required this.sets,
+    this.notes,
   });
 
   bool get isEmpty => sets.isEmpty;
@@ -145,6 +147,7 @@ class ExerciseEntry {
   Map<String, dynamic> toJson() => {
         'exercise': exercise.toJson(),
         'sets':     sets.map((s) => s.toJson()).toList(),
+        if (notes != null && notes!.trim().isNotEmpty) 'notes': notes,
       };
 
   factory ExerciseEntry.fromJson(Map<String, dynamic> j) => ExerciseEntry(
@@ -152,6 +155,7 @@ class ExerciseEntry {
         sets:     (j['sets'] as List<dynamic>? ?? [])
             .map((s) => SetEntry.fromJson(s as Map<String, dynamic>))
             .toList(),
+        notes:    j['notes'] as String?,
       );
 }
 

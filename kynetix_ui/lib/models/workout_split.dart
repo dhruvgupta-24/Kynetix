@@ -28,6 +28,7 @@ class Exercise {
   final ExerciseType type;
   final int? defaultRepMin;
   final int? defaultRepMax;
+  final int? defaultTargetSets;
   final String? notes;
 
   const Exercise({
@@ -37,8 +38,19 @@ class Exercise {
     required this.type,
     this.defaultRepMin,
     this.defaultRepMax,
+    this.defaultTargetSets,
     this.notes,
   });
+
+  int get targetSets =>
+      defaultTargetSets ??
+      switch (type) {
+        ExerciseType.barbellCompound => 4,
+        ExerciseType.dumbbell => 3,
+        ExerciseType.cableMachine => 3,
+        ExerciseType.isolation => 3,
+        ExerciseType.bodyweight => 3,
+      };
 
   int get targetRepMin =>
       defaultRepMin ??
@@ -69,6 +81,7 @@ class Exercise {
     'type': type.index,
     if (defaultRepMin != null) 'defaultRepMin': defaultRepMin,
     if (defaultRepMax != null) 'defaultRepMax': defaultRepMax,
+    if (defaultTargetSets != null) 'defaultTargetSets': defaultTargetSets,
     if (notes != null && notes!.trim().isNotEmpty) 'notes': notes,
   };
 
@@ -84,6 +97,7 @@ class Exercise {
             0],
     defaultRepMin: (j['defaultRepMin'] as num?)?.toInt(),
     defaultRepMax: (j['defaultRepMax'] as num?)?.toInt(),
+    defaultTargetSets: (j['defaultTargetSets'] as num?)?.toInt(),
     notes: j['notes'] as String?,
   );
 
@@ -98,6 +112,7 @@ class Exercise {
     ExerciseType? type,
     int? defaultRepMin,
     int? defaultRepMax,
+    int? defaultTargetSets,
     String? notes,
   }) => Exercise(
     id: id,
@@ -106,6 +121,7 @@ class Exercise {
     type: type ?? this.type,
     defaultRepMin: defaultRepMin ?? this.defaultRepMin,
     defaultRepMax: defaultRepMax ?? this.defaultRepMax,
+    defaultTargetSets: defaultTargetSets ?? this.defaultTargetSets,
     notes: notes ?? this.notes,
   );
 }
