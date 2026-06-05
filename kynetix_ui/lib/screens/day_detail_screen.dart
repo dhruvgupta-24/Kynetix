@@ -324,15 +324,22 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       addedAt:         DateTime.now(),
       dayOfWeek:       widget.date.weekday,
       parsedFoods:     [name],
+      userCorrected:   true,
       result: NutritionResult.createCustom(
         canonicalMeal: name,
         calories: calories,
         protein: protein,
         source: 'quick_add',
+        userCorrected: true,
       ),
     );
     _log.add(sec, entry);
-    MealMemory.instance.store(name, entry.result).ignore();
+    MealMemory.instance.store(
+      name,
+      entry.result,
+      finalSavedInput: name,
+      canonicalMeal: name,
+    ).ignore();
     _refresh();
     kHapticMedium();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -582,9 +589,9 @@ class _DayDetailContentState extends State<_DayDetailContent> {
   }
 
   double get _targetFiber {
-    final profile = currentUserProfile;
-    if (profile == null) return 30.0;
-    return NutritionTargetEngine().weeklyPlan(profile, health: widget.health).fiberTargetG;
+    final target = _dayTarget;
+    if (target == null) return 30.0;
+    return (14.0 * target.calories / 1000).clamp(20.0, 60.0);
   }
 
   @override

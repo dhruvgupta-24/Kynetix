@@ -380,7 +380,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double get _consumedProtein  => _selectedLog.totalProteinMid;
   double get _targetCalories   => _effectiveDayTarget?.calories ?? _weeklyPlan.avgDailyCalories;
   double get _targetProtein    => _effectiveDayTarget?.protein  ?? _weeklyPlan.avgDailyProtein;
-  double get _targetFiber      => _weeklyPlan.fiberTargetG;
+  double get _targetFiber      => (14.0 * _targetCalories / 1000).clamp(20.0, 60.0);
   double get _remainingCalories => (_targetCalories - _consumedCalories).clamp(0, double.infinity);
   double get _remainingProtein  => (_targetProtein  - _consumedProtein ).clamp(0, double.infinity);
 

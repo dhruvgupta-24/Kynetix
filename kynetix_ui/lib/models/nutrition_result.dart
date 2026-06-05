@@ -671,7 +671,7 @@ class NutritionResult {
     double? fat,
     double? fiber,
     required String source,
-    bool userCorrected = false,
+    bool userCorrected = true,
     List<NutritionItem>? items,
   }) {
     final carbsRange = carbohydrates != null

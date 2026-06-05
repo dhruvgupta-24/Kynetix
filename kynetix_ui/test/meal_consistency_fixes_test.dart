@@ -9,6 +9,7 @@ import 'package:kynetix/services/mock_estimation_service.dart' show NutrientRang
 import 'package:kynetix/screens/onboarding_screen.dart' show UserProfile, currentUserProfile;
 import 'package:kynetix/services/nutrition_hydration_guard.dart';
 import 'package:kynetix/services/meal_memory.dart';
+import 'package:kynetix/services/nutrition_target_engine.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -481,6 +482,120 @@ void main() {
       final deserializedEntry = deserializedLog.entriesFor(MealSection.breakfast).first;
       expect(deserializedEntry.result.userCorrected, isTrue);
       expect(deserializedEntry.result.calories.min, equals(1200.0));
+    });
+
+    test('8. Custom meal creations and Quick Add meals default to userCorrected = true and locked', () {
+      // Create custom meal
+      final custom = NutritionResult.createCustom(
+        canonicalMeal: 'Custom Steak',
+        calories: 800,
+        protein: 70,
+        source: 'custom_flow',
+      );
+      expect(custom.userCorrected, isTrue);
+      expect(custom.macrosLockedByUser, isTrue);
+
+      // Create quick add meal via JSON or direct call
+      final quickAdd = NutritionResult.createCustom(
+        canonicalMeal: 'Quick Apple',
+        calories: 90,
+        protein: 0,
+        source: 'quick_add',
+      );
+      expect(quickAdd.userCorrected, isTrue);
+      expect(quickAdd.macrosLockedByUser, isTrue);
+    });
+
+    test('9. Fiber target is calculated dynamically based on daily target calories (14g per 1000 kcal) clamped between 20g and 60g', () {
+      final engine = NutritionTargetEngine.instance;
+
+      // 1. Very low calories: 1000 kcal -> 14g -> clamped to 20g
+      final profileLow = const UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 170.0,
+        weight: 60.0,
+        workoutDaysMin: 0,
+        workoutDaysMax: 0,
+        goal: 'Fat Loss',
+        useCustomTargets: true,
+        customTrainingDayCalories: 1000,
+        customRestDayCalories: 1000,
+        customProteinTarget: 100,
+      );
+      final planLow = engine.weeklyPlan(profileLow);
+      expect(planLow.fiberTargetG, equals(20.0));
+
+      // 2. Normal calories: 2000 kcal -> 28g fiber
+      final profileNormal = const UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 175.0,
+        weight: 75.0,
+        workoutDaysMin: 0,
+        workoutDaysMax: 0,
+        goal: 'Fat Loss',
+        useCustomTargets: true,
+        customTrainingDayCalories: 2000,
+        customRestDayCalories: 2000,
+        customProteinTarget: 130,
+      );
+      final planNormal = engine.weeklyPlan(profileNormal);
+      expect(planNormal.fiberTargetG, equals(28.0));
+
+      // 3. Extremely high calories: 5000 kcal -> 70g -> clamped to 60g
+      final profileHigh = const UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 190.0,
+        weight: 100.0,
+        workoutDaysMin: 0,
+        workoutDaysMax: 0,
+        goal: 'Bulk',
+        useCustomTargets: true,
+        customTrainingDayCalories: 5000,
+        customRestDayCalories: 5000,
+        customProteinTarget: 180,
+      );
+      final planHigh = engine.weeklyPlan(profileHigh);
+      expect(planHigh.fiberTargetG, equals(60.0));
+    });
+
+    test('10. Edited meals cache correctly in MealMemory and are retrievable by rawInput, finalSavedInput, and canonicalMeal', () async {
+      final customResult = NutritionResult.createCustom(
+        canonicalMeal: 'Aloo Paratha',
+        calories: 350,
+        protein: 8,
+        source: 'user_override',
+        userCorrected: true,
+      );
+
+      // Store in memory under raw input "2 aloo paratha" but with canonical "Aloo Paratha" and final input "2 Aloo Parathas"
+      await MealMemory.instance.store(
+        '2 aloo paratha',
+        customResult,
+        finalSavedInput: '2 Aloo Parathas',
+        canonicalMeal: 'Aloo Paratha',
+      );
+
+      // Retrieve via rawInput
+      final rawMatch = MealMemory.instance.lookup('2 aloo paratha');
+      expect(rawMatch, isNotNull);
+      expect(rawMatch!.calories.min, equals(350));
+      expect(rawMatch.userCorrected, isTrue);
+
+      // Retrieve via finalSavedInput
+      final savedMatch = MealMemory.instance.lookup('2 Aloo Parathas');
+      expect(savedMatch, isNotNull);
+      expect(savedMatch!.calories.min, equals(350));
+
+      // Retrieve via canonicalMeal
+      final canonicalMatch = MealMemory.instance.lookup('Aloo Paratha');
+      expect(canonicalMatch, isNotNull);
+      expect(canonicalMatch!.calories.min, equals(350));
     });
   });
 }

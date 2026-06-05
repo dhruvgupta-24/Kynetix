@@ -312,7 +312,7 @@ class _AddMealScreenState extends State<AddMealScreen>
       final parsedFoods = _result!.items.map((i) => i.name).toList(growable: false);
       final entry = MealEntry(
         rawInput: widget.initialEntry!.rawInput,
-        result: _result!,
+        result: _result!.copyWith(userCorrected: true, macrosLockedByUser: true),
         addedAt: widget.initialEntry!.addedAt,
         section: widget.initialEntry!.section,
         dayOfWeek: widget.initialEntry!.dayOfWeek,
@@ -323,7 +323,12 @@ class _AddMealScreenState extends State<AddMealScreen>
         userCorrected: true,
       );
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
-      await MealMemory.instance.store(entry.rawInput, entry.result);
+      await MealMemory.instance.store(
+        entry.rawInput,
+        entry.result,
+        finalSavedInput: entry.finalSavedInput,
+        canonicalMeal: entry.result.canonicalMeal,
+      );
       await PersistenceService.saveDay(widget.date);
       if (mounted) {
         Navigator.of(context).pop(entry);
@@ -363,9 +368,14 @@ class _AddMealScreenState extends State<AddMealScreen>
     final parsedFoods = _result!.items.map((i) => i.name).toList(growable: false);
     // edited=true when: (a) re-editing an existing entry, OR (b) user fixed macros on this new entry.
     final isEdited = widget.initialEntry != null || (_result?.macrosLockedByUser ?? false);
+    final userCorrectedVal = (widget.initialEntry?.userCorrected ?? false) || (_result?.userCorrected ?? false) || isEdited;
+    final finalResult = _result!.copyWith(
+      userCorrected: userCorrectedVal,
+      macrosLockedByUser: userCorrectedVal,
+    );
     final entry = MealEntry(
       rawInput: widget.initialEntry?.rawInput ?? text,
-      result:   _result!,
+      result:   finalResult,
       addedAt:  widget.initialEntry?.addedAt ?? DateTime.now(),
       section: widget.section,
       dayOfWeek: widget.date.weekday,
@@ -373,14 +383,19 @@ class _AddMealScreenState extends State<AddMealScreen>
       edited: isEdited,
       editCount: (widget.initialEntry?.editCount ?? 0) + (widget.initialEntry != null ? 1 : 0),
       finalSavedInput: text,
-      userCorrected: widget.initialEntry?.userCorrected ?? (_result?.userCorrected ?? false),
+      userCorrected: userCorrectedVal,
     );
     if (widget.initialEntry != null) {
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
     } else {
       logFor(widget.date).add(widget.section, entry);
     }
-    await MealMemory.instance.store(entry.rawInput, entry.result);
+    await MealMemory.instance.store(
+      entry.rawInput,
+      entry.result,
+      finalSavedInput: entry.finalSavedInput,
+      canonicalMeal: entry.result.canonicalMeal,
+    );
     await PersistenceService.saveDay(widget.date);
     if (!mounted) return;
     Navigator.of(context).pop(entry);

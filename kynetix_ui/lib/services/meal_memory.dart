@@ -355,21 +355,37 @@ class MealMemory {
     await _persistCandidates();
   }
 
-  /// Stores [result] for [rawInput].  Overwrites any existing entry with
-  /// the same normalized key.
-  Future<void> store(String rawInput, NutritionResult result) async {
-    final key = normalize(rawInput);
+  Future<void> store(
+    String rawInput,
+    NutritionResult result, {
+    String? finalSavedInput,
+    String? canonicalMeal,
+  }) async {
     final now = DateTime.now();
-    _store[key] = MealMemoryEntry(
-      id:              '${now.millisecondsSinceEpoch}',
-      rawInput:        rawInput,
-      normalizedInput: key,
-      result:          result,
-      timesUsed:       1,
-      createdAt:       now,
-      updatedAt:       now,
-    );
     _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
+
+    void storeKey(String input) {
+      final key = normalize(input);
+      if (key.isEmpty) return;
+      _store[key] = MealMemoryEntry(
+        id:              '${now.millisecondsSinceEpoch}_${key.hashCode}',
+        rawInput:        input,
+        normalizedInput: key,
+        result:          result,
+        timesUsed:       1,
+        createdAt:       now,
+        updatedAt:       now,
+      );
+    }
+
+    storeKey(rawInput);
+    if (finalSavedInput != null) {
+      storeKey(finalSavedInput);
+    }
+    if (canonicalMeal != null) {
+      storeKey(canonicalMeal);
+    }
+
     await _persist();
   }
 
