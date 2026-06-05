@@ -3045,6 +3045,68 @@ class _SetTypeSelector extends StatefulWidget {
 
 class _SetTypeSelectorState extends State<_SetTypeSelector> {
   bool _showAll = false;
+  late ScrollController _scrollController;
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+  final Map<SetType, GlobalKey> _chipKeys = {
+    for (var type in SetType.values) type: GlobalKey(),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _scrollController.addListener(_updateScrollIndicators);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateScrollIndicators();
+      _scrollSelectedIntoView();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_updateScrollIndicators);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SetTypeSelector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollSelectedIntoView();
+      });
+    }
+  }
+
+  void _updateScrollIndicators() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    final canScrollLeft = offset > 0.5;
+    final canScrollRight = offset < maxScroll - 0.5 && maxScroll > 0;
+    if (canScrollLeft != _canScrollLeft || canScrollRight != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = canScrollLeft;
+        _canScrollRight = canScrollRight;
+      });
+    }
+  }
+
+  void _scrollSelectedIntoView() {
+    if (!_scrollController.hasClients) return;
+    final key = _chipKeys[widget.selected];
+    if (key != null && key.currentContext != null) {
+      Scrollable.ensureVisible(
+        key.currentContext!,
+        duration: const Duration(milliseconds: 150),
+        alignment: 0.5,
+        curve: Curves.easeInOut,
+      );
+    }
+    _updateScrollIndicators();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3065,19 +3127,20 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
             SetType.warmUp,
           ];
 
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFF141624).withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
+    final showLeftFade = _canScrollLeft;
+    final showRightFade = _canScrollRight;
+
+    Widget scrollContent = SingleChildScrollView(
+      controller: _scrollController,
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           ...visibleOptions.map((type) {
             final isSelected = widget.selected == type;
             return GestureDetector(
+              key: _chipKeys[type],
               onTap: () {
                 HapticFeedback.selectionClick();
                 widget.onChanged(type);
@@ -3106,6 +3169,9 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
               setState(() {
                 _showAll = !_showAll;
               });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _scrollSelectedIntoView();
+              });
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -3131,6 +3197,39 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
             ),
           ),
         ],
+      ),
+    );
+
+    if (showLeftFade || showRightFade) {
+      scrollContent = ShaderMask(
+        shaderCallback: (Rect bounds) {
+          return LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              showLeftFade ? Colors.transparent : Colors.white,
+              Colors.white,
+              Colors.white,
+              showRightFade ? Colors.transparent : Colors.white,
+            ],
+            stops: const [0.0, 0.08, 0.92, 1.0],
+          ).createShader(bounds);
+        },
+        blendMode: BlendMode.dstIn,
+        child: scrollContent,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141624).withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: KColor.border, width: 0.5),
+      ),
+      child: Center(
+        widthFactor: 1.0,
+        child: scrollContent,
       ),
     );
   }

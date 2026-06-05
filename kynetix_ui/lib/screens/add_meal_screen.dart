@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/app_theme.dart';
 import '../models/nutrition_result.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_pipeline.dart';
@@ -566,40 +567,45 @@ class _AddMealScreenState extends State<AddMealScreen>
     }
   }
 
-  Widget _buildField(String label, TextEditingController ctrl, Color color) {
+  Widget _buildField(String label, TextEditingController ctrl, Color color, {bool isProminent = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          label,
+          label.toUpperCase(),
           style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: color.withOpacity(0.85),
+            fontSize: 8.5,
+            fontWeight: isProminent ? FontWeight.w800 : FontWeight.w600,
+            color: color.withOpacity(isProminent ? 0.95 : 0.7),
+            letterSpacing: 0.5,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         TextField(
           controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
-          style: const TextStyle(color: Colors.white, fontSize: 13),
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 13.5,
+            fontWeight: isProminent ? FontWeight.bold : FontWeight.normal,
+          ),
           decoration: InputDecoration(
             filled: true,
             fillColor: const Color(0xFF0F0F14),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             isDense: true,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(0.3)),
+              borderSide: BorderSide(color: color.withOpacity(isProminent ? 0.25 : 0.15)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(0.25)),
+              borderSide: BorderSide(color: color.withOpacity(isProminent ? 0.2 : 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color, width: 1.5),
+              borderSide: BorderSide(color: color, width: isProminent ? 1.5 : 1.0),
             ),
           ),
         ),
@@ -695,10 +701,20 @@ class _AddMealScreenState extends State<AddMealScreen>
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'MEAL NAME',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        color: KColor.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                     AnimatedBuilder(
                       animation: _pulse,
                       builder: (context, child) {
@@ -790,6 +806,29 @@ class _AddMealScreenState extends State<AddMealScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Remember edits for future logs',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFD1D5DB),
+                            ),
+                          ),
+                          Switch(
+                            value: _rememberEdits,
+                            onChanged: (v) => setState(() => _rememberEdits = v),
+                            activeThumbColor: KColor.green,
+                            activeTrackColor: const Color(0xFF1E3A2F),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Divider(color: KColor.border, height: 1),
+                      const SizedBox(height: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           const Expanded(
                             child: Text(
@@ -804,21 +843,21 @@ class _AddMealScreenState extends State<AddMealScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF52B788).withOpacity(0.15),
+                              color: KColor.green.withOpacity(0.08),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF52B788).withOpacity(0.4)),
+                              border: Border.all(color: KColor.green.withOpacity(0.2), width: 0.8),
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.bookmark_rounded, size: 10, color: Color(0xFF52B788)),
-                                SizedBox(width: 4),
+                                Icon(Icons.bookmark_rounded, size: 11, color: KColor.green),
+                                const SizedBox(width: 4),
                                 Text(
-                                  'Saves to Food Library',
+                                  'Saved to Food Library',
                                   style: TextStyle(
                                     fontSize: 9.5,
                                     fontWeight: FontWeight.w700,
-                                    color: Color(0xFF52B788),
+                                    color: KColor.green,
                                   ),
                                 ),
                               ],
@@ -911,34 +950,34 @@ class _AddMealScreenState extends State<AddMealScreen>
                             const Divider(color: Color(0xFF2E2E3E), height: 16),
                             Row(
                               children: [
-                                Expanded(child: _buildField('Calories (kcal)', row.calCtrl, const Color(0xFFFF6B35))),
-                                const SizedBox(width: 10),
-                                Expanded(child: _buildField('Protein (g)', row.proCtrl, const Color(0xFF52B788))),
+                                Expanded(child: _buildField('Calories (kcal)', row.calCtrl, KColor.calorie, isProminent: true)),
+                                const SizedBox(width: 12),
+                                Expanded(child: _buildField('Protein (g)', row.proCtrl, KColor.protein, isProminent: true)),
                               ],
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
                             Row(
                               children: [
-                                Expanded(child: _buildField('Carbs (g)', row.carbCtrl, const Color(0xFF60A5FA))),
-                                const SizedBox(width: 10),
-                                Expanded(child: _buildField('Fat (g)', row.fatCtrl, const Color(0xFFFBBF24))),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
+                                Expanded(child: _buildField('Carbs (g)', row.carbCtrl, KColor.blue)),
+                                const SizedBox(width: 8),
+                                Expanded(child: _buildField('Fat (g)', row.fatCtrl, KColor.amber)),
+                                const SizedBox(width: 8),
                                 Expanded(child: _buildField('Fiber (g)', row.fibCtrl, const Color(0xFFA78BFA))),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: TextButton.icon(
-                                    onPressed: () => _resetItemToOriginal(i),
-                                    icon: const Icon(Icons.undo_rounded, size: 12),
-                                    label: const Text('Reset to Estimate', style: TextStyle(fontSize: 11)),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: const Color(0xFF6B7280),
-                                      padding: EdgeInsets.zero,
-                                      alignment: Alignment.centerLeft,
-                                    ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => _resetItemToOriginal(i),
+                                  icon: const Icon(Icons.undo_rounded, size: 11),
+                                  label: const Text('Reset to Estimate', style: TextStyle(fontSize: 10.5)),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: KColor.textMuted,
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
                                 ),
                               ],
@@ -990,26 +1029,6 @@ class _AddMealScreenState extends State<AddMealScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Remember edits for future logs',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFD1D5DB),
-                        ),
-                      ),
-                      Switch(
-                        value: _rememberEdits,
-                        onChanged: (v) => setState(() => _rememberEdits = v),
-                        activeThumbColor: const Color(0xFF52B788),
-                        activeTrackColor: const Color(0xFF1E3A2F),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   if (_validationWarning != null)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1038,31 +1057,57 @@ class _AddMealScreenState extends State<AddMealScreen>
                       ),
                     ),
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E1E2C),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: KColor.border, width: 0.5),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        const Text(
+                          'RUNNING TOTAL',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: KColor.textMuted,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
                           children: [
-                            const Text(
-                              'RUNNING TOTAL',
-                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF6B7280)),
-                            ),
-                            const SizedBox(height: 4),
                             Text(
-                              '${_totalCal.toStringAsFixed(0)} kcal · ${_totalPro.toStringAsFixed(1)}g P',
-                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                              '${_totalCal.toStringAsFixed(0)} kcal',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: KColor.calorie,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '${_totalPro.toStringAsFixed(1)}g Protein',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: KColor.protein,
+                              ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 8),
                         Text(
-                          'C: ${_totalCarb.toStringAsFixed(0)}g · F: ${_totalFat.toStringAsFixed(0)}g · Fib: ${_totalFib.toStringAsFixed(0)}g',
-                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
+                          '${_totalCarb.toStringAsFixed(0)}g Carbs  •  ${_totalFat.toStringAsFixed(0)}g Fat  •  ${_totalFib.toStringAsFixed(0)}g Fiber',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: KColor.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -1073,9 +1118,11 @@ class _AddMealScreenState extends State<AddMealScreen>
                     child: ElevatedButton(
                       onPressed: _saveMeal,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2D6A4F),
+                        backgroundColor: KColor.greenDark,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 1.5,
+                        shadowColor: Colors.black.withOpacity(0.2),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: Text(
