@@ -54,6 +54,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   bool _isSaving = false;
   bool _isDiscarding = false;
 
+  final GlobalKey _dockKey = GlobalKey();
+  double _dockHeight = 160.0;
+
   // Active exercises
   late List<Exercise> _sessionExercises;
 
@@ -186,6 +189,22 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _saveRecoveryState();
+    }
+  }
+
+  void _measureDock() {
+    if (!mounted) return;
+    final context = _dockKey.currentContext;
+    if (context != null) {
+      final renderBox = context.findRenderObject() as RenderBox?;
+      if (renderBox != null && renderBox.hasSize) {
+        final height = renderBox.size.height;
+        if (height != _dockHeight) {
+          setState(() {
+            _dockHeight = height;
+          });
+        }
+      }
     }
   }
 
@@ -1119,6 +1138,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.of(context).viewInsets.bottom == 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _measureDock());
+    }
     final progress = _completionProgress;
 
     return PopScope(
@@ -1186,6 +1208,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                                 _exerciseNotes[ex.id] = notes;
                                 _queueRecoverySave();
                               },
+                              dockHeight: MediaQuery.of(context).viewInsets.bottom > 0 ? 0.0 : _dockHeight,
                               sessionNotes: _sessionNotes,
                               onSessionNotesChange: (notes) {
                                 setState(() {
@@ -1235,18 +1258,18 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                       },
                     ),
                   ),
-                  // Bottom dock height offset
-                  const SizedBox(height: 120),
                 ],
               ),
             ),
 
             // Pinned Bottom Command Center Dock
-             Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _BottomDockWidget(
+            if (MediaQuery.of(context).viewInsets.bottom == 0)
+              Positioned(
+                key: _dockKey,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _BottomDockWidget(
                 exercises: _sessionExercises,
                 sets: _sets,
                 skippedExercises: _skippedExercises,
@@ -1303,95 +1326,109 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   Widget _buildSessionAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          IconButton(
-            icon: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
-            onPressed: _confirmDiscard,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.splitDay.name.toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                Row(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
+                onPressed: _confirmDiscard,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    _LiveTimerWidget(startedAt: _startTime),
-                    const SizedBox(width: 6),
-                    const Text('•', style: TextStyle(color: KColor.textMuted)),
-                    const SizedBox(width: 6),
                     Text(
-                      '$_totalSets sets',
-                      style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text('•', style: TextStyle(color: KColor.textMuted)),
-                    const SizedBox(width: 6),
-                    _AnimatedCountUpText(
-                      value: _totalVolume,
-                      suffix: ' kg',
-                      style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // Isolated Live Score ValueListenableBuilder
-          ValueListenableBuilder<int>(
-            valueListenable: _scoreNotifier,
-            builder: (context, score, child) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: KColor.border, width: 0.5),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.bolt_rounded, color: KColor.amber, size: 16),
-                    const SizedBox(width: 4),
-                    _AnimatedCountUpText(
-                      value: score,
-                      prefix: 'SCORE: ',
+                      widget.splitDay.name.toUpperCase(),
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 11,
+                        fontSize: 15,
                         fontWeight: FontWeight.w900,
-                        fontFeatures: [FontFeature.tabularFigures()],
+                        letterSpacing: 0.8,
                       ),
+                    ),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      children: [
+                        _LiveTimerWidget(startedAt: _startTime),
+                        const Text('•', style: TextStyle(color: KColor.textMuted)),
+                        Text(
+                          '$_totalSets sets',
+                          style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
+                        ),
+                        const Text('•', style: TextStyle(color: KColor.textMuted)),
+                        _AnimatedCountUpText(
+                          value: _totalVolume,
+                          suffix: ' kg',
+                          style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              );
-            },
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: _isSaving ? null : _finish,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: KColor.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              elevation: 0,
-            ),
-            child: _isSaving
-                ? const SizedBox(
-                    width: 16, height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Finish', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ValueListenableBuilder<int>(
+                valueListenable: _scoreNotifier,
+                builder: (context, score, child) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: KColor.border, width: 0.5),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.bolt_rounded, color: KColor.amber, size: 16),
+                        const SizedBox(width: 4),
+                        _AnimatedCountUpText(
+                          value: score,
+                          prefix: 'SCORE: ',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              ElevatedButton(
+                onPressed: _isSaving ? null : _finish,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: KColor.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                ),
+                child: _isSaving
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Finish', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              ),
+            ],
           ),
         ],
       ),
@@ -1483,6 +1520,7 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final Function(int) onRemoveSet;
   final VoidCallback onDuplicateSets;
   final VoidCallback onOpenHistory;
+  final double dockHeight;
 
   // Execution tracking properties
   final bool isSkipped;
@@ -1529,6 +1567,7 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.onRemoveSet,
     required this.onDuplicateSets,
     required this.onOpenHistory,
+    required this.dockHeight,
     required this.isSkipped,
     required this.skipReason,
     required this.isSubstitution,
@@ -1797,7 +1836,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             Expanded(
               flex: 5,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
                 child: _buildHeroSection(),
               ),
             ),
@@ -1805,7 +1844,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               flex: 5,
               child: SingleChildScrollView(
                 controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
                 child: _buildSkippedBanner(),
               ),
             ),
@@ -1814,7 +1853,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       } else {
         return ListView(
           controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
           children: [
             _buildHeroSection(),
             const SizedBox(height: 14),
@@ -1847,7 +1886,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           Expanded(
             flex: 5,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
               child: leftCol,
             ),
           ),
@@ -1855,7 +1894,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             flex: 5,
             child: SingleChildScrollView(
               controller: _scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
               child: rightCol,
             ),
           ),
@@ -1864,7 +1903,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     } else {
       return ListView(
         controller: _scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
         children: [
           leftCol,
           const SizedBox(height: 14),
@@ -1934,7 +1973,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                     return Transform.scale(
                       scale: 0.92 + (value * 0.08),
                       child: Opacity(
-                        opacity: value,
+                        opacity: value.clamp(0.0, 1.0),
                         child: child,
                       ),
                     );
@@ -2036,13 +2075,15 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           const SizedBox(height: 12),
           
           // Unified Session Notes at the bottom of the list
-          const Row(
+          Row(
             children: [
-              Icon(Icons.edit_note_rounded, color: KColor.textSecondary, size: 18),
-              SizedBox(width: 8),
-              Text(
-                'WORKOUT SESSION NOTES',
-                style: TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+              const Icon(Icons.edit_note_rounded, color: KColor.textSecondary, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'WORKOUT SESSION NOTES',
+                  style: const TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                ),
               ),
             ],
           ),
@@ -2308,9 +2349,11 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   children: [
                     const Icon(Icons.offline_bolt_rounded, color: Color(0xFFFFB347), size: 14),
                     const SizedBox(width: 6),
-                    Text(
-                      'Recommended Next Set: $recSet',
-                      style: const TextStyle(color: Color(0xFFFFB347), fontSize: 11, fontWeight: FontWeight.w900),
+                    Expanded(
+                      child: Text(
+                        'Recommended Next Set: $recSet',
+                        style: const TextStyle(color: Color(0xFFFFB347), fontSize: 11, fontWeight: FontWeight.w900),
+                      ),
                     ),
                   ],
                 ),
@@ -2596,8 +2639,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       child: Column(
         children: [
           // Large digital readout header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 14,
             children: [
               Text(
                 '${_selectedWeight.toStringAsFixed(1)} kg',
@@ -2608,9 +2653,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   fontFeatures: [FontFeature.tabularFigures()],
                 ),
               ),
-              const SizedBox(width: 14),
               const Text('×', style: TextStyle(color: KColor.textMuted, fontSize: 22)),
-              const SizedBox(width: 14),
               Text(
                 '$_selectedReps reps',
                 style: const TextStyle(
@@ -2776,15 +2819,17 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 4,
+                runSpacing: 4,
                 children: [
                   Icon(
                     _showCues ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                     color: KColor.textSecondary,
                     size: 16,
                   ),
-                  const SizedBox(width: 4),
                   Text(
                     widget.enableRpeTracking
                         ? (_showCues ? 'HIDE CUES, ANATOMY & ADVANCED METRICS' : 'SHOW CUES, ANATOMY & ADVANCED METRICS')
@@ -3514,12 +3559,16 @@ class _BottomDockWidget extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(isSkipped ? Icons.block_rounded : Icons.add_task_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          isSkipped
-                              ? 'EXERCISE SKIPPED'
-                              : 'LOG SET ${loggedList.length + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 0.5),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            isSkipped
+                                ? 'EXERCISE SKIPPED'
+                                : 'LOG SET ${loggedList.length + 1}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                          ),
                         ),
                       ],
                     ),
@@ -4013,17 +4062,18 @@ class _LiveTimerWidget extends StatefulWidget {
 }
 
 class _LiveTimerWidgetState extends State<_LiveTimerWidget> {
-  Stream<int> _timerStream() async* {
-    while (true) {
-      await Future.delayed(const Duration(seconds: 1));
-      yield 1;
-    }
+  late final Stream<int> _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Stream<int>.periodic(const Duration(seconds: 1), (x) => x);
   }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
-      stream: _timerStream(),
+      stream: _ticker,
       builder: (context, snapshot) {
         final now = DateTime.now();
         final diff = now.difference(widget.startedAt);
@@ -4099,7 +4149,7 @@ class _FloatingTextWidgetState extends State<_FloatingTextWidget>
         animation: _controller,
         builder: (context, child) {
           return Opacity(
-            opacity: _opacity.value,
+            opacity: _opacity.value.clamp(0.0, 1.0),
             child: FractionalTranslation(
               translation: _position.value,
               child: Container(
