@@ -53,12 +53,15 @@ class KynetixWidgetProvider : AppWidgetProvider() {
 
                 Log.d(TAG, "updateAppWidget: id=$appWidgetId size=${minWidth}x${minHeight}")
 
-                // Determine layout dynamically based on options dimensions
                 val layoutResId = when {
-                    minWidth > 0 && minWidth < 180 -> R.layout.kynetix_widget_2x2
-                    minWidth >= 180 && ((minHeight > 0 && minHeight < 180) || minHeight == 0) -> R.layout.kynetix_widget_4x2
-                    minWidth >= 180 && minHeight >= 180 -> R.layout.kynetix_widget_4x4
-                    else -> R.layout.kynetix_widget_2x2 // Default/fallback
+                    minWidth >= 180 -> {
+                        if (minHeight >= 180) {
+                            R.layout.kynetix_widget_4x4
+                        } else {
+                            R.layout.kynetix_widget_4x2
+                        }
+                    }
+                    else -> R.layout.kynetix_widget_2x2
                 }
 
                 val views = RemoteViews(context.packageName, layoutResId)
@@ -84,7 +87,7 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                     // Fresh install / empty state fallback
                     views.setViewVisibility(R.id.widget_content_layout, View.GONE)
                     views.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
-                    if (layoutResId != R.layout.kynetix_widget_2x2) {
+                    if (layoutResId == R.layout.kynetix_widget_4x4) {
                         views.setViewVisibility(R.id.widget_header_layout, View.GONE)
                         views.setViewVisibility(R.id.widget_details_layout, View.GONE)
                     }
@@ -197,7 +200,7 @@ class KynetixWidgetProvider : AppWidgetProvider() {
                     val fallbackViews = RemoteViews(context.packageName, fallbackResId)
                     fallbackViews.setViewVisibility(R.id.widget_content_layout, View.GONE)
                     fallbackViews.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
-                    if (fallbackResId != R.layout.kynetix_widget_2x2) {
+                    if (fallbackResId == R.layout.kynetix_widget_4x4) {
                         fallbackViews.setViewVisibility(R.id.widget_header_layout, View.GONE)
                         fallbackViews.setViewVisibility(R.id.widget_details_layout, View.GONE)
                     }
