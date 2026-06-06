@@ -1,29 +1,70 @@
 # Kynetix - AI-First Nutrition & Fitness Coach
 
-Kynetix is an Android app built with Flutter for Indian users who want realistic, low-friction calorie and protein tracking. It combines AI-powered meal estimation with a conversational nutrition coach, workout tracking, and Health Connect integration.
+Kynetix is an AI-first health and training application built with Flutter for Android. It combines natural language meal logging, an AI-powered conversational nutrition coach, calorie-cycled daily targets, Health Connect synchronization, a training journal, and a native Android Home Widget.
 
 ---
 
-## What Kynetix Does
+## What Makes Kynetix Different?
 
-- **Natural language meal logging** - type "2 roti dal" and get a realistic calorie + protein estimate tuned for Indian food and mess/hostel eating
-- **AI Nutrition Coach** - conversational chat powered by OpenAI, aware of your meals, targets, and eating history
-- **Calorie-cycled daily targets** - Mifflin-St Jeor TDEE with gym-day (+120 kcal) and rest-day (−120 kcal) splits
-- **Health Connect integration** - reads step history to gently influence maintenance estimate
-- **Workout tracker** - logs workouts and flags gym vs rest days
-- **Personalized food memory** - remembers your recurring meals and uses them in future estimates
-- **Weight Tracking Trend Chart & Stats** - stateful interactive custom trend chart supporting range selection (7D, 30D, 90D, ALL), interactive touch hover/tap detection (displays vertical line, neon intersection dot, and glassmorphism tooltip card with haptics), displays Min/Max/Avg weight range statistics, and includes data quality badges based on `WeightQualityReport`.
-- **Android Home Screen Widget** - native home widget supporting responsive layouts (2x2, 4x2, 4x4) and tap-to-open. The widget renders double concentric progress rings (Google Fit style) on a Canvas (Calories outer orange `#FF6B35`/yellow `#F59E0B`; Protein inner green `#52B788`/yellow `#F59E0B`), updates dynamically on meal/profile modifications, and supports date-based local rollover.
+* **Indian Food Optimization**: Natural language meal logging is optimized for Indian diets, portion sizes, and mess/hostel eating patterns.
+* **Personal Nutrition Memory**: The engine learns from manual user corrections to refine future AI calorie and protein estimates for recurring meals.
+* **ChatGPT Account Linking**: Seamlessly pairs with a user's personal ChatGPT Plus/Developer account to run coaching requests using their own API limits, reducing system infrastructure costs.
+* **Multimodal Coaching (Vision)**: An AI nutrition coach capable of analyzing food photos, menus, and delivery app screenshots.
+* **Integrated Ecosystem**: Automatically cycles daily calorie and protein targets based on active workout splits (gym days vs. rest days) and step counts.
+* **Concentric Progress Widget**: Renders Google Fit-style concentric rings directly on the native Android home screen to track calories and protein in real time.
 
 ---
 
-## Architecture
+## Product Feature Status
+
+To ensure transparency and prevent documentation drift, the table below maps the current status of Kynetix features:
+* **Fully Implemented**: Complete loop (UI + Service + Database) and active in the user flow.
+* **Partially Implemented**: Connects UI and code, but has key omissions, incomplete data flows, or known gaps.
+* **Infrastructure Exists**: Backend services, models, or database tables are implemented, but are not wired into the main client app flows.
+* **Planned Only**: Conceptual placeholder with no code representation.
+
+| Feature | Status | Notes |
+| :--- | :--- | :--- |
+| **Natural Language Meal Logging** | **Fully Implemented** | Uses direct token parsing + Gemini REST API meal estimation, falling back to a local database. |
+| **AI Nutrition Coach (Kyno Chat)** | **Fully Implemented** | Conversational chat interface supporting multi-turn stream messages, suggestion chips, and camera/gallery photos. |
+| **Calorie-Cycled Targets (TDEE)** | **Fully Implemented** | Mifflin-St Jeor TDEE formula adjusting for gym day vs. rest day training splits. |
+| **Health Connect Integration** | **Fully Implemented** | Deduplicates and syncs daily step counts and body weights. |
+| **Workout Recovery Dialog** | **Fully Implemented** | Modal recovery prompt displayed on boot if a draft session is detected. Drafts survive indefinitely. |
+| **Planned vs. Executed History** | **Fully Implemented** | Side-by-side planned vs. actual workout logs displaying skips, replacements, and additions. |
+| **Partial Workout Status** | **Fully Implemented** | `WorkoutStatus.partial` is saved when ending a workout session early. |
+| **RPE Toggle & Dials** | **Fully Implemented** | Settings switch that reveals RPE 6–10 selectors in the unified training console. |
+| **Set Type Selector Enhancements** | **Fully Implemented** | Segmented single-row selector with `+ More` button, fade indicators, and active-chip auto-scroll. |
+| **ChatGPT Account Linking Flow** | **Fully Implemented** | Device-code OAuth flow. Injects user token server-side in `ai-chat-router` on success. |
+| **Home Screen Widget** | **Fully Implemented** | Native Android Widget with 2x2/4x2/4x4 layouts, concentric progress arcs, and midnight rollover. |
+| **Achievement System** | **Fully Implemented** | Evaluates and displays training and habit achievements in history and insights screens. |
+| **AI Coaching Insights** | **Fully Implemented** | Local deterministic coach summaries displayed on the daily logs screen. |
+| **Cloud Sync** | **Partially Implemented** | Hydrates core logs, profiles, and workouts. Some analytics/cache tables are write-only and not restored. |
+| **Calorie Carry-Forward** | **Infrastructure Exists** | `carry_forward_record.dart` exists, but lacks active UI settings or roll-over logic. |
+| **Wearable Recovery Integration** | **Infrastructure Exists** | `SleepData` and `HrvData` models exist in `recovery_service.dart` but are not wired to sensors or UI. |
+
+---
+
+## Unused / Legacy / Experimental Components
+
+The following elements exist in the repository but are not active in primary user flows. They are documented here to prevent confusion for future developers:
+
+| Component | Category | Status | Purpose / Notes |
+| :--- | :--- | :--- | :--- |
+| `home_screen.dart` | UI Screen | **Unused** | Residual landing screen replaced by the active tab views in `app_shell.dart`. |
+| `codex-model-probe` | Edge Function | **Unused** | Server-side script to probe OpenAI models, not wired into any client flows. |
+| `openai_auth_nonces` | DB Table | **Unused** | Database table with zero read/write queries in the client or Edge Functions. |
+| `SleepData` & `HrvData` | Code Stubs | **Experimental** | Placeholder data structures for future wearable recovery tracking. |
+| `carry_forward_record` | Code Stub | **Experimental** | Data model for weekly rolling calorie balances, not integrated with TDEE logic. |
+
+---
+
+## Architecture & Core Flows
 
 ```
 Flutter App (kynetix_ui / Android)
     │
     ├─ Supabase Auth         (Google SSO + email/password)
-    ├─ Supabase Postgres     (profiles, day_logs, user_nutrition_memory, workouts)
+    ├─ Supabase Postgres     (profiles, day_logs, user_openai_links, workouts)
     └─ Supabase Edge Functions
           │
           ├─ ai-meal-coach        ← Nutrition coach - builds full context,
@@ -32,172 +73,62 @@ Flutter App (kynetix_ui / Android)
           │
           └─ ai-chat-router       ← AI provider router
                 │
-                ├─ PRIMARY:   OpenAI  gpt-4o-mini (text)
-                │                     gpt-4o      (vision / image input)
-                └─ FALLBACK:  OpenRouter  deepseek/deepseek-chat-v3-0324
+                ├─ PRIMARY:   OpenAI  (using user's linked ChatGPT token if connected)
+                │                     Fallback: OpenAI system credentials
+                │
+                └─ FALLBACK:  OpenRouter
 ```
 
-**Security principle:** All private AI API keys live exclusively in Supabase Edge Function secrets. The Flutter frontend contains zero private keys.
+### AI Coaching Architecture
+
+Coaching is separated into three clean layers:
+1. **Local CoachService** (`lib/services/coach_service.dart`): Operates completely **offline** on the device. Evaluates today's meal logs against targets to print immediate, deterministic coaching blocks (e.g., flagging severe protein deficits, calculating protein requirements per remaining meal, or checking weekly calorie target adherence).
+2. **AI Coach Screen** (`lib/screens/ai_coach_screen.dart`): Interactive client interface (the chat window for *Kyno*). Handles multi-turn streaming conversations, camera/gallery uploads, quick suggestion chips, and Markdown response rendering. Encodes weight trends and daily targets as context.
+3. **Edge Function AI Chat** (`supabase/functions/ai-meal-coach/`): Server-side context injector. Receives the user's message, loads user profile/day logs/nutrition memory, and builds a system prompt injecting daily calorie/protein stats and overrides. Then it routes the request to the `ai-chat-router` Edge Function, which calls OpenAI (using the user's linked ChatGPT token if connected, or Kynetix's system API key) and streams responses back to the app via Server-Sent Events (SSE).
 
 ### Android Home Widget Synchronization
-- **Dart SharedPreferences**: When today's meal log, user targets, or profile details change, `WidgetService` calculates today's consumed/remaining calories and protein, serializes them to a JSON string, and saves it in SharedPreferences with the key `flutter.widget_data_v1`.
+- **Dart SharedPreferences**: When today's meal log, user targets, or profile details change, `WidgetService` calculates today's consumed/remaining calories and protein, serializes them to a JSON string, and saves it in SharedPreferences with the key `widget_data_v1`. Flutter automatically prefixes this key with `flutter.` internally when saving to Android's SharedPreferences XML file.
 - **MethodChannel Update Broadcast**: `WidgetService` fires an update call over the MethodChannel `com.kynetix.app/widget`. The native `MainActivity` intercepts it and broadcasts a refresh intent (`AppWidgetManager.ACTION_APPWIDGET_UPDATE`) containing all active widget IDs.
-- **Native Render & Layouts**: `KynetixWidgetProvider` intercepts the broadcast, parses the SharedPreferences JSON, dynamically draws concentric rings (outer orange/yellow for calories, inner green/yellow for protein) on a Bitmap via native `Canvas` and `Paint`, and updates `RemoteViews`.
-- **Offline Midnight Rollover**: `KynetixWidgetProvider` automatically tracks `last_update_date` in the SharedPreferences payload. If a new calendar day is reached, the widget provider automatically resets consumed values to `0.0` locally and refreshes the UI without requiring a prior launch of the Flutter app.
+- **Native Render & Layouts**: `KynetixWidgetProvider.kt` intercepts the broadcast, parses the SharedPreferences JSON (reading the `flutter.widget_data_v1` key), dynamically draws concentric rings (outer orange/yellow for calories, inner green/yellow for protein) on a Bitmap via native `Canvas` and `Paint`, and updates `RemoteViews`.
+- **Offline Midnight Rollover**: `KynetixWidgetProvider` automatically tracks the `last_update_date` in the SharedPreferences payload. If a new calendar day is reached, the widget provider resets consumed values to `0.0` locally and refreshes the UI without requiring a prior launch of the Flutter app.
 
 ---
 
-## Key Screens
+## AI Routing Rules & Provider Logic
 
-| Screen | Purpose |
-|---|---|
-| `auth_screen.dart` | Google Sign-In + email/password auth |
-| `onboarding_screen.dart` | Profile setup (age, weight, goal, workout frequency) |
-| `home_screen.dart` | Dashboard - daily progress rings, calorie/protein status |
-| `dashboard_screen.dart` | Full day view - meals, sections, targets |
-| `day_detail_screen.dart` | Per-day meal log and editing |
-| `add_meal_screen.dart` | Natural language meal entry + AI estimation |
-| `ai_coach_screen.dart` | Conversational AI nutrition coach (with image support) |
-| `workout_screen.dart` | Workout log and gym/rest day tracking |
-| `workout_session_screen.dart` | Active workout session tracking |
-| `workout_setup_screen.dart` | Workout plan configuration |
-| `profile_screen.dart` | Settings, profile edit, AI engine info |
+The `ai-chat-router` Edge Function applies the following rules:
+
+| Condition | Provider | Default Configuration |
+| :--- | :--- | :--- |
+| **Normal message** | OpenAI (primary system or linked ChatGPT account) | Primary Text Model |
+| **Message with image** | OpenAI (primary system or linked ChatGPT account) | Primary Vision Model |
+| **OpenAI fails (any error)** | OpenRouter (fallback) | Fallback Text Model |
+| **Both fail** | Error returned | - |
+
+The AI Coach badge shows **⚡ OpenAI** (green) on success and **↩ OpenRouter** (purple) on fallback.
 
 ---
 
-## Local Development
+## Database Schema
 
-### Prerequisites
+The backend uses a Supabase PostgreSQL database organized into the following functional domains:
 
-- Flutter SDK ≥ 3.19 / Dart ≥ 3.3
-- Android device or emulator (Android-only; iOS not configured)
-- Node.js ≥ 18 + Supabase CLI:
-  ```bash
-  npm install supabase --save-dev
-  ```
-
-### Install Flutter dependencies
-
-```bash
-cd kynetix_ui
-flutter pub get
-```
-
-### Copy config files
-
-```bash
-# Supabase connection (URL + anon key - safe to share but gitignored)
-cp kynetix_ui/lib/config/supabase_secrets.example.dart kynetix_ui/lib/config/supabase_secrets.dart
-# Fill in your project URL and anon key
-
-# App secrets (empty shell - no keys needed here)
-cp kynetix_ui/lib/config/secrets.example.dart kynetix_ui/lib/config/secrets.dart
-```
-
-### Run the app
-
-```bash
-cd kynetix_ui
-flutter run -d <device_id>
-```
-
----
-
-## Environment Variables
-
-### Flutter - no private AI keys needed ✅
-
-The Flutter app requires **no** OpenAI or OpenRouter API keys. All AI requests are proxied through Supabase Edge Functions which inject secrets server-side.
-
-`supabase_secrets.dart` holds only the Supabase project URL and anon key - both are public-safe but gitignored by convention.
-
-### Edge Functions - local development
-
-Create this file (already gitignored):
-
-```
-supabase/functions/.env
-```
-
-Contents:
-
-```env
-# PRIMARY AI provider
-# Get from: https://platform.openai.com/api-keys
-OPENAI_API_KEY=your_openai_api_key_here
-
-# FALLBACK AI provider
-# Get from: https://openrouter.ai/keys
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
-
-Run functions locally:
-
-```bash
-npx supabase functions serve --env-file supabase/functions/.env
-```
-
----
-
-## Production Setup
-
-### 1. Set Supabase secrets
-
-```bash
-npx supabase secrets set OPENAI_API_KEY=sk-your-key-here --project-ref YOUR_PROJECT_REF
-npx supabase secrets set OPENROUTER_API_KEY=sk-or-your-key-here --project-ref YOUR_PROJECT_REF
-```
-
-Verify:
-
-```bash
-npx supabase secrets list --project-ref YOUR_PROJECT_REF
-```
-
-### 2. Deploy Edge Functions
-
-```bash
-npx supabase functions deploy ai-chat-router --no-verify-jwt --project-ref YOUR_PROJECT_REF
-npx supabase functions deploy ai-meal-coach --no-verify-jwt --project-ref YOUR_PROJECT_REF
-```
-
----
-
-## AI Provider Routing
-
-| Condition | Provider | Model |
-|---|---|---|
-| Normal message | OpenAI (primary) | `gpt-4o-mini` |
-| Message with image | OpenAI (primary) | `gpt-4o` (vision) |
-| OpenAI fails (any error) | OpenRouter (fallback) | `deepseek/deepseek-chat-v3-0324` |
-| Both fail | Error returned | - |
-
-The AI Coach badge shows **⚡ OpenAI** (green) on success, **↩ OpenRouter** (purple) on fallback.
-
----
-
-## Database Tables
-
-| Table | Purpose |
-|---|---|
-| `profiles` | User profile (weight, height, age, goal, workout frequency) |
-| `day_logs` | Daily meal log - `sections_json` stores meals by section |
-| `user_nutrition_memory` | Learned food values from past logs |
-| `workouts` | Workout sessions |
-
----
-
-## Security
-
-| Item | Status |
-|---|---|
-| `OPENAI_API_KEY` | Supabase secrets only - never in Flutter |
-| `OPENROUTER_API_KEY` | Supabase secrets only - never in Flutter |
-| `supabase_secrets.dart` | Gitignored (Supabase URL + anon key) |
-| `secrets.dart` | Gitignored (empty - no keys) |
-| `supabase/functions/.env` | Gitignored |
-| Flutter → `api.openai.com` | ❌ Never - all calls go through Edge Functions |
-| Flutter → `openrouter.ai` | ❌ Never - all calls go through Edge Functions |
+* **Profiles & Authentication**:
+  * `profiles` - User bio-metrics (age, weight, height, TDEE goal, activity factors).
+  * `user_openai_links` - Stores ChatGPT OAuth tokens and discovered capabilities.
+  * `openai_device_auth_sessions` - Manages active pairing session states.
+* **Nutrition & Daily Logs**:
+  * `day_logs` - Stores daily meal logs (`sections_json`) and gym day overrides.
+  * `user_nutrition_memory` - Custom food overrides mapped to personal entries.
+  * `user_quick_adds` - Personalized quick-add food item shortcuts.
+  * `user_eating_patterns` - Logs corrections and classifications of food types.
+  * `user_meal_contexts` - Captures context data for meal recommendation.
+* **Training & Splits**:
+  * `workout_sessions` - Completed workout logs (exercises, sets, reps, skips).
+  * `workout_splits` - Training split configurations (exercise schedules).
+* **Insights & Achievements**:
+  * `user_achievements` - Unlocked consistency, habit, and nutrition achievements.
+  * `user_insights_cache` - Write-only cache backups for weekly/monthly reports.
 
 ---
 
@@ -209,41 +140,140 @@ Kynetix/
 │   ├── lib/
 │   │   ├── config/              # Supabase config + secrets (gitignored)
 │   │   ├── models/              # Data models (NutritionResult, etc.)
-│   │   ├── screens/             # 14 UI screens
-│   │   ├── services/            # Business logic, AI client, Health Connect
+│   │   ├── screens/             # UI screens (Auth, Onboarding, Dashboard, Workout, etc.)
+│   │   ├── services/            # Business logic (AI clients, Health Connect, Sync, etc.)
 │   │   └── main.dart
-│   └── assets/branding/         # App icons + splash
+│   ├── assets/branding/         # App icons + splash assets
+│   └── test/                    # Integration and unit tests
 │
 ├── supabase/
 │   └── functions/
 │       ├── ai-chat-router/      # AI provider dispatcher (OpenAI → OpenRouter)
 │       ├── ai-meal-coach/       # Context builder + nutrition coach
+│       ├── openai-link-*/       # ChatGPT OAuth device pairing functions
 │       └── .env.example         # Template for local dev secrets
 │
 ├── docs/                        # PRD, system design, API docs
 └── README.md
 ```
 
+### UI Screens Modules (`lib/screens/`)
+* **Authentication & Onboarding**: Handles user login, password recovery, and the interactive onboarding questionnaire.
+* **Dashboard & Daily Journal**: Displays daily progress rings, targets, meal categories (Breakfast, Lunch, Dinner, Snacks), and quick additions.
+* **AI Chat & Diagnostics**: Contains the conversational chat coach interface (supporting image attachments) and developer diagnostics screens.
+* **Workout Setup & Session Tracking**: Coordinates split day layouts, planning targets, and the active workout console.
+* **History, Insights & Profile**: Integrates completed session heatmaps, streaks, unlocked achievements, and user preferences.
+
+### Services Modules (`lib/services/`)
+* **Core Engines & Parsers**: Natural language token parsing, portion normalization, and calorie estimation.
+* **AI & Messaging Clients**: Services communicating with Gemini and Supabase Edge Functions.
+* **Device Integrations**: Health Connect steps/weight synchronization and native MethodChannel Android widget callbacks.
+* **Data Synchronizers**: Supabase Postgres sync and local SharedPreferences persistence services.
+* **Insights & Rules Engines**: Muscle recovery readiness, streak calculator, and habit evaluations.
+
 ---
 
-## Debugging AI Issues
+## Local Development
 
-Check logs in the Supabase dashboard: **Dashboard → Functions → ai-meal-coach / ai-chat-router → Logs**
+### Prerequisites
+- Flutter SDK ≥ 3.19 / Dart ≥ 3.3
+- Android device or emulator (Android-only)
+- Node.js ≥ 18 + Supabase CLI (`npm install supabase --save-dev`)
 
-### Expected log flow (success)
-
+### Install Flutter dependencies
+```bash
+cd kynetix_ui
+flutter pub get
 ```
-[ai-meal-coach] user=<uuid> date=20260416 hasImage=false
-[AI ROUTER] user=<uuid> msgs=2 openai_key=sk-...xxxx
-[AI ROUTER] provider=OPENAI success
+
+### Copy config files
+```bash
+# Supabase connection (URL + anon key)
+cp kynetix_ui/lib/config/supabase_secrets.example.dart kynetix_ui/lib/config/supabase_secrets.dart
+
+# App secrets (empty shell - no keys needed here)
+cp kynetix_ui/lib/config/secrets.example.dart kynetix_ui/lib/config/secrets.dart
 ```
 
-### Common errors
+### Run the app
+```bash
+cd kynetix_ui
+flutter run
+```
 
-| Log / Error | Meaning | Fix |
-|---|---|---|
-| `Auth failed: Unsupported JWT algorithm ES256` | supabase-js version mismatch | Redeploy functions (already fixed in v2+) |
-| `OPENAI_API_KEY not set` | Secret missing in Supabase | Run `npx supabase secrets set OPENAI_API_KEY=...` |
-| `HTTP 401` from OpenAI | API key invalid or expired | Rotate key at platform.openai.com |
-| `OpenAI failed → fallback to OpenRouter` | OpenAI quota/error, using fallback | Normal - check if OpenAI key needs top-up |
-| `all providers failed` | Both OpenAI and OpenRouter failed | Check both API keys |
+---
+
+## Environment Variables & Edge Functions
+
+The Flutter app requires **no** private AI API keys. All AI requests are proxied through Supabase Edge Functions which inject secrets server-side.
+
+### Local Edge Functions Testing
+Create `supabase/functions/.env` (already gitignored):
+```env
+# PRIMARY AI provider
+OPENAI_API_KEY=your_openai_api_key_here
+
+# FALLBACK AI provider
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+```
+
+Run functions locally:
+```bash
+npx supabase functions serve --env-file supabase/functions/.env
+```
+
+### Production Deployment
+Set secrets:
+```bash
+npx supabase secrets set OPENAI_API_KEY=sk-your-key-here --project-ref YOUR_PROJECT_REF
+npx supabase secrets set OPENROUTER_API_KEY=sk-or-your-key-here --project-ref YOUR_PROJECT_REF
+```
+
+Deploy Edge Functions:
+```bash
+npx supabase secrets set ...
+npx supabase functions deploy ai-chat-router --no-verify-jwt --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy ai-meal-coach --no-verify-jwt --project-ref YOUR_PROJECT_REF
+```
+
+---
+
+## Security & Secrets Warning
+
+> [!CAUTION]
+> **CRITICAL SECURITY REQUIREMENT**
+>
+> Never commit configuration secrets or private API credentials to the repository. Ensure the following files remain listed in your `.gitignore` and are never staged for commit:
+> * `supabase_secrets.dart` (holds public-safe Supabase connection details)
+> * `secrets.dart` (holds client API keys)
+> * `supabase/functions/.env` (holds private OpenAI and OpenRouter keys)
+> * Any files containing user OAuth access/refresh credentials or temporary nonces.
+
+---
+
+## Testing Infrastructure
+
+All automated tests are located in `kynetix_ui/test/` and are organized into the following categories:
+
+* **Integration & End-to-End Tests**:
+  * Covers multi-tenant row-level security (RLS) and database isolation.
+  * Validates step/weight synchronization logic with Health Connect.
+  * Asserts database sync for Completed vs. Partial workout sessions.
+  * Verifies AI estimation corrections and portion override workflows.
+* **Unit & Behavior Tests**:
+  * Asserts calculations for MSJ TDEE equations and activity multipliers.
+  * Validates meal classification rules, parsing, and lexicon lookups.
+  * Verifies weekly/monthly report calculations and achievement streaks.
+  * Tests mock database lookup fallback behaviors when APIs are offline.
+
+### How to Run Tests
+To run all test suites:
+```bash
+cd kynetix_ui
+flutter test
+```
+
+To run a specific test suite:
+```bash
+flutter test test/user_isolation_test.dart
+```
