@@ -1025,6 +1025,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Connection Status',
                 value: isConnected ? 'Connected' : 'Disconnected',
               ),
+              _InfoRow(
+                icon: Icons.check_circle_outline_rounded,
+                label: 'Last Successful Request',
+                value: s.lastSuccessfulRequestAt != null ? _relativeTime(s.lastSuccessfulRequestAt) : '—',
+              ),
+              _InfoRow(
+                icon: Icons.error_outline_rounded,
+                label: 'Last Failed Request',
+                value: s.lastFailedRequestAt != null ? _relativeTime(s.lastFailedRequestAt) : '—',
+              ),
+              _InfoRow(
+                icon: Icons.network_check_rounded,
+                label: 'Last Active Provider',
+                value: _providerDisplayName(s.lastSuccessfulProvider),
+              ),
+              _InfoRow(
+                icon: Icons.speed_rounded,
+                label: 'Average Response Latency',
+                value: s.averageLatencyMs != null ? '${s.averageLatencyMs!.toStringAsFixed(0)} ms' : '—',
+              ),
               if (isConnected) ...[
                 _InfoRow(
                   icon: Icons.refresh_rounded,

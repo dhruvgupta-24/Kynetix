@@ -7,6 +7,7 @@ import '../models/day_status.dart';
 import '../services/insights_report_service.dart';
 import '../services/insights_engine.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/workout_service.dart';
 import '../screens/onboarding_screen.dart'; // UserProfile
 
 class InsightsScreen extends StatefulWidget {
@@ -225,6 +226,11 @@ class _InsightsScreenState extends State<InsightsScreen> {
   // ─── Shared UI blocks ────────────────────────────────────────────────────────
 
   Widget _buildConsistencyHeroCard(ConsistencyScore score, PeriodDelta? delta) {
+    final loggingStreak = InsightsReportService.instance.getLoggingStreak();
+    final profile = currentUserProfile;
+    final proteinStreak = profile != null ? InsightsReportService.instance.getProteinStreak(profile) : 0;
+    final calorieStreak = profile != null ? InsightsReportService.instance.getCalorieStreak(profile) : 0;
+
     return KCard(
       padding: const EdgeInsets.all(KSpacing.lg),
       child: Column(
@@ -271,7 +277,57 @@ class _InsightsScreenState extends State<InsightsScreen> {
           _buildMetricRow('Workout Consistency', score.gymAttendance, '${(score.gymAttendance * 100).round()}%', KColor.amber),
           if (score.mealQuality > 0)
             _buildMetricRow('Meal Quality', score.mealQuality, '${(score.mealQuality * 100).round()}', const Color(0xFFA78BFA)),
+          const SizedBox(height: 16),
+          const Divider(color: KColor.divider, height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildStreakChip('Log Streak', loggingStreak, KColor.blue, '🔥'),
+              const SizedBox(width: 8),
+              _buildStreakChip('Protein Streak', proteinStreak, KColor.protein, '⚡'),
+              const SizedBox(width: 8),
+              _buildStreakChip('Calorie Streak', calorieStreak, KColor.calorie, '🎯'),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildStreakChip(String label, int count, Color color, String emoji) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.2), width: 0.5),
+        ),
+        child: Column(
+          children: [
+            Text(
+              '$emoji $count ${count == 1 ? "day" : "days"}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 8,
+                color: KColor.textMuted,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1239,6 +1295,256 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
+  Widget _buildExercisePersonalRecordsCard() {
+    final prs = WorkoutService.instance.getPersonalRecords();
+    if (prs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    String formatDateKey(String? dateKey) {
+      if (dateKey == null) return '—';
+      final parts = dateKey.split('-');
+      if (parts.length < 3) return dateKey;
+      final m = int.tryParse(parts[1]) ?? 1;
+      final d = int.tryParse(parts[2]) ?? 1;
+      return '${months[m - 1]} $d';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'EXERCISE PERSONAL RECORDS',
+          style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Column(
+          children: prs.map((pr) {
+            double topRepsWeight = 0.0;
+            int topReps = 0;
+            String? topRepsDate;
+            pr.maxRepsAtWeight.forEach((w, r) {
+              if (r > topReps) {
+                topReps = r;
+                topRepsWeight = w;
+                topRepsDate = pr.maxRepsAtWeightDate[w];
+              }
+            });
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: KCard(
+                padding: const EdgeInsets.all(KSpacing.lg),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          pr.exerciseName,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: KColor.green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            '🏆 RECORD',
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: KColor.green),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildPrDetailRow('Best Weight', '${pr.bestWeight.toStringAsFixed(pr.bestWeight == pr.bestWeight.truncateToDouble() ? 0 : 1)} kg', formatDateKey(pr.bestWeightDate)),
+                    const Divider(color: KColor.divider, height: 12),
+                    _buildPrDetailRow('Best Volume', '${pr.bestVolume.toStringAsFixed(pr.bestVolume == pr.bestVolume.truncateToDouble() ? 0 : 1)} kg', formatDateKey(pr.bestVolumeDate)),
+                    const Divider(color: KColor.divider, height: 12),
+                    _buildPrDetailRow('Best Est. 1RM', '${pr.bestEstimatedOneRepMax.toStringAsFixed(pr.bestEstimatedOneRepMax == pr.bestEstimatedOneRepMax.truncateToDouble() ? 0 : 1)} kg', formatDateKey(pr.bestEstimatedOneRepMaxDate)),
+                    if (topReps > 0) ...[
+                      const Divider(color: KColor.divider, height: 12),
+                      _buildPrDetailRow(
+                        'Most Reps',
+                        '$topReps reps @ ${topRepsWeight.toStringAsFixed(topRepsWeight == topRepsWeight.truncateToDouble() ? 0 : 1)} kg',
+                        formatDateKey(topRepsDate),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrDetailRow(String label, String value, String dateDesc) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 11, color: KColor.textSecondary)),
+            const SizedBox(height: 2),
+            Text(dateDesc, style: const TextStyle(fontSize: 9, color: KColor.textMuted)),
+          ],
+        ),
+        Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+      ],
+    );
+  }
+
+  Widget _buildWorkoutPerformanceInsights() {
+    final wService = WorkoutService.instance;
+    final plateaus = wService.getPlateauedExercises();
+    final wowVolume = wService.getWeekOverWeekVolumeChangeByMuscle();
+    final freqTrends = wService.getMuscleFrequencyTrends();
+    final hasWorkoutHistory = wService.sessions.isNotEmpty;
+    if (!hasWorkoutHistory) return const SizedBox.shrink();
+
+    return FutureBuilder<bool>(
+      future: wService.hasRecoveryDeterioration(),
+      builder: (context, snapshot) {
+        final recoveryDeteriorated = snapshot.data ?? false;
+        final hasPlateaus = plateaus.isNotEmpty;
+        final hasAnyAlert = hasPlateaus || recoveryDeteriorated;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'WORKOUT PERFORMANCE & INSIGHTS',
+              style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            
+            if (hasAnyAlert) ...[
+              if (recoveryDeteriorated)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(KSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF4D4D).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFFF4D4D).withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('🚨', style: TextStyle(fontSize: 18)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Recovery Alert', style: TextStyle(fontSize: 9, color: Color(0xFFFF4D4D), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Low readiness scores detected for 3 consecutive days. Consider a deload or prioritizing sleep and active recovery.',
+                              style: TextStyle(fontSize: 12.5, color: Colors.white, height: 1.4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
+              if (hasPlateaus)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(KSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFB347).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('⚠️', style: TextStyle(fontSize: 18)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Plateau Warning', style: TextStyle(fontSize: 9, color: KColor.amber, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Progress stalled on: ${plateaus.join(", ")}. Consider varying exercise order, changing reps, or adding a deload.',
+                              style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+
+            KCard(
+              padding: const EdgeInsets.all(KSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('MUSCLE GROUP TRENDS', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  if (freqTrends.isEmpty)
+                    const Text('No training frequency data yet.', style: TextStyle(fontSize: 12, color: KColor.textSecondary))
+                  else
+                    Column(
+                      children: freqTrends.entries.map((entry) {
+                        final muscle = entry.key;
+                        final freq = entry.value;
+                        final wow = wowVolume[muscle] ?? 0.0;
+                        final wowStr = wow >= 0 ? '+${wow.toStringAsFixed(0)}%' : '${wow.toStringAsFixed(0)}%';
+                        final wowColor = wow >= 0 ? KColor.green : KColor.danger;
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(muscle, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+                                  const SizedBox(height: 2),
+                                  Text('Avg Frequency: ${freq.toStringAsFixed(1)}x/week', style: const TextStyle(fontSize: 10, color: KColor.textMuted)),
+                                ],
+                              ),
+                              Row(
+                                children: [
+                                  const Text(
+                                    'WoW Vol: ',
+                                    style: TextStyle(fontSize: 10, color: KColor.textMuted),
+                                  ),
+                                  Text(
+                                    wowStr,
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: wowColor),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ─── Achievements UI ────────────────────────────────────────────────────────
 
   Widget _buildAchievementsSection() {
@@ -1514,6 +1820,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
               const SizedBox(height: 24),
               _buildPersonalBestsCard(InsightsReportService.instance.personalBests, weeklyReport),
+
+              const SizedBox(height: 24),
+              _buildExercisePersonalRecordsCard(),
+
+              const SizedBox(height: 24),
+              _buildWorkoutPerformanceInsights(),
 
               const SizedBox(height: 24),
               _buildAchievementsSection(),

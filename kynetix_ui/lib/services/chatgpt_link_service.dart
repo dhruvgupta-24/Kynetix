@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_client.dart';
 
@@ -45,6 +46,11 @@ class ChatGptLinkStatus {
   final String? fallbackReason;
   final String? testGenerationSnippet;
 
+  final DateTime? lastSuccessfulRequestAt;
+  final DateTime? lastFailedRequestAt;
+  final String? lastSuccessfulProvider;
+  final double? averageLatencyMs;
+
   const ChatGptLinkStatus({
     required this.isConnected,
     this.tokenExpired = false,
@@ -61,6 +67,10 @@ class ChatGptLinkStatus {
     this.lastRefreshedAt,
     this.fallbackReason,
     this.testGenerationSnippet,
+    this.lastSuccessfulRequestAt,
+    this.lastFailedRequestAt,
+    this.lastSuccessfulProvider,
+    this.averageLatencyMs,
   });
 
   static ChatGptLinkStatus get disconnected => const ChatGptLinkStatus(
@@ -213,10 +223,45 @@ class ChatGptLinkService {
         method: HttpMethod.post,
       );
 
-      if (res.data == null) return ChatGptLinkStatus.disconnected;
+      final prefs = await SharedPreferences.getInstance();
+      final lastSuccessStr = prefs.getString('ai_diag_last_success_at');
+      final lastFailureStr = prefs.getString('ai_diag_last_failed_at');
+      final lastProvider = prefs.getString('ai_diag_last_provider');
+      final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+
+      final lastSuccess = lastSuccessStr != null ? DateTime.tryParse(lastSuccessStr) : null;
+      final lastFailure = lastFailureStr != null ? DateTime.tryParse(lastFailureStr) : null;
+
+      double? avgLatency;
+      if (latencyHistoryRaw.isNotEmpty) {
+        final latencies = latencyHistoryRaw.map((e) => double.tryParse(e) ?? 0.0).where((e) => e > 0).toList();
+        if (latencies.isNotEmpty) {
+          avgLatency = latencies.reduce((a, b) => a + b) / latencies.length;
+        }
+      }
+
+      if (res.data == null) {
+        return ChatGptLinkStatus(
+          isConnected: false,
+          activeProvider: 'openrouter',
+          lastSuccessfulRequestAt: lastSuccess,
+          lastFailedRequestAt: lastFailure,
+          lastSuccessfulProvider: lastProvider,
+          averageLatencyMs: avgLatency,
+        );
+      }
 
       final data = Map<String, dynamic>.from(res.data as Map);
-      if (data['error'] != null) return ChatGptLinkStatus.disconnected;
+      if (data['error'] != null) {
+        return ChatGptLinkStatus(
+          isConnected: false,
+          activeProvider: 'openrouter',
+          lastSuccessfulRequestAt: lastSuccess,
+          lastFailedRequestAt: lastFailure,
+          lastSuccessfulProvider: lastProvider,
+          averageLatencyMs: avgLatency,
+        );
+      }
 
       final discoveredRaw = data['discovered_models'];
       List<String>? chatModels;
@@ -242,10 +287,41 @@ class ChatGptLinkService {
         lastRefreshedAt:         _parseDate(data['last_refreshed_at']),
         fallbackReason:          data['fallback_reason'] as String?,
         testGenerationSnippet:   data['test_generation_snippet'] as String?,
+        lastSuccessfulRequestAt: lastSuccess,
+        lastFailedRequestAt:     lastFailure,
+        lastSuccessfulProvider:  lastProvider,
+        averageLatencyMs:        avgLatency,
       );
     } catch (e) {
       debugPrint('[ChatGptLinkService] getStatus error: $e');
-      return ChatGptLinkStatus.disconnected;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final lastSuccessStr = prefs.getString('ai_diag_last_success_at');
+        final lastFailureStr = prefs.getString('ai_diag_last_failed_at');
+        final lastProvider = prefs.getString('ai_diag_last_provider');
+        final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+
+        final lastSuccess = lastSuccessStr != null ? DateTime.tryParse(lastSuccessStr) : null;
+        final lastFailure = lastFailureStr != null ? DateTime.tryParse(lastFailureStr) : null;
+
+        double? avgLatency;
+        if (latencyHistoryRaw.isNotEmpty) {
+          final latencies = latencyHistoryRaw.map((e) => double.tryParse(e) ?? 0.0).where((e) => e > 0).toList();
+          if (latencies.isNotEmpty) {
+            avgLatency = latencies.reduce((a, b) => a + b) / latencies.length;
+          }
+        }
+        return ChatGptLinkStatus(
+          isConnected: false,
+          activeProvider: 'openrouter',
+          lastSuccessfulRequestAt: lastSuccess,
+          lastFailedRequestAt: lastFailure,
+          lastSuccessfulProvider: lastProvider,
+          averageLatencyMs: avgLatency,
+        );
+      } catch (_) {
+        return ChatGptLinkStatus.disconnected;
+      }
     }
   }
 
@@ -260,6 +336,33 @@ class ChatGptLinkService {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  static Future<void> recordAiRequestSuccess(String provider, double latencyMs) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('ai_diag_last_success_at', DateTime.now().toIso8601String());
+      await prefs.setString('ai_diag_last_provider', provider);
+
+      final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+      latencyHistoryRaw.add(latencyMs.toStringAsFixed(1));
+
+      if (latencyHistoryRaw.length > 20) {
+        latencyHistoryRaw.removeRange(0, latencyHistoryRaw.length - 20);
+      }
+      await prefs.setStringList('ai_diag_latency_history', latencyHistoryRaw);
+    } catch (e) {
+      debugPrint('[ChatGptLinkService] Error recording AI success diagnostics: $e');
+    }
+  }
+
+  static Future<void> recordAiRequestFailure() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('ai_diag_last_failed_at', DateTime.now().toIso8601String());
+    } catch (e) {
+      debugPrint('[ChatGptLinkService] Error recording AI failure diagnostics: $e');
+    }
+  }
 
   static DateTime? _parseDate(dynamic raw) {
     if (raw == null) return null;

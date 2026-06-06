@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/insights_report_service.dart';
 import '../models/insights_models.dart';
 import 'insights_screen.dart';
+import 'home_screen.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Null when no weight readings are available.
   WeightContext? get _weightContext =>
       _weightHistory != null && _weightHistory!.isNotEmpty
-          ? WeightContext.fromHistory(_weightHistory!)
+          ? WeightContext.fromHistory(_weightHistory!, goal: currentUserProfile?.goal)
           : null;
 
   @override
@@ -134,7 +135,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       session: yesterdaySession,
       workoutTypeName: workoutTypeName,
       targetCaloriesOverride: yesterdayGymDay?.targetCaloriesOverride,
-      carryForwardAdjustment: yesterdayLog.carryForwardAdjustment,
+      carryForwardAdjustment: null, // Zero compounding / banking protection!
     );
 
     final yesterdayTarget = targetDay.calories;
@@ -147,9 +148,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    // adjustment amount = -diff, capped at ±500
+    // adjustment amount = -diff, capped at ±300
     final rawAdjustment = -diff;
-    final adjustmentAmount = rawAdjustment.clamp(-500.0, 500.0);
+    final adjustmentAmount = rawAdjustment.clamp(-300.0, 300.0);
 
     if (!mounted) return;
 
@@ -202,6 +203,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 );
                 historyRaw.add(jsonEncode(record.toJson()));
                 await prefs.setStringList('carry_forward_history_v1', historyRaw);
+
+                // Save inside today's gymDay so it syncs to cloud
+                final todayLog = logFor(today);
+                todayLog.gymDay = (todayLog.gymDay ?? const GymDay(didGym: false)).withCarryForwardRecord(record);
+                await PersistenceService.saveDay(today);
               },
               child: const Text('Ignore', style: TextStyle(color: Color(0xFF9CA3AF))),
             ),
@@ -226,7 +232,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 final todayLog = logFor(today);
                 todayLog.carryForwardAdjustment = adjustmentAmount;
-                await PersistenceService.saveDayLogs();
+                todayLog.gymDay = (todayLog.gymDay ?? const GymDay(didGym: false)).withCarryForwardRecord(record);
+                await PersistenceService.saveDay(today);
 
                 if (mounted) {
                   setState(() {});
@@ -284,21 +291,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return;
         }
       }
+      final hasSleep = await HealthService().hasSleepPermission();
+      if (!hasSleep) {
+        await HealthService().requestSleepPermission();
+      }
+      final hasHrv = await HealthService().hasHrvPermission();
+      if (!hasHrv) {
+        await HealthService().requestHrvPermission();
+      }
     }
 
-    // Run step sync and weight sync concurrently.
-    // Weight permission is separate: a denial does not block step results.
-    // We do NOT auto-request weight permission here — the user must tap
-    // the weight card's "Connect" button to grant it explicitly.
+    // Run step sync, weight sync, and sleep/HRV sync concurrently.
+    // Weight, Sleep, and HRV permissions are separate: a denial does not block other results.
     final results = await Future.wait([
       HealthService().sync(),
       HealthService().syncWeight(),
+      HealthService().syncSleepAndHrv(),
     ]);
 
     if (!mounted) return;
 
     final result        = results[0] as HealthSyncResult;
     final weightHistory = results[1] as List<WeightReading>;
+    final sleepHrvData   = results[2] as Map<String, double?>;
+
+    // Update WorkoutService with synced Sleep and HRV data
+    await WorkoutService.instance.updateSleepAndHrv(
+      sleepHours: sleepHrvData['sleep_hours'],
+      hrvRmssd: sleepHrvData['hrv_rmssd'],
+      hrvBaseline: sleepHrvData['hrv_baseline'],
+    );
 
     if (!result.hasError && result.hasData) {
       currentUserProfile = currentUserProfile!.copyWithHealth(
@@ -411,11 +433,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {});   // refresh rings after returning
   }
 
+  void _openQuickMacroEstimator() {
+    showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => const HomeScreen(),
+    ).then((updated) {
+      if (updated == true && mounted) {
+        setState(() {}); // refresh rings on return
+      }
+    });
+  }
+
+  void _showAddMealOptionsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const KDragHandle(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Add Food or Activity',
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: KColor.green.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.restaurant_menu_rounded, color: KColor.green),
+                  ),
+                  title: const Text('Log Daily Food & Gym', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('View detailed day log, log meals, track water and workouts.', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openDay(_selectedDate);
+                  },
+                ),
+                const Divider(color: KColor.divider, height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: KColor.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.bolt_rounded, color: KColor.blue),
+                  ),
+                  title: const Text('Quick Macro Estimator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Directly input macros or estimate with AI instantly.', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openQuickMacroEstimator();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF13131F),
-      floatingActionButton: _AddMealFab(onTap: () => _openDay(_selectedDate)),
+      floatingActionButton: _AddMealFab(onTap: _showAddMealOptionsSheet),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -766,6 +863,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             targetCal: _targetCalories,
             targetPro: _targetProtein,
           ),
+          const SizedBox(height: 12),
+          _buildQuickEstimatorCard(),
           AdditionalMacrosCard(
             log: _selectedLog,
             targetCal: _targetCalories,
@@ -773,6 +872,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
             targetFiber: _targetFiber,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickEstimatorCard() {
+    return Pressable(
+      onTap: _openQuickMacroEstimator,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2C),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF2A2A3C), width: 0.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 10, offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: KColor.blue.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.bolt_rounded, color: KColor.blue, size: 22),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Quick Macro Estimator',
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Manually enter macros or estimate using AI',
+                    style: TextStyle(color: KColor.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: KColor.textMuted),
+          ],
+        ),
       ),
     );
   }

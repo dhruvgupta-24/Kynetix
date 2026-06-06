@@ -19,11 +19,55 @@
 
 import '../models/workout_session.dart';
 
-// ─── Future data model stubs ──────────────────────────────────────────────────
-// These are defined now so the API surface is stable.
-// They contain no data yet — they are placeholders for future integrations.
+// ─── Wearable scoring engines ──────────────────────────────────────────────────
 
-/// Sleep quality data from Health Connect / HealthKit (future integration).
+/// Configurable target range for sleep duration with linear decay outside the range.
+class SleepTarget {
+  final double minHours;
+  final double maxHours;
+  /// Linear decay per hour outside the range (e.g. 0.2 means score drops by 20% per hour)
+  final double decayRate;
+
+  const SleepTarget({
+    this.minHours = 7.5,
+    this.maxHours = 9.0,
+    this.decayRate = 0.2,
+  });
+
+  double calculateScore(double hours) {
+    if (hours >= minHours && hours <= maxHours) {
+      return 1.0;
+    }
+    if (hours < minHours) {
+      final diff = minHours - hours;
+      return (1.0 - diff * decayRate).clamp(0.0, 1.0);
+    } else {
+      final diff = hours - maxHours;
+      return (1.0 - diff * decayRate).clamp(0.0, 1.0);
+    }
+  }
+}
+
+/// Configurable score calculator for HRV RMSSD baseline deviation.
+class HrvScorer {
+  /// Ratio threshold below which score starts declining
+  final double thresholdRatio;
+
+  const HrvScorer({
+    this.thresholdRatio = 1.0,
+  });
+
+  double calculateScore(double latestHrv, double baselineHrv) {
+    if (baselineHrv <= 0) return 1.0;
+    final ratio = latestHrv / baselineHrv;
+    if (ratio >= thresholdRatio) return 1.0;
+    return ratio.clamp(0.0, 1.0);
+  }
+}
+
+// ─── Data model stubs ──────────────────────────────────────────────────────────
+
+/// Sleep quality data from Health Connect.
 class SleepData {
   final double? durationHours;
   final double? deepSleepPercent;  // 0.0–1.0
@@ -31,7 +75,7 @@ class SleepData {
   const SleepData({this.durationHours, this.deepSleepPercent, this.sleepQualityScore});
 }
 
-/// HRV data from a wearable (future integration).
+/// HRV data from Health Connect.
 class HrvData {
   final double? rmssd;      // ms — standard HRV metric
   final double? sdnn;       // ms
@@ -85,6 +129,8 @@ class RecoveryReport {
   final double overallReadiness; // 0.0–1.0 weighted average
   final String readinessLabel;
   final int? daysSinceLastWorkout; // null if no sessions
+  final double? sleepScore;
+  final double? hrvScore;
 
   // Future fields — populated when sleep/HRV data is available
   final double? fatigueScore;       // 0.0–1.0 (future: HRV-derived)
@@ -95,6 +141,8 @@ class RecoveryReport {
     required this.overallReadiness,
     required this.readinessLabel,
     this.daysSinceLastWorkout,
+    this.sleepScore,
+    this.hrvScore,
     this.fatigueScore,
     this.aiRecommendation,
   });
@@ -110,11 +158,16 @@ class RecoveryInput {
   final HrvData? hrvData;
   final double? restingHeartRate; // bpm
 
+  final SleepTarget? sleepTarget;
+  final HrvScorer? hrvScorer;
+
   const RecoveryInput({
     required this.sessions,
     this.sleepData,
     this.hrvData,
     this.restingHeartRate,
+    this.sleepTarget,
+    this.hrvScorer,
   });
 }
 
@@ -126,8 +179,6 @@ class RecoveryService {
   /// Computes a full [RecoveryReport] from [input].
   ///
   /// Pure function — no state, no side effects.
-  /// Additional [RecoveryInput] fields (sleep, HRV, HR) are reserved for
-  /// future computation paths but do not affect current output.
   static RecoveryReport compute(RecoveryInput input) {
     final now = DateTime.now();
 
@@ -160,8 +211,8 @@ class RecoveryService {
     }).toList()
       ..sort((a, b) => a.hoursSinceLastTraining.compareTo(b.hoursSinceLastTraining));
 
-    // 3. Overall readiness (mean score across all trained muscles)
-    final overall = muscleRecoveries.isEmpty
+    // 3. Overall muscle recovery score (mean score across all trained muscles)
+    final muscleScore = muscleRecoveries.isEmpty
         ? 1.0
         : muscleRecoveries.fold<double>(0, (s, m) => s + m.score) /
             muscleRecoveries.length;
@@ -173,14 +224,35 @@ class RecoveryService {
         ? null
         : now.difference(sortedSessions.first.date).inDays;
 
-    // 5. Future: apply sleep/HRV weighting here when available
-    // e.g. if (input.sleepData != null) overall = _applySleedWeight(overall, input.sleepData!);
+    // 5. Apply sleep/HRV weighting with weight redistribution
+    double totalWeight = 0.4;
+    double weightedScore = muscleScore * 0.4;
+
+    double? sleepScore;
+    if (input.sleepData != null && input.sleepData!.durationHours != null) {
+      final target = input.sleepTarget ?? const SleepTarget();
+      sleepScore = target.calculateScore(input.sleepData!.durationHours!);
+      weightedScore += sleepScore * 0.3;
+      totalWeight += 0.3;
+    }
+
+    double? hrvScore;
+    if (input.hrvData != null && input.hrvData!.rmssd != null && input.hrvData!.baselineRmssd != null) {
+      final scorer = input.hrvScorer ?? const HrvScorer();
+      hrvScore = scorer.calculateScore(input.hrvData!.rmssd!, input.hrvData!.baselineRmssd!);
+      weightedScore += hrvScore * 0.3;
+      totalWeight += 0.3;
+    }
+
+    final overall = totalWeight > 0 ? (weightedScore / totalWeight).clamp(0.0, 1.0) : 1.0;
 
     return RecoveryReport(
       muscles: muscleRecoveries,
       overallReadiness: overall,
       readinessLabel: _readinessLabel(overall, daysSince),
       daysSinceLastWorkout: daysSince,
+      sleepScore: sleepScore,
+      hrvScore: hrvScore,
     );
   }
 

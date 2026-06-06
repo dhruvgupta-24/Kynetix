@@ -1102,6 +1102,11 @@ class _RecoveryInsightsCard extends StatelessWidget {
     final recovery = viewModel.recovery;
     final overall = recovery.overallReadiness;
     final label = recovery.readinessLabel;
+    final sleepScore = recovery.sleepScore;
+    final hrvScore = recovery.hrvScore;
+    final sleepHours = WorkoutService.instance.sleepHours;
+    final hrvRmssd = WorkoutService.instance.hrvRmssd;
+    final acwrBand = viewModel.acwrBand;
 
     final lastSession = viewModel.recentSessions.firstOrNull;
     final daysSinceLast = lastSession != null 
@@ -1112,6 +1117,13 @@ class _RecoveryInsightsCard extends StatelessWidget {
         : daysSinceLast == 0 
             ? 'Today' 
             : '$daysSinceLast day${daysSinceLast == 1 ? "" : "s"} ago';
+
+    final acwrColor = switch (acwrBand) {
+      AcwrBand.normal   => KColor.green,
+      AcwrBand.elevated => KColor.amber,
+      AcwrBand.high     => KColor.danger,
+      AcwrBand.extreme  => const Color(0xFF9F2B68), // deep purple
+    };
 
     return KCard(
       padding: const EdgeInsets.all(16),
@@ -1164,10 +1176,113 @@ class _RecoveryInsightsCard extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          
+          // Recovery Metrics Row
+          Row(
+            children: [
+              // Muscle Group Recovery Card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: KColor.bg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KColor.border, width: 0.5),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.fitness_center_rounded, size: 16, color: KColor.green),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Muscle Status',
+                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        recovery.muscles.isEmpty ? '100% Fresh' : 'Recovering',
+                        style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              
+              // Sleep Score Card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: KColor.bg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KColor.border, width: 0.5),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.king_bed_rounded, size: 16, color: Colors.blueAccent),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Sleep Duration',
+                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        sleepHours != null && sleepScore != null
+                            ? '${sleepHours.toStringAsFixed(1)}h (${(sleepScore * 100).toStringAsFixed(0)}%)'
+                            : 'Not Synced',
+                        style: KText.bodyMedium.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              
+              // HRV Score Card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: KColor.bg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KColor.border, width: 0.5),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.favorite_rounded, size: 16, color: KColor.danger),
+                      const SizedBox(height: 6),
+                      Text(
+                        'HRV RMSSD',
+                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        hrvRmssd != null && hrvScore != null
+                            ? '${hrvRmssd.toStringAsFixed(0)}ms (${(hrvScore * 100).toStringAsFixed(0)}%)'
+                            : 'Not Synced',
+                        style: KText.bodyMedium.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
           if (recovery.muscles.isNotEmpty) ...[
             const SizedBox(height: 14),
-            const Divider(color: KColor.border, height: 1),
-            const SizedBox(height: 12),
             SizedBox(
               height: 28,
               child: ListView.builder(
@@ -1190,6 +1305,56 @@ class _RecoveryInsightsCard extends StatelessWidget {
               ),
             ),
           ],
+          
+          const SizedBox(height: 16),
+          const Divider(color: KColor.border, height: 1),
+          const SizedBox(height: 14),
+
+          // ACWR Fatigue Load Coaching Insight Card
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: acwrColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: acwrColor.withValues(alpha: 0.22)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.analytics_rounded,
+                  color: acwrColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Fatigue load: ${acwrBand.label}',
+                            style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          Text(
+                            'ACWR: ${WorkoutService.instance.calculateAcwr().toStringAsFixed(2)}',
+                            style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        acwrBand.coachingInsight,
+                        style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.3),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

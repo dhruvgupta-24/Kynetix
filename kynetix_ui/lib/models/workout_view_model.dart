@@ -39,6 +39,7 @@ class WorkoutDashboardViewModel {
 
   // ── Recovery ─────────────────────────────────────────────────────────────────
   final RecoveryReport recovery;
+  final AcwrBand acwrBand;
 
   // ── Recent sessions (pre-sliced) ─────────────────────────────────────────────
   final List<WorkoutSession> recentSessions;
@@ -61,6 +62,7 @@ class WorkoutDashboardViewModel {
     required this.latestPr,
     required this.recentHighlights,
     required this.recovery,
+    required this.acwrBand,
     required this.recentSessions,
     required this.consistencyLabel,
   });
@@ -75,8 +77,18 @@ class WorkoutDashboardViewModel {
     final trainingDays = svc.trainingDays.length;
     final completedDays = completion.values.where((v) => v).length;
 
+    final sleepHours = svc.sleepHours;
+    final hrvRmssd = svc.hrvRmssd;
+    final hrvBaseline = svc.hrvBaseline;
+
     final recovery = RecoveryService.compute(
-      RecoveryInput(sessions: svc.sessions.toList()),
+      RecoveryInput(
+        sessions: svc.sessions.toList(),
+        sleepData: sleepHours != null ? SleepData(durationHours: sleepHours) : null,
+        hrvData: (hrvRmssd != null && hrvBaseline != null)
+            ? HrvData(rmssd: hrvRmssd, baselineRmssd: hrvBaseline)
+            : null,
+      ),
     );
 
     // Compute total PRs all-time
@@ -107,6 +119,7 @@ class WorkoutDashboardViewModel {
       latestPr: svc.latestPersonalBest(),
       recentHighlights: svc.recentImprovementHighlights(limit: 2),
       recovery: recovery,
+      acwrBand: svc.acwrBand,
       recentSessions: svc.recentSessions(limit: 5),
       consistencyLabel: svc.consistencyLabel(),
     );

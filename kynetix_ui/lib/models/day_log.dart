@@ -1,5 +1,6 @@
 
 import 'nutrition_result.dart';
+import 'carry_forward_record.dart';
 
 // ─── Workout types ────────────────────────────────────────────────────────────
 
@@ -81,12 +82,16 @@ class GymDay {
   /// Manual override for the day's calorie target
   final double? targetCaloriesOverride;
 
+  /// Rollover event prompted/resolved on this day
+  final CarryForwardRecord? carryForwardRecord;
+
   const GymDay({
     required this.didGym,
     this.workoutType,
     this.splitDayName,
     this.splitOverridden = false,
     this.targetCaloriesOverride,
+    this.carryForwardRecord,
   });
 
   /// Returns a copy with the user's manually-chosen split day name and type.
@@ -98,6 +103,7 @@ class GymDay {
     splitDayName:    splitName,
     splitOverridden: true,
     targetCaloriesOverride: targetCaloriesOverride,
+    carryForwardRecord: carryForwardRecord,
   );
 
   /// Returns a copy that marks the day as gym without changing the split prefill.
@@ -107,6 +113,7 @@ class GymDay {
     splitDayName:    splitDayName,
     splitOverridden: did ? splitOverridden : false,
     targetCaloriesOverride: targetCaloriesOverride,
+    carryForwardRecord: carryForwardRecord,
   );
 
   /// Returns a copy with a new calorie override. Set to null to clear.
@@ -116,6 +123,17 @@ class GymDay {
     splitDayName:    splitDayName,
     splitOverridden: splitOverridden,
     targetCaloriesOverride: override,
+    carryForwardRecord: carryForwardRecord,
+  );
+
+  /// Returns a copy with a carry-forward record.
+  GymDay withCarryForwardRecord(CarryForwardRecord? record) => GymDay(
+    didGym:          didGym,
+    workoutType:     workoutType,
+    splitDayName:    splitDayName,
+    splitOverridden: splitOverridden,
+    targetCaloriesOverride: targetCaloriesOverride,
+    carryForwardRecord: record,
   );
 
   Map<String, dynamic> toJson() => {
@@ -124,6 +142,7 @@ class GymDay {
     if (splitDayName != null) 'splitDayName':    splitDayName,
     if (splitOverridden)      'splitOverridden': splitOverridden,
     if (targetCaloriesOverride != null) 'targetCaloriesOverride': targetCaloriesOverride,
+    if (carryForwardRecord != null) 'carryForwardRecord': carryForwardRecord!.toJson(),
   };
 
   factory GymDay.fromJson(Map<String, dynamic> j) => GymDay(
@@ -134,6 +153,9 @@ class GymDay {
     splitDayName:    j['splitDayName']    as String?,
     splitOverridden: j['splitOverridden'] as bool?   ?? false,
     targetCaloriesOverride: (j['targetCaloriesOverride'] as num?)?.toDouble(),
+    carryForwardRecord: j['carryForwardRecord'] != null
+        ? CarryForwardRecord.fromJson(j['carryForwardRecord'] as Map<String, dynamic>)
+        : null,
   );
 
   static WorkoutType? _safeWorkoutType(String name) {

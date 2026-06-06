@@ -51,8 +51,6 @@ The following elements exist in the repository but are not active in primary use
 | Component | Category | Status | Purpose / Notes |
 | :--- | :--- | :--- | :--- |
 | `home_screen.dart` | UI Screen | **Unused** | Residual landing screen replaced by the active tab views in `app_shell.dart`. |
-| `codex-model-probe` | Edge Function | **Unused** | Server-side script to probe OpenAI models, not wired into any client flows. |
-| `openai_auth_nonces` | DB Table | **Unused** | Database table with zero read/write queries in the client or Edge Functions. |
 | `SleepData` & `HrvData` | Code Stubs | **Experimental** | Placeholder data structures for future wearable recovery tracking. |
 | `carry_forward_record` | Code Stub | **Experimental** | Data model for weekly rolling calorie balances, not integrated with TDEE logic. |
 

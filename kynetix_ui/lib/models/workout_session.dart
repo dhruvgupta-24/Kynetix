@@ -332,3 +332,68 @@ class WorkoutSession {
     }
   }
 }
+
+// ─── PersonalRecord ───────────────────────────────────────────────────────────
+
+class PersonalRecord {
+  final String exerciseId;
+  final String exerciseName;
+  
+  final double bestWeight;       // kg
+  final String? bestWeightDate;  // yyyy-MM-dd
+  
+  final double bestVolume;       // kg
+  final String? bestVolumeDate;  // yyyy-MM-dd
+  
+  final double bestEstimatedOneRepMax; // kg
+  final String? bestEstimatedOneRepMaxDate; // yyyy-MM-dd
+  
+  /// Map of weight -> reps representing the most reps performed at that weight
+  final Map<double, int> maxRepsAtWeight;
+  /// Map of weight -> date of that reps record
+  final Map<double, String> maxRepsAtWeightDate;
+
+  const PersonalRecord({
+    required this.exerciseId,
+    required this.exerciseName,
+    required this.bestWeight,
+    this.bestWeightDate,
+    required this.bestVolume,
+    this.bestVolumeDate,
+    required this.bestEstimatedOneRepMax,
+    this.bestEstimatedOneRepMaxDate,
+    required this.maxRepsAtWeight,
+    required this.maxRepsAtWeightDate,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'exerciseId': exerciseId,
+    'exerciseName': exerciseName,
+    'bestWeight': bestWeight,
+    if (bestWeightDate != null) 'bestWeightDate': bestWeightDate,
+    'bestVolume': bestVolume,
+    if (bestVolumeDate != null) 'bestVolumeDate': bestVolumeDate,
+    'bestEstimatedOneRepMax': bestEstimatedOneRepMax,
+    if (bestEstimatedOneRepMaxDate != null) 'bestEstimatedOneRepMaxDate': bestEstimatedOneRepMaxDate,
+    'maxRepsAtWeight': maxRepsAtWeight.map((k, v) => MapEntry(k.toString(), v)),
+    'maxRepsAtWeightDate': maxRepsAtWeightDate.map((k, v) => MapEntry(k.toString(), v)),
+  };
+
+  factory PersonalRecord.fromJson(Map<String, dynamic> j) {
+    final rawMaxReps = j['maxRepsAtWeight'] as Map<String, dynamic>? ?? {};
+    final rawMaxRepsDate = j['maxRepsAtWeightDate'] as Map<String, dynamic>? ?? {};
+    
+    return PersonalRecord(
+      exerciseId: j['exerciseId'] as String? ?? '',
+      exerciseName: j['exerciseName'] as String? ?? '',
+      bestWeight: (j['bestWeight'] as num?)?.toDouble() ?? 0.0,
+      bestWeightDate: j['bestWeightDate'] as String?,
+      bestVolume: (j['bestVolume'] as num?)?.toDouble() ?? 0.0,
+      bestVolumeDate: j['bestVolumeDate'] as String?,
+      bestEstimatedOneRepMax: (j['bestEstimatedOneRepMax'] as num?)?.toDouble() ?? 0.0,
+      bestEstimatedOneRepMaxDate: j['bestEstimatedOneRepMaxDate'] as String?,
+      maxRepsAtWeight: rawMaxReps.map((k, v) => MapEntry(double.parse(k), (v as num).toInt())),
+      maxRepsAtWeightDate: rawMaxRepsDate.map((k, v) => MapEntry(double.parse(k), v as String)),
+    );
+  }
+}

@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
@@ -19,6 +17,7 @@ import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
 import 'dashboard_screen.dart';
+import 'home_screen.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -282,28 +281,93 @@ class _DayDetailContentState extends State<_DayDetailContent> {
   }
 
   Future<void> _openAddMeal(MealSection section) async {
-    final entry = await Navigator.of(context).push<dynamic>(
-      PageRouteBuilder(
-        pageBuilder: (_, animation, secondaryAnimation) =>
-            AddMealScreen(section: section, date: widget.date),
-        transitionsBuilder: (_, animation, secondaryAnimation, child) =>
-            SlideTransition(
-              position:
-                  Tween<Offset>(
-                    begin: const Offset(0, 1),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    ),
-                  ),
-              child: child,
-            ),
-        transitionDuration: const Duration(milliseconds: 380),
+    final option = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const KDragHandle(),
+                const SizedBox(height: 8),
+                Text(
+                  'Add to ${section.displayName}',
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: KColor.green.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.auto_awesome_rounded, color: KColor.green),
+                  ),
+                  title: const Text('AI Meal Logger', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Describe your food in plain text (e.g. 2 eggs and toast).', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
+                  onTap: () => Navigator.pop(ctx, 'ai'),
+                ),
+                const Divider(color: KColor.divider, height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: KColor.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.bolt_rounded, color: KColor.blue),
+                  ),
+                  title: const Text('Quick Macro Estimator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Directly input macros or estimate with manual override.', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
+                  onTap: () => Navigator.pop(ctx, 'quick'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
-    if (entry != null) _refresh();
+
+    if (option == 'ai') {
+      if (!mounted) return;
+      final entry = await Navigator.of(context).push<dynamic>(
+        PageRouteBuilder(
+          pageBuilder: (_, animation, secondaryAnimation) =>
+              AddMealScreen(section: section, date: widget.date),
+          transitionsBuilder: (_, animation, secondaryAnimation, child) =>
+              SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 1),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
+                child: child,
+              ),
+          transitionDuration: const Duration(milliseconds: 380),
+        ),
+      );
+      if (entry != null) _refresh();
+    } else if (option == 'quick') {
+      if (!mounted) return;
+      final updated = await showModalBottomSheet<dynamic>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => HomeScreen(initialSection: section),
+      );
+      if (updated == true) _refresh();
+    }
   }
 
   MealSection get _currentSection {
@@ -662,37 +726,6 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     );
   }
 
-  // ── Day navigation helpers ─────────────────────────────────────────────────
-
-  void _navigateToPrevDay() {
-    final prev = widget.date.subtract(const Duration(days: 1));
-    Navigator.of(context).pushReplacement(_daySlideRoute(prev, direction: 1));
-  }
-
-  /// Navigate forward one day. Blocked when already at today.
-  void _navigateToNextDay() {
-    final today = DateTime.now();
-    final todayMidnight = DateTime(today.year, today.month, today.day);
-    final thisMidnight  = DateTime(widget.date.year, widget.date.month, widget.date.day);
-    if (!thisMidnight.isBefore(todayMidnight)) return; // already at/past today
-    final next = widget.date.add(const Duration(days: 1));
-    Navigator.of(context).pushReplacement(_daySlideRoute(next, direction: -1));
-  }
-
-  PageRouteBuilder<void> _daySlideRoute(DateTime date, {required int direction}) {
-    return PageRouteBuilder(
-      pageBuilder: (_, __, ___) =>
-          DayDetailScreen(date: date, health: widget.health),
-      transitionsBuilder: (_, animation, __, child) => SlideTransition(
-        position: Tween<Offset>(
-          begin: Offset(direction.toDouble(), 0),
-          end: Offset.zero,
-        ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-        child: child,
-      ),
-      transitionDuration: const Duration(milliseconds: 300),
-    );
-  }
 }
 
 // ─── AI Coach FAB ─────────────────────────────────────────────────────────────

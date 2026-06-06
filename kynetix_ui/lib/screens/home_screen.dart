@@ -1,531 +1,505 @@
 import 'package:flutter/material.dart';
-import '../services/nutrition_pipeline.dart';
+import '../config/app_theme.dart';
+import '../models/day_log.dart';
 import '../models/nutrition_result.dart';
+import '../models/quick_add_item.dart';
+import '../services/nutrition_pipeline.dart';
+import '../services/persistence_service.dart';
+import '../services/quick_add_service.dart';
+import '../services/meal_memory.dart';
 
-// ─── HomeScreen ───────────────────────────────────────────────────────────────
+// ─── HomeScreen (Redesigned as Quick Macro Estimator Sheet) ─────────────────
 //
-// Standalone meal estimation screen (entry point for quick-check flow).
-// Uses the full AI pipeline (cache → OpenRouter → local fallback).
-// Navigation: this screen is not used in the main onboarding→dashboard flow;
-// it exists as a standalone estimation playground/utility.
+// Popup utility card / sheet that allows the user to log a meal directly
+// with manual calories and macros or estimate them via plain text description using AI.
+//
+// Accessible via:
+//   • Dashboard Card
+//   • Floating Action Button
+//   • Bottom Sheet from Add Meal flow
+//
+// Visual layout:
+//   • Description / Name TextField
+//   • Calorie and Macro fields of IDENTICAL HEIGHT (52px)
+//   • Log to Journal action (with section dropdown)
+//   • Save as Quick Add action
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final MealSection? initialSection;
+  const HomeScreen({super.key, this.initialSection});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _controller = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+  final _descriptionController = TextEditingController();
+  final _caloriesController = TextEditingController();
+  final _proteinController = TextEditingController();
+  final _carbsController = TextEditingController();
+  final _fatController = TextEditingController();
+  final _fiberController = TextEditingController();
 
-  NutritionResult? _result;
+  MealSection _selectedSection = MealSection.breakfast;
   bool _loading = false;
 
-  static const _suggestions = [
-    '2 roti and dal',
-    'paneer with rice',
-    'thoda sabzi and 3 chapati',
-    'dal chawal',
-    'roti sabzi paneer',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _selectedSection = widget.initialSection ?? _getSectionForTime();
+  }
 
   @override
   void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
+    _descriptionController.dispose();
+    _caloriesController.dispose();
+    _proteinController.dispose();
+    _carbsController.dispose();
+    _fatController.dispose();
+    _fiberController.dispose();
     super.dispose();
   }
 
-  Future<void> _calculate() async {
-    final input = _controller.text.trim();
-    if (input.isEmpty || _loading) return;
+  MealSection _getSectionForTime() {
+    final now = DateTime.now();
+    final h = now.hour;
+    if (h < 11) return MealSection.breakfast;
+    if (h < 16) return MealSection.lunch;
+    if (h < 19) return MealSection.eveningSnack;
+    if (h < 23) return MealSection.dinner;
+    return MealSection.lateNight;
+  }
 
-    _focusNode.unfocus();
-    setState(() { _loading = true; _result = null; });
+  Future<void> _estimateWithAi() async {
+    final desc = _descriptionController.text.trim();
+    if (desc.isEmpty) return;
 
+    setState(() => _loading = true);
+    kHaptic();
     try {
-      final result = await NutritionPipeline.instance.estimateMeal(input);
-      if (mounted) setState(() { _result = result; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      final result = await NutritionPipeline.instance.estimateMeal(desc);
+      if (mounted) {
+        _caloriesController.text = result.primaryCaloriesEstimate.round().toString();
+        _proteinController.text = result.primaryProteinEstimate.round().toString();
+        if (result.carbohydrates != null) {
+          _carbsController.text = result.carbohydrates!.mid.round().toString();
+        }
+        if (result.fat != null) {
+          _fatController.text = result.fat!.mid.round().toString();
+        }
+        if (result.fiber != null) {
+          _fiberController.text = result.fiber!.mid.round().toString();
+        }
+        setState(() => _loading = false);
+        kHapticMedium();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI Estimation failed: $e'), backgroundColor: KColor.danger),
+        );
+      }
     }
   }
 
-  void _useSuggestion(String suggestion) {
-    _controller.text = suggestion;
-    _calculate();
-  }
+  Future<void> _logToJournal() async {
+    final name = _descriptionController.text.trim().isNotEmpty
+        ? _descriptionController.text.trim()
+        : 'Quick Meal';
+    final calories = double.tryParse(_caloriesController.text) ?? 0.0;
+    final protein = double.tryParse(_proteinController.text) ?? 0.0;
+    final carbs = double.tryParse(_carbsController.text);
+    final fat = double.tryParse(_fatController.text);
+    final fiber = double.tryParse(_fiberController.text);
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // ── App bar ─────────────────────────────────────────
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2D6A4F),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.restaurant_rounded,
-                              color: Colors.white, size: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        const Text(
-                          'Kynetix',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 28),
-                    const Text(
-                      'What did you eat?',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Describe your meal in plain language',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF6B7280),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Input + button ───────────────────────────────────
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
-                      minLines: 2,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _calculate(),
-                      decoration: const InputDecoration(
-                        hintText: 'e.g. 2 roti dal thoda paneer',
-                        prefixIcon: Padding(
-                          padding: EdgeInsets.only(left: 14, right: 10, top: 14),
-                          child: Icon(Icons.edit_note_rounded,
-                              color: Color(0xFF52B788), size: 22),
-                        ),
-                        prefixIconConstraints: BoxConstraints(minWidth: 0),
-                        contentPadding: EdgeInsets.fromLTRB(0, 16, 16, 16),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _loading ? null : _calculate,
-                        child: _loading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('Calculate'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Suggestions ─────────────────────────────────────
-            if (_result == null)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Try these',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF6B7280),
-                          letterSpacing: 0.8,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _suggestions
-                            .map((s) => _SuggestionChip(
-                                  label: s,
-                                  onTap: () => _useSuggestion(s),
-                                ))
-                            .toList(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // ── Result card ──────────────────────────────────────
-            if (_result != null)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 400),
-                    transitionBuilder: (child, animation) => FadeTransition(
-                      opacity: animation,
-                      child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0, 0.06),
-                          end: Offset.zero,
-                        ).animate(animation),
-                        child: child,
-                      ),
-                    ),
-                    child: _HomeResultCard(
-                      key: ValueKey(_result.hashCode),
-                      result: _result!,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+    final today = DateTime.now();
+    final todayLog = logFor(today);
+    final entry = MealEntry(
+      rawInput: name,
+      finalSavedInput: name,
+      section: _selectedSection,
+      addedAt: DateTime.now(),
+      dayOfWeek: today.weekday,
+      parsedFoods: [name],
+      userCorrected: true,
+      result: NutritionResult.createCustom(
+        canonicalMeal: name,
+        calories: calories,
+        protein: protein,
+        carbohydrates: carbs,
+        fat: fat,
+        fiber: fiber,
+        source: 'quick_macro_estimator',
+        userCorrected: true,
       ),
     );
-  }
-}
+    todayLog.add(_selectedSection, entry);
 
-// ─── Inline result card for HomeScreen ───────────────────────────────────────
+    MealMemory.instance.store(
+      name,
+      entry.result,
+      finalSavedInput: name,
+      canonicalMeal: name,
+    ).ignore();
 
-class _HomeResultCard extends StatelessWidget {
-  final NutritionResult result;
-  const _HomeResultCard({super.key, required this.result});
+    await PersistenceService.saveDay(today);
 
-  @override
-  Widget build(BuildContext context) {
-    final hasFood = result.calories.max > 0;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: hasFood
-              ? const Color(0xFF52B788).withValues(alpha: 0.35)
-              : Colors.transparent,
-        ),
-      ),
-      padding: const EdgeInsets.all(24),
-      child: hasFood ? _content() : _empty(),
-    );
-  }
-
-  Widget _empty() {
-    return const Row(
-      children: [
-        Icon(Icons.restaurant_menu_rounded, size: 24, color: Color(0xFF4B5563)),
-        SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            'No food recognised — try rephrasing.',
-            style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _content() {
-    final calMin = result.calories.min.toInt();
-    final calMax = result.calories.max.toInt();
-    final proMin = result.protein.min.toInt();
-    final proMax = result.protein.max.toInt();
-    final primaryCal = result.primaryCaloriesEstimate.toInt();
-    final primaryPro = result.primaryProteinEstimate.toInt();
-    final userWarnings = result.userFacingWarnings;
-
-    final calLabel = calMin == calMax ? '$calMin kcal' : '$calMin–$calMax kcal';
-    final proLabel = proMin == proMax ? '$proMin g' : '$proMin–$proMax g';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$primaryCal kcal • $primaryPro g protein',
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          result.shouldShowRange
-              ? '${result.estimateLabel} • likely $calLabel • $proLabel'
-              : result.estimateLabel,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF9CA3AF),
-          ),
-        ),
-        if ((result.coachSummary ?? '').isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(
-            result.coachSummary!,
-            style: const TextStyle(fontSize: 13, color: Color(0xFFD1D5DB), height: 1.35),
-          ),
-        ],
-        const SizedBox(height: 20),
-        _NutrientRow(
-          icon: Icons.local_fire_department_rounded,
-          iconColor: const Color(0xFFFF6B35),
-          label: 'Calories',
-          value: calLabel,
-        ),
-        const SizedBox(height: 16),
-        _NutrientRow(
-          icon: Icons.fitness_center_rounded,
-          iconColor: const Color(0xFF52B788),
-          label: 'Protein',
-          value: proLabel,
-        ),
-        const SizedBox(height: 20),
-        _ConfidenceBar(
-          confidence: result.confidence,
-          isManual: result.userCorrected || result.macrosLockedByUser || result.source == 'user_override',
-        ),
-        if (userWarnings.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          const Divider(color: Color(0xFF2E2E3E), height: 1),
-          const SizedBox(height: 16),
-          ...userWarnings.map((w) => _WarningTile(message: w)),
-        ],
-      ],
-    );
-  }
-}
-
-class _NutrientRow extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final String value;
-
-  const _NutrientRow({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: iconColor, size: 20),
-        ),
-        const SizedBox(width: 14),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
-                  letterSpacing: 0.6,
-                )),
-            const SizedBox(height: 2),
-            Text(value,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                )),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ConfidenceBar extends StatelessWidget {
-  final double confidence;
-  final bool isManual;
-  const _ConfidenceBar({required this.confidence, this.isManual = false});
-
-  Color _barColor() {
-    if (confidence >= 0.75) return const Color(0xFF52B788);
-    if (confidence >= 0.55) return const Color(0xFFFFB347);
-    return const Color(0xFFFF6B6B);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (isManual) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF60A5FA).withOpacity(0.12),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: const Color(0xFF60A5FA).withOpacity(0.4),
-            width: 1.0,
-          ),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.edit_rounded, size: 14, color: Color(0xFF60A5FA)),
-            SizedBox(width: 6),
-            Text(
-              'Manually Edited',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF60A5FA),
-              ),
-            ),
-          ],
+    if (mounted) {
+      kHapticMedium();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Logged "$name" to ${entry.section.displayName}'),
+          backgroundColor: KColor.greenDark,
         ),
       );
+      Navigator.pop(context, true);
     }
-
-    final pct = (confidence * 100).toInt();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(confidence >= 0.75 ? 'Highly Reliable' : confidence >= 0.55 ? 'Approximate' : 'Rough Estimate',
-                style: TextStyle(
-                  fontSize: 12, color: _barColor(),
-                  fontWeight: FontWeight.w600, letterSpacing: 0.4,
-                )),
-            Text('$pct%',
-                style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white70,
-                )),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: confidence),
-            duration: const Duration(milliseconds: 700),
-            curve: Curves.easeOutCubic,
-            builder: (_, value, child) => LinearProgressIndicator(
-              value: value,
-              minHeight: 7,
-              backgroundColor: const Color(0xFF2E2E3E),
-              valueColor: AlwaysStoppedAnimation(_barColor()),
-            ),
-          ),
-        ),
-      ],
-    );
   }
-}
 
-class _WarningTile extends StatelessWidget {
-  final String message;
-  const _WarningTile({required this.message});
+  Future<void> _saveAsQuickAdd() async {
+    final name = _descriptionController.text.trim().isNotEmpty
+        ? _descriptionController.text.trim()
+        : 'Quick Meal';
+    final calories = double.tryParse(_caloriesController.text) ?? 0.0;
+    final protein = double.tryParse(_proteinController.text) ?? 0.0;
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+    final item = QuickAddItem(
+      id: QuickAddService.instance.generateUuid(),
+      name: name,
+      calories: calories,
+      protein: protein,
+      emoji: '⚡',
+      builtIn: false,
+    );
+    await QuickAddService.instance.saveItem(item);
+
+    if (mounted) {
+      kHapticMedium();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved "$name" to Quick Add!'),
+          backgroundColor: KColor.greenDark,
+        ),
+      );
+      Navigator.pop(context, true);
+    }
+  }
+
+  Widget _buildField({
+    required TextEditingController controller,
+    required String label,
+    required String suffix,
+    required Color color,
+  }) {
+    return Container(
+      height: 52, // Identical heights for all calorie and macro inputs!
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      alignment: Alignment.center,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 2),
-            child: Icon(Icons.info_outline_rounded,
-                size: 14, color: Color(0xFFFFB347)),
-          ),
-          const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                fontSize: 13, color: Color(0xFFFFB347), height: 1.45,
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.only(top: 8),
+                border: InputBorder.none,
+                hintText: '0',
+                hintStyle: const TextStyle(color: Color(0xFF4B5563)),
+                labelText: label.toUpperCase(),
+                labelStyle: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+                floatingLabelBehavior: FloatingLabelBehavior.always,
               ),
             ),
+          ),
+          Text(
+            suffix,
+            style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold),
           ),
         ],
       ),
     );
   }
-}
 
-// ─── Suggestion chip ──────────────────────────────────────────────────────────
-
-class _SuggestionChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _SuggestionChip({required this.label, required this.onTap});
+  Widget _buildMealSectionDropdown() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<MealSection>(
+          value: _selectedSection,
+          dropdownColor: const Color(0xFF1E1E2C),
+          icon: const Icon(Icons.arrow_drop_down_rounded, color: Colors.white),
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+          onChanged: (val) {
+            if (val != null) setState(() => _selectedSection = val);
+          },
+          items: MealSection.values
+              .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(s.displayName),
+                  ))
+              .toList(),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF2E2E3E)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF9CA3AF),
-          ),
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF13131F),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(top: BorderSide(color: Color(0xFF2A2A3C), width: 0.5)),
+      ),
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 8,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const KDragHandle(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Quick Macro Estimator',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Input macros manually or estimate with AI',
+                      style: TextStyle(fontSize: 12, color: KColor.textMuted),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: KColor.textMuted),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Description textfield
+            TextField(
+              controller: _descriptionController,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'Meal Description / Name',
+                labelStyle: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                hintText: 'e.g. 2 eggs and a banana',
+                hintStyle: const TextStyle(color: Color(0xFF4B5563)),
+                filled: true,
+                fillColor: const Color(0xFF1E1E2C),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF2E2E3E), width: 0.5),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF2E2E3E), width: 0.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KColor.green, width: 1),
+                ),
+                suffixIcon: _descriptionController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, color: KColor.textMuted, size: 18),
+                        onPressed: () {
+                          _descriptionController.clear();
+                          setState(() {});
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: KColor.green),
+                      )
+                    : TextButton.icon(
+                        onPressed: _descriptionController.text.trim().isEmpty ? null : _estimateWithAi,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 14),
+                        label: const Text('Estimate with AI'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: KColor.green,
+                          disabledForegroundColor: KColor.textDisabled,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                      ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Calories & Protein Row (Identical 52px heights)
+            Row(
+              children: [
+                Expanded(
+                  child: _buildField(
+                    controller: _caloriesController,
+                    label: 'Calories',
+                    suffix: 'kcal',
+                    color: KColor.calorie,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildField(
+                    controller: _proteinController,
+                    label: 'Protein',
+                    suffix: 'g',
+                    color: KColor.protein,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Carbs, Fat, and Fiber Row (Identical 52px heights)
+            Row(
+              children: [
+                Expanded(
+                  child: _buildField(
+                    controller: _carbsController,
+                    label: 'Carbs',
+                    suffix: 'g',
+                    color: KColor.blue,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildField(
+                    controller: _fatController,
+                    label: 'Fat',
+                    suffix: 'g',
+                    color: const Color(0xFFE9D502),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildField(
+                    controller: _fiberController,
+                    label: 'Fiber',
+                    suffix: 'g',
+                    color: const Color(0xFFA78BFA),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            const Divider(color: KColor.divider, height: 1),
+            const SizedBox(height: 16),
+
+            // Dropdown selection
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'LOGGING SECTION',
+                  style: TextStyle(
+                    color: KColor.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                _buildMealSectionDropdown(),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // Action Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: Pressable(
+                    onTap: _saveAsQuickAdd,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: KColor.green, width: 1.5),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Save as Quick Add',
+                        style: TextStyle(color: KColor.green, fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Pressable(
+                    onTap: _logToJournal,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [KColor.greenDark, KColor.green],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: KColor.greenDark.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Log to Journal',
+                        style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
         ),
       ),
     );

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
 import '../screens/onboarding_screen.dart';
+import '../services/chatgpt_link_service.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 
 class AiEscalationContext {
@@ -65,28 +66,41 @@ class AiNutritionService {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
 
-    final res = await Supabase.instance.client.functions.invoke(
-      'ai-chat-router',
-      body: {'messages': messages},
-      headers: {'Authorization': 'Bearer ${session.accessToken}'},
-    );
+    final stopwatch = Stopwatch()..start();
+    try {
+      final res = await Supabase.instance.client.functions.invoke(
+        'ai-chat-router',
+        body: {'messages': messages},
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+      );
 
-    final data = res.data as Map<String, dynamic>?;
-    if (data == null || data['success'] != true) {
-      final errMsg = data?['error'] ?? 'ai-chat-router returned no data';
-      debugPrint('[AI] ❌ router error: $errMsg');
-      throw Exception('AI router error: $errMsg');
+      final data = res.data as Map<String, dynamic>?;
+      if (data == null || data['success'] != true) {
+        final errMsg = data?['error'] ?? 'ai-chat-router returned no data';
+        debugPrint('[AI] ❌ router error: $errMsg');
+        ChatGptLinkService.recordAiRequestFailure().ignore();
+        throw Exception('AI router error: $errMsg');
+      }
+
+      stopwatch.stop();
+      final providerUsed  = data['provider_used'] as String? ?? 'unknown';
+      final fallbackUsed  = data['fallback_used'] == true;
+      final text          = data['response'] as String? ?? '';
+
+      ChatGptLinkService.recordAiRequestSuccess(
+        providerUsed,
+        stopwatch.elapsedMilliseconds.toDouble(),
+      ).ignore();
+
+      debugPrint('[AI] provider=$providerUsed fallback=$fallbackUsed');
+      debugPrint('[AI] raw response (first 600): '
+          '${text.substring(0, text.length.clamp(0, 600))}');
+
+      return _parse(text, rawInput);
+    } catch (e) {
+      ChatGptLinkService.recordAiRequestFailure().ignore();
+      rethrow;
     }
-
-    final providerUsed  = data['provider_used'] as String? ?? 'unknown';
-    final fallbackUsed  = data['fallback_used'] == true;
-    final text          = data['response'] as String? ?? '';
-
-    debugPrint('[AI] provider=$providerUsed fallback=$fallbackUsed');
-    debugPrint('[AI] raw response (first 600): '
-        '${text.substring(0, text.length.clamp(0, 600))}');
-
-    return _parse(text, rawInput);
   }
 
   // ── Response parsing ──────────────────────────────────────────────────────

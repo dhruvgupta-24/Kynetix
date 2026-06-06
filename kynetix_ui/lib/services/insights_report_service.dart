@@ -9,6 +9,7 @@ import 'chatgpt_link_service.dart';
 import 'insights_engine.dart';
 import 'cloud_sync_service.dart';
 import 'workout_service.dart';
+import 'nutrition_target_engine.dart';
 
 // ─── InsightsReportService ───────────────────────────────────────────────────
 class InsightsReportService extends ChangeNotifier {
@@ -492,7 +493,196 @@ class InsightsReportService extends ChangeNotifier {
     }
   }
 
+  Future<void> mergeCacheFromCloud(Map<String, dynamic> cache) async {
+    try {
+      final weeklyJson = cache['weekly_json'] as Map<String, dynamic>?;
+      final monthlyJson = cache['monthly_json'] as Map<String, dynamic>?;
+      final yearlyJson = cache['yearly_json'] as Map<String, dynamic>?;
+      final pbJson = cache['personal_bests_json'] as Map<String, dynamic>?;
+
+      if (weeklyJson != null) {
+        _weekly = weeklyJson.map((k, v) => MapEntry(k, WeeklyReport.fromJson(v as Map<String, dynamic>)));
+      }
+      if (monthlyJson != null) {
+        _monthly = monthlyJson.map((k, v) => MapEntry(k, MonthlyReport.fromJson(v as Map<String, dynamic>)));
+      }
+      if (yearlyJson != null) {
+        _yearly = yearlyJson.map((k, v) => MapEntry(k, YearlyReport.fromJson(v as Map<String, dynamic>)));
+      }
+      if (pbJson != null) {
+        _personalBests = PersonalBests.fromJson(pbJson);
+      }
+      _lastComputed = DateTime.now();
+      await _save();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[InsightsReportService] Error merging cache from cloud: $e');
+    }
+  }
+
   String _currentWeekKey() => InsightsEngine.weekKeyOf(DateTime.now());
   String _currentMonthKey() => InsightsEngine.monthKeyOf(DateTime.now());
   String _currentYearKey() => DateTime.now().year.toString();
+
+  // ─── Nutrition Adherence Streaks ───────────────────────────────────────────
+
+  int getLoggingStreak() {
+    int streak = 0;
+    final now = DateTime.now();
+
+    // Check today
+    final todayKey = dateKey(now);
+    final todayLog = dayLogStore[todayKey];
+    final todayLogged = todayLog != null && !todayLog.isEmpty;
+
+    DateTime startCountingFrom;
+    if (todayLogged) {
+      streak = 1;
+      startCountingFrom = now.subtract(const Duration(days: 1));
+    } else {
+      // If today is not logged, check yesterday.
+      final yesterdayDate = now.subtract(const Duration(days: 1));
+      final yesterdayKey = dateKey(yesterdayDate);
+      final yesterdayLog = dayLogStore[yesterdayKey];
+      final yesterdayLogged = yesterdayLog != null && !yesterdayLog.isEmpty;
+      if (yesterdayLogged) {
+        streak = 1;
+        startCountingFrom = yesterdayDate.subtract(const Duration(days: 1));
+      } else {
+        return 0; // No active streak
+      }
+    }
+
+    while (true) {
+      final key = dateKey(startCountingFrom);
+      final log = dayLogStore[key];
+      if (log != null && !log.isEmpty) {
+        streak++;
+        startCountingFrom = startCountingFrom.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  bool _isProteinHit(DayLog log, UserProfile profile, DateTime date) {
+    if (log.isEmpty) return false;
+    final session = WorkoutService.instance.sessionFor(date);
+    final isGymDay = log.gymDay?.didGym == true;
+    final target = NutritionTargetEngine.instance.dayTarget(
+      profile,
+      isGymDay: isGymDay,
+      session: session,
+      workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+    );
+
+    final pro = log.totalProteinMid;
+    final proRat = pro / target.protein.clamp(1.0, double.infinity);
+    return proRat >= 0.90;
+  }
+
+  int getProteinStreak(UserProfile profile) {
+    int streak = 0;
+    final now = DateTime.now();
+
+    // Check today
+    final todayKey = dateKey(now);
+    final todayLog = dayLogStore[todayKey];
+    final todayLogged = todayLog != null && !todayLog.isEmpty;
+
+    DateTime startCountingFrom;
+    if (todayLogged) {
+      if (_isProteinHit(todayLog, profile, now)) {
+        streak = 1;
+        startCountingFrom = now.subtract(const Duration(days: 1));
+      } else {
+        return 0; // Today is logged but target missed
+      }
+    } else {
+      // Today is not logged yet, check yesterday
+      final yesterdayDate = now.subtract(const Duration(days: 1));
+      final yesterdayKey = dateKey(yesterdayDate);
+      final yesterdayLog = dayLogStore[yesterdayKey];
+      final yesterdayLogged = yesterdayLog != null && !yesterdayLog.isEmpty;
+      if (yesterdayLogged && _isProteinHit(yesterdayLog, profile, yesterdayDate)) {
+        streak = 1;
+        startCountingFrom = yesterdayDate.subtract(const Duration(days: 1));
+      } else {
+        return 0;
+      }
+    }
+
+    while (true) {
+      final key = dateKey(startCountingFrom);
+      final log = dayLogStore[key];
+      if (log != null && !log.isEmpty && _isProteinHit(log, profile, startCountingFrom)) {
+        streak++;
+        startCountingFrom = startCountingFrom.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  bool _isCalorieHit(DayLog log, UserProfile profile, DateTime date) {
+    if (log.isEmpty) return false;
+    final session = WorkoutService.instance.sessionFor(date);
+    final isGymDay = log.gymDay?.didGym == true;
+    final target = NutritionTargetEngine.instance.dayTarget(
+      profile,
+      isGymDay: isGymDay,
+      session: session,
+      workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+    );
+
+    final cals = log.totalCaloriesMid;
+    final calRat = cals / target.calories.clamp(1.0, double.infinity);
+    return calRat >= 0.88 && calRat <= 1.08;
+  }
+
+  int getCalorieStreak(UserProfile profile) {
+    int streak = 0;
+    final now = DateTime.now();
+
+    // Check today
+    final todayKey = dateKey(now);
+    final todayLog = dayLogStore[todayKey];
+    final todayLogged = todayLog != null && !todayLog.isEmpty;
+
+    DateTime startCountingFrom;
+    if (todayLogged) {
+      if (_isCalorieHit(todayLog, profile, now)) {
+        streak = 1;
+        startCountingFrom = now.subtract(const Duration(days: 1));
+      } else {
+        return 0; // Today is logged but target missed
+      }
+    } else {
+      // Today is not logged yet, check yesterday
+      final yesterdayDate = now.subtract(const Duration(days: 1));
+      final yesterdayKey = dateKey(yesterdayDate);
+      final yesterdayLog = dayLogStore[yesterdayKey];
+      final yesterdayLogged = yesterdayLog != null && !yesterdayLog.isEmpty;
+      if (yesterdayLogged && _isCalorieHit(yesterdayLog, profile, yesterdayDate)) {
+        streak = 1;
+        startCountingFrom = yesterdayDate.subtract(const Duration(days: 1));
+      } else {
+        return 0;
+      }
+    }
+
+    while (true) {
+      final key = dateKey(startCountingFrom);
+      final log = dayLogStore[key];
+      if (log != null && !log.isEmpty && _isCalorieHit(log, profile, startCountingFrom)) {
+        streak++;
+        startCountingFrom = startCountingFrom.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
 }

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
 import '../screens/onboarding_screen.dart' show currentUserProfile;
+import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart' show WeightContext;
 
 // ─── AiCoachResponse ──────────────────────────────────────────────────────────
@@ -106,27 +107,39 @@ class AiCoachService {
     final portionHint = _portionAnchorHint();
     if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
 
-    debugPrint('[AiCoachService] (5/7) sendMessage request invoking ai-meal-coach: keys=${body.keys.toList()}');
+    final stopwatch = Stopwatch()..start();
+    try {
+      final res = await Supabase.instance.client.functions.invoke(
+        'ai-meal-coach',
+        body:    body,
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+      );
 
-    final res = await Supabase.instance.client.functions.invoke(
-      'ai-meal-coach',
-      body:    body,
-      headers: {'Authorization': 'Bearer ${session.accessToken}'},
-    );
+      final data = res.data as Map<String, dynamic>?;
+      if (data == null) {
+        ChatGptLinkService.recordAiRequestFailure().ignore();
+        throw Exception('ai-meal-coach returned no data');
+      }
+      if (data['success'] != true) {
+        final err = data['error'] ?? 'Unknown error from ai-meal-coach';
+        debugPrint('[AiCoachService] ✖ error: $err');
+        ChatGptLinkService.recordAiRequestFailure().ignore();
+        throw Exception(err);
+      }
 
-    final data = res.data as Map<String, dynamic>?;
-    if (data == null) {
-      throw Exception('ai-meal-coach returned no data');
+      stopwatch.stop();
+      final response = AiCoachResponse.fromJson(data);
+      ChatGptLinkService.recordAiRequestSuccess(
+        response.providerUsed,
+        stopwatch.elapsedMilliseconds.toDouble(),
+      ).ignore();
+
+      debugPrint('[AiCoachService] (7/7) sendMessage response received: provider=${response.providerUsed} fallback=${response.fallbackUsed} message length=${response.message.length}');
+      return response;
+    } catch (e) {
+      ChatGptLinkService.recordAiRequestFailure().ignore();
+      rethrow;
     }
-    if (data['success'] != true) {
-      final err = data['error'] ?? 'Unknown error from ai-meal-coach';
-      debugPrint('[AiCoachService] ✖ error: $err');
-      throw Exception(err);
-    }
-
-    final response = AiCoachResponse.fromJson(data);
-    debugPrint('[AiCoachService] (7/7) sendMessage response received: provider=${response.providerUsed} fallback=${response.fallbackUsed} message length=${response.message.length}');
-    return response;
   }
 
   // ─── Streaming ──────────────────────────────────────────────────────────────
@@ -190,8 +203,7 @@ class AiCoachService {
       }
     }
 
-    debugPrint('[AiCoachService] (5/7) streamMessage request invoking ai-meal-coach: keys=${body.keys.toList()}');
-
+    final stopwatch = Stopwatch()..start();
     final url     = Uri.parse('${SupabaseSecrets.url}/functions/v1/ai-meal-coach');
     final request = http.Request('POST', url)
       ..headers['Authorization'] = 'Bearer ${session.accessToken}'
@@ -204,8 +216,15 @@ class AiCoachService {
 
       if (streamedRes.statusCode != 200) {
         final errBody = await streamedRes.stream.bytesToString();
+        ChatGptLinkService.recordAiRequestFailure().ignore();
         throw Exception('ai-meal-coach ${streamedRes.statusCode}: $errBody');
       }
+
+      stopwatch.stop();
+      ChatGptLinkService.recordAiRequestSuccess(
+        'openai',
+        stopwatch.elapsedMilliseconds.toDouble(),
+      ).ignore();
 
       // Parse SSE stream line by line
       await for (final line in streamedRes.stream

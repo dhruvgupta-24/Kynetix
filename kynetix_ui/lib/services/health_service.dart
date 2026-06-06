@@ -86,11 +86,14 @@ class WeightQualityReport {
 
 /// Compact weight summary passed to Kyno.
 ///
-/// Contains only the 4 scalar fields needed for coaching reasoning plus a
+/// Contains only the scalar fields needed for coaching reasoning plus a
 /// quality report that gates how confidently the AI should rely on the data.
 /// Raw weight history is NEVER serialised into prompts.
 class WeightContext {
   final double?            latestWeightKg;
+  final double?            smoothedWeightKg; // 7-day rolling average
+  final double?            projectedWeight30dKg; // 30-day projection
+  final String?            monthlyRecommendation; // recommendation message
   final double?            delta7dKg;
   final double?            delta30dKg;
 
@@ -101,6 +104,9 @@ class WeightContext {
 
   const WeightContext({
     required this.latestWeightKg,
+    required this.smoothedWeightKg,
+    required this.projectedWeight30dKg,
+    required this.monthlyRecommendation,
     required this.delta7dKg,
     required this.delta30dKg,
     required this.trendDirection,
@@ -114,11 +120,19 @@ class WeightContext {
   ///
   /// Returns null when the list is empty — the caller should omit the
   /// weight block from the prompt entirely.
-  static WeightContext? fromHistory(List<WeightReading> history) {
+  static WeightContext? fromHistory(List<WeightReading> history, {String? goal}) {
     if (history.isEmpty) return null;
 
     final now    = DateTime.now();
     final latest = history.first;
+
+    // ── 7-day rolling average (smoothed weight) ─────────────────────
+    final latestDate = latest.recordedAt;
+    final cutoff7dWindow = latestDate.subtract(const Duration(days: 7));
+    final recentReadings = history.where((r) => r.recordedAt.isAfter(cutoff7dWindow) || r.recordedAt.isAtSameMomentAs(cutoff7dWindow)).toList();
+    final smoothedWeight = recentReadings.isNotEmpty 
+        ? recentReadings.map((r) => r.kg).reduce((a, b) => a + b) / recentReadings.length
+        : latest.kg;
 
     // ── Deltas ──────────────────────────────────────────────────────
     double? delta7d;
@@ -152,6 +166,64 @@ class WeightContext {
       _                             => 'stable',
     };
 
+    // ── Projections & Recommendations ────────────────────────────────
+    double? projectedWeight30d;
+    double monthlyRate = 0.0;
+    bool hasActualTrend = false;
+
+    if (delta30d != null) {
+      monthlyRate = delta30d;
+      hasActualTrend = true;
+    } else if (delta7d != null) {
+      monthlyRate = delta7d * 4.28;
+      hasActualTrend = true;
+    }
+
+    if (hasActualTrend) {
+      projectedWeight30d = smoothedWeight + monthlyRate;
+    } else {
+      if (goal != null) {
+        if (goal.contains('Fat Loss') || goal.contains('Cut')) {
+          projectedWeight30d = smoothedWeight - 2.0;
+        } else if (goal.contains('Recomposition')) {
+          projectedWeight30d = smoothedWeight - 0.8;
+        } else if (goal.contains('Lean Bulk')) {
+          projectedWeight30d = smoothedWeight + 0.8;
+        } else if (goal.contains('Bulk') || goal.contains('Gain')) {
+          projectedWeight30d = smoothedWeight + 1.6;
+        } else {
+          projectedWeight30d = smoothedWeight;
+        }
+      } else {
+        projectedWeight30d = smoothedWeight;
+      }
+    }
+
+    String recommendation;
+    if (hasActualTrend && goal != null) {
+      if (goal.contains('Fat Loss') || goal.contains('Cut') || goal.contains('Recomposition')) {
+        if (monthlyRate < -0.2) {
+          recommendation = 'At your current rate of change (${monthlyRate.toStringAsFixed(1)} kg/month), you are successfully in a deficit. Keep calories and activity stable.';
+        } else {
+          recommendation = 'Weight is stable or increasing (${monthlyRate.toStringAsFixed(1)} kg/month). To continue fat loss, consider reducing daily target by 100 kcal or increasing steps.';
+        }
+      } else if (goal.contains('Lean Bulk') || goal.contains('Bulk') || goal.contains('Gain')) {
+        if (monthlyRate > 0.2) {
+          recommendation = 'At your current rate of change (+${monthlyRate.toStringAsFixed(1)} kg/month), you are building muscle. Keep training hard.';
+        } else {
+          recommendation = 'Weight is stable or decreasing (${monthlyRate.toStringAsFixed(1)} kg/month). To support muscle growth, consider increasing daily calories by 150 kcal.';
+        }
+      } else {
+        if (monthlyRate.abs() <= 0.5) {
+          recommendation = 'Your weight is perfectly stable (${monthlyRate.toStringAsFixed(1)} kg/month). Maintenance target is dialed in!';
+        } else {
+          recommendation = 'Weight is shifting (${monthlyRate.toStringAsFixed(1)} kg/month). Consider adjusting calories slightly to remain stable.';
+        }
+      }
+    } else {
+      recommendation = 'Weigh in at least twice a week to establish a reliable smoothed weight trend.';
+    }
+
     // ── Quality report ──────────────────────────────────────────────
     final r7d  = history.where(
         (r) => r.recordedAt.isAfter(now.subtract(const Duration(days: 7)))).length;
@@ -174,6 +246,9 @@ class WeightContext {
 
     return WeightContext(
       latestWeightKg: latest.kg,
+      smoothedWeightKg: smoothedWeight,
+      projectedWeight30dKg: projectedWeight30d,
+      monthlyRecommendation: recommendation,
       delta7dKg:      delta7d,
       delta30dKg:     delta30d,
       trendDirection: trendDirection,
@@ -185,16 +260,6 @@ class WeightContext {
 
   /// Produces a short, multi-line block for injection into the Kyno system
   /// prompt. Raw history is never included — only computed scalars.
-  ///
-  /// Example output:
-  /// ```
-  /// WEIGHT CONTEXT (confidence: medium)
-  /// - Current weight: 74.5 kg
-  /// - 7-day change: −0.8 kg (losing)
-  /// - 30-day change: −1.6 kg
-  /// - Data: 6 readings over 30d, latest 2d ago
-  /// NOTE: Weight data is sparse. Avoid strong weight-based assertions.
-  /// ```
   String toPromptString() {
     final q = quality;
     final buf = StringBuffer();
@@ -202,6 +267,15 @@ class WeightContext {
     buf.writeln('WEIGHT CONTEXT (confidence: ${q.confidenceLabel})');
     if (latestWeightKg != null) {
       buf.writeln('- Current weight: ${latestWeightKg!.toStringAsFixed(1)} kg');
+    }
+    if (smoothedWeightKg != null) {
+      buf.writeln('- Smoothed (7d rolling avg): ${smoothedWeightKg!.toStringAsFixed(1)} kg');
+    }
+    if (projectedWeight30dKg != null) {
+      buf.writeln('- 30d projection: ${projectedWeight30dKg!.toStringAsFixed(1)} kg');
+    }
+    if (monthlyRecommendation != null) {
+      buf.writeln('- Coach Tip: $monthlyRecommendation');
     }
     if (delta7dKg != null) {
       final sign = delta7dKg! >= 0 ? '+' : '';
@@ -396,6 +470,10 @@ class HealthService {
   static const _stepPermissions = [HealthDataAccess.READ];
   static const _weightTypes       = [HealthDataType.WEIGHT];
   static const _weightPermissions = [HealthDataAccess.READ];
+  static const _sleepTypes       = [HealthDataType.SLEEP_SESSION];
+  static const _sleepPermissions = [HealthDataAccess.READ];
+  static const _hrvTypes         = [HealthDataType.HEART_RATE_VARIABILITY_RMSSD];
+  static const _hrvPermissions   = [HealthDataAccess.READ];
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -440,6 +518,44 @@ class HealthService {
   Future<bool> requestWeightPermission() async {
     try {
       return await _health.requestAuthorization(_weightTypes, permissions: _weightPermissions);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns true if sleep permission has been granted.
+  Future<bool> hasSleepPermission() async {
+    try {
+      final granted = await _health.hasPermissions(_sleepTypes, permissions: _sleepPermissions);
+      return granted == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Requests permission to read sleep data from Health Connect.
+  Future<bool> requestSleepPermission() async {
+    try {
+      return await _health.requestAuthorization(_sleepTypes, permissions: _sleepPermissions);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns true if HRV permission has been granted.
+  Future<bool> hasHrvPermission() async {
+    try {
+      final granted = await _health.hasPermissions(_hrvTypes, permissions: _hrvPermissions);
+      return granted == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Requests permission to read HRV data from Health Connect.
+  Future<bool> requestHrvPermission() async {
+    try {
+      return await _health.requestAuthorization(_hrvTypes, permissions: _hrvPermissions);
     } catch (_) {
       return false;
     }
@@ -625,6 +741,77 @@ class HealthService {
     } catch (_) {
       return [];
     }
+  }
+
+  /// Fetches the last 7 days of sleep and HRV RMSSD data from Health Connect.
+  ///
+  /// Returns a Map containing:
+  ///   - 'sleep_hours': double? (the most recent night's sleep duration in hours)
+  ///   - 'hrv_rmssd': double? (the most recent night's HRV in ms)
+  ///   - 'hrv_baseline': double? (the average HRV of the last 7 days in ms)
+  Future<Map<String, double?>> syncSleepAndHrv() async {
+    final now = DateTime.now();
+    final start = now.subtract(const Duration(days: 7));
+
+    double? latestSleep;
+    double? latestHrv;
+    double? hrvBaseline;
+
+    try {
+      final hasSleep = await hasSleepPermission();
+      if (hasSleep) {
+        final sleepPoints = await _health.getHealthDataFromTypes(
+          types: _sleepTypes,
+          startTime: start,
+          endTime: now,
+        );
+
+        if (sleepPoints.isNotEmpty) {
+          // Sort by date descending (most recent first)
+          sleepPoints.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
+          // Take the most recent session's duration
+          final latestPoint = sleepPoints.first;
+          final duration = latestPoint.dateTo.difference(latestPoint.dateFrom);
+          latestSleep = duration.inMinutes / 60.0;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final hasHrv = await hasHrvPermission();
+      if (hasHrv) {
+        final hrvPoints = await _health.getHealthDataFromTypes(
+          types: _hrvTypes,
+          startTime: start,
+          endTime: now,
+        );
+
+        if (hrvPoints.isNotEmpty) {
+          hrvPoints.sort((a, b) => b.dateFrom.compareTo(a.dateFrom));
+          final List<double> values = [];
+          for (final p in hrvPoints) {
+            if (p.value is NumericHealthValue) {
+              final val = (p.value as NumericHealthValue).numericValue.toDouble();
+              if (val > 0) {
+                values.add(val);
+              }
+            }
+          }
+
+          if (values.isNotEmpty) {
+            latestHrv = values.first;
+            final sum = values.fold<double>(0.0, (a, b) => a + b);
+            hrvBaseline = sum / values.length;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return {
+      'sleep_hours': latestSleep,
+      'hrv_rmssd': latestHrv,
+      'hrv_baseline': hrvBaseline,
+    };
   }
 
   // ── Arithmetic helper ───────────────────────────────────────────────────────

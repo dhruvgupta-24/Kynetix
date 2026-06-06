@@ -5,6 +5,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/workout_split.dart';
 import '../models/workout_session.dart';
 import '../services/cloud_sync_service.dart';
+import '../services/recovery_service.dart';
+
+// ─── ACWR / Fatigue Analytics ─────────────────────────────────────────────────
+
+enum AcwrBand {
+  normal,
+  elevated,
+  high,
+  extreme;
+
+  String get label => switch (this) {
+    AcwrBand.normal   => 'Normal',
+    AcwrBand.elevated => 'Elevated',
+    AcwrBand.high     => 'High',
+    AcwrBand.extreme  => 'Extreme',
+  };
+
+  String get coachingInsight => switch (this) {
+    AcwrBand.normal   => 'Training load is optimal. Keep up the consistent work!',
+    AcwrBand.elevated => 'Fatigue load is elevated. Prioritize recovery and sleep.',
+    AcwrBand.high     => 'Training volume is high. Be mindful of fatigue; consider a deload if sore.',
+    AcwrBand.extreme  => 'Workload is extreme or highly irregular. Watch your pacing and rest.',
+  };
+}
 
 // ─── WorkoutService ───────────────────────────────────────────────────────────
 //
@@ -40,6 +64,11 @@ class WorkoutService extends ChangeNotifier {
   final Map<String, int> _additionAcceptedCounts = {};
   final Map<String, int> _additionIgnoredCounts = {};
 
+  // ── Wearable Recovery Data ────────────────────────────────────────────────
+  double? _sleepHours;
+  double? _hrvRmssd;
+  double? _hrvBaseline;
+
   // ── Write-queue fields ────────────────────────────────────────────────────
   // Prevents concurrent _persist() calls from overwriting each other.
   bool _persisting = false;
@@ -53,6 +82,10 @@ class WorkoutService extends ChangeNotifier {
   List<WorkoutSession> get sessions => List.unmodifiable(_sessions);
 
   WorkoutSession? get draftSession => _draftSession;
+
+  double? get sleepHours => _sleepHours;
+  double? get hrvRmssd => _hrvRmssd;
+  double? get hrvBaseline => _hrvBaseline;
 
   /// The DateTime at which the current draft workout was started.
   /// Persisted so the session timer can be reconstructed after a crash or
@@ -1015,6 +1048,9 @@ class WorkoutService extends ChangeNotifier {
           }
         }
       }
+      _sleepHours = prefs.getDouble('kynetix_sleep_hours_v1');
+      _hrvRmssd = prefs.getDouble('kynetix_hrv_rmssd_v1');
+      _hrvBaseline = prefs.getDouble('kynetix_hrv_baseline_v1');
     } catch (e) {
       // Only a total JSON decode failure reaches here — individual field
       // failures are caught above, preserving setup config.
@@ -1045,9 +1081,15 @@ class WorkoutService extends ChangeNotifier {
     _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     _additionAcceptedCounts.clear();
     _additionIgnoredCounts.clear();
+    _sleepHours = null;
+    _hrvRmssd = null;
+    _hrvBaseline = null;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kData);
+      await prefs.remove('kynetix_sleep_hours_v1');
+      await prefs.remove('kynetix_hrv_rmssd_v1');
+      await prefs.remove('kynetix_hrv_baseline_v1');
     } catch (e) {
       debugPrint('[WorkoutService] Clear data failed: $e');
     }
@@ -1120,6 +1162,100 @@ class WorkoutService extends ChangeNotifier {
     return completed;
   }
 
+  Future<void> updateSleepAndHrv({
+    double? sleepHours,
+    double? hrvRmssd,
+    double? hrvBaseline,
+  }) async {
+    _sleepHours = sleepHours;
+    _hrvRmssd = hrvRmssd;
+    _hrvBaseline = hrvBaseline;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (sleepHours != null) {
+      await prefs.setDouble('kynetix_sleep_hours_v1', sleepHours);
+    } else {
+      await prefs.remove('kynetix_sleep_hours_v1');
+    }
+    if (hrvRmssd != null) {
+      await prefs.setDouble('kynetix_hrv_rmssd_v1', hrvRmssd);
+    } else {
+      await prefs.remove('kynetix_hrv_rmssd_v1');
+    }
+    if (hrvBaseline != null) {
+      await prefs.setDouble('kynetix_hrv_baseline_v1', hrvBaseline);
+    } else {
+      await prefs.remove('kynetix_hrv_baseline_v1');
+    }
+
+    try {
+      final report = RecoveryService.compute(RecoveryInput(
+        sessions: _sessions,
+        sleepData: SleepData(durationHours: sleepHours),
+        hrvData: HrvData(rmssd: hrvRmssd, baselineRmssd: hrvBaseline),
+      ));
+      final score = report.overallReadiness;
+      
+      final historyRaw = prefs.getString('kynetix_readiness_history_v1');
+      final Map<String, dynamic> history = historyRaw != null ? jsonDecode(historyRaw) : {};
+      
+      history[_dateKey(DateTime.now())] = score;
+      
+      final keys = history.keys.toList()..sort();
+      if (keys.length > 30) {
+        for (int i = 0; i < keys.length - 30; i++) {
+          history.remove(keys[i]);
+        }
+      }
+      await prefs.setString('kynetix_readiness_history_v1', jsonEncode(history));
+    } catch (e) {
+      debugPrint('[WorkoutService] Error updating readiness score history: $e');
+    }
+
+    notifyListeners();
+  }
+
+  /// Calculates the Acute-to-Chronic Workload Ratio (ACWR).
+  double calculateAcwr() {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    
+    // Acute window: last 7 days (including today)
+    final acuteCutoff = todayStart.subtract(const Duration(days: 7));
+    
+    // Chronic window: last 28 days (including today)
+    final chronicCutoff = todayStart.subtract(const Duration(days: 28));
+
+    double acuteVolume = 0.0;
+    double chronicVolume = 0.0;
+
+    for (final session in _sessions) {
+      if (session.isEmpty) continue;
+      
+      final sessionDay = DateTime(session.date.year, session.date.month, session.date.day);
+      if (sessionDay.isAfter(chronicCutoff) || sessionDay.isAtSameMomentAs(chronicCutoff)) {
+        chronicVolume += session.totalWorkingVolume;
+        if (sessionDay.isAfter(acuteCutoff) || sessionDay.isAtSameMomentAs(acuteCutoff)) {
+          acuteVolume += session.totalWorkingVolume;
+        }
+      }
+    }
+
+    final acuteDaily = acuteVolume / 7.0;
+    final chronicDaily = chronicVolume / 28.0;
+
+    if (chronicDaily <= 0) return 1.0; // Baseline default ratio
+    return acuteDaily / chronicDaily;
+  }
+
+  AcwrBand get acwrBand {
+    final acwr = calculateAcwr();
+    if (acwr >= 0.8 && acwr <= 1.3) return AcwrBand.normal;
+    if (acwr > 1.3 && acwr <= 1.5) return AcwrBand.elevated;
+    if (acwr > 1.5 && acwr <= 1.8) return AcwrBand.high;
+    return AcwrBand.extreme;
+  }
+
   List<String> recentImprovementHighlights({int limit = 3}) {
     final out = <String>[];
     final bySplit = <String, WorkoutSession>{};
@@ -1139,5 +1275,222 @@ class WorkoutService extends ChangeNotifier {
       if (out.length >= limit) break;
     }
     return out;
+  }
+
+  /// Computes a list of all [PersonalRecord]s across all logged sessions.
+  List<PersonalRecord> getPersonalRecords() {
+    final registry = <String, PersonalRecord>{};
+
+    for (final session in _sessions) {
+      if (session.isEmpty) continue;
+      final dateStr = _dateKey(session.date);
+
+      for (final entry in session.entries) {
+        if (entry.isSkipped || entry.sets.isEmpty) continue;
+        final ex = entry.exercise;
+
+        // Get or create current record for this exercise
+        var rec = registry[ex.id] ?? PersonalRecord(
+          exerciseId: ex.id,
+          exerciseName: ex.name,
+          bestWeight: 0.0,
+          bestVolume: 0.0,
+          bestEstimatedOneRepMax: 0.0,
+          maxRepsAtWeight: {},
+          maxRepsAtWeightDate: {},
+        );
+
+        double bestWeight = rec.bestWeight;
+        String? bestWeightDate = rec.bestWeightDate;
+        double bestVolume = rec.bestVolume;
+        String? bestVolumeDate = rec.bestVolumeDate;
+        double bestEstimated1RM = rec.bestEstimatedOneRepMax;
+        String? bestEstimated1RMDate = rec.bestEstimatedOneRepMaxDate;
+        final maxRepsAtWeight = Map<double, int>.from(rec.maxRepsAtWeight);
+        final maxRepsAtWeightDate = Map<double, String>.from(rec.maxRepsAtWeightDate);
+
+        for (final s in entry.sets) {
+          if (s.weight > bestWeight) {
+            bestWeight = s.weight;
+            bestWeightDate = dateStr;
+          }
+          if (s.volume > bestVolume) {
+            bestVolume = s.volume;
+            bestVolumeDate = dateStr;
+          }
+          if (s.estimatedOneRepMax > bestEstimated1RM) {
+            bestEstimated1RM = s.estimatedOneRepMax;
+            bestEstimated1RMDate = dateStr;
+          }
+
+          final currentMaxReps = maxRepsAtWeight[s.weight] ?? 0;
+          if (s.reps > currentMaxReps) {
+            maxRepsAtWeight[s.weight] = s.reps;
+            maxRepsAtWeightDate[s.weight] = dateStr;
+          }
+        }
+
+        registry[ex.id] = PersonalRecord(
+          exerciseId: ex.id,
+          exerciseName: ex.name,
+          bestWeight: bestWeight,
+          bestWeightDate: bestWeightDate,
+          bestVolume: bestVolume,
+          bestVolumeDate: bestVolumeDate,
+          bestEstimatedOneRepMax: bestEstimated1RM,
+          bestEstimatedOneRepMaxDate: bestEstimated1RMDate,
+          maxRepsAtWeight: maxRepsAtWeight,
+          maxRepsAtWeightDate: maxRepsAtWeightDate,
+        );
+      }
+    }
+
+    return registry.values.toList();
+  }
+
+  /// Calculates week-over-week volume change percentage by muscle group.
+  /// Returns a Map of muscleGroup -> % change from last week to this week.
+  Map<String, double> getWeekOverWeekVolumeChangeByMuscle() {
+    final now = DateTime.now();
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+    final thisMonday = todayMidnight.subtract(Duration(days: now.weekday - 1));
+    final lastMonday = thisMonday.subtract(const Duration(days: 7));
+    
+    final thisWeekStart = thisMonday;
+    final thisWeekEnd = thisWeekStart.add(const Duration(days: 7));
+    
+    final lastWeekStart = lastMonday;
+    final lastWeekEnd = lastWeekStart.add(const Duration(days: 7));
+    
+    final thisWeekVolume = <String, double>{};
+    final lastWeekVolume = <String, double>{};
+    
+    for (final s in _sessions) {
+      if (s.isEmpty) continue;
+      final d = s.date;
+      final isThisWeek = !d.isBefore(thisWeekStart) && d.isBefore(thisWeekEnd);
+      final isLastWeek = !d.isBefore(lastWeekStart) && d.isBefore(lastWeekEnd);
+      
+      if (isThisWeek) {
+        for (final entry in s.entries) {
+          final muscle = entry.exercise.muscleGroup;
+          thisWeekVolume[muscle] = (thisWeekVolume[muscle] ?? 0.0) + entry.workingVolume;
+        }
+      } else if (isLastWeek) {
+        for (final entry in s.entries) {
+          final muscle = entry.exercise.muscleGroup;
+          lastWeekVolume[muscle] = (lastWeekVolume[muscle] ?? 0.0) + entry.workingVolume;
+        }
+      }
+    }
+    
+    final results = <String, double>{};
+    final allMuscles = {...thisWeekVolume.keys, ...lastWeekVolume.keys};
+    for (final muscle in allMuscles) {
+      final cur = thisWeekVolume[muscle] ?? 0.0;
+      final prev = lastWeekVolume[muscle] ?? 0.0;
+      if (prev > 0) {
+        results[muscle] = ((cur - prev) / prev) * 100.0;
+      } else if (cur > 0) {
+        results[muscle] = 100.0;
+      } else {
+        results[muscle] = 0.0;
+      }
+    }
+    return results;
+  }
+
+  /// Returns a Map of muscleGroup -> frequency (sessions/week avg) over the last 4 weeks.
+  Map<String, double> getMuscleFrequencyTrends() {
+    final now = DateTime.now();
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+    final cutoff = todayMidnight.subtract(const Duration(days: 28));
+    
+    final counts = <String, int>{};
+    for (final s in _sessions) {
+      if (s.isEmpty || s.date.isBefore(cutoff)) continue;
+      
+      final seenMuscles = <String>{};
+      for (final entry in s.entries) {
+        if (!entry.isSkipped && entry.sets.isNotEmpty) {
+          seenMuscles.add(entry.exercise.muscleGroup);
+        }
+      }
+      for (final m in seenMuscles) {
+        counts[m] = (counts[m] ?? 0) + 1;
+      }
+    }
+    
+    return counts.map((k, v) => MapEntry(k, v / 4.0));
+  }
+
+  /// Detects exercises where performance (top set weight and reps) has not progressed
+  /// for at least 3 consecutive sessions spanning 3+ weeks.
+  List<String> getPlateauedExercises() {
+    final plateaus = <String>[];
+    
+    // Group history by exercise ID
+    final exerciseHistory = <String, List<({DateTime date, ExerciseEntry entry})>>{};
+    for (final s in _sessions.reversed) {
+      if (s.isEmpty) continue;
+      for (final e in s.entries) {
+        if (e.isSkipped || e.sets.isEmpty) continue;
+        exerciseHistory.putIfAbsent(e.exercise.id, () => []).add((date: s.date, entry: e));
+      }
+    }
+    
+    exerciseHistory.forEach((id, history) {
+      if (history.length < 3) return;
+      
+      // Look at the latest session
+      final latestEntry = history.first.entry;
+      final latestTop = latestEntry.topWorkingSet ?? latestEntry.topSet;
+      if (latestTop == null) return;
+      
+      // Find a session from roughly 3+ weeks (21+ days) ago
+      final latestDate = history.first.date;
+      int comparisonIndex = -1;
+      for (int i = 1; i < history.length; i++) {
+        if (latestDate.difference(history[i].date).inDays >= 21) {
+          comparisonIndex = i;
+          break;
+        }
+      }
+      
+      if (comparisonIndex != -1) {
+        final compEntry = history[comparisonIndex].entry;
+        final compTop = compEntry.topWorkingSet ?? compEntry.topSet;
+        if (compTop != null) {
+          if (latestTop.weight <= compTop.weight && latestTop.reps <= compTop.reps) {
+            plateaus.add(latestEntry.exercise.name);
+          }
+        }
+      }
+    });
+    
+    return plateaus;
+  }
+
+  /// Returns true if the readiness score has been low (< 0.6) for the last 3 consecutive days.
+  Future<bool> hasRecoveryDeterioration() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('kynetix_readiness_history_v1');
+    if (raw == null) return false;
+    
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    final today = DateTime.now();
+    
+    int consecutiveLow = 0;
+    for (int i = 0; i < 3; i++) {
+      final day = today.subtract(Duration(days: i));
+      final key = _dateKey(day);
+      final score = map[key] as num?;
+      if (score != null && score < 0.6) {
+        consecutiveLow++;
+      } else {
+        break;
+      }
+    }
+    return consecutiveLow >= 3;
   }
 }

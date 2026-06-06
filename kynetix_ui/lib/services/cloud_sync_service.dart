@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/day_log.dart';
@@ -228,6 +230,40 @@ class CloudSyncService {
         debugPrint('[CloudSyncService] 🔄 Restored ${restored.length} achievements from cloud');
       } catch (e) {
         debugPrint('[CloudSyncService] Error restoring achievements: $e');
+      }
+
+      // 9. Restore insights cache from cloud
+      try {
+        final cacheResp = await _supabase.from('user_insights_cache').select().maybeSingle();
+        if (cacheResp != null) {
+          await InsightsReportService.instance.mergeCacheFromCloud(cacheResp);
+          debugPrint('[CloudSyncService] 🔄 Restored insights cache from cloud');
+        }
+      } catch (e) {
+        debugPrint('[CloudSyncService] Error restoring insights cache: $e');
+      }
+
+      // 10. Reconstruct carry-forward resolved dates and history from day logs
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final resolvedDates = <String>{};
+        final history = <String>[];
+
+        for (final entry in dayLogStore.entries) {
+          final record = entry.value.gymDay?.carryForwardRecord;
+          if (record != null) {
+            resolvedDates.add(record.yesterdayDate);
+            history.add(jsonEncode(record.toJson()));
+          }
+        }
+
+        if (resolvedDates.isNotEmpty) {
+          await prefs.setStringList('carry_forward_resolved_dates_v1', resolvedDates.toList());
+          await prefs.setStringList('carry_forward_history_v1', history);
+          debugPrint('[CloudSyncService] 🔄 Reconstructed ${resolvedDates.length} carry-forward rollover events from logs.');
+        }
+      } catch (e) {
+        debugPrint('[CloudSyncService] Error reconstructing carry-forward from day logs: $e');
       }
 
       debugPrint('[CloudSyncService] Hydration completed.');
