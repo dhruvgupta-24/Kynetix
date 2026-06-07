@@ -6,7 +6,6 @@ import '../services/profile_service.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/nutrition_hydration_guard.dart';
-import '../services/workout_service.dart';
 import '../services/eating_pattern_service.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
