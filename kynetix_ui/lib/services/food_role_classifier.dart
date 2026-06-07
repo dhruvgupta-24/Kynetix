@@ -144,6 +144,50 @@ class FoodRoleClassifier {
     return items.map((p) => RolledFoodItem(p, classify(p.normalizedName))).toList();
   }
 
+  /// Estimate the serving count of a food item.
+  /// Explicit count-based carbs (roti, bread) use quantity directly.
+  /// Weight-based/volume-based carbs and accompaniments fall back to calorie/weight ratios.
+  static double estimateServingCount(String normalizedName, FoodRole role, double quantity, double calories) {
+    final name = normalizedName.toLowerCase();
+    final qty = quantity > 0.0 ? quantity : 1.0;
+
+    if (role == FoodRole.primary) {
+      if (name.contains('roti') || name.contains('chapati') || name.contains('chapatti') || name.contains('phulka') || name.contains('poori')) {
+        return qty;
+      }
+      if (name.contains('paratha') || name.contains('naan')) {
+        return qty * 1.5;
+      }
+      if (name.contains('bread') || name.contains('toast')) {
+        return qty * 0.5;
+      }
+      if (name.contains('rice') || name.contains('chawal')) {
+        return calories / 130.0;
+      }
+      // General primary fallback
+      return calories / 200.0;
+    }
+
+    if (role == FoodRole.accompaniment) {
+      if (name.contains('paneer')) {
+        return calories / 250.0;
+      }
+      if (name.contains('rajma') || name.contains('chole') || name.contains('channa') || name.contains('kidney bean') || name.contains('chickpea')) {
+        return calories / 150.0;
+      }
+      if (name.contains('dal') || name.contains('sambar') || name.contains('kadhi') || name.contains('rasam')) {
+        return calories / 100.0;
+      }
+      if (name.contains('sabzi') || name.contains('sabji') || name.contains('bhindi') || name.contains('gobi') || name.contains('aloo')) {
+        return calories / 120.0;
+      }
+      // General accompaniment fallback
+      return calories / 120.0;
+    }
+
+    return 1.0;
+  }
+
   // ── Private ─────────────────────────────────────────────────────────────────
 
   static bool _matchesAny(String lc, List<String> keywords) =>

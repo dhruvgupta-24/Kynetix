@@ -51,6 +51,7 @@ class NutritionItem {
   final NutrientRange? sugar;
   final NutrientRange? saturatedFat;
   final NutrientRange? sodium;
+  final bool           eatingPatternScalarApplied;
 
   const NutritionItem({
     required this.name,
@@ -66,6 +67,7 @@ class NutritionItem {
     this.sugar,
     this.saturatedFat,
     this.sodium,
+    this.eatingPatternScalarApplied = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -82,6 +84,7 @@ class NutritionItem {
         if (sugar != null) 'sugar': {'min': sugar!.min, 'max': sugar!.max},
         if (saturatedFat != null) 'saturatedFat': {'min': saturatedFat!.min, 'max': saturatedFat!.max},
         if (sodium != null) 'sodium': {'min': sodium!.min, 'max': sodium!.max},
+        'eatingPatternScalarApplied': eatingPatternScalarApplied,
       };
 
   factory NutritionItem.fromJson(Map<String, dynamic> j) {
@@ -111,6 +114,7 @@ class NutritionItem {
       sugar: j['sugar'] != null ? _range(j['sugar']) : null,
       saturatedFat:  j['saturatedFat'] != null ? _range(j['saturatedFat']) : null,
       sodium:        j['sodium'] != null ? _range(j['sodium']) : null,
+      eatingPatternScalarApplied: j['eatingPatternScalarApplied'] as bool? ?? false,
     );
   }
 
@@ -138,6 +142,7 @@ class NutritionItem {
         sugar: sugar != null ? _normalizeRange(sugar!) : null,
         saturatedFat: saturatedFat != null ? _normalizeRange(saturatedFat!) : null,
         sodium: sodium != null ? _normalizeRange(sodium!) : null,
+        eatingPatternScalarApplied: eatingPatternScalarApplied,
       );
 
   static NutrientRange _normalizeRange(NutrientRange r) {
@@ -176,6 +181,7 @@ class NutritionItem {
       sodium: sodium != null
           ? NutrientRange(min: sodium!.min * scalar, max: sodium!.max * scalar)
           : null,
+      eatingPatternScalarApplied: true,
     );
   }
 }

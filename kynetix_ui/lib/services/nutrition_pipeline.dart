@@ -16,6 +16,7 @@ import '../services/unit_normalizer.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/cloud_sync_service.dart';
+import '../screens/onboarding_screen.dart' show currentUserProfile, PortionAnchor;
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -71,7 +72,7 @@ class NutritionPipeline {
       debugPrint('  -> ${p.normalizedName} (qty: ${p.quantity}, unit: ${p.unit})');
     }
 
-    final finalItems = <NutritionItem>[];
+    var finalItems = <NutritionItem>[];
     double sumCalMin = 0, sumCalMax = 0;
     double sumProMin = 0, sumProMax = 0;
     final allWarnings = <String>[];
@@ -230,32 +231,8 @@ class NutritionPipeline {
       }
     }
 
-    // Apply eating pattern scalars
-    final rolledItems = FoodRoleClassifier.classifyAll(parsedItems);
-    final rolledMap = { for (final r in rolledItems) r.parsed.normalizedName: r };
-
-    for (int i = 0; i < finalItems.length; i++) {
-      var item = finalItems[i];
-      final rolled = rolledMap[item.name];
-      if (rolled == null) continue;
-
-      // Determine context: is there a primary food in this meal?
-      final hasPrimary = rolledItems.any((r) => r.role == FoodRole.primary);
-      final contextRole = hasPrimary ? FoodRole.primary : null;
-
-      final scalar = EatingPatternService.instance.getScalar(
-        rolled.role,
-        contextRole: contextRole,
-      );
-
-      if (scalar != null) {
-        // Apply scalar to calorie/macro estimates (scale min AND max)
-        finalItems[i] = item.withScalar(scalar);
-        debugPrint('[Pipeline] 🧠 Pattern scalar ${scalar.toStringAsFixed(2)}× '
-            'applied to "${item.name}" (${rolled.role.name} in context of '
-            '${contextRole?.name ?? "solo"})');
-      }
-    }
+    // Apply eating pattern scalars and Portion Anchor meal-level adjustments
+    finalItems = _applyMealLevelPortionAnchorPass(finalItems);
 
     // ── 4. AGGREGATION ───────────────────────────────────────────────────────
     double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
@@ -310,7 +287,8 @@ class NutritionPipeline {
     );
 
     // Record meal context for pattern learning and sync to cloud
-    EatingPatternService.instance.recordMealContext(rolledItems);
+    EatingPatternService.instance.recordMealContext(
+        FoodRoleClassifier.classifyAll(parsedItems));
     // Fire-and-forget: upload new contexts to Supabase so they survive device wipes
     CloudSyncService.instance.syncMealContextsBackground().ignore();
     CloudSyncService.instance.syncEatingPatternsBackground().ignore();
@@ -780,7 +758,7 @@ class NutritionPipeline {
     if (trimmed.isEmpty) return null;
 
     final parsedItems = ItemParser.parse(trimmed);
-    final finalItems = <NutritionItem>[];
+    var finalItems = <NutritionItem>[];
 
     for (final parsed in parsedItems) {
       final normParsed = _normalizeParsed(parsed);
@@ -820,6 +798,8 @@ class NutritionPipeline {
 
       return null; // Atomic item missed memory, requires AI -> fail sync lookup
     }
+
+    finalItems = _applyMealLevelPortionAnchorPass(finalItems);
 
     double sumCalMin = 0, sumCalMax = 0, sumProMin = 0, sumProMax = 0;
     double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
@@ -883,6 +863,114 @@ class NutritionPipeline {
       mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
       mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
     );
+  }
+
+  List<NutritionItem> _applyMealLevelPortionAnchorPass(List<NutritionItem> items) {
+    if (items.isEmpty) return items;
+
+    // Check if the pass has already been applied to prevent double application
+    if (items.any((item) => item.eatingPatternScalarApplied)) {
+      if (kDebugMode) {
+        debugPrint('[Pipeline Pass] ⚠️  Skipping Portion Anchor pass: already applied.');
+      }
+      return items;
+    }
+
+    final anchor = currentUserProfile?.portionAnchor;
+
+    // 1. Detect roles and compile base metrics
+    final roles = <NutritionItem, FoodRole>{};
+    double totalPrimaryCalories = 0;
+    double totalAccompanimentCalories = 0;
+
+    for (final item in items) {
+      final role = FoodRoleClassifier.classify(item.name);
+      roles[item] = role;
+      if (role == FoodRole.primary) {
+        totalPrimaryCalories += item.calories.mid;
+      } else if (role == FoodRole.accompaniment) {
+        totalAccompanimentCalories += item.calories.mid;
+      }
+    }
+
+    final hasPrimary = totalPrimaryCalories > 0;
+    final hasAccompaniment = totalAccompanimentCalories > 0;
+
+    // 2. Compute unscaled serving equivalents
+    double baseCarbServings = 0;
+    double baseAccServings = 0;
+    for (final item in items) {
+      final role = roles[item]!;
+      if (role == FoodRole.primary) {
+        baseCarbServings += FoodRoleClassifier.estimateServingCount(item.name, FoodRole.primary, item.quantity, item.calories.mid);
+      } else if (role == FoodRole.accompaniment) {
+        baseAccServings += FoodRoleClassifier.estimateServingCount(item.name, FoodRole.accompaniment, item.quantity, item.calories.mid);
+      }
+    }
+
+    // Safeguards against extreme scaling / pathological inputs
+    baseCarbServings = baseCarbServings.clamp(0.1, 10.0);
+    baseAccServings = baseAccServings.clamp(0.1, 10.0);
+
+    final result = <NutritionItem>[];
+
+    // Helper to safely retrieve user-specific learned/seeded pattern scalars
+    double? getPatternScalar(FoodRole role, FoodRole? context) {
+      return EatingPatternService.instance.getScalar(role, contextRole: context);
+    }
+
+    for (final item in items) {
+      final role = roles[item]!;
+      double? finalScalar;
+
+      if (anchor == PortionAnchor.carbAnchored && hasPrimary && hasAccompaniment) {
+        if (role == FoodRole.accompaniment) {
+          // Expected accompaniment servings scaled based on carb servings
+          final expectedAccServings = baseCarbServings * 0.5;
+          final baseScale = (expectedAccServings / baseAccServings).clamp(0.3, 3.0);
+          final patternScalar = getPatternScalar(FoodRole.accompaniment, FoodRole.primary) ?? 0.55;
+          finalScalar = (baseScale * patternScalar).clamp(0.3, 2.5);
+        } else {
+          finalScalar = getPatternScalar(role, hasAccompaniment ? FoodRole.accompaniment : null);
+        }
+      } else if (anchor == PortionAnchor.curryAnchored && hasPrimary && hasAccompaniment) {
+        if (role == FoodRole.primary) {
+          // Carbs portion scales to finish accompaniment curries.
+          // Scaled curries are used to calculate the accompanimentServings.
+          final accPatternScalar = getPatternScalar(FoodRole.accompaniment, FoodRole.primary) ?? 1.40;
+          final scaledAccServings = baseAccServings * accPatternScalar;
+
+          final expectedCarbServings = scaledAccServings * 1.5;
+          final baseScale = (expectedCarbServings / baseCarbServings).clamp(0.3, 3.0);
+          final patternScalar = getPatternScalar(FoodRole.primary, FoodRole.accompaniment) ?? 0.60;
+          finalScalar = (baseScale * patternScalar).clamp(0.3, 2.5);
+        } else if (role == FoodRole.accompaniment) {
+          finalScalar = getPatternScalar(FoodRole.accompaniment, FoodRole.primary) ?? 1.40;
+        } else {
+          finalScalar = getPatternScalar(role, hasPrimary ? FoodRole.primary : null);
+        }
+      } else {
+        // Balanced / Solo / No-profile: standard scalar logic
+        final context = (role == FoodRole.primary)
+            ? (hasAccompaniment ? FoodRole.accompaniment : null)
+            : (role == FoodRole.accompaniment)
+                ? (hasPrimary ? FoodRole.primary : null)
+                : null;
+        finalScalar = getPatternScalar(role, context);
+      }
+
+      if (finalScalar != null) {
+        result.add(item.withScalar(finalScalar));
+        if (kDebugMode) {
+          debugPrint('[Pipeline Pass] 🧠 Scalar ${finalScalar.toStringAsFixed(2)}× applied to "${item.name}" ($role)');
+        }
+      } else {
+        // Mark as processed/scalar-applied even if 1.0 to protect against double application
+        result.add(item.withScalar(1.0));
+      }
+    }
+
+    return result;
   }
 }
 
