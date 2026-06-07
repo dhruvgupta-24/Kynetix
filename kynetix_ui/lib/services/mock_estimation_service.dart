@@ -171,6 +171,13 @@ const List<_FoodEntry> _db = [
     tier:     _Tier.veryHigh,
   ),
   _FoodEntry(
+    label:    'Sprouts',
+    keywords: ['sprouts', 'sprout', 'sprouted Moong', 'sprouted Moong dal'],
+    calories: NutrientRange(min: 100, max: 120),
+    protein:  NutrientRange(min: 7.0, max: 9.0),
+    tier:     _Tier.veryHigh,
+  ),
+  _FoodEntry(
     label:    'Indian Snacks / Namkeen',
     keywords: ['tedhe medhe', 'kurkure', 'chips', 'namkeen', 'snack', 'snacks', 'lay', 'lays', 'bingo'],
     calories: NutrientRange(min: 130, max: 170),
@@ -354,7 +361,7 @@ const List<_FoodEntry> _db = [
   ),
   _FoodEntry(
     label:    'Chole (1 serving)',
-    keywords: ['chole', 'chana', 'chickpea', 'chhole'],
+    keywords: ['chole', 'chana', 'channa', 'chickpea', 'chhole'],
     calories: NutrientRange(min: 145, max: 168),   // ±7 %
     protein:  NutrientRange(min: 7.5, max: 9.0),
     isSide:   true,
@@ -944,4 +951,21 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
     matchedTokenCount: claimedTokens.length,
     matchedKeywords: matchedKeywords,
   );
+}
+
+List<String> getDatabaseWords() {
+  final Set<String> words = {};
+  for (final entry in _db) {
+    // Label words
+    for (final word in entry.label.toLowerCase().split(RegExp(r'[^a-zA-Z0-9]'))) {
+      if (word.isNotEmpty) words.add(word);
+    }
+    // Keywords
+    for (final kw in entry.keywords) {
+      for (final word in kw.toLowerCase().split(RegExp(r'[^a-zA-Z0-9]'))) {
+        if (word.isNotEmpty) words.add(word);
+      }
+    }
+  }
+  return words.toList();
 }

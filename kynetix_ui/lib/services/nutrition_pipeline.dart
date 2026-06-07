@@ -754,17 +754,24 @@ class NutritionPipeline {
         'matched_keywords=${analysis.matchedKeywords.join(', ')}';
   }
 
-  NutritionResult _empty() => NutritionResult(
-        canonicalMeal:  '',
-        items:          const [],
-        calories:       const NutrientRange(min: 0, max: 0),
-        protein:        const NutrientRange(min: 0, max: 0),
-        confidence:     0,
-        warnings:       const ['No input provided.'],
-        source:         'local_fallback',
-        fallbackReason: 'Empty input',
-        createdAt:      DateTime.now(),
-      );
+  NutritionResult _empty() {
+    final score = NutritionResult.calculateLocalQualityScore(0, 0, '');
+    return NutritionResult(
+      canonicalMeal:  '',
+      items:          const [],
+      calories:       const NutrientRange(min: 0, max: 0),
+      protein:        const NutrientRange(min: 0, max: 0),
+      confidence:     0,
+      warnings:       const ['No input provided.'],
+      source:         'local_fallback',
+      fallbackReason: 'Empty input',
+      createdAt:      DateTime.now(),
+      mealQualityScore: score,
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, ''),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, ''),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, ''),
+    );
+  }
 
   /// Synchronous memory evaluation. Useful for UI elements that need memory numbers instantly 
   /// without risking an async OpenRouter AI API call.

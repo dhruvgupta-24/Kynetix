@@ -889,14 +889,21 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'EXERCISES PLAN',
-                    style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
+                  Expanded(
+                    child: Text(
+                      'EXERCISES PLAN',
+                      style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   if (exercises.isNotEmpty)
-                    Text(
-                      '${exercises.length} Exercises',
-                      style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
+                    Flexible(
+                      child: Text(
+                        '${exercises.length} Exercises',
+                        style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                 ],
               ),
@@ -929,9 +936,12 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                     children: [
                       const Icon(Icons.drag_indicator_rounded, color: KColor.textMuted, size: 14),
                       const SizedBox(width: 6),
-                      Text(
-                        'Drag handle to change exercise ordering',
-                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                      Expanded(
+                        child: Text(
+                          'Drag handle to change exercise ordering',
+                          style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -1027,6 +1037,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
                         Icons.add_circle_outline_rounded,
@@ -1034,12 +1045,15 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                         size: 18,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        'Add Exercise',
-                        style: KText.bodyMedium.copyWith(
-                          color: KColor.green,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
+                      Flexible(
+                        child: Text(
+                          'Add Exercise',
+                          overflow: TextOverflow.ellipsis,
+                          style: KText.bodyMedium.copyWith(
+                            color: KColor.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13.5,
+                          ),
                         ),
                       ),
                     ],

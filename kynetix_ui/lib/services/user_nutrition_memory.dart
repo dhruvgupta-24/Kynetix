@@ -423,6 +423,15 @@ class UserNutritionMemory {
       debugPrint('[UserNutritionMemory] ✅ MATCH '
           '"${bestMatch.canonicalMeal}" f1=$bestScore '
           '| ${bestMatch.caloriesPerUnit.toStringAsFixed(3)} kcal/${bestMatch.referenceUnit}');
+      final score = NutritionResult.calculateLocalQualityScore(
+        bestMatch.caloriesPerUnit,
+        bestMatch.proteinPerUnit,
+        bestMatch.canonicalMeal,
+        carbs: bestMatch.carbohydratesPerUnit,
+        fat: bestMatch.fatPerUnit,
+        fiber: bestMatch.fiberPerUnit,
+      );
+
       return NutritionResult(
         canonicalMeal: bestMatch.canonicalMeal,
         items:         [],
@@ -443,6 +452,10 @@ class UserNutritionMemory {
         warnings:      [],
         source:        'user_override',
         createdAt:     DateTime.now(),
+        mealQualityScore: score,
+        mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, bestMatch.canonicalMeal),
+        mealQualityPositive: NutritionResult.getLocalQualityPositive(score, bestMatch.canonicalMeal),
+        mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, bestMatch.canonicalMeal),
       );
     }
 

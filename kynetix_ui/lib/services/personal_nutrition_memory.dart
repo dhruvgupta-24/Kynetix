@@ -178,6 +178,8 @@ class PersonalNutritionMemory {
       .map((e) => e.toJson())
       .toList(growable: false);
 
+  List<String> get allTemplateKeys => _defaultTemplates.keys.toList();
+
   // ── Milk interpolation ────────────────────────────────────────────────────
   //
   // Handles "N ml milk", "N ml doodh" for any quantity using linear
@@ -318,6 +320,15 @@ class PersonalNutritionMemory {
         ? NutrientRange(min: fiber, max: fiber)
         : NutritionResult.estimateFiberLocally(kcal, label);
 
+    final score = NutritionResult.calculateLocalQualityScore(
+      kcal,
+      protein,
+      label,
+      carbs: carbs.mid,
+      fat: f.mid,
+      fiber: fib.mid,
+    );
+
     return NutritionResult(
       canonicalMeal: label,
       items: [
@@ -343,6 +354,10 @@ class PersonalNutritionMemory {
       warnings: const [],
       source: source,
       createdAt: DateTime.now(),
+      mealQualityScore: score,
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, label),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, label),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, label),
     ).normalizedUncertainty();
   }
 }

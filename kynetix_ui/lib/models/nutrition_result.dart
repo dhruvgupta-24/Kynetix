@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../services/mock_estimation_service.dart'
     show NutrientRange, FoodItem, EstimationResult;
 import '../services/user_nutrition_memory.dart';
@@ -590,6 +591,9 @@ class NutritionResult {
     double? fat,
     double? fiber,
   }) {
+    if (cal <= 0) {
+      debugPrint('[calculateLocalQualityScore] Warning: Quality score calculated for zero/low calorie entry (text: "$text").');
+    }
     final lowerText = text.toLowerCase();
     double score = 55.0; // base score
 

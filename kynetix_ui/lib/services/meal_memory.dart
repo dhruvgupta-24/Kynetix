@@ -401,6 +401,9 @@ class MealMemory {
       _store.values.toList()
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
+  /// All known foods defaults/learned templates.
+  Map<String, NutritionResult> get allKnownFoods => Map.unmodifiable(_knownFoods);
+
   // ── Internals ─────────────────────────────────────────────────────────────
 
   Future<void> _persist() async {
@@ -571,7 +574,21 @@ NutritionResult _knownSingleItem({
   required NutrientRange calories,
   required NutrientRange protein,
   required EstimationMode mode,
-}) => NutritionResult(
+}) {
+  final calMid = (calories.min + calories.max) / 2;
+  final proMid = (protein.min + protein.max) / 2;
+  final carbs = NutritionResult.estimateCarbsLocally(calMid, proMid, canonicalMeal);
+  final fat = NutritionResult.estimateFatLocally(calMid, proMid, canonicalMeal);
+  final fiber = NutritionResult.estimateFiberLocally(calMid, canonicalMeal);
+  final score = NutritionResult.calculateLocalQualityScore(
+    calMid,
+    proMid,
+    canonicalMeal,
+    carbs: carbs.mid,
+    fat: fat.mid,
+    fiber: fiber.mid,
+  );
+  return NutritionResult(
       canonicalMeal: canonicalMeal,
       items: [
         NutritionItem(
@@ -582,15 +599,26 @@ NutritionResult _knownSingleItem({
           mode: mode,
           calories: calories,
           protein: protein,
+          carbohydrates: carbs,
+          fat: fat,
+          fiber: fiber,
         ),
       ],
       calories: calories,
       protein: protein,
+      carbohydrates: carbs,
+      fat: fat,
+      fiber: fiber,
       confidence: 0.98,
       warnings: const [],
       source: 'memory_exact',
       createdAt: DateTime.now(),
+      mealQualityScore: score,
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, canonicalMeal),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
     ).normalizedUncertainty();
+}
 
 final Map<String, NutritionResult> _defaultKnownFoods = {
   MealMemory.normalize('1 scoop whey'):

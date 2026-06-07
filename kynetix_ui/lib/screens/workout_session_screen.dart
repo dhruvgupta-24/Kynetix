@@ -248,7 +248,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 .toList();
           }
 
-          _selectedIndex = (data['selectedIndex'] as int? ?? 0).clamp(0, _sessionExercises.length - 1);
+          _selectedIndex = _sessionExercises.isEmpty
+              ? 0
+              : (data['selectedIndex'] as int? ?? 0).clamp(0, _sessionExercises.length - 1);
           
           final setTypeMap = data['setTypeSelections'] as Map<String, dynamic>?;
           if (setTypeMap != null) {
@@ -630,13 +632,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _rpeSelections.remove(original.id);
       _setTypeSelections.remove(original.id);
       
-      if (_selectedIndex >= _sessionExercises.length) {
-        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
-      }
+      _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
+      if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
         _pageController.jumpToPage(_selectedIndex);
       }
     });
@@ -668,13 +668,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _skippedExercises.remove(exercise.id);
       _skipReasons.remove(exercise.id);
       
-      if (_selectedIndex >= _sessionExercises.length) {
-        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
-      }
+      _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
+      if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
         _pageController.jumpToPage(_selectedIndex);
       }
     });
@@ -899,6 +897,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           borderRadius: BorderRadius.circular(16),
           side: const BorderSide(color: KColor.border, width: 0.5),
         ),
+        actionsOverflowDirection: VerticalDirection.down,
         title: const Text('End Workout Session', style: TextStyle(color: Colors.white)),
         content: const Text(
           'Choose how you want to save this session. If you intentionally cut it short, choose Partial.',
@@ -977,6 +976,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2C),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actionsOverflowDirection: VerticalDirection.down,
         title: const Text('Pause Workout?', style: TextStyle(color: Colors.white)),
         content: const Text(
           'Do you want to save this as a draft and resume later, or discard it entirely?',
@@ -1080,6 +1080,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         builder: (_) => AlertDialog(
           backgroundColor: const Color(0xFF1E1E2C),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          actionsOverflowDirection: VerticalDirection.down,
           title: const Text('Remove exercise?', style: TextStyle(color: Colors.white)),
           content: Text(
             'You logged sets for "${ex.name}". Removing it will discard those sets for today.',
@@ -1107,13 +1108,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _repsSelections.remove(ex.id);
       _rpeSelections.remove(ex.id);
       _setTypeSelections.remove(ex.id);
-      if (_selectedIndex >= _sessionExercises.length) {
-        _selectedIndex = (_sessionExercises.length - 1).clamp(0, double.maxFinite.toInt());
-      }
+      _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
+      if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
         _pageController.jumpToPage(_selectedIndex);
       }
     });
@@ -1166,8 +1165,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 children: [
                   _buildSessionAppBar(),
                   Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
+                    child: _sessionExercises.isEmpty
+                        ? _buildEmptyState()
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
                         final isWide = constraints.maxWidth > 600;
                         return PageView.builder(
                           controller: _pageController,
@@ -1443,6 +1444,69 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           text: data.text,
         );
       }).toList(),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: KColor.green.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.fitness_center_rounded,
+                color: KColor.green,
+                size: 64,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Empty Workout Session',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Add your first exercise to start tracking your sets, weight, reps, and RPE.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: KColor.textSecondary,
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: 200,
+              height: 48,
+              child: ElevatedButton.icon(
+                key: const Key('center_add_exercise_button'),
+                onPressed: _addExerciseToSession,
+                icon: const Icon(Icons.add_rounded, color: Colors.white),
+                label: const Text('Add Exercise', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: KColor.green,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2008,9 +2072,13 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${s.reps} reps',
-                                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                  Flexible(
+                                    child: Text(
+                                      '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${s.reps} reps',
+                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
@@ -3320,6 +3388,42 @@ class _BottomDockWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (exercises.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C0C14).withValues(alpha: 0.95),
+          border: const Border(top: BorderSide(color: Color(0xFF1E1E2F), width: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 20,
+              offset: const Offset(0, -6),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              key: const Key('bottom_add_exercise_button'),
+              onPressed: onAddExercise,
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              label: const Text('Add Exercise', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 0.5)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: KColor.green,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final activeEx = exercises[selectedIndex];
     final loggedList = sets[activeEx.id] ?? [];
     final isSkipped = skippedExercises[activeEx.id] ?? false;

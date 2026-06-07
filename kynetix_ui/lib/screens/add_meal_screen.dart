@@ -1,3 +1,4 @@
+import 'dart:async' show Timer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
@@ -107,9 +108,15 @@ class _AddMealScreenState extends State<AddMealScreen>
   double _totalFib = 0;
   String? _validationWarning;
 
+  String? _spellingSuggestion;
+  double? _spellingConfidence;
+  Timer? _spellingDebounce;
+  bool _showSpellingBanner = true;
+
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_onTextChanged);
     if (widget.initialEntry != null) {
       _controller.text = widget.initialEntry!.finalSavedInput;
       _result = widget.initialEntry!.result;
@@ -130,8 +137,55 @@ class _AddMealScreenState extends State<AddMealScreen>
     }
   }
 
+  void _onTextChanged() {
+    _spellingDebounce?.cancel();
+    _spellingDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      final text = _controller.text.trim();
+      if (text.isEmpty) {
+        setState(() {
+          _spellingSuggestion = null;
+          _spellingConfidence = null;
+          _showSpellingBanner = false;
+        });
+        return;
+      }
+      final sug = ItemParser.getSpellingSuggestion(text);
+      if (sug != null) {
+        setState(() {
+          _spellingSuggestion = sug.suggested;
+          _spellingConfidence = sug.confidence;
+          _showSpellingBanner = true;
+        });
+      } else {
+        setState(() {
+          _spellingSuggestion = null;
+          _spellingConfidence = null;
+          _showSpellingBanner = false;
+        });
+      }
+    });
+  }
+
+  void _acceptSpellingSuggestion() {
+    if (_spellingSuggestion == null) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      _controller.text = _spellingSuggestion!;
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+      _spellingSuggestion = null;
+      _spellingConfidence = null;
+      _showSpellingBanner = false;
+    });
+    _calculate();
+  }
+
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
+    _spellingDebounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     _pulseCtrl.dispose();
@@ -661,6 +715,71 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
   }
 
+  Widget _buildSpellingSuggestionBanner() {
+    final isHighConf = _spellingConfidence != null && _spellingConfidence! > 0.95;
+    final themeColor = isHighConf ? const Color(0xFF52B788) : const Color(0xFFFFB347);
+    final bgColor = themeColor.withOpacity(0.08);
+    final border = Border.all(color: themeColor.withOpacity(0.3), width: 0.8);
+    
+    final text = isHighConf
+        ? 'Corrected to: '
+        : 'Did you mean: ';
+        
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: border,
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isHighConf ? Icons.check_circle_outline_rounded : Icons.help_outline_rounded,
+            color: themeColor,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                children: [
+                  TextSpan(text: text),
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: GestureDetector(
+                      onTap: _acceptSpellingSuggestion,
+                      child: Text(
+                        _spellingSuggestion!,
+                        style: TextStyle(
+                          color: themeColor,
+                          fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!isHighConf) const TextSpan(text: '?'),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 16, color: KColor.textMuted),
+            onPressed: () {
+              setState(() {
+                _showSpellingBanner = false;
+              });
+            },
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialEntry != null;
@@ -757,6 +876,10 @@ class _AddMealScreenState extends State<AddMealScreen>
                         ),
                       ),
                     ),
+                    if (_spellingSuggestion != null && _showSpellingBanner) ...[
+                      const SizedBox(height: 8),
+                      _buildSpellingSuggestionBanner(),
+                    ],
                     const SizedBox(height: 10),
 
                     SizedBox(
@@ -808,14 +931,18 @@ class _AddMealScreenState extends State<AddMealScreen>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'Remember edits for future logs',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFFD1D5DB),
+                          const Expanded(
+                            child: Text(
+                              'Remember edits for future logs',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFFD1D5DB),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           Switch(
                             value: _rememberEdits,
                             onChanged: (v) => setState(() => _rememberEdits = v),
@@ -852,12 +979,15 @@ class _AddMealScreenState extends State<AddMealScreen>
                               children: [
                                 Icon(Icons.bookmark_rounded, size: 11, color: KColor.green),
                                 const SizedBox(width: 4),
-                                Text(
-                                  'Saved to Food Library',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: KColor.green,
+                                Flexible(
+                                  child: Text(
+                                    'Saved to Food Library',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: KColor.green,
+                                    ),
                                   ),
                                 ),
                               ],

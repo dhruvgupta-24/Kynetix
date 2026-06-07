@@ -1,5 +1,22 @@
 import 'package:flutter/foundation.dart';
 import 'parser_lexicon.dart';
+import 'mock_estimation_service.dart' show getDatabaseWords;
+import 'user_nutrition_memory.dart';
+import 'meal_memory.dart';
+import 'personal_nutrition_memory.dart';
+
+class SpellingSuggestion {
+  final String original;
+  final String suggested;
+  final double confidence;
+
+  const SpellingSuggestion({
+    required this.original,
+    required this.suggested,
+    required this.confidence,
+  });
+}
+
 
 class ParsedFoodItem {
   final String rawChunk;
@@ -24,7 +41,9 @@ class ItemParser {
     String text = rawInput.toLowerCase().trim();
     if (text.isEmpty) return [];
 
-    debugPrint('[ItemParser] Input: "$rawInput"');
+    if (kDebugMode) {
+      debugPrint('[ItemParser] Input: "$rawInput"');
+    }
 
     // 1. Explicit Delimiter Split
     // Replace all explicit delimiters with a unique separator '|'
@@ -43,13 +62,21 @@ class ItemParser {
 
     // We now split by '|'
     final rawChunks = text.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-    debugPrint('[ItemParser] Raw Chunks: $rawChunks');
+    if (kDebugMode) {
+      debugPrint('[ItemParser] Raw Chunks: $rawChunks');
+    }
 
     // 3. Extract quantity per chunk
     final parsedItems = <ParsedFoodItem>[];
     for (final chunk in rawChunks) {
       final parsed = _extractQuantityAndName(chunk);
-      parsedItems.add(parsed);
+      final correctedName = correctSpelling(parsed.normalizedName);
+      parsedItems.add(ParsedFoodItem(
+        rawChunk: parsed.rawChunk,
+        normalizedName: correctedName,
+        quantity: parsed.quantity,
+        unit: parsed.unit,
+      ));
     }
 
     return parsedItems;
@@ -85,9 +112,6 @@ class ItemParser {
     }
 
     // Now, if 'name' starts or ends with a known unit, extract it.
-    // "scoop whey" -> unit: scoop, name: whey
-    // "chapatis 2" -> wait, if "2 chapatis" was handled, number extracted, name "chapatis".
-    // We check if the name consists of a unit ONLY or Starts with a unit.
     bool unitFound = false;
     
     // Sort units by length descending so "tablespoon" matches before "tbsp" or "spoon"
@@ -111,8 +135,6 @@ class ItemParser {
     }
 
     // Handle things like "150g tofu"
-    // If the chunk started with "150g", the previous regex wouldn't catch it because of missing space!
-    // Let's refine the number matcher to handle optional space.
     if (!handledFractions && qty == 1.0 && !unitFound) {
       final tightNumberUnitMatch = RegExp(r'^([0-9]*\.?[0-9]+)([a-zA-Z]+)\s*(.*)').firstMatch(chunk);
       if (tightNumberUnitMatch != null) {
@@ -123,15 +145,11 @@ class ItemParser {
         if (parsedNum != null && ParserLexicon.commonUnits.contains(matchedUnit)) {
           qty = parsedNum;
           unit = matchedUnit;
-          name = rest.isEmpty ? matchedUnit : rest; // if it was just "150g", name is "g"? No name should be rawChunk.
+          name = rest.isEmpty ? matchedUnit : rest;
           unitFound = true;
         }
       }
     }
-
-    // Handle trailing units? E.g., "pizza slice" -> "slice" is unit?
-    // User requested "Unknown Multi-Word Handling". "pizza slice" is protected or left as is.
-    // So if name doesn't start with unit, leave it alone.
     
     // Clean up generic leading/trailing hyphens etc just in case
     name = name.replaceAll(RegExp(r'^-+|-+$'), '').trim();
@@ -145,5 +163,340 @@ class ItemParser {
       quantity: qty,
       unit: unit,
     );
+  }
+
+  static Set<String> getAllFoodWords() {
+    final Set<String> words = {};
+    
+    // 1. Database words
+    try {
+      words.addAll(getDatabaseWords().map((w) => w.toLowerCase()));
+    } catch (_) {}
+
+    // 2. User overrides
+    try {
+      for (final over in UserNutritionMemory.instance.allOverrides) {
+        for (final word in over.canonicalMeal.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+    } catch (_) {}
+
+    // 3. Personal templates
+    try {
+      for (final key in PersonalNutritionMemory.instance.allTemplateKeys) {
+        for (final word in key.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+      for (final over in PersonalNutritionMemory.instance.allUserOverrides) {
+        final label = over['label'] as String? ?? '';
+        for (final word in label.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+    } catch (_) {}
+
+    // 4. MealMemory known foods
+    try {
+      for (final key in MealMemory.instance.allKnownFoods.keys) {
+        for (final word in key.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+    } catch (_) {}
+
+    // 5. MealMemory recurring entries
+    try {
+      for (final entry in MealMemory.instance.allEntries) {
+        for (final word in entry.normalizedInput.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+        for (final word in entry.rawInput.split(RegExp(r'[^a-zA-Z0-9]'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+    } catch (_) {}
+
+    // Add common default foods just in case database hasn't loaded or to ensure coverage
+    words.addAll(const {
+      'sprouts', 'sprout', 'banana', 'paneer', 'oats', 'whey', 'protein', 'rice', 'milk', 'bread', 'chips',
+      'egg', 'tofu', 'peanut', 'butter', 'dal', 'roti', 'sabzi', 'chicken', 'salad', 'veg', 'shake', 'breast'
+    });
+
+    return words;
+  }
+
+  static bool _isProtectedWord(String word) {
+    final w = word.toLowerCase().trim();
+    if (w.isEmpty) return false;
+
+    // 1. Protected brands
+    const protectedBrands = {
+      'myprotein',
+      'optimum',
+      'nutrition',
+      'troovy',
+      'goatlife',
+      'amul',
+    };
+    if (protectedBrands.contains(w)) return true;
+
+    // 2. User-created foods (UserNutritionMemory)
+    try {
+      for (final over in UserNutritionMemory.instance.allOverrides) {
+        for (final part in over.canonicalMeal.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return true;
+        }
+      }
+    } catch (_) {}
+
+    // 3. User overrides (PersonalNutritionMemory)
+    try {
+      for (final over in PersonalNutritionMemory.instance.allUserOverrides) {
+        final label = (over['label'] as String? ?? '').toLowerCase();
+        for (final part in label.split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return true;
+        }
+      }
+    } catch (_) {}
+
+    return false;
+  }
+
+  static int _getWordPriority(String word) {
+    final w = word.toLowerCase().trim();
+    if (w.isEmpty) return 5;
+
+    // 1. User foods
+    try {
+      for (final over in UserNutritionMemory.instance.allOverrides) {
+        for (final part in over.canonicalMeal.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 1;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      for (final over in PersonalNutritionMemory.instance.allUserOverrides) {
+        final label = (over['label'] as String? ?? '').toLowerCase();
+        for (final part in label.split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 1;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Saved foods
+    try {
+      for (final key in MealMemory.instance.allKnownFoods.keys) {
+        for (final part in key.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 2;
+        }
+      }
+      for (final entry in MealMemory.instance.allEntries) {
+        for (final part in entry.normalizedInput.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 2;
+        }
+        for (final part in entry.rawInput.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 2;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Personal templates
+    try {
+      for (final key in PersonalNutritionMemory.instance.allTemplateKeys) {
+        for (final part in key.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 3;
+        }
+      }
+    } catch (_) {}
+
+    // 4. Database foods
+    try {
+      for (final dbWord in getDatabaseWords()) {
+        for (final part in dbWord.toLowerCase().split(RegExp(r'[^a-z0-9]'))) {
+          if (part == w) return 4;
+        }
+      }
+    } catch (_) {}
+
+    return 5;
+  }
+
+  static SpellingSuggestion? getSpellingSuggestion(String text) {
+    final cleanText = text.trim().toLowerCase();
+    if (cleanText.isEmpty) return null;
+
+    final words = cleanText.split(RegExp(r'\s+'));
+    final suggestedWords = <String>[];
+    bool hasCorrection = false;
+    double minConfidence = 1.0;
+
+    final dictionary = getAllFoodWords();
+
+    final Set<String> ignoreWords = {
+      ...ParserLexicon.commonUnits,
+      'and', 'with', 'plus', 'or', '&', '+', 'of', 'for', 'in', 'at', 'on', 'a', 'an', 'the',
+      'half', 'quarter', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'
+    };
+
+    for (final word in words) {
+      if (word.isEmpty || RegExp(r'^\d+$').hasMatch(word) || ignoreWords.contains(word)) {
+        suggestedWords.add(word);
+        continue;
+      }
+
+      // Handle simple plurals silently (high confidence 1.0)
+      if (word.endsWith('s') && dictionary.contains(word.substring(0, word.length - 1))) {
+        suggestedWords.add(word.substring(0, word.length - 1));
+        hasCorrection = true;
+        continue;
+      }
+      if (word.endsWith('es') && dictionary.contains(word.substring(0, word.length - 2))) {
+        suggestedWords.add(word.substring(0, word.length - 2));
+        hasCorrection = true;
+        continue;
+      }
+
+      // If the word itself is exactly in the dictionary, keep it as is
+      if (dictionary.contains(word)) {
+        suggestedWords.add(word);
+        continue;
+      }
+
+      // If the word matches a protected brand or user custom food, keep it as is
+      if (_isProtectedWord(word)) {
+        suggestedWords.add(word);
+        continue;
+      }
+
+      // Find the closest word in the dictionary
+      String bestMatch = word;
+      double bestSimilarity = -1.0;
+      int bestPriority = 99;
+
+      for (final dictWord in dictionary) {
+        final dist = _levenshtein(word, dictWord);
+        final maxLen = word.length > dictWord.length ? word.length : dictWord.length;
+        if (maxLen == 0) continue;
+
+        final double similarity;
+        if (maxLen <= 4 && dist == 1) {
+          similarity = 0.85; // Boost short word 1-char typos to medium confidence (80% - 95%)
+        } else {
+          similarity = 1.0 - (dist / maxLen);
+        }
+
+        final bool isMatch = similarity >= 0.80;
+
+        if (isMatch) {
+          final priority = _getWordPriority(dictWord);
+          if (similarity > bestSimilarity) {
+            bestSimilarity = similarity;
+            bestMatch = dictWord;
+            bestPriority = priority;
+          } else if (similarity == bestSimilarity) {
+            if (priority < bestPriority) {
+              bestMatch = dictWord;
+              bestPriority = priority;
+            }
+          }
+        }
+      }
+
+      // Brand and custom food protection for the SUGGESTED target word:
+      // If the suggested word is a protected brand/custom food, we must require >0.95 confidence.
+      if (bestSimilarity > 0 && _isProtectedWord(bestMatch)) {
+        if (bestSimilarity <= 0.95) {
+          // Reject correction, keep original
+          bestMatch = word;
+          bestSimilarity = -1.0;
+        }
+      }
+
+      if (bestMatch != word && bestSimilarity >= 0.80) {
+        hasCorrection = true;
+        suggestedWords.add(bestMatch);
+        if (bestSimilarity < minConfidence) {
+          minConfidence = bestSimilarity;
+        }
+      } else {
+        suggestedWords.add(word);
+      }
+    }
+
+    if (hasCorrection) {
+      final suggestedText = suggestedWords.join(' ');
+      // 8. Debug logging for spelling suggestions during development:
+      if (kDebugMode) {
+        debugPrint('Input: "$text" Suggestion: "$suggestedText" Confidence: ${minConfidence.toStringAsFixed(2)}');
+      }
+      return SpellingSuggestion(
+        original: text,
+        suggested: suggestedText,
+        confidence: minConfidence,
+      );
+    }
+    return null;
+  }
+
+  static String correctSpelling(String text) {
+    final suggestion = getSpellingSuggestion(text);
+    if (suggestion != null) {
+      // Only auto-correct if confidence is High (> 0.95)
+      if (suggestion.confidence > 0.95) {
+        return suggestion.suggested;
+      }
+    }
+    return text;
+  }
+
+  static int _levenshtein(String s, String t) {
+    if (s == t) return 0;
+    if (s.isEmpty) return t.length;
+    if (t.isEmpty) return s.length;
+
+    final int sLen = s.length;
+    final int tLen = t.length;
+
+    final List<List<int>> d = List.generate(
+      sLen + 1,
+      (_) => List<int>.filled(tLen + 1, 0),
+    );
+
+    for (int i = 0; i <= sLen; i++) {
+      d[i][0] = i;
+    }
+    for (int j = 0; j <= tLen; j++) {
+      d[0][j] = j;
+    }
+
+    for (int i = 1; i <= sLen; i++) {
+      for (int j = 1; j <= tLen; j++) {
+        final int cost = (s.codeUnitAt(i - 1) == t.codeUnitAt(j - 1)) ? 0 : 1;
+
+        int minVal = d[i - 1][j] + 1; // deletion
+        if (d[i][j - 1] + 1 < minVal) minVal = d[i][j - 1] + 1; // insertion
+        if (d[i - 1][j - 1] + cost < minVal) minVal = d[i - 1][j - 1] + cost; // substitution
+
+        if (i > 1 && j > 1 &&
+            s.codeUnitAt(i - 1) == t.codeUnitAt(j - 2) &&
+            s.codeUnitAt(i - 2) == t.codeUnitAt(j - 1)) {
+          if (d[i - 2][j - 2] + cost < minVal) {
+            minVal = d[i - 2][j - 2] + cost; // transposition
+          }
+        }
+        d[i][j] = minVal;
+      }
+    }
+    return d[sLen][tLen];
+  }
+
+  static int _min3(int a, int b, int c) {
+    int min = a;
+    if (b < min) min = b;
+    if (c < min) min = c;
+    return min;
   }
 }

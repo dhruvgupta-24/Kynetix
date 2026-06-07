@@ -284,7 +284,7 @@ class KButton extends StatelessWidget {
         borderRadius: KRadius.md,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
           decoration: BoxDecoration(
             color: outlined ? Colors.transparent : (loading ? bg.withValues(alpha: 0.5) : bg),
             borderRadius: KRadius.md,
@@ -298,6 +298,7 @@ class KButton extends StatelessWidget {
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               if (loading) ...[
                 const SizedBox(
@@ -311,13 +312,17 @@ class KButton extends StatelessWidget {
                 Icon(icon, size: 18, color: Colors.white),
                 const SizedBox(width: 8),
               ],
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
                 ),
               ),
             ],
@@ -356,7 +361,19 @@ class KChip extends StatelessWidget {
             Icon(icon, size: 12, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(label, style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: fg,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
         ],
       ),
     );
