@@ -7,6 +7,7 @@ import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/nutrition_hydration_guard.dart';
+import '../services/eating_pattern_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─── User profile model ───────────────────────────────────────────────────────
@@ -475,6 +476,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     // Fire & forget cloud update
     ProfileService.instance.upsertProfile(currentUserProfile!);
+
+    // Seed eating pattern scalars from the declared eating style so the
+    // scalar system is active from day one, not after 3+ corrections.
+    if (_portionAnchor != null) {
+      EatingPatternService.instance.seedFromPortionAnchor(_portionAnchor!);
+      EatingPatternService.instance.save().ignore();
+    }
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(

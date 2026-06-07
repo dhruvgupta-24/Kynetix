@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'food_role_classifier.dart';
+import '../screens/onboarding_screen.dart' show PortionAnchor;
 
 // ─── EatingPatternService ─────────────────────────────────────────────────────
 //
@@ -195,6 +196,7 @@ class EatingPatternService {
 
   static const _kPatterns = 'eating_patterns_v1';
   static const _kContext  = 'meal_context_v1';
+  static const _kSeeded  = 'eating_pattern_seeded_anchor_v1';
   static const _halfLifeDays = 14.0;
   static const _dropAfterDays = 90;
   static const _minSamples = 3;
@@ -203,6 +205,7 @@ class EatingPatternService {
   final Map<PatternKey, List<_CorrectionRecord>> _records = {};
   final List<_MealContextRecord> _contextRecords = [];
   bool _dirty = false;
+  PortionAnchor? _seededAnchor; // tracks which anchor was last seeded
 
   // ── Recording ───────────────────────────────────────────────────────────────
 
@@ -219,6 +222,7 @@ class EatingPatternService {
     required bool mealHasPrimary,
     required double pipelineCalEstimate,
     required double userCorrectedCal,
+    DateTime? timestamp,
   }) {
     if (pipelineCalEstimate <= 0) return;
     // completeMeal items are self-contained — no role-relationship learning.
@@ -233,7 +237,7 @@ class EatingPatternService {
       pipelineEstimate:  pipelineCalEstimate,
       userCorrectedCal:  userCorrectedCal,
       ratio:             ratio,
-      timestamp:         DateTime.now(),
+      timestamp:         timestamp ?? DateTime.now(),
     ));
 
     // Keep rolling window — drop oldest if over cap.
@@ -374,6 +378,108 @@ class EatingPatternService {
   /// Total number of meal contexts recorded.
   int get totalMealsTracked => _contextRecords.length;
 
+  // ── Portion Anchor Seeding ───────────────────────────────────────────────────
+
+  /// Bootstrap the scalar system from the user's declared eating style.
+  ///
+  /// Inserts synthetic correction records anchored 30 days in the past so they
+  /// count as half-weight after one 14-day half-life.  Real user corrections
+  /// (weight = 1.0 at day 0) accumulate on top and will dominate within a few
+  /// corrections.  Calling this method a second time with the same anchor is a
+  /// no-op; calling with a different anchor first removes the old seed.
+  ///
+  /// Seeding strategy by anchor:
+  ///   carbAnchored   → accompaniments small (0.55×) when primary present
+  ///   curryAnchored  → accompaniments large (1.40×), primary small (0.60×)
+  ///   balanced       → no synthetic seed (population average = 1.0 baseline)
+  void seedFromPortionAnchor(PortionAnchor anchor) {
+    if (_seededAnchor == anchor) {
+      debugPrint('[EatingPatternService] 🌱 Seed already applied for ${anchor.name}. No-op.');
+      return;
+    }
+
+    // Remove any previous seed records before applying the new anchor's seed.
+    _removeSeedRecords();
+    _seededAnchor = anchor;
+
+    if (anchor == PortionAnchor.balanced) {
+      // Balanced = population average. No synthetic tilt needed.
+      debugPrint('[EatingPatternService] 🌱 balanced anchor — no synthetic seed applied.');
+      _dirty = true;
+      return;
+    }
+
+    // Seed timestamp: 30 days ago so it counts at ~0.25 weight relative to today.
+    // This means 2 real corrections (~1.5 effective weight each) quickly dominate.
+    final seedTime = DateTime.now().subtract(const Duration(days: 30));
+
+    void addSeed(PatternKey key, double ratio, {int count = 4}) {
+      final list = _records.putIfAbsent(key, () => []);
+      for (int i = 0; i < count; i++) {
+        // Stagger timestamps slightly so they survive the duplicate filter.
+        final ts = seedTime.subtract(Duration(minutes: i * 5));
+        list.add(_CorrectionRecord(
+          key:               key,
+          pipelineEstimate:  100.0,          // arbitrary non-zero base
+          userCorrectedCal:  100.0 * ratio,  // calibrate to the target ratio
+          ratio:             ratio,
+          timestamp:         ts,
+        ));
+      }
+      // Enforce rolling window cap
+      if (list.length > _maxRecordsPerKey) {
+        _records[key] = list.sublist(list.length - _maxRecordsPerKey);
+      }
+    }
+
+    switch (anchor) {
+      case PortionAnchor.carbAnchored:
+        // Accompaniments (dal, sabzi, curry…) are small when carbs are present.
+        addSeed(
+          PatternKey(FoodRole.accompaniment, contextRole: FoodRole.primary),
+          0.55,
+        );
+        break;
+
+      case PortionAnchor.curryAnchored:
+        // Accompaniments are large (full katori).
+        addSeed(
+          PatternKey(FoodRole.accompaniment, contextRole: FoodRole.primary),
+          1.40,
+        );
+        // Carbs are smaller (just enough to go with the dal).
+        addSeed(
+          PatternKey(FoodRole.primary, contextRole: FoodRole.accompaniment),
+          0.60,
+        );
+        break;
+
+      case PortionAnchor.balanced:
+        break; // handled above
+    }
+
+    _dirty = true;
+    debugPrint('[EatingPatternService] 🌱 Seeded patterns for ${anchor.name}: '
+        '${_records.values.fold(0, (s, l) => s + l.length)} total records');
+  }
+
+  /// Remove all synthetic seed records (identified by age ≥ 29 days and
+  /// pipelineEstimate == 100.0 sentinel).  Real corrections use non-round
+  /// pipeline estimates that won't match this filter.
+  void _removeSeedRecords() {
+    if (_seededAnchor == null) return;
+    final cutoff = DateTime.now().subtract(const Duration(days: 29));
+    for (final key in _records.keys.toList()) {
+      _records[key]!.removeWhere(
+        (r) => r.timestamp.isBefore(cutoff) && r.pipelineEstimate == 100.0,
+      );
+      if (_records[key]!.isEmpty) _records.remove(key);
+    }
+    _seededAnchor = null;
+    _dirty = true;
+    debugPrint('[EatingPatternService] 🗑️  Removed seed records for anchor change.');
+  }
+
   // ── Reset ───────────────────────────────────────────────────────────────────
 
   void resetPattern(FoodRole targetRole, {FoodRole? contextRole}) {
@@ -386,6 +492,7 @@ class EatingPatternService {
   void resetAll() {
     _records.clear();
     _contextRecords.clear();
+    _seededAnchor = null;
     _dirty = true;
     debugPrint('[EatingPatternService] 🗑️  Reset ALL patterns');
   }
@@ -538,6 +645,15 @@ class EatingPatternService {
         }
       }
 
+      // Restore seeded anchor sentinel
+      final seededRaw = prefs.getString(_kSeeded);
+      if (seededRaw != null) {
+        _seededAnchor = PortionAnchor.values.firstWhere(
+          (e) => e.name == seededRaw,
+          orElse: () => PortionAnchor.balanced,
+        );
+      }
+
       _dirty = false;
       debugPrint('[EatingPatternService] ✅ Loaded '
           '${_records.length} pattern keys, '
@@ -563,6 +679,13 @@ class EatingPatternService {
           : _contextRecords;
       await prefs.setString(
           _kContext, jsonEncode(trimmed.map((r) => r.toJson()).toList()));
+
+      // Persist seeded anchor sentinel
+      if (_seededAnchor != null) {
+        await prefs.setString(_kSeeded, _seededAnchor!.name);
+      } else {
+        await prefs.remove(_kSeeded);
+      }
 
       _dirty = false;
       debugPrint('[EatingPatternService] 💾 Saved patterns');

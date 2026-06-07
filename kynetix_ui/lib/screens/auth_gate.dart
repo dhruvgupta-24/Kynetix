@@ -7,6 +7,7 @@ import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/nutrition_hydration_guard.dart';
 import '../services/workout_service.dart';
+import '../services/eating_pattern_service.dart';
 import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
@@ -121,11 +122,15 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       final remoteProfile = await ProfileService.instance.fetchProfile();
       await CloudSyncService.instance.hydrateFromCloud();
       if (remoteProfile != null) {
+        // Remote is source of truth for portionAnchor.
+        // Only fall back to local when remote has no value (older profile rows).
+        final resolvedAnchor = remoteProfile.portionAnchor
+            ?? currentUserProfile?.portionAnchor;
         final mergedProfile = remoteProfile.copyWith(
           healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
           averageDailySteps: currentUserProfile?.averageDailySteps,
           lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
-          portionAnchor: currentUserProfile?.portionAnchor,
+          portionAnchor: resolvedAnchor,
           useCustomTargets: currentUserProfile?.useCustomTargets,
           customMaintenanceCalories: currentUserProfile?.customMaintenanceCalories,
           customTrainingDayCalories: currentUserProfile?.customTrainingDayCalories,
@@ -137,6 +142,11 @@ class _LoggedInGateState extends State<_LoggedInGate> {
         );
         await PersistenceService.saveProfile(mergedProfile);
         currentUserProfile = mergedProfile;
+        // Seed eating pattern scalars from the declared style.
+        if (resolvedAnchor != null) {
+          EatingPatternService.instance.seedFromPortionAnchor(resolvedAnchor);
+          await EatingPatternService.instance.save();
+        }
         if (mounted) {
           setState(() {}); // refresh visual state
         }
@@ -161,12 +171,15 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       if (remoteProfile != null) {
         debugPrint('[_LoggedInGate] Supabase Profile Found. Triggering localized AppShell hydration.');
         
-        // Preserve local Health Connect state and unsynced local goal changes
+        // Remote is source of truth for portionAnchor.
+        // Only fall back to local when remote has no value (older profile rows).
+        final resolvedAnchor = remoteProfile.portionAnchor
+            ?? currentUserProfile?.portionAnchor;
         final mergedProfile = remoteProfile.copyWith(
           healthSyncEnabled: currentUserProfile?.healthSyncEnabled ?? false,
           averageDailySteps: currentUserProfile?.averageDailySteps,
           lastHealthSyncAt: currentUserProfile?.lastHealthSyncAt,
-          portionAnchor: currentUserProfile?.portionAnchor,
+          portionAnchor: resolvedAnchor,
           useCustomTargets: currentUserProfile?.useCustomTargets,
           customMaintenanceCalories: currentUserProfile?.customMaintenanceCalories,
           customTrainingDayCalories: currentUserProfile?.customTrainingDayCalories,
@@ -181,6 +194,11 @@ class _LoggedInGateState extends State<_LoggedInGate> {
         await PersistenceService.saveProfile(mergedProfile);
         await PersistenceService.setOnboardingDone();
         currentUserProfile = mergedProfile;
+        // Seed eating pattern scalars from the declared style.
+        if (resolvedAnchor != null) {
+          EatingPatternService.instance.seedFromPortionAnchor(resolvedAnchor);
+          await EatingPatternService.instance.save();
+        }
         
         InsightsReportService.instance.maybeRecompute(currentUserProfile!).ignore();
 

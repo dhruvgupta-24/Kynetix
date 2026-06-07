@@ -59,6 +59,7 @@ class ProfileService {
         if (v is num) return v.toInt();
         return int.tryParse(v.toString()) ?? fb;
       }
+      final anchorRaw = data['portion_anchor'] as String?;
       return UserProfile(
         name: (data['name'] as String?) ?? '',
         age: _i(data['age'], 25),
@@ -68,6 +69,12 @@ class ProfileService {
         workoutDaysMin: _i(data['workout_days_min'], 2),
         workoutDaysMax: _i(data['workout_days_max'], 3),
         goal: (data['goal'] as String?) ?? 'Maintenance',
+        portionAnchor: anchorRaw != null
+            ? PortionAnchor.values.firstWhere(
+                (e) => e.name == anchorRaw,
+                orElse: () => PortionAnchor.balanced,
+              )
+            : null,
         averageDailySteps: null, // Keep HealthSync strictly local for now
         healthSyncEnabled: false,
         carryForwardEnabled: data['carry_forward_enabled'] as bool? ?? false,
@@ -99,6 +106,10 @@ class ProfileService {
         'goal': profile.goal,
         'carry_forward_enabled': profile.carryForwardEnabled,
         'carry_forward_threshold': profile.carryForwardThreshold,
+        if (profile.portionAnchor != null)
+          'portion_anchor': profile.portionAnchor!.toJson()
+        else
+          'portion_anchor': null,
       });
     } catch (e) {
       // Background failure safe due to local-first architecture.

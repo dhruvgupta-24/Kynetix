@@ -339,17 +339,49 @@ class AiNutritionService {
     return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
   }
 
-  /// Returns the user's portion-anchor instruction for injection into the
-  /// DAL/SABZI section of the system prompt.
-  ///
-  /// Empty string when no portionAnchor is set (e.g. existing users who
-  /// skipped the onboarding step, or null profile) — the static section
-  /// already defaults to the balanced behaviour in that case.
-  String _portionAnchorHint() {
+  /// Returns a prominent override block for injection at the top of the
+  /// MESS/HOSTEL section.  Empty string when portionAnchor is null (no-op).
+  String _portionAnchorHintBlock() {
     final anchor = currentUserProfile?.portionAnchor;
     if (anchor == null) return '';
-    return '- USER PORTION STYLE: ${anchor.aiHint}';
+    switch (anchor) {
+      case PortionAnchor.carbAnchored:
+        return '''
+
+► USER EATING STYLE OVERRIDE (HIGHEST PRIORITY — overrides all defaults below):
+  This user is CARB-ANCHORED. They eat a fixed amount of roti/rice and treat
+  dal/sabzi as a condiment to finish those carbs — not as a main dish.
+  RULES:
+  - "2 roti with dal" → estimate only enough dal to finish 2 roti (~70–85ml).
+  - "2 roti + rice with dal" → estimate dal needed to finish both carb sources.
+  - "Rice with rajma" → estimate rajma relative to rice quantity (~70–90g).
+  - "3 roti with paneer" → estimate gravy relative to 3 roti; paneer pieces are fully consumed.
+  - Do NOT assume a full katori of dal/sabzi unless explicitly stated as "full bowl".
+  - Dal/sabzi quantity ≈ 2–3 tbsp per roti (condiment role).
+''';
+      case PortionAnchor.curryAnchored:
+        return '''
+
+► USER EATING STYLE OVERRIDE (HIGHEST PRIORITY — overrides all defaults below):
+  This user is CURRY-ANCHORED. They eat until the dal/sabzi runs out — it is
+  the main dish. Roti/rice quantity is estimated relative to the curry amount.
+  RULES:
+  - "2 roti with dal" → assume a full serving of dal (~150ml katori), then adjust roti count.
+  - "Rice with rajma" → estimate a full katori rajma (~150ml); estimate rice to match.
+  - Dal/sabzi is always a full katori (~150ml) per sitting unless explicitly stated small.
+  - Carb quantity is estimated as what's needed to finish the stated dal/sabzi serving.
+  - Do NOT reduce dal/sabzi to condiment size unless explicitly stated "thoda" or "small".
+''';
+      case PortionAnchor.balanced:
+        return '''
+
+► USER EATING STYLE: BALANCED — use standard population-average Indian mess estimates.
+''';
+    }
   }
+
+  // Legacy single-line hint kept for backward compatibility (not used in prompt).
+  String _portionAnchorHint() => '';
 
   // ── System prompt ─────────────────────────────────────────────────────────
 
@@ -377,19 +409,18 @@ ${MessCalibration.toPromptContext()}
 MESS / HOSTEL EATING BEHAVIOUR (critical)
 ═══════════════════════════════════════════════════
 ESTIMATE WHAT WAS CONSUMED — not what was served.
-
+${_portionAnchorHintBlock()}
 ROTI / RICE:
 - Estimate by count / ladle exactly as stated.
 - 1 roti = 100 kcal, 3g protein.
 - 1 rice ladle = 130 kcal, 3g protein (≈85–90g cooked).
 
 DAL / SABZI alongside roti or rice:
-- Treat as accompaniment, NOT a full katori/bowl.
+- Default: treat as accompaniment, NOT a full katori/bowl.
 - User eats only enough dal/sabzi to finish the roti/rice.
 - Rajma/chole alongside 2 roti: estimate ~70–90g consumed = 155–195 kcal, 7–9g protein.
 - Plain dal alongside 2 roti: estimate ~70–85 ml consumed = 95–130 kcal, 5–7g protein.
 - Do NOT assume a full 250ml bowl unless explicitly stated.
-${_portionAnchorHint()}
 
 PANEER DISHES (mess context):
 - User eats ALL paneer pieces/cubes.
