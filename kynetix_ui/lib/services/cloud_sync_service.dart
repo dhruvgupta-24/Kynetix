@@ -76,6 +76,7 @@ class CloudSyncService {
       // 2. Process Workouts
       // Only add sessions that are not already in local storage.
       // Historical sessions are immutable — never overwrite existing local entries.
+      final importedSessions = <WorkoutSession>[];
       for (final row in workoutsResp) {
         final id = row['id'] as String;
         // Avoid overwriting local history if it exists, or just accept cloud as truth
@@ -93,8 +94,11 @@ class CloudSyncService {
             durationMinutes: row['duration_minutes'] as int?,
             entries: (row['entries_json'] as List<dynamic>?)?.map((e) => ExerciseEntry.fromJson(e)).toList() ?? [],
           );
-          await WorkoutService.instance.saveSession(session);
+          importedSessions.add(session);
         }
+      }
+      if (importedSessions.isNotEmpty) {
+        await WorkoutService.instance.bulkImportCloudSessions(importedSessions);
       }
 
       // 3. Process Nutrition Memory

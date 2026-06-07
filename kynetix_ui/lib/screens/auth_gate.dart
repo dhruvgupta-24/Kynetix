@@ -93,12 +93,9 @@ class _LoggedInGateState extends State<_LoggedInGate> {
           'cache owned by $cachedOwnerId, current user is ${session.user.id}. '
           'Wiping local cache.');
       await PersistenceService.reset();
-      // Also wipe workout data — it belongs to the previous account.
-      await WorkoutService.instance.clearAll();
-    } else if (cachedOwnerId == null && currentUserProfile != null) {
-      debugPrint('[_LoggedInGate] 🚨 ORPHANED CACHE: profile exists but no owner ID. Wiping local cache.');
-      await PersistenceService.reset();
-      await WorkoutService.instance.clearAll();
+    } else if (cachedOwnerId == null) {
+      debugPrint('[_LoggedInGate] cachedOwnerId missing — assuming same account, writing owner ID.');
+      await PersistenceService.setCachedOwnerId(session.user.id);
     }
 
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately

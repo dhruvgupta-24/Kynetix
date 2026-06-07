@@ -926,6 +926,24 @@ class WorkoutService extends ChangeNotifier {
     CloudSyncService.instance.syncWorkoutBackground(session);
   }
 
+  Future<void> bulkImportCloudSessions(List<WorkoutSession> importedSessions) async {
+    for (final session in importedSessions) {
+      _sessions.removeWhere((s) => s.id == session.id);
+      _sessions.add(session);
+    }
+
+    if (_sessions.length > _maxSessions) {
+      _sessions = _sessions.reversed
+          .take(_maxSessions)
+          .toList()
+          .reversed
+          .toList();
+    }
+
+    await _persist();
+    notifyListeners();
+  }
+
   Future<void> saveDraftSession(
     WorkoutSession session, {
     DateTime? startedAt,
@@ -1095,6 +1113,11 @@ class WorkoutService extends ChangeNotifier {
     }
     _ready = true;
     notifyListeners();
+  }
+
+  @visibleForTesting
+  void resetReadyForTesting() {
+    _ready = false;
   }
 
   // ── Persistence ──────────────────────────────────────────────────────────
