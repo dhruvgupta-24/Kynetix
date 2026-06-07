@@ -16,7 +16,8 @@ import '../services/unit_normalizer.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/cloud_sync_service.dart';
-import '../screens/onboarding_screen.dart' show currentUserProfile, PortionAnchor;
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -876,7 +877,18 @@ class NutritionPipeline {
       return items;
     }
 
-    final anchor = currentUserProfile?.portionAnchor;
+    // Source of truth: ProfileService.activePortionAnchor.
+    //
+    // EatingPatternService._seededAnchor is intentionally NOT used here.
+    // That field exists only to bootstrap the learning/scalar engine with
+    // synthetic correction records. It is not guaranteed to be in sync with
+    // the user's current profile preference (the user may change eating style
+    // after a seed without triggering a reseed).
+    //
+    // Reading from ProfileService ensures that a profile change is immediately
+    // visible to the pipeline on the very next estimation call, regardless of
+    // whether EatingPatternService has been reseeded yet.
+    final anchor = ProfileService.instance.activePortionAnchor;
 
     // 1. Detect roles and compile base metrics
     final roles = <NutritionItem, FoodRole>{};

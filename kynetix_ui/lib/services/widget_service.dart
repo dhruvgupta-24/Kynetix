@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/day_log.dart';
-import '../screens/onboarding_screen.dart' show currentUserProfile;
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 import '../services/workout_service.dart';
 import '../services/nutrition_target_engine.dart';
 
@@ -24,7 +25,7 @@ class WidgetService {
       final consumedProtein = log.totalProteinMid;
 
       // 2. Profile
-      final profile = currentUserProfile;
+      final profile = ProfileService.instance.currentUserProfile;
       if (profile == null) {
         debugPrint('[WidgetService] Profile not found, clearing widget data');
         final prefs = await SharedPreferences.getInstance();

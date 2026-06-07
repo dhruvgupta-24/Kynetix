@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 
@@ -342,7 +343,7 @@ class AiNutritionService {
   /// Returns a prominent override block for injection at the top of the
   /// MESS/HOSTEL section.  Empty string when portionAnchor is null (no-op).
   String _portionAnchorHintBlock() {
-    final anchor = currentUserProfile?.portionAnchor;
+    final anchor = ProfileService.instance.currentUserProfile?.portionAnchor;
     if (anchor == null) return '';
     switch (anchor) {
       case PortionAnchor.carbAnchored:
@@ -551,7 +552,7 @@ ACCURACY RULES (NON-NEGOTIABLE)
   }''';
 
   String _userPrompt(String rawInput, {AiEscalationContext? context}) {
-    final profile = currentUserProfile;
+    final profile = ProfileService.instance.currentUserProfile;
     final profileContext = profile == null
         ? 'No user profile available. Use generalized defaults only.'
         : '''User profile for calibration only:

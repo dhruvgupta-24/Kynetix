@@ -1,4 +1,5 @@
-import '../screens/onboarding_screen.dart' show currentUserProfile, PortionAnchor;
+import '../models/user_profile.dart' show PortionAnchor;
+import 'profile_service.dart';
 import 'food_role_classifier.dart';
 import 'eating_pattern_service.dart';
 
@@ -59,7 +60,7 @@ class ConsumedPortionEngine {
     //
     // The scalar is only applied when the user has explicitly chosen an anchor.
     // Null anchor = balanced = no change to existing behaviour.
-    final anchorScalar = switch (currentUserProfile?.portionAnchor) {
+    final anchorScalar = switch (ProfileService.instance.currentUserProfile?.portionAnchor) {
       PortionAnchor.carbAnchored  => 0.78,
       PortionAnchor.balanced      => 1.00,
       PortionAnchor.curryAnchored => 1.30,

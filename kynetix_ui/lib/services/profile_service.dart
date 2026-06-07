@@ -1,10 +1,17 @@
 import 'package:flutter/foundation.dart';
-import '../screens/onboarding_screen.dart'; // Where UserProfile lives currently
+import '../models/user_profile.dart';
 import '../config/supabase_client.dart';
 
 class ProfileService {
   ProfileService._();
   static final instance = ProfileService._();
+
+  /// Global in-memory user profile store
+  UserProfile? currentUserProfile;
+
+  /// Helper to get the active PortionAnchor
+  PortionAnchor get activePortionAnchor => currentUserProfile?.portionAnchor ?? PortionAnchor.balanced;
+
 
   /// Check if the currently logged in user already has a profile row.
   Future<bool> hasProfile() async {

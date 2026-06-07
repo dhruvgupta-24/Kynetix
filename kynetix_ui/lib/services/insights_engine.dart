@@ -3,7 +3,7 @@ import '../models/day_log.dart';
 import '../models/day_status.dart';
 import '../models/insights_models.dart';
 import '../models/workout_session.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
 import '../services/nutrition_target_engine.dart';
 
 // ─── AchievementRegistry ──────────────────────────────────────────────────────

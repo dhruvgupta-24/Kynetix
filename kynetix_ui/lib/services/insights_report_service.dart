@@ -4,7 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/day_log.dart';
 import '../models/insights_models.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 import 'chatgpt_link_service.dart';
 import 'insights_engine.dart';
 import 'cloud_sync_service.dart';
@@ -122,7 +123,7 @@ class InsightsReportService extends ChangeNotifier {
 
   // AchievementProgress is computed on call — NOT cached, NOT in build()
   List<AchievementProgress> get progress =>
-      InsightsEngine.computeProgress(_achievements, dayLogStore, currentUserProfile ?? const UserProfile(name: '', age: 0, gender: '', height: 0, weight: 0, workoutDaysMin: 0, workoutDaysMax: 0, goal: ''), WorkoutService.instance.sessions);
+      InsightsEngine.computeProgress(_achievements, dayLogStore, ProfileService.instance.currentUserProfile ?? const UserProfile(name: '', age: 0, gender: '', height: 0, weight: 0, workoutDaysMin: 0, workoutDaysMax: 0, goal: ''), WorkoutService.instance.sessions);
 
   Map<String, WeeklyReport> get weeklyCache => Map.unmodifiable(_weekly);
   Map<String, MonthlyReport> get monthlyCache => Map.unmodifiable(_monthly);

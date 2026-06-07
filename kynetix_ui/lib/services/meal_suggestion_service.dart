@@ -1,5 +1,5 @@
 import '../models/day_log.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
 import '../services/day_pattern_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/workout_service.dart';

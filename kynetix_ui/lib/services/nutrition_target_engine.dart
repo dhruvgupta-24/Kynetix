@@ -1,5 +1,5 @@
 import '../models/workout_session.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
 import '../services/health_service.dart';
 
 // ─── DayTarget ────────────────────────────────────────────────────────────────

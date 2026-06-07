@@ -4,7 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
-import '../screens/onboarding_screen.dart' show currentUserProfile;
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart' show WeightContext;
 
@@ -263,7 +264,7 @@ class AiCoachService {
   /// when the user hasn't set one. The edge function appends this to the
   /// system prompt when non-empty.
   String _portionAnchorHint() {
-    final anchor = currentUserProfile?.portionAnchor;
+    final anchor = ProfileService.instance.currentUserProfile?.portionAnchor;
     if (anchor == null) return '';
     return anchor.aiHint;
   }

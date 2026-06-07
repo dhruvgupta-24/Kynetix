@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'food_role_classifier.dart';
-import '../screens/onboarding_screen.dart' show PortionAnchor;
+import '../models/user_profile.dart' show PortionAnchor;
 
 // ─── EatingPatternService ─────────────────────────────────────────────────────
 //
@@ -275,7 +275,21 @@ class EatingPatternService {
 
   // ── Querying ────────────────────────────────────────────────────────────────
 
-  /// Returns a recency-weighted consumption scalar for [targetRole] in the
+  /// The currently active [PortionAnchor] as seeded by [seedFromPortionAnchor],
+  /// or null if no anchor has been set yet (fresh user / no eating style).
+  ///
+  /// Services and the pipeline read this instead of reaching into the UI layer
+  /// for [currentUserProfile?.portionAnchor].
+  PortionAnchor? get activeAnchor => _seededAnchor;
+
+  /// True when the user has declared a carb-anchored eating style (roti/rice first).
+  /// Callers that only need a boolean check use this instead of comparing the
+  /// [PortionAnchor] enum, keeping them free of the `onboarding_screen` import.
+  bool get isCarbAnchored => _seededAnchor == PortionAnchor.carbAnchored;
+
+  /// True when the user has declared a curry-anchored eating style (dal/sabzi first).
+  bool get isCurryAnchored => _seededAnchor == PortionAnchor.curryAnchored;
+
   /// context of [contextRole].  Returns null when fewer than [_minSamples]
   /// valid (non-stale) records exist — caller must treat null as "no adjustment".
   double? getScalar(FoodRole targetRole, {FoodRole? contextRole}) {

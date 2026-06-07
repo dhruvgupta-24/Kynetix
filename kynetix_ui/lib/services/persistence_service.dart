@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../screens/onboarding_screen.dart';
+import '../models/user_profile.dart';
+import 'profile_service.dart';
 import '../models/day_log.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
@@ -58,7 +59,7 @@ class PersistenceService {
 
       final profileRaw = prefs.getString(_kProfile);
       if (profileRaw != null) {
-        currentUserProfile = UserProfile.fromJson(
+        ProfileService.instance.currentUserProfile = UserProfile.fromJson(
             jsonDecode(profileRaw) as Map<String, dynamic>);
       }
 
@@ -160,8 +161,9 @@ class PersistenceService {
 
   static Future<void> saveDay(DateTime date) async {
     await saveDayLogs();
-    if (currentUserProfile != null) {
-      InsightsReportService.instance.recomputeForDate(date, currentUserProfile!).ignore();
+    final profile = ProfileService.instance.currentUserProfile;
+    if (profile != null) {
+      InsightsReportService.instance.recomputeForDate(date, profile).ignore();
     }
   }
 
@@ -184,7 +186,7 @@ class PersistenceService {
     NutritionHydrationGuard.instance.reset();
 
     _onboardingDone = false;
-    currentUserProfile = null;
+    ProfileService.instance.currentUserProfile = null;
     _cachedOwnerId = null;
     dayLogStore.clear();
 
