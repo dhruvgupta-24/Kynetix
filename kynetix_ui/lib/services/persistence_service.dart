@@ -151,16 +151,63 @@ class PersistenceService {
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kDayLogs, jsonEncode(pruned));
-      
-      WidgetService.updateWidgetData().ignore();
-      
-      // Fire-and-forget sync to Supabase
-      CloudSyncService.instance.syncDayLogsBackground();
     } catch (_) {}
   }
 
+  static Future<void> runHistoricalRepairMigration() async {
+    bool migrated = false;
+
+    for (final entry in dayLogStore.entries) {
+      final log = entry.value;
+      if (log.gymDay == null && !log.isEmpty) {
+        final date = DateTime.tryParse(entry.key);
+        if (date != null) {
+          final splitDay = WorkoutService.instance.splitDayFor(date);
+          if (splitDay != null && !splitDay.isRestDay) {
+            log.gymDay = GymDay(
+              didGym: true,
+              workoutType: WorkoutType.fromSplitName(splitDay.name),
+              splitDayName: splitDay.name,
+              splitOverridden: false,
+            );
+            migrated = true;
+          } else {
+            log.gymDay = const GymDay(didGym: false);
+            migrated = true;
+          }
+        }
+      }
+    }
+
+    if (migrated) {
+      await saveDayLogs();
+    }
+  }
+
   static Future<void> saveDay(DateTime date) async {
+    final dKey = dateKey(date);
+    final log = dayLogStore[dKey];
+    if (log != null && log.gymDay == null && !log.isEmpty) {
+      final splitDay = WorkoutService.instance.splitDayFor(date);
+      if (splitDay != null && !splitDay.isRestDay) {
+        log.gymDay = GymDay(
+          didGym: true,
+          workoutType: WorkoutType.fromSplitName(splitDay.name),
+          splitDayName: splitDay.name,
+          splitOverridden: false,
+        );
+      } else {
+        log.gymDay = const GymDay(didGym: false);
+      }
+    }
+
     await saveDayLogs();
+    
+    WidgetService.updateWidgetData().ignore();
+    
+    // Fire-and-forget sync to Supabase
+    CloudSyncService.instance.syncDayLogsBackground();
+    
     final profile = ProfileService.instance.currentUserProfile;
     if (profile != null) {
       InsightsReportService.instance.recomputeForDate(date, profile).ignore();

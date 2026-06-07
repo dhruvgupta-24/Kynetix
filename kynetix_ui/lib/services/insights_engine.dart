@@ -5,6 +5,7 @@ import '../models/insights_models.dart';
 import '../models/workout_session.dart';
 import '../models/user_profile.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/workout_service.dart';
 
 // ─── AchievementRegistry ──────────────────────────────────────────────────────
 class AchievementRegistry {
@@ -122,6 +123,15 @@ class AchievementRegistry {
 class InsightsEngine {
   InsightsEngine._();
 
+  static bool isGymDay({
+    required DateTime date,
+    required DayLog? log,
+    required WorkoutSession? session,
+  }) {
+    final sessionIsNotEmpty = session != null && !session.isEmpty;
+    return (log?.gymDay?.didGym == true) || sessionIsNotEmpty;
+  }
+
   // Helper: format a date key "yyyy-MM-dd"
   static String dateKeyOf(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -236,7 +246,11 @@ class InsightsEngine {
 
       // Count gym day BEFORE the meal-log guard so gym-only days (no meals
       // logged that day) are still included in workout-consistency calculations.
-      final isGymDay = (log?.gymDay?.didGym == true) || (session != null && !session.isEmpty);
+      final isGymDay = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: session,
+      );
       if (isGymDay) gymDaysCount++;
 
       if (log == null || log.isEmpty) {
@@ -506,7 +520,11 @@ class InsightsEngine {
 
       // Count gym day BEFORE the meal-log guard so gym-only days (no meals
       // logged that day) are still included in workout-consistency calculations.
-      final isGymDay = (log?.gymDay?.didGym == true) || (session != null && !session.isEmpty);
+      final isGymDay = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: session,
+      );
       if (isGymDay) totalGymDays++;
 
       if (log == null || log.isEmpty) continue;
@@ -622,7 +640,11 @@ class InsightsEngine {
         final log = logs[dKey];
         if (log == null || log.isEmpty) continue;
         final session = sessionsByDate[dKey];
-        final isGymDay = log.gymDay?.didGym == true;
+        final isGymDay = InsightsEngine.isGymDay(
+          date: date,
+          log: log,
+          session: session,
+        );
         final target = NutritionTargetEngine.instance.dayTarget(
           profile,
           isGymDay: isGymDay,
@@ -989,7 +1011,11 @@ class InsightsEngine {
       final parsedDate = DateTime.tryParse(dateStr) ?? DateTime.now();
 
       // Count gym day BEFORE the meal-log guard so gym-only days are counted.
-      final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
+      final isGymDay = InsightsEngine.isGymDay(
+        date: parsedDate,
+        log: log,
+        session: session,
+      );
       if (isGymDay) {
         totalGymDays++;
         consecutiveGymDays++;
@@ -1095,7 +1121,11 @@ class InsightsEngine {
           final session = sessionsByDate[dKey];
           final target = NutritionTargetEngine.instance.dayTarget(
             profile,
-            isGymDay: log.gymDay?.didGym == true,
+            isGymDay: isGymDay(
+              date: date,
+              log: log,
+              session: session,
+            ),
             session: session,
             workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
           );
@@ -1162,7 +1192,11 @@ class InsightsEngine {
       final session = sessionsByDate[dateStr];
 
       // Count gym day BEFORE the meal-log guard so gym-only days are counted.
-      final isGymDayProg = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
+      final isGymDayProg = isGymDay(
+        date: DateTime.parse(dateStr),
+        log: log,
+        session: session,
+      );
       if (isGymDayProg) totalGym++;
 
       if (log.isEmpty) {

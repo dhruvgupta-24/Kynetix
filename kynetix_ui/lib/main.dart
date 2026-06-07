@@ -11,6 +11,8 @@ import 'services/meal_memory.dart';
 import 'services/personal_nutrition_memory.dart';
 import 'services/persistence_service.dart';
 import 'services/workout_service.dart';
+import 'services/insights_report_service.dart';
+import 'models/day_log.dart';
 import 'config/supabase_secrets.dart';
 
 Future<void> main() async {
@@ -54,6 +56,8 @@ Future<void> main() async {
   final servicesTime = stopwatch.elapsedMilliseconds - serviceStart;
   debugPrint('[Startup Profile] Concurrently loaded independent services (Health, Memory, Local cache, Workouts) in: ${servicesTime} ms');
   debugPrint('[Startup Profile] Total main initialization took: ${stopwatch.elapsedMilliseconds} ms');
+
+
 
   runApp(const KynetixApp());
 }

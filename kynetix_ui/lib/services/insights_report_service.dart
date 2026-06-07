@@ -9,6 +9,7 @@ import 'profile_service.dart';
 import 'chatgpt_link_service.dart';
 import 'insights_engine.dart';
 import 'cloud_sync_service.dart';
+import '../services/persistence_service.dart';
 import 'workout_service.dart';
 import 'nutrition_target_engine.dart';
 
@@ -190,6 +191,9 @@ class InsightsReportService extends ChangeNotifier {
 
   // ── Internal ──────────────────────────────────────────────────────────────
   Future<void> _recompute(UserProfile profile) async {
+    // Run historical repair migration for DayLogs with null gymDay on training days
+    await PersistenceService.runHistoricalRepairMigration();
+
     final weekKeys = <String>{};
     final monthKeys = <String>{};
     final yearKeys = <String>{};
@@ -570,7 +574,7 @@ class InsightsReportService extends ChangeNotifier {
   bool _isProteinHit(DayLog log, UserProfile profile, DateTime date) {
     if (log.isEmpty) return false;
     final session = WorkoutService.instance.sessionFor(date);
-    final isGymDay = log.gymDay?.didGym == true;
+    final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
     final target = NutritionTargetEngine.instance.dayTarget(
       profile,
       isGymDay: isGymDay,
@@ -630,7 +634,7 @@ class InsightsReportService extends ChangeNotifier {
   bool _isCalorieHit(DayLog log, UserProfile profile, DateTime date) {
     if (log.isEmpty) return false;
     final session = WorkoutService.instance.sessionFor(date);
-    final isGymDay = log.gymDay?.didGym == true;
+    final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
     final target = NutritionTargetEngine.instance.dayTarget(
       profile,
       isGymDay: isGymDay,

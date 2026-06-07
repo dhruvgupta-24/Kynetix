@@ -622,10 +622,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
               final date = report.weekStart.add(Duration(days: i));
               final dKey = InsightsEngine.dateKeyOf(date);
               final log = dayLogStore[dKey];
-              // Unified gym-day: either the meal-log toggle OR a completed session.
               final session = WorkoutService.instance.sessionFor(date);
-              final didGym = (log?.gymDay?.didGym == true) ||
-                  (session != null && !session.isEmpty);
+              final didGym = InsightsEngine.isGymDay(
+                date: date,
+                log: log,
+                session: session,
+              );
 
               return Column(
                 children: [
@@ -716,7 +718,11 @@ class _InsightsScreenState extends State<InsightsScreen> {
         // Mock a day outcome by reading its status or classification
         // Let's classify it using the engine target
         final session = WorkoutService.instance.sessionFor(date);
-        final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
+        final isGymDay = InsightsEngine.isGymDay(
+          date: date,
+          log: log,
+          session: session,
+        );
         final target = NutritionTargetEngine.instance.dayTarget(
           currentUserProfile!,
           isGymDay: isGymDay,
