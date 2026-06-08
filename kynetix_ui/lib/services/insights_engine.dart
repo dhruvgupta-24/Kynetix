@@ -454,6 +454,433 @@ class InsightsEngine {
       }
     }
 
+    // ─── Weekly Training Review & Muscle Recovery Analysis ───
+    final weekSessions = sessions.where((s) {
+      final d = s.date;
+      return !s.isEmpty &&
+          !d.isBefore(weekStart) &&
+          d.isBefore(weekStart.add(const Duration(days: 7)));
+    }).toList();
+
+    const targetMuscleGroups = [
+      'Chest', 'Back', 'Shoulders', 'Rear Delts', 'Biceps', 'Triceps',
+      'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Forearms'
+    ];
+
+    final Map<String, List<DateTime>> muscleDates = {
+      for (final m in targetMuscleGroups) m: []
+    };
+    final Map<String, int> muscleHardSets = {
+      for (final m in targetMuscleGroups) m: 0
+    };
+    final Map<String, double> muscleVolume = {
+      for (final m in targetMuscleGroups) m: 0.0
+    };
+
+    String mapToTargetMuscle(String exerciseMuscle) {
+      final name = exerciseMuscle.trim().toLowerCase();
+      if (name.contains('chest')) return 'Chest';
+      if (name.contains('back') || name.contains('lat')) return 'Back';
+      if (name.contains('rear') || name.contains('delt')) return 'Rear Delts';
+      if (name.contains('shoulder') || name.contains('trap')) return 'Shoulders';
+      if (name.contains('bicep')) return 'Biceps';
+      if (name.contains('tricep')) return 'Triceps';
+      if (name.contains('quad') || name.contains('adductor')) return 'Quads';
+      if (name.contains('hamstring')) return 'Hamstrings';
+      if (name.contains('glute')) return 'Glutes';
+      if (name.contains('calf') || name.contains('calves')) return 'Calves';
+      if (name.contains('ab') || name.contains('core')) return 'Abs';
+      if (name.contains('forearm')) return 'Forearms';
+      return 'Back'; // Default fallback
+    }
+
+    for (final s in weekSessions) {
+      final normalizedDate = DateTime(s.date.year, s.date.month, s.date.day);
+      for (final entry in s.entries) {
+        if (entry.isSkipped) continue;
+        final targetMuscle = mapToTargetMuscle(entry.exercise.muscleGroup);
+        if (!targetMuscleGroups.contains(targetMuscle)) continue;
+
+        for (final set in entry.sets) {
+          if (set.setType != SetType.warmUp) {
+            muscleVolume[targetMuscle] = (muscleVolume[targetMuscle] ?? 0.0) + set.volume;
+            muscleHardSets[targetMuscle] = (muscleHardSets[targetMuscle] ?? 0) + 1;
+            final datesList = muscleDates[targetMuscle]!;
+            if (!datesList.any((d) => d.year == normalizedDate.year && d.month == normalizedDate.month && d.day == normalizedDate.day)) {
+              datesList.add(normalizedDate);
+            }
+          }
+        }
+      }
+    }
+
+    final muscleAnalyses = <MuscleGroupAnalysis>[];
+    for (final m in targetMuscleGroups) {
+      final dates = muscleDates[m]!;
+      dates.sort();
+      final sessionsTrained = dates.length;
+      final hardSets = muscleHardSets[m]!;
+      final volumeVal = muscleVolume[m]!;
+
+      double? daysBetweenExposures;
+      if (dates.length >= 2) {
+        double totalGap = 0.0;
+        for (int j = 0; j < dates.length - 1; j++) {
+          totalGap += dates[j + 1].difference(dates[j]).inDays;
+        }
+        daysBetweenExposures = totalGap / (dates.length - 1);
+      }
+
+      muscleAnalyses.add(MuscleGroupAnalysis(
+        muscleGroup: m,
+        sessionsTrained: sessionsTrained,
+        hardSets: hardSets,
+        weeklyVolume: volumeVal,
+        recoveryFrequency: sessionsTrained,
+        daysBetweenExposures: daysBetweenExposures,
+      ));
+    }
+
+    // Progressive Overload
+    final priorWeekStart = weekStart.subtract(const Duration(days: 7));
+    final priorWeekSessions = sessions.where((s) {
+      final d = s.date;
+      return !s.isEmpty &&
+          !d.isBefore(priorWeekStart) &&
+          d.isBefore(priorWeekStart.add(const Duration(days: 7)));
+    }).toList();
+
+    final Map<String, ({double weight, int reps, double volume, String name})> currentExerciseBest = {};
+    for (final s in weekSessions) {
+      for (final entry in s.entries) {
+        if (entry.isSkipped || entry.sets.isEmpty) continue;
+        final workingSets = entry.sets.where((s) => s.setType != SetType.warmUp).toList();
+        if (workingSets.isEmpty) continue;
+        
+        final topSet = workingSets.reduce((a, b) => a.estimatedOneRepMax >= b.estimatedOneRepMax ? a : b);
+        final vol = workingSets.fold(0.0, (sum, s) => sum + s.volume);
+        
+        final existing = currentExerciseBest[entry.exercise.id];
+        if (existing == null || topSet.estimatedOneRepMax > (existing.weight * (1 + existing.reps / 30.0))) {
+          currentExerciseBest[entry.exercise.id] = (
+            weight: topSet.weight,
+            reps: topSet.reps,
+            volume: vol,
+            name: entry.exercise.name,
+          );
+        }
+      }
+    }
+
+    final Map<String, ({double weight, int reps, double volume})> priorExerciseBest = {};
+    for (final s in priorWeekSessions) {
+      for (final entry in s.entries) {
+        if (entry.isSkipped || entry.sets.isEmpty) continue;
+        final workingSets = entry.sets.where((s) => s.setType != SetType.warmUp).toList();
+        if (workingSets.isEmpty) continue;
+        
+        final topSet = workingSets.reduce((a, b) => a.estimatedOneRepMax >= b.estimatedOneRepMax ? a : b);
+        final vol = workingSets.fold(0.0, (sum, s) => sum + s.volume);
+        
+        final existing = priorExerciseBest[entry.exercise.id];
+        if (existing == null || topSet.estimatedOneRepMax > (existing.weight * (1 + existing.reps / 30.0))) {
+          priorExerciseBest[entry.exercise.id] = (
+            weight: topSet.weight,
+            reps: topSet.reps,
+            volume: vol,
+          );
+        }
+      }
+    }
+
+    final List<String> progressionFeats = [];
+    final List<String> regressionFeats = [];
+
+    currentExerciseBest.forEach((id, curr) {
+      final prior = priorExerciseBest[id];
+      if (prior != null) {
+        if (curr.weight > prior.weight) {
+          progressionFeats.add('Progressive overload achieved on ${curr.name} (increased weight to ${curr.weight.toStringAsFixed(curr.weight == curr.weight.truncateToDouble() ? 0 : 1)} kg from ${prior.weight.toStringAsFixed(prior.weight == prior.weight.truncateToDouble() ? 0 : 1)} kg).');
+        } else if (curr.weight == prior.weight && curr.reps > prior.reps) {
+          progressionFeats.add('Progressive overload achieved on ${curr.name} (increased reps to ${curr.reps} from ${prior.reps} at ${curr.weight.toStringAsFixed(curr.weight == curr.weight.truncateToDouble() ? 0 : 1)} kg).');
+        } else if (curr.volume > prior.volume * 1.05) {
+          progressionFeats.add('Progressive overload achieved on ${curr.name} (increased weekly volume by ${((curr.volume - prior.volume) / prior.volume * 100).round()}%).');
+        } else if (curr.weight < prior.weight) {
+          regressionFeats.add('Weight decreased on ${curr.name} to ${curr.weight.toStringAsFixed(curr.weight == curr.weight.truncateToDouble() ? 0 : 1)} kg (previously ${prior.weight.toStringAsFixed(prior.weight == prior.weight.truncateToDouble() ? 0 : 1)} kg).');
+        }
+      }
+    });
+
+    final coachingWhatWentWell = <String>[];
+    final coachingNeedsImprovement = <String>[];
+    final coachingRecommendations = <String>[];
+
+    final List<String> qualityIssues = [];
+    final List<String> spacingIssues = [];
+    final List<String> volumeIssues = [];
+    final List<String> balanceIssues = [];
+    final List<String> consistencyIssues = [];
+
+    final List<String> qualitySuccesses = [];
+    final List<String> spacingSuccesses = [];
+    final List<String> volumeSuccesses = [];
+    final List<String> balanceSuccesses = [];
+    final List<String> consistencySuccesses = [];
+
+    // ─── 1. Consistency Score ───
+    final double actualExpected = expectedGymDays > 0 ? expectedGymDays : 4.0;
+    final int trainingConsistencyScore = ((gymDaysCount / actualExpected) * 100).round().clamp(0, 100);
+
+    if (trainingConsistencyScore >= 90) {
+      consistencySuccesses.add('Trained $gymDaysCount days, matching your target of ${actualExpected.toStringAsFixed(0)} days.');
+      coachingWhatWentWell.add('Workout consistency matched or exceeded your target.');
+    } else if (trainingConsistencyScore >= 70) {
+      consistencySuccesses.add('Trained $gymDaysCount days out of target ${actualExpected.toStringAsFixed(0)} days.');
+    } else {
+      consistencyIssues.add('Trained $gymDaysCount days, falling short of your target of ${actualExpected.toStringAsFixed(0)} days.');
+      coachingNeedsImprovement.add('Workout frequency was below recommended target.');
+      coachingRecommendations.add('Plan workout slots in advance next week to meet your $actualExpected-day target.');
+    }
+
+    final String trainingConsistencyExplanation = consistencyIssues.isNotEmpty 
+        ? consistencyIssues.join(' ') 
+        : (consistencySuccesses.isNotEmpty ? consistencySuccesses.join(' ') : 'Trained $gymDaysCount days.');
+
+    // ─── 2. Spacing / Recovery Score ───
+    int trainingRecoveryScore = 100;
+    bool hasConsecutiveDays = false;
+    for (final m in targetMuscleGroups) {
+      final dates = muscleDates[m]!;
+      if (dates.length >= 2) {
+        for (int j = 0; j < dates.length - 1; j++) {
+          final diff = dates[j + 1].difference(dates[j]).inDays;
+          if (diff < 2) {
+            hasConsecutiveDays = true;
+            spacingIssues.add('$m was trained on consecutive days.');
+            break;
+          }
+        }
+      }
+    }
+
+    if (hasConsecutiveDays) {
+      trainingRecoveryScore -= 25;
+      coachingNeedsImprovement.add('Insufficient recovery windows detected on consecutive training days.');
+      coachingRecommendations.add('Add an extra recovery day between exposures of the same muscle group.');
+    }
+
+    if (gymDaysCount == 7) {
+      trainingRecoveryScore -= 20;
+      spacingIssues.add('Trained 7 days this week without a rest day.');
+      coachingNeedsImprovement.add('No rest days taken this week.');
+      coachingRecommendations.add('Add at least one complete rest day next week to prevent systemic fatigue.');
+    } else if (gymDaysCount == 6) {
+      trainingRecoveryScore -= 10;
+      spacingIssues.add('Trained 6 days this week (1 rest day). Spacing is tight.');
+    } else if (gymDaysCount > 0 && gymDaysCount <= 2) {
+      spacingIssues.add('Trained $gymDaysCount days, providing ample recovery but lower stimulus.');
+    } else if (gymDaysCount > 0) {
+      spacingSuccesses.add('Optimal recovery structure with ${7 - gymDaysCount} rest days.');
+    }
+
+    if (trainingRecoveryScore == 100 && gymDaysCount > 0) {
+      coachingWhatWentWell.add('Recovery spacing was optimal.');
+    }
+
+    final String trainingRecoveryExplanation = spacingIssues.isNotEmpty 
+        ? spacingIssues.join(' ') 
+        : (spacingSuccesses.isNotEmpty ? spacingSuccesses.join(' ') : 'Good recovery spacing maintained.');
+
+    // ─── 3. Volume Score ───
+    int volumeDeductions = 0;
+    final List<String> undertrainedMuscles = [];
+    final List<String> overtrainedMuscles = [];
+    final List<String> optimalVolumeMuscles = [];
+
+    // Check legs as a whole
+    final int quadSets = muscleHardSets['Quads'] ?? 0;
+    final int hamSets = muscleHardSets['Hamstrings'] ?? 0;
+    if (quadSets == 0 && hamSets == 0) {
+      volumeDeductions += 30;
+      undertrainedMuscles.add('Legs');
+      coachingNeedsImprovement.add('Legs were not trained this week.');
+      coachingRecommendations.add('Add 4-6 hamstring sets and 4-6 quad sets.');
+    } else {
+      if (quadSets == 0) {
+        volumeDeductions += 15;
+        undertrainedMuscles.add('Quads');
+        coachingNeedsImprovement.add('Quads were not trained this week.');
+        coachingRecommendations.add('Add 4-6 quad sets next week.');
+      } else if (quadSets < 6) {
+        volumeDeductions += 10;
+        undertrainedMuscles.add('Quads');
+        coachingNeedsImprovement.add('Quads volume below recommended range.');
+        coachingRecommendations.add('Add 2-4 sets for Quads next week.');
+      } else if (quadSets > 20) {
+        volumeDeductions += 10;
+        overtrainedMuscles.add('Quads');
+        coachingNeedsImprovement.add('Quads received unusually high weekly volume.');
+        coachingRecommendations.add('Reduce Quads isolation volume to allow better recovery.');
+      } else {
+        optimalVolumeMuscles.add('Quads');
+      }
+
+      if (hamSets == 0) {
+        volumeDeductions += 15;
+        undertrainedMuscles.add('Hamstrings');
+        coachingNeedsImprovement.add('Hamstrings were not trained this week.');
+        coachingRecommendations.add('Add 4-6 hamstring sets next week.');
+      } else if (hamSets < 6) {
+        volumeDeductions += 10;
+        undertrainedMuscles.add('Hamstrings');
+        coachingNeedsImprovement.add('Hamstrings volume below recommended range.');
+        coachingRecommendations.add('Add 4-6 hamstring sets next week.');
+      } else if (hamSets > 20) {
+        volumeDeductions += 10;
+        overtrainedMuscles.add('Hamstrings');
+        coachingNeedsImprovement.add('Hamstrings received unusually high weekly volume.');
+        coachingRecommendations.add('Reduce Hamstrings isolation volume to allow better recovery.');
+      } else {
+        optimalVolumeMuscles.add('Hamstrings');
+      }
+    }
+
+    final majorMusclesToCheck = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps'];
+    for (final m in majorMusclesToCheck) {
+      final sets = muscleHardSets[m] ?? 0;
+      if (sets == 0) {
+        volumeDeductions += 15;
+        undertrainedMuscles.add(m);
+        coachingNeedsImprovement.add('$m was not trained this week.');
+        coachingRecommendations.add('Add 4-6 sets for $m next week.');
+      } else if (sets < 6) {
+        volumeDeductions += 10;
+        undertrainedMuscles.add(m);
+        coachingNeedsImprovement.add('$m volume below recommended range.');
+        coachingRecommendations.add('Add 2-4 sets for $m next week.');
+      } else if (sets > 20) {
+        volumeDeductions += 10;
+        overtrainedMuscles.add(m);
+        coachingNeedsImprovement.add('$m received unusually high weekly volume.');
+        coachingRecommendations.add('Reduce $m isolation volume.');
+      } else {
+        optimalVolumeMuscles.add(m);
+      }
+    }
+
+    final int trainingVolumeScore = (100 - volumeDeductions).clamp(0, 100);
+
+    for (final m in optimalVolumeMuscles) {
+      volumeSuccesses.add('$m volume is optimal.');
+    }
+    if (undertrainedMuscles.isNotEmpty) {
+      volumeIssues.add('Undertrained muscles: ${undertrainedMuscles.join(", ")}.');
+    }
+    if (overtrainedMuscles.isNotEmpty) {
+      volumeIssues.add('Overtrained muscles: ${overtrainedMuscles.join(", ")}.');
+    }
+
+    final String trainingVolumeExplanation = (volumeIssues.isNotEmpty || volumeSuccesses.isNotEmpty)
+        ? '${volumeIssues.join(" ")} ${volumeSuccesses.take(3).join(" ")}'
+        : 'All major muscle groups received adequate training volume.';
+
+    // ─── 4. Balance Score ───
+    int trainingBalanceScore = 100;
+    final List<String> balanceSuccessesList = [];
+    
+    final chestSets = muscleHardSets['Chest'] ?? 0;
+    final shoulderSets = muscleHardSets['Shoulders'] ?? 0;
+    final tricepSets = muscleHardSets['Triceps'] ?? 0;
+    final pushSets = chestSets + shoulderSets + tricepSets;
+
+    final backSets = muscleHardSets['Back'] ?? 0;
+    final rearDeltSets = muscleHardSets['Rear Delts'] ?? 0;
+    final bicepSets = muscleHardSets['Biceps'] ?? 0;
+    final pullSets = backSets + rearDeltSets + bicepSets;
+
+    if (pushSets > 2 * pullSets && pushSets >= 10) {
+      trainingBalanceScore -= 30;
+      balanceIssues.add('Push volume ($pushSets sets) is much higher than pull volume ($pullSets sets).');
+    } else if (pullSets > 2 * pushSets && pullSets >= 10) {
+      trainingBalanceScore -= 30;
+      balanceIssues.add('Pull volume ($pullSets sets) is much higher than push volume ($pushSets sets).');
+    } else if (pushSets >= 8 && pullSets >= 8) {
+      balanceSuccessesList.add('Push/Pull balance is healthy.');
+      coachingWhatWentWell.add('Push/Pull balance remained healthy.');
+    }
+
+    if (quadSets >= 10 && hamSets <= quadSets * 0.5) {
+      trainingBalanceScore -= 30;
+      balanceIssues.add('Hamstring volume ($hamSets sets) is significantly lower than quad volume ($quadSets sets).');
+    } else if (hamSets >= 10 && quadSets <= hamSets * 0.5) {
+      trainingBalanceScore -= 30;
+      balanceIssues.add('Quad volume ($quadSets sets) is significantly lower than hamstring volume ($hamSets sets).');
+    } else if (quadSets >= 6 && hamSets >= 6) {
+      balanceSuccessesList.add('Quad/Hamstring balance is healthy.');
+    }
+
+    for (final m in ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings']) {
+      if ((muscleHardSets[m] ?? 0) == 0) {
+        trainingBalanceScore -= 15;
+      }
+    }
+    trainingBalanceScore = trainingBalanceScore.clamp(0, 100);
+
+    final String trainingBalanceExplanation = balanceIssues.isNotEmpty
+        ? balanceIssues.join(' ')
+        : (balanceSuccessesList.isNotEmpty ? balanceSuccessesList.join(' ') : 'Good balance maintained between opposing muscle groups.');
+
+    // ─── 5. Training Quality Score ───
+    int trainingQualityScore = 100;
+    for (final m in ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings']) {
+      if ((muscleHardSets[m] ?? 0) < 6) {
+        trainingQualityScore -= 15;
+      }
+    }
+    for (final m in targetMuscleGroups) {
+      if ((muscleHardSets[m] ?? 0) > 20) {
+        trainingQualityScore -= 15;
+      }
+    }
+    if (pushSets > 2 * pullSets && pushSets >= 10) trainingQualityScore -= 10;
+    if (pullSets > 2 * pushSets && pullSets >= 10) trainingQualityScore -= 10;
+    if (quadSets >= 10 && hamSets <= quadSets * 0.5) trainingQualityScore -= 10;
+    if (hamSets >= 10 && quadSets <= hamSets * 0.5) trainingQualityScore -= 10;
+    trainingQualityScore = trainingQualityScore.clamp(0, 100);
+
+    if (trainingQualityScore >= 85) {
+      qualitySuccesses.add('Excellent training quality with balanced muscle group loading.');
+    } else if (trainingQualityScore >= 65) {
+      qualitySuccesses.add('Moderate training quality. Some muscle group volume adjustments needed.');
+    } else {
+      qualityIssues.add('Low training quality score due to multiple volume imbalances or skipped muscles.');
+    }
+
+    final String trainingQualityExplanation = qualityIssues.isNotEmpty
+        ? qualityIssues.join(' ')
+        : (qualitySuccesses.isNotEmpty ? qualitySuccesses.join(' ') : 'Overall training quality remains high.');
+
+    if (progressionFeats.isNotEmpty) {
+      coachingWhatWentWell.addAll(progressionFeats);
+    }
+    if (regressionFeats.isNotEmpty) {
+      coachingNeedsImprovement.addAll(regressionFeats);
+    }
+
+    if (coachingWhatWentWell.isEmpty) {
+      coachingWhatWentWell.add('Consistent training structure.');
+    }
+    if (coachingNeedsImprovement.isEmpty) {
+      coachingNeedsImprovement.add('No major training issues detected. Excellent job!');
+    }
+    if (coachingRecommendations.isEmpty) {
+      coachingRecommendations.add('Maintain current training volume and recovery spacing.');
+    }
+
+    final coachingWhatWentWellList = coachingWhatWentWell.toSet().toList();
+    final coachingNeedsImprovementList = coachingNeedsImprovement.toSet().toList();
+    final coachingRecommendationsList = coachingRecommendations.toSet().toList();
+
     return WeeklyReport(
       weekKey: weekKey,
       weekStart: weekStart,
@@ -469,6 +896,22 @@ class InsightsEngine {
       topImprovement: topImprovement,
       regressions: regressions,
       computedAt: DateTime.now(),
+
+      // Training Insights
+      trainingQualityScore: trainingQualityScore,
+      trainingRecoveryScore: trainingRecoveryScore,
+      trainingVolumeScore: trainingVolumeScore,
+      trainingBalanceScore: trainingBalanceScore,
+      trainingConsistencyScore: trainingConsistencyScore,
+      trainingQualityExplanation: trainingQualityExplanation,
+      trainingRecoveryExplanation: trainingRecoveryExplanation,
+      trainingVolumeExplanation: trainingVolumeExplanation,
+      trainingBalanceExplanation: trainingBalanceExplanation,
+      trainingConsistencyExplanation: trainingConsistencyExplanation,
+      muscleAnalyses: muscleAnalyses,
+      coachingWhatWentWell: coachingWhatWentWellList,
+      coachingNeedsImprovement: coachingNeedsImprovementList,
+      coachingRecommendations: coachingRecommendationsList,
     );
   }
 

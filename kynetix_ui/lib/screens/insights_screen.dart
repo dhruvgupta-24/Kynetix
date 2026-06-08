@@ -500,8 +500,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   // ─── Week View ──────────────────────────────────────────────────────────────
 
   Widget _buildWeekView() {
-    final cache = InsightsReportService.instance.weeklyCache;
-    final report = cache[_selectedWeekKey];
+    final report = InsightsReportService.instance.weeklyFor(_selectedWeekKey ?? '');
 
     if (report == null) {
       return _buildEmptyState('No report generated for this week yet. Log meals 3+ days to compute insights.');
@@ -574,10 +573,157 @@ class _InsightsScreenState extends State<InsightsScreen> {
         _buildGymAttendanceRow(report),
         const SizedBox(height: 16),
 
+        _buildWeeklyTrainingReviewCard(report),
+        const SizedBox(height: 16),
+
         _buildMacroSummaryRow(report.avgCalories, report.avgProtein, report.avgFiber),
         const SizedBox(height: 16),
 
         _buildOutcomeDistributionRow(report),
+      ],
+    );
+  }
+
+  Widget _buildWeeklyTrainingReviewCard(WeeklyReport report) {
+    return KCard(
+      padding: const EdgeInsets.all(KSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('WEEKLY TRAINING REVIEW', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          
+          _buildScoreItem('Training Quality', report.trainingQualityScore, report.trainingQualityExplanation),
+          _buildScoreItem('Recovery Spacing', report.trainingRecoveryScore, report.trainingRecoveryExplanation),
+          _buildScoreItem('Volume Target', report.trainingVolumeScore, report.trainingVolumeExplanation),
+          _buildScoreItem('Volume Balance', report.trainingBalanceScore, report.trainingBalanceExplanation),
+          _buildScoreItem('Workout Consistency', report.trainingConsistencyScore, report.trainingConsistencyExplanation),
+          
+          const Divider(height: 24, color: Color(0xFF2E2E3E)),
+          
+          const Text('COACHING SUMMARY', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          _buildCoachingSection('WHAT WENT WELL', report.coachingWhatWentWell, Icons.check_circle_outline_rounded, KColor.green),
+          _buildCoachingSection('WHAT NEEDS IMPROVEMENT', report.coachingNeedsImprovement, Icons.warning_amber_rounded, KColor.amber),
+          _buildCoachingSection('RECOMMENDED CHANGES NEXT WEEK', report.coachingRecommendations, Icons.lightbulb_outline_rounded, KColor.blue),
+          
+          const Divider(height: 24, color: Color(0xFF2E2E3E)),
+          
+          _buildMuscleAnalysesTable(report.muscleAnalyses),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoreItem(String label, int score, String explanation) {
+    final Color color = score >= 85
+        ? KColor.green
+        : (score >= 65 ? KColor.amber : KColor.danger);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label.toUpperCase(), style: const TextStyle(fontSize: 11, color: KColor.textSecondary, fontWeight: FontWeight.bold)),
+              Text('$score', style: TextStyle(fontSize: 15, color: color, fontWeight: FontWeight.w900)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(explanation, style: const TextStyle(fontSize: 11, color: KColor.textMuted, height: 1.35)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoachingSection(String title, List<String> items, IconData icon, Color color) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Text(title, style: TextStyle(fontSize: 10.5, color: color, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...items.map((item) => Padding(
+            padding: const EdgeInsets.only(left: 20, bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('•', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
+                const SizedBox(width: 6),
+                Expanded(child: Text(item, style: const TextStyle(fontSize: 11.5, color: Colors.white, height: 1.35))),
+              ],
+            ),
+          )).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMuscleAnalysesTable(List<MuscleGroupAnalysis> analyses) {
+    if (analyses.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('MUSCLE GROUP DETAILS', style: TextStyle(fontSize: 11, color: KColor.textMuted, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Table(
+          columnWidths: const {
+            0: FlexColumnWidth(3),
+            1: FlexColumnWidth(2),
+            2: FlexColumnWidth(2),
+            3: FlexColumnWidth(3),
+          },
+          children: [
+            const TableRow(
+              children: [
+                TableCell(child: Text('Muscle', style: TextStyle(fontSize: 10, color: KColor.textMuted, fontWeight: FontWeight.bold))),
+                TableCell(child: Text('Sets', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: KColor.textMuted, fontWeight: FontWeight.bold))),
+                TableCell(child: Text('Freq', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: KColor.textMuted, fontWeight: FontWeight.bold))),
+                TableCell(child: Text('Spacing', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: KColor.textMuted, fontWeight: FontWeight.bold))),
+              ],
+            ),
+            ...analyses.map((a) {
+              final double? gap = a.daysBetweenExposures;
+              final String spacingLabel = gap == null
+                  ? 'None'
+                  : (gap < 2.0 ? '${gap.toStringAsFixed(1)}d (Poor)' : '${gap.toStringAsFixed(1)}d (Good)');
+              final Color spacingColor = gap == null
+                  ? KColor.textMuted
+                  : (gap < 2.0 ? KColor.danger : KColor.green);
+
+              return TableRow(
+                children: [
+                  TableCell(child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(a.muscleGroup, style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
+                  )),
+                  TableCell(child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text('${a.hardSets}', style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold), textAlign: TextAlign.right),
+                  )),
+                  TableCell(child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text('${a.sessionsTrained}x', style: const TextStyle(fontSize: 11, color: Colors.white), textAlign: TextAlign.right),
+                  )),
+                  TableCell(child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(spacingLabel, style: TextStyle(fontSize: 11, color: spacingColor, fontWeight: FontWeight.w500), textAlign: TextAlign.right),
+                  )),
+                ],
+              );
+            }).toList(),
+          ],
+        ),
       ],
     );
   }
@@ -824,8 +970,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   // ─── Month View ─────────────────────────────────────────────────────────────
 
   Widget _buildMonthView() {
-    final cache = InsightsReportService.instance.monthlyCache;
-    final report = cache[_selectedMonthKey];
+    final report = InsightsReportService.instance.monthlyFor(_selectedMonthKey ?? '');
 
     if (report == null) {
       return _buildEmptyState('No report generated for this month yet. Log meals 10+ days to compute insights.');
@@ -1019,8 +1164,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
   // ─── Year View ──────────────────────────────────────────────────────────────
 
   Widget _buildYearView() {
-    final cache = InsightsReportService.instance.yearlyCache;
-    final report = cache[_selectedYearKey];
+    final report = InsightsReportService.instance.yearlyFor(_selectedYearKey ?? '');
 
     if (report == null) {
       return _buildEmptyState('No report generated for this year yet. Log meals 60+ days to compute insights.');

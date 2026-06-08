@@ -108,17 +108,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final draft = widget.draftSession;
     if (draft != null) {
       _sessionNotes = draft.notes ?? '';
-    }
-    _sessionExercises = draft != null
-        ? draft.entries.map((e) => e.exercise).toList()
-        : List.of(widget.splitDay.exercises);
+      _sessionExercises = draft.entries.map((e) => e.exercise).toList();
 
-    for (final ex in _sessionExercises) {
-      _sets[ex.id] = [];
-      _setTypeSelections[ex.id] = SetType.normal;
-      _rpeSelections[ex.id] = 8.0; // default RPE target
+      for (final ex in _sessionExercises) {
+        _sets[ex.id] = [];
+        _setTypeSelections[ex.id] = SetType.normal;
+        _rpeSelections[ex.id] = 8.0;
 
-      if (draft != null) {
         final matchingEntry = draft.entries.where((e) => e.exercise.id == ex.id).firstOrNull;
         if (matchingEntry != null) {
           _sets[ex.id] = matchingEntry.sets.toList();
@@ -139,23 +135,48 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           }
           _temporaryAdditions[ex.id] = matchingEntry.isTemporaryAddition;
         }
+
+        // Initialize default dial values
+        final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
+        final lastTop = lastEntry?.topSet;
+        if (lastTop != null) {
+          _weightSelections[ex.id] = lastTop.weight;
+          _repsSelections[ex.id] = lastTop.reps;
+        } else {
+          _weightSelections[ex.id] = 40.0;
+          _repsSelections[ex.id] = 10;
+        }
       }
 
-      // Initialize default dial values
-      final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
-      final lastTop = lastEntry?.topSet;
-      if (lastTop != null) {
-        _weightSelections[ex.id] = lastTop.weight;
-        _repsSelections[ex.id] = lastTop.reps;
-      } else {
-        _weightSelections[ex.id] = 40.0;
-        _repsSelections[ex.id] = 10;
-      }
-    }
+      _restoreState().then((_) {
+        _updateLiveScore();
+      });
+    } else {
+      _sessionExercises = List.of(widget.splitDay.exercises);
 
-    _restoreState().then((_) {
+      for (final ex in _sessionExercises) {
+        _sets[ex.id] = [];
+        _setTypeSelections[ex.id] = SetType.normal;
+        _rpeSelections[ex.id] = 8.0;
+
+        // Initialize default dial values
+        final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
+        final lastTop = lastEntry?.topSet;
+        if (lastTop != null) {
+          _weightSelections[ex.id] = lastTop.weight;
+          _repsSelections[ex.id] = lastTop.reps;
+        } else {
+          _weightSelections[ex.id] = 40.0;
+          _repsSelections[ex.id] = 10;
+        }
+      }
+
+      // Clear recovery state to make sure it's fresh
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.remove('kynetix_workout_recovery');
+      });
       _updateLiveScore();
-    });
+    }
   }
 
   void _loadRpeSetting() async {
@@ -242,7 +263,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         final data = jsonDecode(recoveryJson) as Map<String, dynamic>;
         setState(() {
           final rawExercises = data['sessionExercises'] as List<dynamic>?;
-          if (rawExercises != null) {
+          if (rawExercises != null && rawExercises.isNotEmpty) {
             _sessionExercises = rawExercises
                 .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
                 .toList();
@@ -485,6 +506,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     
     final picked = await showModalBottomSheet<Exercise>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E2C),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -526,6 +548,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
     final picked = await showModalBottomSheet<Exercise>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E2C),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -968,7 +991,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   Future<void> _confirmDiscard() async {
     if (_totalSets == 0) {
-      Navigator.of(context).pop();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('kynetix_workout_recovery');
+      await _service.clearDraftSession();
+      if (mounted) Navigator.of(context).pop();
       return;
     }
     final result = await showDialog<String>(
@@ -1042,6 +1068,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     
     final picked = await showModalBottomSheet<Exercise>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E2C),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -4339,7 +4366,26 @@ class _SessionExercisePickerSheet extends StatefulWidget {
 
 class _SessionExercisePickerSheetState
     extends State<_SessionExercisePickerSheet> {
+  late final TextEditingController _controller;
+  late final FocusNode _searchFocusNode;
   String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _searchFocusNode = FocusNode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _searchFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4351,72 +4397,137 @@ class _SessionExercisePickerSheetState
         )
         .toList();
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              onChanged: (v) => setState(() => _query = v),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Search exercises...',
-                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B7280), size: 18),
-                filled: true,
-                fillColor: const Color(0xFF13131F),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              ),
-            ),
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: () async {
-                final navigator = Navigator.of(context);
-                final ex = await showCreateCustomExerciseSheet(context);
-                if (!mounted || ex == null) return;
-                navigator.pop(ex);
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: KColor.green.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: KColor.green.withValues(alpha: 0.3)),
+    final splitIds = WorkoutService.instance.split.days.expand((d) => d.exercises).map((e) => e.id).toSet();
+    final recentIds = WorkoutService.instance.recentSessions(limit: 10).expand((s) => s.entries).map((e) => e.exercise.id).toSet();
+
+    filtered.sort((a, b) {
+      int scoreA = 0;
+      if (splitIds.contains(a.id)) scoreA -= 10;
+      if (recentIds.contains(a.id)) scoreA -= 5;
+
+      int scoreB = 0;
+      if (splitIds.contains(b.id)) scoreB -= 10;
+      if (recentIds.contains(b.id)) scoreB -= 5;
+
+      if (scoreA != scoreB) {
+        return scoreA.compareTo(scoreB);
+      }
+      return a.name.compareTo(b.name);
+    });
+
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return AnimatedPadding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      child: SafeArea(
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _controller,
+                focusNode: _searchFocusNode,
+                onChanged: (v) => setState(() => _query = v),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Search exercises...',
+                  prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B7280), size: 18),
+                  filled: true,
+                  fillColor: const Color(0xFF13131F),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.add_rounded, color: KColor.green, size: 20),
-                    SizedBox(width: 10),
-                    Text(
-                      '+ Add Custom Exercise',
-                      style: TextStyle(color: KColor.green, fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Divider(height: 1, color: Color(0xFF2E2E3E)),
-            const SizedBox(height: 4),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: filtered.length,
-                itemBuilder: (context, i) {
-                  final ex = filtered[i];
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                    title: Text(ex.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                    subtitle: Text('${ex.muscleGroup} • ${ex.repRangeLabel}', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
-                    trailing: const Icon(Icons.add_rounded, color: KColor.green, size: 20),
-                    onTap: () => Navigator.of(context).pop(ex),
-                  );
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () async {
+                  final navigator = Navigator.of(context);
+                  final ex = await showCreateCustomExerciseSheet(context);
+                  if (!mounted || ex == null) return;
+                  navigator.pop(ex);
                 },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: KColor.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: KColor.green.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.add_rounded, color: KColor.green, size: 20),
+                      SizedBox(width: 10),
+                      Text(
+                        '+ Add Custom Exercise',
+                        style: TextStyle(color: KColor.green, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: Color(0xFF2E2E3E)),
+              const SizedBox(height: 4),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final ex = filtered[i];
+                    final isSplit = splitIds.contains(ex.id);
+                    final isRecent = recentIds.contains(ex.id);
+                    
+                    String badge = '';
+                    Color badgeColor = Colors.transparent;
+                    if (isSplit && isRecent) {
+                      badge = 'Split • Recent';
+                      badgeColor = KColor.green;
+                    } else if (isSplit) {
+                      badge = 'Split';
+                      badgeColor = KColor.blue;
+                    } else if (isRecent) {
+                      badge = 'Recent';
+                      badgeColor = KColor.amber;
+                    }
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                      title: Row(
+                        children: [
+                          Expanded(child: Text(ex.name, style: const TextStyle(color: Colors.white, fontSize: 13))),
+                          if (badge.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: badgeColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.5),
+                              ),
+                              child: Text(
+                                badge,
+                                style: TextStyle(color: badgeColor, fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      subtitle: Text('${ex.muscleGroup} • ${ex.repRangeLabel}', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
+                      trailing: const Icon(Icons.add_rounded, color: KColor.green, size: 20),
+                      onTap: () => Navigator.of(context).pop(ex),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

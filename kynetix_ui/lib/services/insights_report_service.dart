@@ -45,45 +45,96 @@ class InsightsReportService extends ChangeNotifier {
 
       final weeklyRaw = prefs.getString(_kWeekly);
       if (weeklyRaw != null) {
-        final map = jsonDecode(weeklyRaw) as Map<String, dynamic>;
-        _weekly = map.map((k, v) => MapEntry(k, WeeklyReport.fromJson(v as Map<String, dynamic>)));
-        _weekly.removeWhere((k, v) => v.schemaVersion != kInsightsSchemaVersion);
+        try {
+          final map = jsonDecode(weeklyRaw) as Map<String, dynamic>;
+          _weekly = {};
+          map.forEach((k, v) {
+            try {
+              final report = WeeklyReport.fromJson(v as Map<String, dynamic>);
+              if (report.schemaVersion == kInsightsSchemaVersion) {
+                _weekly[k] = report;
+              }
+            } catch (inner) {
+              debugPrint('[InsightsReportService] Error parsing weekly report $k: $inner');
+            }
+          });
+        } catch (outer) {
+          debugPrint('[InsightsReportService] Error decoding weekly cache: $outer');
+        }
       }
 
       final monthlyRaw = prefs.getString(_kMonthly);
       if (monthlyRaw != null) {
-        final map = jsonDecode(monthlyRaw) as Map<String, dynamic>;
-        _monthly = map.map((k, v) => MapEntry(k, MonthlyReport.fromJson(v as Map<String, dynamic>)));
-        _monthly.removeWhere((k, v) => v.schemaVersion != kInsightsSchemaVersion);
+        try {
+          final map = jsonDecode(monthlyRaw) as Map<String, dynamic>;
+          _monthly = {};
+          map.forEach((k, v) {
+            try {
+              final report = MonthlyReport.fromJson(v as Map<String, dynamic>);
+              if (report.schemaVersion == kInsightsSchemaVersion) {
+                _monthly[k] = report;
+              }
+            } catch (inner) {
+              debugPrint('[InsightsReportService] Error parsing monthly report $k: $inner');
+            }
+          });
+        } catch (outer) {
+          debugPrint('[InsightsReportService] Error decoding monthly cache: $outer');
+        }
       }
 
       final yearlyRaw = prefs.getString(_kYearly);
       if (yearlyRaw != null) {
-        final map = jsonDecode(yearlyRaw) as Map<String, dynamic>;
-        _yearly = map.map((k, v) => MapEntry(k, YearlyReport.fromJson(v as Map<String, dynamic>)));
-        _yearly.removeWhere((k, v) => v.schemaVersion != kInsightsSchemaVersion);
+        try {
+          final map = jsonDecode(yearlyRaw) as Map<String, dynamic>;
+          _yearly = {};
+          map.forEach((k, v) {
+            try {
+              final report = YearlyReport.fromJson(v as Map<String, dynamic>);
+              if (report.schemaVersion == kInsightsSchemaVersion) {
+                _yearly[k] = report;
+              }
+            } catch (inner) {
+              debugPrint('[InsightsReportService] Error parsing yearly report $k: $inner');
+            }
+          });
+        } catch (outer) {
+          debugPrint('[InsightsReportService] Error decoding yearly cache: $outer');
+        }
       }
 
       final pbRaw = prefs.getString(_kPersonalBests);
       if (pbRaw != null) {
-        final pb = PersonalBests.fromJson(jsonDecode(pbRaw) as Map<String, dynamic>);
-        if (pb.schemaVersion == kInsightsSchemaVersion) {
-          _personalBests = pb;
+        try {
+          final pb = PersonalBests.fromJson(jsonDecode(pbRaw) as Map<String, dynamic>);
+          if (pb.schemaVersion == kInsightsSchemaVersion) {
+            _personalBests = pb;
+          }
+        } catch (e) {
+          debugPrint('[InsightsReportService] Error parsing personal bests cache: $e');
         }
       }
 
       final achievementsRaw = prefs.getString(_kAchievements);
       if (achievementsRaw != null) {
-        final list = jsonDecode(achievementsRaw) as List<dynamic>;
-        _achievements = list
-            .map((item) => Achievement.fromJson(item as Map<String, dynamic>))
-            .toList();
+        try {
+          final list = jsonDecode(achievementsRaw) as List<dynamic>;
+          _achievements = list
+              .map((item) => Achievement.fromJson(item as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('[InsightsReportService] Error parsing achievements cache: $e');
+        }
       }
 
       final aiRaw = prefs.getString(_kAiSummaries);
       if (aiRaw != null) {
-        final map = jsonDecode(aiRaw) as Map<String, dynamic>;
-        _aiSummaries = map.map((k, v) => MapEntry(k, InsightsSummary.fromJson(v as Map<String, dynamic>)));
+        try {
+          final map = jsonDecode(aiRaw) as Map<String, dynamic>;
+          _aiSummaries = map.map((k, v) => MapEntry(k, InsightsSummary.fromJson(v as Map<String, dynamic>)));
+        } catch (e) {
+          debugPrint('[InsightsReportService] Error parsing AI summaries cache: $e');
+        }
       }
 
       final lastComputedRaw = prefs.getString(_kLastComputed);
@@ -110,12 +161,79 @@ class InsightsReportService extends ChangeNotifier {
   }
 
   // ── Pure getters — ZERO computation, ZERO async ───────────────────────────
-  WeeklyReport?           latestWeekly()         => _weekly[_currentWeekKey()];
-  MonthlyReport?          latestMonthly()        => _monthly[_currentMonthKey()];
-  YearlyReport?           latestYearly()         => _yearly[_currentYearKey()];
-  WeeklyReport?           weeklyFor(String key)  => _weekly[key];
-  MonthlyReport?          monthlyFor(String key) => _monthly[key];
-  YearlyReport?           yearlyFor(String key)  => _yearly[key];
+  WeeklyReport?           latestWeekly()         => weeklyFor(_currentWeekKey());
+  MonthlyReport?          latestMonthly()        => monthlyFor(_currentMonthKey());
+  YearlyReport?           latestYearly()         => yearlyFor(_currentYearKey());
+  WeeklyReport? weeklyFor(String key) {
+    if (!_weekly.containsKey(key)) {
+      final profile = ProfileService.instance.currentUserProfile;
+      if (profile != null) {
+        try {
+          final report = InsightsEngine.computeWeek(
+            weekKey: key,
+            profile: profile,
+            logs: dayLogStore,
+            sessions: WorkoutService.instance.sessions,
+            priorWeek: null,
+          );
+          if (report != null) {
+            _weekly[key] = report;
+            _save().ignore();
+          }
+        } catch (e) {
+          debugPrint('[InsightsReportService] On-demand compute for week $key failed: $e');
+        }
+      }
+    }
+    return _weekly[key];
+  }
+
+  MonthlyReport? monthlyFor(String key) {
+    if (!_monthly.containsKey(key)) {
+      final profile = ProfileService.instance.currentUserProfile;
+      if (profile != null) {
+        try {
+          final report = InsightsEngine.computeMonth(
+            monthKey: key,
+            profile: profile,
+            logs: dayLogStore,
+            sessions: WorkoutService.instance.sessions,
+            priorMonth: null,
+          );
+          if (report != null) {
+            _monthly[key] = report;
+            _save().ignore();
+          }
+        } catch (e) {
+          debugPrint('[InsightsReportService] On-demand compute for month $key failed: $e');
+        }
+      }
+    }
+    return _monthly[key];
+  }
+
+  YearlyReport? yearlyFor(String key) {
+    if (!_yearly.containsKey(key)) {
+      final profile = ProfileService.instance.currentUserProfile;
+      if (profile != null) {
+        try {
+          final report = InsightsEngine.computeYear(
+            yearKey: key,
+            profile: profile,
+            logs: dayLogStore,
+            monthlyCache: _monthly,
+          );
+          if (report != null) {
+            _yearly[key] = report;
+            _save().ignore();
+          }
+        } catch (e) {
+          debugPrint('[InsightsReportService] On-demand compute for year $key failed: $e');
+        }
+      }
+    }
+    return _yearly[key];
+  }
   PersonalBests?          get personalBests      => _personalBests;
   List<Achievement>       get achievements       => List.unmodifiable(_achievements);
   int                     get newAchievementCount => _achievements.where((a) => a.isNew).length;

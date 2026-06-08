@@ -3,7 +3,7 @@ import 'day_status.dart';
 // ─── Schema version sentinel ──────────────────────────────────────────────────
 // Increment when any field is added/removed. Cached blobs with lower versions
 // are discarded on load and immediately recomputed.
-const int kInsightsSchemaVersion = 1;
+const int kInsightsSchemaVersion = 2;
 
 // ─── ConsistencyScore ─────────────────────────────────────────────────────────
 class ConsistencyScore {
@@ -212,6 +212,43 @@ class PersonalBests {
       );
 }
 
+// ─── MuscleGroupAnalysis ──────────────────────────────────────────────────────
+class MuscleGroupAnalysis {
+  final String muscleGroup;
+  final int sessionsTrained;
+  final int hardSets;
+  final double weeklyVolume;
+  final int recoveryFrequency;
+  final double? daysBetweenExposures;
+
+  const MuscleGroupAnalysis({
+    required this.muscleGroup,
+    required this.sessionsTrained,
+    required this.hardSets,
+    required this.weeklyVolume,
+    required this.recoveryFrequency,
+    this.daysBetweenExposures,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'muscleGroup': muscleGroup,
+        'sessionsTrained': sessionsTrained,
+        'hardSets': hardSets,
+        'weeklyVolume': weeklyVolume,
+        'recoveryFrequency': recoveryFrequency,
+        if (daysBetweenExposures != null) 'daysBetweenExposures': daysBetweenExposures,
+      };
+
+  factory MuscleGroupAnalysis.fromJson(Map<String, dynamic> j) => MuscleGroupAnalysis(
+        muscleGroup: j['muscleGroup'] as String? ?? '',
+        sessionsTrained: (j['sessionsTrained'] as num?)?.toInt() ?? 0,
+        hardSets: (j['hardSets'] as num?)?.toInt() ?? 0,
+        weeklyVolume: (j['weeklyVolume'] as num?)?.toDouble() ?? 0.0,
+        recoveryFrequency: (j['recoveryFrequency'] as num?)?.toInt() ?? 0,
+        daysBetweenExposures: (j['daysBetweenExposures'] as num?)?.toDouble(),
+      );
+}
+
 // ─── WeeklyReport ─────────────────────────────────────────────────────────────
 class WeeklyReport {
   final int schemaVersion = kInsightsSchemaVersion;
@@ -230,6 +267,25 @@ class WeeklyReport {
   final List<RegressionAlert> regressions;
   final DateTime computedAt;
 
+  // Training & Spacing Analysis (Explainable Scores)
+  final int trainingQualityScore;
+  final int trainingRecoveryScore;
+  final int trainingVolumeScore;
+  final int trainingBalanceScore;
+  final int trainingConsistencyScore;
+
+  final String trainingQualityExplanation;
+  final String trainingRecoveryExplanation;
+  final String trainingVolumeExplanation;
+  final String trainingBalanceExplanation;
+  final String trainingConsistencyExplanation;
+
+  final List<MuscleGroupAnalysis> muscleAnalyses;
+
+  final List<String> coachingWhatWentWell;
+  final List<String> coachingNeedsImprovement;
+  final List<String> coachingRecommendations;
+
   const WeeklyReport({
     required this.weekKey,
     required this.weekStart,
@@ -245,6 +301,22 @@ class WeeklyReport {
     this.topImprovement,
     required this.regressions,
     required this.computedAt,
+
+    // Training Metrics
+    this.trainingQualityScore = 0,
+    this.trainingRecoveryScore = 0,
+    this.trainingVolumeScore = 0,
+    this.trainingBalanceScore = 0,
+    this.trainingConsistencyScore = 0,
+    this.trainingQualityExplanation = '',
+    this.trainingRecoveryExplanation = '',
+    this.trainingVolumeExplanation = '',
+    this.trainingBalanceExplanation = '',
+    this.trainingConsistencyExplanation = '',
+    this.muscleAnalyses = const [],
+    this.coachingWhatWentWell = const [],
+    this.coachingNeedsImprovement = const [],
+    this.coachingRecommendations = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -263,6 +335,22 @@ class WeeklyReport {
         if (topImprovement != null) 'topImprovement': topImprovement!.toJson(),
         'regressions': regressions.map((r) => r.toJson()).toList(),
         'computedAt': computedAt.toIso8601String(),
+
+        // Training Metrics
+        'trainingQualityScore': trainingQualityScore,
+        'trainingRecoveryScore': trainingRecoveryScore,
+        'trainingVolumeScore': trainingVolumeScore,
+        'trainingBalanceScore': trainingBalanceScore,
+        'trainingConsistencyScore': trainingConsistencyScore,
+        'trainingQualityExplanation': trainingQualityExplanation,
+        'trainingRecoveryExplanation': trainingRecoveryExplanation,
+        'trainingVolumeExplanation': trainingVolumeExplanation,
+        'trainingBalanceExplanation': trainingBalanceExplanation,
+        'trainingConsistencyExplanation': trainingConsistencyExplanation,
+        'muscleAnalyses': muscleAnalyses.map((m) => m.toJson()).toList(),
+        'coachingWhatWentWell': coachingWhatWentWell,
+        'coachingNeedsImprovement': coachingNeedsImprovement,
+        'coachingRecommendations': coachingRecommendations,
       };
 
   factory WeeklyReport.fromJson(Map<String, dynamic> j) => WeeklyReport(
@@ -287,6 +375,34 @@ class WeeklyReport {
                 .toList() ??
             const [],
         computedAt: DateTime.parse(j['computedAt'] as String),
+
+        // Training Metrics
+        trainingQualityScore: (j['trainingQualityScore'] as num?)?.toInt() ?? 0,
+        trainingRecoveryScore: (j['trainingRecoveryScore'] as num?)?.toInt() ?? 0,
+        trainingVolumeScore: (j['trainingVolumeScore'] as num?)?.toInt() ?? 0,
+        trainingBalanceScore: (j['trainingBalanceScore'] as num?)?.toInt() ?? 0,
+        trainingConsistencyScore: (j['trainingConsistencyScore'] as num?)?.toInt() ?? 0,
+        trainingQualityExplanation: j['trainingQualityExplanation'] as String? ?? '',
+        trainingRecoveryExplanation: j['trainingRecoveryExplanation'] as String? ?? '',
+        trainingVolumeExplanation: j['trainingVolumeExplanation'] as String? ?? '',
+        trainingBalanceExplanation: j['trainingBalanceExplanation'] as String? ?? '',
+        trainingConsistencyExplanation: j['trainingConsistencyExplanation'] as String? ?? '',
+        muscleAnalyses: (j['muscleAnalyses'] as List<dynamic>?)
+                ?.map((m) => MuscleGroupAnalysis.fromJson(m as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        coachingWhatWentWell: (j['coachingWhatWentWell'] as List<dynamic>?)
+                ?.map((e) => e as String)
+                .toList() ??
+            const [],
+        coachingNeedsImprovement: (j['coachingNeedsImprovement'] as List<dynamic>?)
+                ?.map((e) => e as String)
+                .toList() ??
+            const [],
+        coachingRecommendations: (j['coachingRecommendations'] as List<dynamic>?)
+                ?.map((e) => e as String)
+                .toList() ??
+            const [],
       );
 }
 

@@ -1108,6 +1108,7 @@ class WorkoutService extends ChangeNotifier {
       await prefs.remove('kynetix_sleep_hours_v1');
       await prefs.remove('kynetix_hrv_rmssd_v1');
       await prefs.remove('kynetix_hrv_baseline_v1');
+      await prefs.remove('kynetix_workout_recovery');
     } catch (e) {
       debugPrint('[WorkoutService] Clear data failed: $e');
     }

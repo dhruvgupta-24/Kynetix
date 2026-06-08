@@ -12,6 +12,7 @@ import 'package:kynetix/services/insights_report_service.dart';
 import 'package:kynetix/services/profile_service.dart';
 import 'package:kynetix/models/nutrition_result.dart';
 import 'package:kynetix/services/mock_estimation_service.dart' show NutrientRange;
+import 'package:kynetix/services/insights_engine.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -147,6 +148,98 @@ void main() {
       expect(fridayLog.gymDay, isNotNull);
       expect(fridayLog.gymDay!.didGym, isTrue);
       expect(fridayLog.gymDay!.splitDayName, equals('Push'));
+    });
+  });
+
+  group('Workout Consistency Source of Truth - isGymDay Rules', () {
+    test('Gym toggle YES with no workout session -> Gym Day = YES', () {
+      final date = DateTime(2026, 6, 1);
+      final log = DayLog();
+      log.gymDay = const GymDay(didGym: true);
+      
+      final result = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: null,
+      );
+      
+      expect(result, isTrue);
+    });
+
+    test('Workout session completed with toggle NO -> Gym Day = YES', () {
+      final date = DateTime(2026, 6, 1);
+      final log = DayLog();
+      log.gymDay = const GymDay(didGym: false);
+      
+      final session = WorkoutSession(
+        id: 'ws-123',
+        date: date,
+        splitDayName: 'Push',
+        entries: [
+          ExerciseEntry(
+            exercise: const Exercise(id: 'ex-1', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+            sets: [
+              const SetEntry(weight: 60.0, reps: 8, setType: SetType.normal),
+            ],
+          ),
+        ],
+      );
+      
+      final result = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: session,
+      );
+      
+      expect(result, isTrue);
+    });
+
+    test('Both present -> Gym Day = YES', () {
+      final date = DateTime(2026, 6, 1);
+      final log = DayLog();
+      log.gymDay = const GymDay(didGym: true);
+      
+      final session = WorkoutSession(
+        id: 'ws-123',
+        date: date,
+        splitDayName: 'Push',
+        entries: [
+          ExerciseEntry(
+            exercise: const Exercise(id: 'ex-1', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+            sets: [
+              const SetEntry(weight: 60.0, reps: 8, setType: SetType.normal),
+            ],
+          ),
+        ],
+      );
+      
+      final result = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: session,
+      );
+      
+      expect(result, isTrue);
+    });
+
+    test('Neither present -> Gym Day = NO', () {
+      final date = DateTime(2026, 6, 1);
+      final log = DayLog();
+      
+      final result1 = InsightsEngine.isGymDay(
+        date: date,
+        log: null,
+        session: null,
+      );
+      expect(result1, isFalse);
+      
+      log.gymDay = const GymDay(didGym: false);
+      final result2 = InsightsEngine.isGymDay(
+        date: date,
+        log: log,
+        session: null,
+      );
+      expect(result2, isFalse);
     });
   });
 }
