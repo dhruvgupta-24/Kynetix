@@ -90,18 +90,6 @@ The `ai-chat-router` edge function acts as an intelligent gateway:
 
 ---
 
-## 📸 Recommended Showcase Screenshots
-
-*To showcase Kynetix in a public context, capture and save the following screenshots in `/docs/images/` and link them here:*
-
-*   [ ] **Dashboard**: The primary screen showing the daily progress rings, meal entries categorized by meal section (Breakfast, Lunch, Dinner, Snacks), and quick-add shortcuts.
-*   [ ] **Day Detail**: The detailed timeline of a specific day's meals, calorie allocations, and manual portion correction indicators.
-*   [ ] **Insights Screen**: A visual breakdown of weekly step counts, body weight trends, training frequency heatmaps, and unlocked achievements.
-*   [ ] **Workout Tracking**: The active console showing current sets, reps, previous weight logs, RPE selector dials, and set-type chips.
-*   [ ] **Home Screen Widget**: A screenshot of the Android home screen showcasing the 2x2 or 4x2 concentric progress widget in action.
-
----
-
 ## 🗄️ Database Schema
 
 The backend uses a Supabase PostgreSQL database organized into the following functional domains:
@@ -243,6 +231,5 @@ Kynetix uses a comprehensive automated testing structure spanning unit, integrat
 
 ## 🗺️ Future Roadmap
 
-*   **⚡ Calorie Carry-Forward**: Complete the UI settings and rolling balance logic to automatically carry over leftover/excess calories across the week.
 *   **⌚ Wearable Integration**: Connect the backend `SleepData` and `HrvData` models to physical wearable sensors to refine daily targets based on actual physical recovery metrics.
 *   **📊 Dynamic Charting**: Integrate interactive weight trend charts and macro-nutrient breakdown graphs on the Insights page.
