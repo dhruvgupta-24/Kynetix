@@ -1,199 +1,203 @@
-# Kynetix - AI-First Nutrition & Fitness Coach
+# ⚡ Kynetix — AI-First Nutrition & Fitness Coach
 
-Kynetix is an AI-first health and training application built with Flutter for Android. It combines natural language meal logging, an AI-powered conversational nutrition coach, calorie-cycled daily targets, Health Connect synchronization, a training journal, and a native Android Home Widget.
+Kynetix is a modern, premium, AI-first health and training application built with Flutter for Android. By combining natural language meal logging, an AI-powered conversational coach, calorie-cycled daily targets, native Health Connect synchronization, a detailed training journal, and a dynamic home screen widget, Kynetix acts as a seamless digital companion for physical optimization.
 
----
-
-## What Makes Kynetix Different?
-
-* **Indian Food Optimization**: Natural language meal logging is optimized for Indian diets, portion sizes, and mess/hostel eating patterns.
-* **Personal Nutrition Memory**: The engine learns from manual user corrections to refine future AI calorie and protein estimates for recurring meals.
-* **ChatGPT Account Linking**: Seamlessly pairs with a user's personal ChatGPT Plus/Developer account to run coaching requests using their own API limits, reducing system infrastructure costs.
-* **Multimodal Coaching (Vision)**: An AI nutrition coach capable of analyzing food photos, menus, and delivery app screenshots.
-* **Integrated Ecosystem**: Automatically cycles daily calorie and protein targets based on active workout splits (gym days vs. rest days) and step counts.
-* **Concentric Progress Widget**: Renders Google Fit-style concentric rings directly on the native Android home screen to track calories and protein in real time.
+Designed with privacy and low operational cost in mind, Kynetix features a unique ChatGPT Account Linking flow. This allows users to pair their personal ChatGPT Plus or developer account to power their AI coaching requests, bypassing expensive server middle-men and keeping user data secure.
 
 ---
 
-## Product Feature Status
+## ✨ Key Features
 
-To ensure transparency and prevent documentation drift, the table below maps the current status of Kynetix features:
-* **Fully Implemented**: Complete loop (UI + Service + Database) and active in the user flow.
-* **Partially Implemented**: Connects UI and code, but has key omissions, incomplete data flows, or known gaps.
-* **Infrastructure Exists**: Backend services, models, or database tables are implemented, but are not wired into the main client app flows.
-* **Planned Only**: Conceptual placeholder with no code representation.
-
-| Feature | Status | Notes |
-| :--- | :--- | :--- |
-| **Natural Language Meal Logging** | **Fully Implemented** | Uses direct token parsing + Gemini REST API meal estimation, falling back to a local database. |
-| **AI Nutrition Coach (Kyno Chat)** | **Fully Implemented** | Conversational chat interface supporting multi-turn stream messages, suggestion chips, and camera/gallery photos. |
-| **Calorie-Cycled Targets (TDEE)** | **Fully Implemented** | Mifflin-St Jeor TDEE formula adjusting for gym day vs. rest day training splits. |
-| **Health Connect Integration** | **Fully Implemented** | Deduplicates and syncs daily step counts and body weights. |
-| **Workout Recovery Dialog** | **Fully Implemented** | Modal recovery prompt displayed on boot if a draft session is detected. Drafts survive indefinitely. |
-| **Planned vs. Executed History** | **Fully Implemented** | Side-by-side planned vs. actual workout logs displaying skips, replacements, and additions. |
-| **Partial Workout Status** | **Fully Implemented** | `WorkoutStatus.partial` is saved when ending a workout session early. |
-| **RPE Toggle & Dials** | **Fully Implemented** | Settings switch that reveals RPE 6–10 selectors in the unified training console. |
-| **Set Type Selector Enhancements** | **Fully Implemented** | Segmented single-row selector with `+ More` button, fade indicators, and active-chip auto-scroll. |
-| **ChatGPT Account Linking Flow** | **Fully Implemented** | Device-code OAuth flow. Injects user token server-side in `ai-chat-router` on success. |
-| **Home Screen Widget** | **Fully Implemented** | Native Android Widget with 2x2/4x2/4x4 layouts, concentric progress arcs, and midnight rollover. |
-| **Achievement System** | **Fully Implemented** | Evaluates and displays training and habit achievements in history and insights screens. |
-| **AI Coaching Insights** | **Fully Implemented** | Local deterministic coach summaries displayed on the daily logs screen. |
-| **Cloud Sync** | **Partially Implemented** | Hydrates core logs, profiles, and workouts. Some analytics/cache tables are write-only and not restored. |
-| **Calorie Carry-Forward** | **Infrastructure Exists** | `carry_forward_record.dart` exists, but lacks active UI settings or roll-over logic. |
-| **Wearable Recovery Integration** | **Infrastructure Exists** | `SleepData` and `HrvData` models exist in `recovery_service.dart` but are not wired to sensors or UI. |
+*   **🥗 Indian Food Optimization**: Natural language meal logging is fine-tuned to recognize traditional Indian cuisines, variable portion sizes, and typical mess/hostel eating patterns.
+*   **🧠 Personal Nutrition Memory**: The local intelligence engine learns directly from your manual edits to calibrate calorie and protein values for recurring or custom meals over time.
+*   **🔗 ChatGPT Account Linking**: Seamlessly pairs with a user's personal ChatGPT account via a device-code OAuth flow to execute coaching requests using their own API limits.
+*   **👁️ Multimodal Coaching (Vision)**: The conversational coach (*Kyno*) can analyze food photos, restaurant menus, and delivery app screenshots to extract macros and give instant feedback.
+*   **🔄 Integrated Ecosystem & Cycling**: Automatically recalculates and cycles calorie and protein targets dynamically based on gym splits (workout vs. rest days) and step counts.
+*   **📱 Concentric Progress Widget**: Renders Google Fit-style concentric rings directly on the native Android home screen to track calories and protein intake in real time with offline midnight rollover.
+*   **🏆 Achievements & Streaks**: Automatically tracks workout consistency, habit compliance, and nutritional milestones.
 
 ---
 
-## Unused / Legacy / Experimental Components
+## 🛠️ Tech Stack
 
-The following elements exist in the repository but are not active in primary user flows. They are documented here to prevent confusion for future developers:
+### Client (Frontend)
+*   **Framework**: [Flutter](https://flutter.dev) (SDK ≥ 3.19) / [Dart](https://dart.dev) (SDK ≥ 3.3)
+*   **Local Storage**: `SharedPreferences` for fast key-value caching and offline widget updates.
+*   **Device Integration**: Android `Health Connect` for steps and bodyweight aggregation.
+*   **UI Assets**: Custom Google Fonts (`Inter`, `Outfit`), icons (`CupertinoIcons`, `MaterialIcons`), and adaptive branding.
 
-| Component | Category | Status | Purpose / Notes |
-| :--- | :--- | :--- | :--- |
-| `home_screen.dart` | UI Screen | **Unused** | Residual landing screen replaced by the active tab views in `app_shell.dart`. |
-| `SleepData` & `HrvData` | Code Stubs | **Experimental** | Placeholder data structures for future wearable recovery tracking. |
-| `carry_forward_record` | Code Stub | **Experimental** | Data model for weekly rolling calorie balances, not integrated with TDEE logic. |
+### Backend (Serverless & Database)
+*   **Platform**: [Supabase](https://supabase.com)
+*   **Database**: PostgreSQL with Row-Level Security (RLS) policies for strict tenant isolation.
+*   **Functions**: Supabase Edge Functions (Deno runtime) for AI routing and OAuth flows.
+*   **AI Models**: Gemini REST API (client-side natural language parsing) and OpenAI GPT-4o / OpenRouter (server-side context-aware coaching).
 
 ---
 
-## Architecture & Core Flows
+## 🏗️ Architecture & Core Flows
 
 ```
-Flutter App (kynetix_ui / Android)
-    │
-    ├─ Supabase Auth         (Google SSO + email/password)
-    ├─ Supabase Postgres     (profiles, day_logs, user_openai_links, workouts)
-    └─ Supabase Edge Functions
-          │
-          ├─ ai-meal-coach        ← Nutrition coach - builds full context,
-          │                          fetches meals, targets, food memory,
-          │                          then calls ai-chat-router
-          │
-          └─ ai-chat-router       ← AI provider router
-                │
-                ├─ PRIMARY:   OpenAI  (using user's linked ChatGPT token if connected)
-                │                     Fallback: OpenAI system credentials
-                │
-                └─ FALLBACK:  OpenRouter
+                   ┌──────────────────────────────────────────┐
+                   │        Flutter App (kynetix_ui)          │
+                   └──────┬────────────────────────────┬──────┘
+                          │                            │
+                          ▼                            ▼
+              ┌──────────────────────┐      ┌──────────────────────┐
+              │    Supabase Auth     │      │  Supabase Postgres   │
+              │  (Google / Password) │      │  (Row-Level Security)│
+              └──────────────────────┘      └──────────────────────┘
+                          │                            ▲
+                          ▼                            │ (Database reads/writes)
+              ┌────────────────────────────────────────┴──────┐
+              │           Supabase Edge Functions             │
+              └───────────┬────────────────────────────┬──────┘
+                          │                            │
+                          ▼ (AI Coaching context)      ▼ (OAuth pairing logic)
+              ┌──────────────────────┐      ┌──────────────────────┐
+              │    ai-meal-coach     │      │   openai-link-flow   │
+              └───────────┬──────────┘      └──────────────────────┘
+                          │
+                          ▼ (System prompts + logs)
+              ┌──────────────────────┐
+              │   ai-chat-router     │
+              └───────────┬──────────┘
+                          │
+            ┌─────────────┴─────────────┐
+            ▼ (Primary Router)          ▼ (Secondary Fallback)
+  ┌──────────────────┐        ┌──────────────────┐
+  │   OpenAI API     │        │  OpenRouter API  │
+  │ (User or System) │        │ (Fallback Model) │
+  └──────────────────┘        └──────────────────┘
 ```
 
-### AI Coaching Architecture
+### 1. AI Coaching Architecture
+Coaching is separated into three distinct, robust layers:
+*   **Local Coach Service** (`coach_service.dart`): Operates entirely **offline** on-device. Evaluates daily meal logs against targets to print immediate, deterministic coaching blocks (e.g., flagging protein deficits, calculating protein requirements per remaining meal, or checking weekly calorie target adherence).
+*   **AI Coach Chat Screen** (`ai_coach_screen.dart`): Interactive client interface for *Kyno*. Handles multi-turn streaming conversations, markdown rendering, suggestion chips, and camera/gallery uploads. Encodes weight trends and daily targets as system context.
+*   **Edge Function Context Injector** (`supabase/functions/ai-meal-coach/`): Receives the user's message, loads user profile metrics, day logs, and custom nutrition memory. It builds a system prompt injecting daily stats and routes it to `ai-chat-router`.
 
-Coaching is separated into three clean layers:
-1. **Local CoachService** (`lib/services/coach_service.dart`): Operates completely **offline** on the device. Evaluates today's meal logs against targets to print immediate, deterministic coaching blocks (e.g., flagging severe protein deficits, calculating protein requirements per remaining meal, or checking weekly calorie target adherence).
-2. **AI Coach Screen** (`lib/screens/ai_coach_screen.dart`): Interactive client interface (the chat window for *Kyno*). Handles multi-turn streaming conversations, camera/gallery uploads, quick suggestion chips, and Markdown response rendering. Encodes weight trends and daily targets as context.
-3. **Edge Function AI Chat** (`supabase/functions/ai-meal-coach/`): Server-side context injector. Receives the user's message, loads user profile/day logs/nutrition memory, and builds a system prompt injecting daily calorie/protein stats and overrides. Then it routes the request to the `ai-chat-router` Edge Function, which calls OpenAI (using the user's linked ChatGPT token if connected, or Kynetix's system API key) and streams responses back to the app via Server-Sent Events (SSE).
+### 2. Provider Routing & Failover
+The `ai-chat-router` edge function acts as an intelligent gateway:
+*   **Normal Message**: Routed to OpenAI (using the user's linked ChatGPT account if connected, or Kynetix's system API key).
+*   **Multimodal Message**: Routed to OpenAI Vision models.
+*   **Failover**: If OpenAI fails, the router seamlessly falls back to OpenRouter to ensure continuity. The client displays a visual badge indicating the active provider (⚡ OpenAI or ↩ OpenRouter).
 
-### Android Home Widget Synchronization
-- **Dart SharedPreferences**: When today's meal log, user targets, or profile details change, `WidgetService` calculates today's consumed/remaining calories and protein, serializes them to a JSON string, and saves it in SharedPreferences with the key `widget_data_v1`. Flutter automatically prefixes this key with `flutter.` internally when saving to Android's SharedPreferences XML file.
-- **MethodChannel Update Broadcast**: `WidgetService` fires an update call over the MethodChannel `com.kynetix.app/widget`. The native `MainActivity` intercepts it and broadcasts a refresh intent (`AppWidgetManager.ACTION_APPWIDGET_UPDATE`) containing all active widget IDs.
-- **Native Render & Layouts**: `KynetixWidgetProvider.kt` intercepts the broadcast, parses the SharedPreferences JSON (reading the `flutter.widget_data_v1` key), dynamically draws concentric rings (outer orange/yellow for calories, inner green/yellow for protein) on a Bitmap via native `Canvas` and `Paint`, and updates `RemoteViews`.
-- **Offline Midnight Rollover**: `KynetixWidgetProvider` automatically tracks the `last_update_date` in the SharedPreferences payload. If a new calendar day is reached, the widget provider resets consumed values to `0.0` locally and refreshes the UI without requiring a prior launch of the Flutter app.
-
----
-
-## AI Routing Rules & Provider Logic
-
-The `ai-chat-router` Edge Function applies the following rules:
-
-| Condition | Provider | Default Configuration |
-| :--- | :--- | :--- |
-| **Normal message** | OpenAI (primary system or linked ChatGPT account) | Primary Text Model |
-| **Message with image** | OpenAI (primary system or linked ChatGPT account) | Primary Vision Model |
-| **OpenAI fails (any error)** | OpenRouter (fallback) | Fallback Text Model |
-| **Both fail** | Error returned | - |
-
-The AI Coach badge shows **⚡ OpenAI** (green) on success and **↩ OpenRouter** (purple) on fallback.
+### 3. Android Home Widget Synchronization
+*   **Dart SharedPreferences**: When today's meal log, user targets, or profile details change, `WidgetService` calculates today's consumed/remaining calories and protein, serializes them to a JSON string, and saves it in SharedPreferences with the key `widget_data_v1` (prefixed as `flutter.widget_data_v1` by Flutter).
+*   **MethodChannel Update**: `WidgetService` fires an update call over the MethodChannel `com.kynetix.app/widget`. The native `MainActivity` intercepts it and broadcasts a refresh intent (`AppWidgetManager.ACTION_APPWIDGET_UPDATE`).
+*   **Native Render**: `KynetixWidgetProvider.kt` intercepts the broadcast, parses the JSON payload, dynamically draws concentric progress rings (outer orange/yellow for calories, inner green/yellow for protein) on a Bitmap via native `Canvas`, and updates `RemoteViews`.
+*   **Midnight Rollover**: The widget provider tracks the date of the last update. At midnight, it resets values to `0.0` locally without requiring the user to open the Flutter app.
 
 ---
 
-## Database Schema
+## 📸 Recommended Showcase Screenshots
+
+*To showcase Kynetix in a public context, capture and save the following screenshots in `/docs/images/` and link them here:*
+
+*   [ ] **Dashboard**: The primary screen showing the daily progress rings, meal entries categorized by meal section (Breakfast, Lunch, Dinner, Snacks), and quick-add shortcuts.
+*   [ ] **Day Detail**: The detailed timeline of a specific day's meals, calorie allocations, and manual portion correction indicators.
+*   [ ] **Insights Screen**: A visual breakdown of weekly step counts, body weight trends, training frequency heatmaps, and unlocked achievements.
+*   [ ] **Workout Tracking**: The active console showing current sets, reps, previous weight logs, RPE selector dials, and set-type chips.
+*   [ ] **Home Screen Widget**: A screenshot of the Android home screen showcasing the 2x2 or 4x2 concentric progress widget in action.
+
+---
+
+## 🗄️ Database Schema
 
 The backend uses a Supabase PostgreSQL database organized into the following functional domains:
 
-* **Profiles & Authentication**:
-  * `profiles` - User bio-metrics (age, weight, height, TDEE goal, activity factors).
-  * `user_openai_links` - Stores ChatGPT OAuth tokens and discovered capabilities.
-  * `openai_device_auth_sessions` - Manages active pairing session states.
-* **Nutrition & Daily Logs**:
-  * `day_logs` - Stores daily meal logs (`sections_json`) and gym day overrides.
-  * `user_nutrition_memory` - Custom food overrides mapped to personal entries.
-  * `user_quick_adds` - Personalized quick-add food item shortcuts.
-  * `user_eating_patterns` - Logs corrections and classifications of food types.
-  * `user_meal_contexts` - Captures context data for meal recommendation.
-* **Training & Splits**:
-  * `workout_sessions` - Completed workout logs (exercises, sets, reps, skips).
-  * `workout_splits` - Training split configurations (exercise schedules).
-* **Insights & Achievements**:
-  * `user_achievements` - Unlocked consistency, habit, and nutrition achievements.
-  * `user_insights_cache` - Write-only cache backups for weekly/monthly reports.
+*   **Profiles & Authentication**:
+    *   `profiles` - User bio-metrics (age, weight, height, TDEE goal, activity factors).
+    *   `user_openai_links` - Stores ChatGPT OAuth tokens and discovered capabilities.
+    *   `openai_device_auth_sessions` - Manages active pairing session states.
+*   **Nutrition & Daily Logs**:
+    *   `day_logs` - Stores daily meal logs (`sections_json`) and gym day overrides.
+    *   `user_nutrition_memory` - Custom food overrides mapped to personal entries.
+    *   `user_quick_adds` - Personalized quick-add food item shortcuts.
+    *   `user_eating_patterns` - Logs corrections and classifications of food types.
+    *   `user_meal_contexts` - Captures context data for meal recommendation.
+*   **Training & Splits**:
+    *   `workout_sessions` - Completed workout logs (exercises, sets, reps, skips).
+    *   `workout_splits` - Training split configurations (exercise schedules).
+*   **Insights & Achievements**:
+    *   `user_achievements` - Unlocked consistency, habit, and nutrition achievements.
+    *   `user_insights_cache` - Write-only cache backups for weekly/monthly reports.
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 Kynetix/
-├── kynetix_ui/                  # Flutter Android app
+├── kynetix_ui/                  # Flutter Android app codebase
 │   ├── lib/
-│   │   ├── config/              # Supabase config + secrets (gitignored)
-│   │   ├── models/              # Data models (NutritionResult, etc.)
-│   │   ├── screens/             # UI screens (Auth, Onboarding, Dashboard, Workout, etc.)
-│   │   ├── services/            # Business logic (AI clients, Health Connect, Sync, etc.)
-│   │   └── main.dart
-│   ├── assets/branding/         # App icons + splash assets
-│   └── test/                    # Integration and unit tests
+│   │   ├── config/              # App themes, secrets templates, and client clients
+│   │   ├── models/              # Immutable data models (DayLog, WorkoutSession, etc.)
+│   │   ├── screens/             # UI views (Auth, Dashboard, AI Coach, Active Workout)
+│   │   ├── services/            # Core business logic, parsers, and local-to-cloud sync
+│   │   └── main.dart            # Flutter entry point
+│   ├── assets/branding/         # App launcher icons and splash assets
+│   ├── test/                    # Integration, unit, and layout regression test suites
+│   └── pubspec.yaml             # Flutter pub dependencies and asset definitions
 │
-├── supabase/
+├── supabase/                    # Backend database and edge functions configuration
 │   └── functions/
-│       ├── ai-chat-router/      # AI provider dispatcher (OpenAI → OpenRouter)
-│       ├── ai-meal-coach/       # Context builder + nutrition coach
-│       ├── openai-link-*/       # ChatGPT OAuth device pairing functions
-│       └── .env.example         # Template for local dev secrets
+│       ├── ai-chat-router/      # AI API dispatcher (OpenAI → OpenRouter failover)
+│       ├── ai-meal-coach/       # Context builder + nutrition coach prompt injector
+│       ├── openai-link-*/       # ChatGPT OAuth pairing device flow
+│       └── shared/              # Shared TypeScript utilities
 │
-├── docs/                        # PRD, system design, API docs
-└── README.md
+├── docs/                        # Specifications, PRDs, and architecture documents
+│   ├── Dev_Rules.md             # Developer conventions
+│   ├── PROJECT_CONTEXT.md       # High-level repo summary
+│   ├── system_design.md         # Database and infrastructure design
+│   └── prd.md                   # Product Requirements Document
+│
+├── pad_assets_smartly.py        # Python script to pad branding assets for Android squircle
+└── README.md                    # Public documentation (this file)
 ```
-
-### UI Screens Modules (`lib/screens/`)
-* **Authentication & Onboarding**: Handles user login, password recovery, and the interactive onboarding questionnaire.
-* **Dashboard & Daily Journal**: Displays daily progress rings, targets, meal categories (Breakfast, Lunch, Dinner, Snacks), and quick additions.
-* **AI Chat & Diagnostics**: Contains the conversational chat coach interface (supporting image attachments) and developer diagnostics screens.
-* **Workout Setup & Session Tracking**: Coordinates split day layouts, planning targets, and the active workout console.
-* **History, Insights & Profile**: Integrates completed session heatmaps, streaks, unlocked achievements, and user preferences.
-
-### Services Modules (`lib/services/`)
-* **Core Engines & Parsers**: Natural language token parsing, portion normalization, and calorie estimation.
-* **AI & Messaging Clients**: Services communicating with Gemini and Supabase Edge Functions.
-* **Device Integrations**: Health Connect steps/weight synchronization and native MethodChannel Android widget callbacks.
-* **Data Synchronizers**: Supabase Postgres sync and local SharedPreferences persistence services.
-* **Insights & Rules Engines**: Muscle recovery readiness, streak calculator, and habit evaluations.
 
 ---
 
-## Local Development
+## 🚀 Setup & Local Development
 
-### Prerequisites
-- Flutter SDK ≥ 3.19 / Dart ≥ 3.3
-- Android device or emulator (Android-only)
-- Node.js ≥ 18 + Supabase CLI (`npm install supabase --save-dev`)
+### 1. Prerequisites
+*   Flutter SDK (v3.19.0 or higher)
+*   Dart SDK (v3.3.0 or higher)
+*   Android SDK & Emulator / USB-connected Android Device
+*   Node.js (v18+) & Supabase CLI (`npm install supabase --save-dev`)
 
-### Install Flutter dependencies
-```bash
-cd kynetix_ui
-flutter pub get
-```
+### 2. Client Setup
+1.  Navigate to the client directory and fetch packages:
+    ```bash
+    cd kynetix_ui
+    flutter pub get
+    ```
+2.  Set up local configuration files:
+    ```bash
+    # Copy templates
+    cp lib/config/supabase_secrets.example.dart lib/config/supabase_secrets.dart
+    cp lib/config/secrets.example.dart lib/config/secrets.dart
+    ```
+3.  Fill in `supabase_secrets.dart` with your Supabase project URL and Anonymous API key.
 
-### Copy config files
-```bash
-# Supabase connection (URL + anon key)
-cp kynetix_ui/lib/config/supabase_secrets.example.dart kynetix_ui/lib/config/supabase_secrets.dart
+### 3. Serverless Backend Setup
+1.  Install Supabase CLI and start local services (optional for offline testing):
+    ```bash
+    npx supabase start
+    ```
+2.  Set up Edge Functions environment secrets. Create a `supabase/functions/.env` file:
+    ```env
+    OPENAI_API_KEY=your_openai_key_here
+    OPENROUTER_API_KEY=your_openrouter_key_here
+    ```
+3.  Serve the functions locally:
+    ```bash
+    npx supabase functions serve --env-file supabase/functions/.env
+    ```
 
-# App secrets (empty shell - no keys needed here)
-cp kynetix_ui/lib/config/secrets.example.dart kynetix_ui/lib/config/secrets.dart
-```
-
-### Run the app
+### 4. Running the Application
+Launch the Flutter application on your connected emulator or device:
 ```bash
 cd kynetix_ui
 flutter run
@@ -201,77 +205,44 @@ flutter run
 
 ---
 
-## Environment Variables & Edge Functions
+## 🧪 Testing
 
-The Flutter app requires **no** private AI API keys. All AI requests are proxied through Supabase Edge Functions which inject secrets server-side.
+Kynetix uses a comprehensive automated testing structure spanning unit, integration, and UI layout regression tests.
 
-### Local Edge Functions Testing
-Create `supabase/functions/.env` (already gitignored):
-```env
-# PRIMARY AI provider
-OPENAI_API_KEY=your_openai_api_key_here
+### How to Run Tests
+*   Run the **entire test suite**:
+    ```bash
+    cd kynetix_ui
+    flutter test
+    ```
+*   Run a **specific test file** (e.g., Row-Level Security isolation test):
+    ```bash
+    flutter test test/user_isolation_test.dart
+    ```
 
-# FALLBACK AI provider
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
-
-Run functions locally:
-```bash
-npx supabase functions serve --env-file supabase/functions/.env
-```
-
-### Production Deployment
-Set secrets:
-```bash
-npx supabase secrets set OPENAI_API_KEY=sk-your-key-here --project-ref YOUR_PROJECT_REF
-npx supabase secrets set OPENROUTER_API_KEY=sk-or-your-key-here --project-ref YOUR_PROJECT_REF
-```
-
-Deploy Edge Functions:
-```bash
-npx supabase secrets set ...
-npx supabase functions deploy ai-chat-router --no-verify-jwt --project-ref YOUR_PROJECT_REF
-npx supabase functions deploy ai-meal-coach --no-verify-jwt --project-ref YOUR_PROJECT_REF
-```
+### Test Directory Overview (`kynetix_ui/test/`)
+*   `user_isolation_test.dart`: Verifies Row-Level Security (RLS) and multi-tenant data boundaries.
+*   `meal_consistency_fixes_test.dart`: Ensures manual macro corrections calibrate correctly.
+*   `workout_session_state_test.dart`: Validates active workout flows and session drafts.
+*   `weekly_training_insights_test.dart`: Asserts target cyclings and achievement rules.
 
 ---
 
-## Security & Secrets Warning
+## 🛡️ Security & Git Best Practices
 
 > [!CAUTION]
 > **CRITICAL SECURITY REQUIREMENT**
 >
-> Never commit configuration secrets or private API credentials to the repository. Ensure the following files remain listed in your `.gitignore` and are never staged for commit:
-> * `supabase_secrets.dart` (holds public-safe Supabase connection details)
-> * `secrets.dart` (holds client API keys)
-> * `supabase/functions/.env` (holds private OpenAI and OpenRouter keys)
-> * Any files containing user OAuth access/refresh credentials or temporary nonces.
+> Never commit configuration secrets or private API credentials to the repository. Ensure the following files remain in your `.gitignore` and are never staged:
+> *   `kynetix_ui/lib/config/supabase_secrets.dart`
+> *   `kynetix_ui/lib/config/secrets.dart`
+> *   `supabase/functions/.env`
+> *   Any OAuth tokens or credentials files.
 
 ---
 
-## Testing Infrastructure
+## 🗺️ Future Roadmap
 
-All automated tests are located in `kynetix_ui/test/` and are organized into the following categories:
-
-* **Integration & End-to-End Tests**:
-  * Covers multi-tenant row-level security (RLS) and database isolation.
-  * Validates step/weight synchronization logic with Health Connect.
-  * Asserts database sync for Completed vs. Partial workout sessions.
-  * Verifies AI estimation corrections and portion override workflows.
-* **Unit & Behavior Tests**:
-  * Asserts calculations for MSJ TDEE equations and activity multipliers.
-  * Validates meal classification rules, parsing, and lexicon lookups.
-  * Verifies weekly/monthly report calculations and achievement streaks.
-  * Tests mock database lookup fallback behaviors when APIs are offline.
-
-### How to Run Tests
-To run all test suites:
-```bash
-cd kynetix_ui
-flutter test
-```
-
-To run a specific test suite:
-```bash
-flutter test test/user_isolation_test.dart
-```
+*   **⚡ Calorie Carry-Forward**: Complete the UI settings and rolling balance logic to automatically carry over leftover/excess calories across the week.
+*   **⌚ Wearable Integration**: Connect the backend `SleepData` and `HrvData` models to physical wearable sensors to refine daily targets based on actual physical recovery metrics.
+*   **📊 Dynamic Charting**: Integrate interactive weight trend charts and macro-nutrient breakdown graphs on the Insights page.
