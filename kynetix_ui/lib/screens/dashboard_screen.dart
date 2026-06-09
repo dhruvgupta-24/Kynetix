@@ -1459,7 +1459,7 @@ class _RingStatCard extends StatelessWidget {
               curve: Curves.easeOutCubic,
               builder: (_, value, __) => KGradientCircularProgress(
                 progress: value,
-                strokeWidth: 7,
+                strokeWidth: 5.5,
                 colors: [
                   ringColor,
                   ringColor.withValues(alpha: 0.6),

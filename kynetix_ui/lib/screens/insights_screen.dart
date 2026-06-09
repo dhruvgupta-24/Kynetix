@@ -262,7 +262,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                 height: 64,
                 child: KGradientCircularProgress(
                   progress: score.score / 100.0,
-                  strokeWidth: 6,
+                  strokeWidth: 5,
                   colors: const [KColor.greenDark, KColor.green],
                 ),
               ),

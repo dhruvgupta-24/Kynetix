@@ -222,8 +222,8 @@ class KynetixWidgetProvider : AppWidgetProvider() {
             canvas.drawColor(Color.TRANSPARENT)
 
             val center = size / 2f
-            val radius = size * 0.40f
-            val stroke = size * 0.12f
+            val radius = size * 0.415f
+            val stroke = size * 0.09f
             val rect = RectF(center - radius, center - radius, center + radius, center + radius)
 
             val paint = Paint().apply {
@@ -277,8 +277,8 @@ class KynetixWidgetProvider : AppWidgetProvider() {
             }
 
             // 1. Draw Calories Ring (Outer)
-            val outerRadius = if (isLarge) size * 0.41f else size * 0.44f
-            val outerStroke = size * 0.09f
+            val outerRadius = if (isLarge) size * 0.43f else size * 0.45f
+            val outerStroke = size * 0.07f
             val outerRect = RectF(center - outerRadius, center - outerRadius, center + outerRadius, center + outerRadius)
 
             // Outer Track
@@ -300,8 +300,8 @@ class KynetixWidgetProvider : AppWidgetProvider() {
             }
 
             // 2. Draw Protein Ring (Inner)
-            val innerRadius = if (isLarge) size * 0.29f else size * 0.31f
-            val innerStroke = size * 0.075f
+            val innerRadius = if (isLarge) size * 0.33f else size * 0.34f
+            val innerStroke = size * 0.055f
             val innerRect = RectF(center - innerRadius, center - innerRadius, center + innerRadius, center + innerRadius)
 
             // Inner Track
