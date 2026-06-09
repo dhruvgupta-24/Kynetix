@@ -7,7 +7,10 @@
 // Fix: gym-day determination now runs BEFORE the meal-log guard using the unified rule:
 //   isGymDay = (log?.gymDay?.didGym == true) || (session != null && !session.isEmpty)
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:kynetix/models/day_log.dart';
 import 'package:kynetix/models/workout_session.dart';
 import 'package:kynetix/models/workout_split.dart';
@@ -15,6 +18,11 @@ import 'package:kynetix/services/insights_engine.dart';
 import 'package:kynetix/screens/onboarding_screen.dart'; // UserProfile
 import 'package:kynetix/models/nutrition_result.dart';
 import 'package:kynetix/services/mock_estimation_service.dart' show NutrientRange;
+import 'package:kynetix/screens/insights_screen.dart';
+import 'package:kynetix/services/insights_report_service.dart';
+import 'package:kynetix/services/persistence_service.dart';
+import 'package:kynetix/services/workout_service.dart';
+import 'package:kynetix/services/profile_service.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -426,6 +434,95 @@ void main() {
       expect(report, isNotNull);
       expect(report!.gymDaysCount, equals(1),
           reason: 'Friday (Gym=Yes + meal) must be counted as a gym day');
+    });
+  });
+
+  group('Insights Screen UI Regression - Stale Data', () {
+    setUpAll(() async {
+      SharedPreferences.setMockInitialValues({});
+      try {
+        await Supabase.initialize(
+          url: 'https://mock.supabase.co',
+          anonKey: 'mock-anon-key',
+        );
+      } catch (_) {}
+    });
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      await PersistenceService.reset();
+      await WorkoutService.instance.clearAll();
+      WorkoutService.instance.resetReadyForTesting();
+      await WorkoutService.instance.init();
+      
+      currentUserProfile = UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 180.0,
+        weight: 80.0,
+        workoutDaysMin: 4,
+        workoutDaysMax: 5,
+        goal: 'Fat Loss',
+      );
+      ProfileService.instance.currentUserProfile = currentUserProfile;
+    });
+
+    testWidgets('Insights screen opens with correct values immediately, refresh changes nothing', (WidgetTester tester) async {
+      final monday = DateTime(2026, 6, 1);
+      final friday = DateTime(2026, 6, 5);
+
+      // Save workout sessions via WorkoutService (updates lastWorkoutsChangedAt)
+      await WorkoutService.instance.saveSession(_makeSession(monday));
+      await WorkoutService.instance.saveSession(_makeSession(friday));
+      
+      // Seed day logs in dayLogStore and call saveDayLogs (updates lastLogsChangedAt)
+      dayLogStore.clear();
+      dayLogStore['2026-06-01'] = _makeLog(date: monday, didGym: true, withMeals: true);
+      dayLogStore['2026-06-02'] = _makeLog(date: DateTime(2026, 6, 2), withMeals: true)..gymDay = const GymDay(didGym: false);
+      dayLogStore['2026-06-03'] = _makeLog(date: DateTime(2026, 6, 3), withMeals: true)..gymDay = const GymDay(didGym: false);
+      dayLogStore['2026-06-04'] = _makeLog(date: DateTime(2026, 6, 4), withMeals: true)..gymDay = const GymDay(didGym: false);
+      dayLogStore['2026-06-05'] = _makeLog(date: friday, didGym: true, withMeals: true);
+      dayLogStore['2026-06-06'] = _makeLog(date: DateTime(2026, 6, 6), withMeals: true)..gymDay = const GymDay(didGym: false);
+      dayLogStore['2026-06-07'] = _makeLog(date: DateTime(2026, 6, 7), withMeals: true)..gymDay = const GymDay(didGym: false);
+      await PersistenceService.saveDayLogs();
+
+      // Open the Insights screen for the first time
+      await tester.pumpWidget(MaterialApp(
+        home: const InsightsScreen(),
+      ));
+      
+      // Let any asynchronous microtasks and timer run
+      await tester.pumpAndSettle();
+
+      // Verify Monday and Friday workouts show correctly in gym attendance row immediately
+      // The row displays 'M', 'T', 'W', 'T', 'F', 'S', 'S'.
+      // We expect 2 green checkmarks (didGym = true) and 5 crosses.
+      // Let's verify we have exactly 2 Icons.check_rounded.
+      final checkmarkFinder = find.byIcon(Icons.check_rounded);
+      expect(checkmarkFinder, findsNWidgets(2));
+
+      // Let's capture the initial consistency score text
+      final scoreTextFinder = find.textContaining('/100');
+      expect(scoreTextFinder, findsOneWidget);
+      final Text scoreTextWidget = tester.widget<Text>(scoreTextFinder);
+      final initialScoreText = scoreTextWidget.data;
+
+      // Click the manual refresh button
+      final refreshButton = find.byIcon(Icons.refresh_rounded);
+      expect(refreshButton, findsOneWidget);
+      await tester.tap(refreshButton);
+      await tester.pumpAndSettle();
+
+      // Verify that after refresh, gym attendance checkmarks and consistency score remain identical
+      expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
+      expect(find.textContaining('/100'), findsOneWidget);
+      final Text postRefreshScoreWidget = tester.widget<Text>(find.textContaining('/100'));
+      final postRefreshScoreText = postRefreshScoreWidget.data;
+      expect(postRefreshScoreText, equals(initialScoreText));
+
+      // Advance clock by 5 seconds to let the achievements viewed timer fire and dispose cleanly
+      await tester.pump(const Duration(seconds: 5));
     });
   });
 }

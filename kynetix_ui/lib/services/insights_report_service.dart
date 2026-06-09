@@ -150,7 +150,13 @@ class InsightsReportService extends ChangeNotifier {
   // Post-hydration: only recomputes if > 60 min stale or never computed
   Future<void> maybeRecompute(UserProfile profile) async {
     final now = DateTime.now();
-    if (_lastComputed == null || now.difference(_lastComputed!).inMinutes > 60) {
+    final workoutsChanged = WorkoutService.instance.lastWorkoutsChangedAt;
+    final logsChanged = PersistenceService.lastLogsChangedAt;
+
+    if (_lastComputed == null ||
+        _lastComputed!.isBefore(workoutsChanged) ||
+        _lastComputed!.isBefore(logsChanged) ||
+        now.difference(_lastComputed!).inMinutes > 60) {
       await _recompute(profile);
     }
   }
@@ -622,6 +628,7 @@ class InsightsReportService extends ChangeNotifier {
       final monthlyJson = cache['monthly_json'] as Map<String, dynamic>?;
       final yearlyJson = cache['yearly_json'] as Map<String, dynamic>?;
       final pbJson = cache['personal_bests_json'] as Map<String, dynamic>?;
+      final updatedAtStr = cache['updated_at'] as String?;
 
       if (weeklyJson != null) {
         _weekly = weeklyJson.map((k, v) => MapEntry(k, WeeklyReport.fromJson(v as Map<String, dynamic>)));
@@ -635,7 +642,11 @@ class InsightsReportService extends ChangeNotifier {
       if (pbJson != null) {
         _personalBests = PersonalBests.fromJson(pbJson);
       }
-      _lastComputed = DateTime.now();
+      if (updatedAtStr != null) {
+        _lastComputed = DateTime.tryParse(updatedAtStr);
+      } else {
+        _lastComputed = null; // force recompute as we don't know when it was computed
+      }
       await _save();
       notifyListeners();
     } catch (e) {

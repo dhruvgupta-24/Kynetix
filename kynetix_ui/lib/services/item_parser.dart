@@ -218,10 +218,34 @@ class ItemParser {
       }
     } catch (_) {}
 
-    // Add common default foods just in case database hasn't loaded or to ensure coverage
+    // 6. ParserLexicon protected phrases & implicit pairs
+    try {
+      for (final phrase in ParserLexicon.protectedPhrases) {
+        for (final word in phrase.split(RegExp(r'\s+'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+      for (final key in ParserLexicon.implicitPairs.keys) {
+        for (final word in key.split(RegExp(r'\s+'))) {
+          if (word.isNotEmpty) words.add(word.toLowerCase());
+        }
+      }
+      for (final list in ParserLexicon.implicitPairs.values) {
+        for (final item in list) {
+          for (final word in item.split(RegExp(r'\s+'))) {
+            if (word.isNotEmpty) words.add(word.toLowerCase());
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Add common default foods, Indian foods, and protected brands just in case database hasn't loaded or to ensure coverage
     words.addAll(const {
       'sprouts', 'sprout', 'banana', 'paneer', 'oats', 'whey', 'protein', 'rice', 'milk', 'bread', 'chips',
-      'egg', 'tofu', 'peanut', 'butter', 'dal', 'roti', 'sabzi', 'chicken', 'salad', 'veg', 'shake', 'breast'
+      'egg', 'tofu', 'peanut', 'butter', 'dal', 'roti', 'sabzi', 'chicken', 'salad', 'veg', 'shake', 'breast',
+      'chaat', 'paratha', 'aloo', 'makhni', 'makhani', 'chana', 'rajma', 'biryani', 'samosa', 'naan', 'tandoori',
+      'tikka', 'kebab', 'dosa', 'idli', 'sambar', 'upma', 'poha', 'khichdi', 'raita', 'lassi', 'fish', 'mutton',
+      'curry', 'myprotein', 'optimum', 'nutrition', 'troovy', 'goatlife', 'amul'
     });
 
     return words;
@@ -324,9 +348,67 @@ class ItemParser {
     return 5;
   }
 
+  static const Map<String, String> _knownCorrections = {
+    // Single-word corrections
+    'xhaat': 'chaat',
+    'xaat': 'chaat',
+    'chat': 'chaat',
+    'pnner': 'paneer',
+    'panner': 'paneer',
+    'chiken': 'chicken',
+    'chkien': 'chicken',
+    'pratha': 'paratha',
+    'biryni': 'biryani',
+    'rajmah': 'rajma',
+    'makhni': 'makhani',
+    'makahani': 'makhani',
+    // Multi-word corrections
+    'aloo pratha': 'aloo paratha',
+  };
+
+  static const Set<String> _coreFoodWords = {
+    'chaat', 'paneer', 'paratha', 'chicken', 'biryani', 'rajma', 'banana', 'sprouts',
+    'sprout', 'oats', 'whey', 'protein', 'rice', 'milk', 'bread', 'chips', 'egg',
+    'tofu', 'peanut', 'butter', 'dal', 'roti', 'sabzi', 'salad', 'veg', 'shake', 'breast',
+    'samosa', 'makhani', 'chana', 'aloo', 'naan', 'tandoori', 'tikka', 'kebab', 'dosa',
+    'idli', 'sambar', 'upma', 'poha', 'khichdi', 'raita', 'lassi', 'fish', 'mutton',
+    'curry', 'eggplant', 'bhindi', 'gobi', 'palak', 'methi', 'chole'
+  };
+
+  static bool _isCoreFood(String word) {
+    final w = word.toLowerCase().trim();
+    if (_coreFoodWords.contains(w)) return true;
+
+    // Check MealMemory known foods
+    try {
+      if (MealMemory.instance.allKnownFoods.containsKey(w)) return true;
+    } catch (_) {}
+
+    // Check UserNutritionMemory overrides
+    try {
+      for (final over in UserNutritionMemory.instance.allOverrides) {
+        if (over.canonicalMeal.toLowerCase().split(RegExp(r'[^a-z0-9]')).contains(w)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+
+    return false;
+  }
+
   static SpellingSuggestion? getSpellingSuggestion(String text) {
     final cleanText = text.trim().toLowerCase();
     if (cleanText.isEmpty) return null;
+
+    // Layer 1/2: Full-string match on known corrections (e.g. 'aloo pratha' -> 'aloo paratha')
+    final knownFull = _knownCorrections[cleanText];
+    if (knownFull != null) {
+      return SpellingSuggestion(
+        original: text,
+        suggested: knownFull,
+        confidence: 0.98,
+      );
+    }
 
     final words = cleanText.split(RegExp(r'\s+'));
     final suggestedWords = <String>[];
@@ -347,27 +429,38 @@ class ItemParser {
         continue;
       }
 
-      // Handle simple plurals silently (high confidence 1.0)
+      // Layer 1: Exact Match check FIRST
+      if (dictionary.contains(word)) {
+        suggestedWords.add(word);
+        continue;
+      }
+
+      // Plural checks (only run after exact match check fails, so e.g. "sprouts" is preserved)
       if (word.endsWith('s') && dictionary.contains(word.substring(0, word.length - 1))) {
         suggestedWords.add(word.substring(0, word.length - 1));
         hasCorrection = true;
+        minConfidence = minConfidence < 0.98 ? minConfidence : 0.98;
         continue;
       }
       if (word.endsWith('es') && dictionary.contains(word.substring(0, word.length - 2))) {
         suggestedWords.add(word.substring(0, word.length - 2));
         hasCorrection = true;
-        continue;
-      }
-
-      // If the word itself is exactly in the dictionary, keep it as is
-      if (dictionary.contains(word)) {
-        suggestedWords.add(word);
+        minConfidence = minConfidence < 0.98 ? minConfidence : 0.98;
         continue;
       }
 
       // If the word matches a protected brand or user custom food, keep it as is
       if (_isProtectedWord(word)) {
         suggestedWords.add(word);
+        continue;
+      }
+
+      // Layer 2: Known Food Correction Layer (Word-by-word)
+      final knownWord = _knownCorrections[word];
+      if (knownWord != null) {
+        suggestedWords.add(knownWord);
+        hasCorrection = true;
+        minConfidence = minConfidence < 0.98 ? minConfidence : 0.98;
         continue;
       }
 
@@ -388,7 +481,10 @@ class ItemParser {
           similarity = 1.0 - (dist / maxLen);
         }
 
-        final bool isMatch = similarity >= 0.80;
+        // Layer 3/4: Food-Specific Fuzzy Matching (relaxed threshold) vs Generic Fallback (strict 0.80)
+        final isCore = _isCoreFood(dictWord);
+        final threshold = isCore ? 0.60 : 0.80;
+        final bool isMatch = similarity >= threshold;
 
         if (isMatch) {
           final priority = _getWordPriority(dictWord);
@@ -397,9 +493,18 @@ class ItemParser {
             bestMatch = dictWord;
             bestPriority = priority;
           } else if (similarity == bestSimilarity) {
-            if (priority < bestPriority) {
+            // Tie breakers:
+            // 1. Core food wins
+            final bestIsCore = _isCoreFood(bestMatch);
+            if (isCore && !bestIsCore) {
               bestMatch = dictWord;
               bestPriority = priority;
+            } else if (isCore == bestIsCore) {
+              // 2. Priority wins
+              if (priority < bestPriority) {
+                bestMatch = dictWord;
+                bestPriority = priority;
+              }
             }
           }
         }
@@ -415,7 +520,7 @@ class ItemParser {
         }
       }
 
-      if (bestMatch != word && bestSimilarity >= 0.80) {
+      if (bestMatch != word && bestSimilarity >= 0.60) {
         hasCorrection = true;
         suggestedWords.add(bestMatch);
         if (bestSimilarity < minConfidence) {

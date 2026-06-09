@@ -51,10 +51,10 @@ void main() {
       expect(bannana!.suggested, equals('banana'));
       expect(bannana.confidence, inInclusiveRange(0.80, 0.95));
 
-      final panner = ItemParser.getSpellingSuggestion('panner');
-      expect(panner, isNotNull);
-      expect(panner!.suggested, equals('paneer'));
-      expect(panner.confidence, inInclusiveRange(0.80, 0.95));
+      final paner = ItemParser.getSpellingSuggestion('paner');
+      expect(paner, isNotNull);
+      expect(paner!.suggested, equals('paneer'));
+      expect(paner.confidence, inInclusiveRange(0.80, 0.95));
 
       final oatz = ItemParser.getSpellingSuggestion('oatz');
       expect(oatz, isNotNull);
@@ -66,7 +66,7 @@ void main() {
     test('Medium confidence are NOT silently auto-corrected', () {
       expect(ItemParser.correctSpelling('srouts'), equals('srouts'));
       expect(ItemParser.correctSpelling('bannana'), equals('bannana'));
-      expect(ItemParser.correctSpelling('panner'), equals('panner'));
+      expect(ItemParser.correctSpelling('paner'), equals('paner'));
       expect(ItemParser.correctSpelling('oatz'), equals('oatz'));
     });
 
@@ -146,6 +146,37 @@ void main() {
       expect(ItemParser.correctSpelling('troovy'), equals('troovy'));
       expect(ItemParser.correctSpelling('myprotein'), equals('myprotein'));
       expect(ItemParser.correctSpelling('customfoodxyz'), equals('customfoodxyz'));
+    });
+
+    test('Layered spelling correction regression test cases', () {
+      // Typo corrections
+      expect(ItemParser.correctSpelling('xhaat'), equals('chaat'));
+      expect(ItemParser.correctSpelling('xaat'), equals('chaat'));
+      expect(ItemParser.correctSpelling('pnner'), equals('paneer'));
+      expect(ItemParser.correctSpelling('panner'), equals('paneer'));
+      expect(ItemParser.correctSpelling('chiken'), equals('chicken'));
+      expect(ItemParser.correctSpelling('chkien'), equals('chicken'));
+      expect(ItemParser.correctSpelling('pratha'), equals('paratha'));
+      expect(ItemParser.correctSpelling('biryni'), equals('biryani'));
+      expect(ItemParser.correctSpelling('rajmah'), equals('rajma'));
+
+      // Multi-word / compound corrections
+      expect(ItemParser.correctSpelling('aloo pratha'), equals('aloo paratha'));
+      expect(ItemParser.correctSpelling('sprouts xhaat'), equals('sprouts chaat'));
+
+      final parsed = ItemParser.parse('190 sprouts xhaat');
+      expect(parsed, hasLength(1));
+      expect(parsed.first.normalizedName, equals('sprouts chaat'));
+      expect(parsed.first.quantity, equals(190.0));
+
+      // Negative corrections: correct inputs preserved
+      expect(ItemParser.correctSpelling('paneer'), equals('paneer'));
+      expect(ItemParser.correctSpelling('chicken'), equals('chicken'));
+      expect(ItemParser.correctSpelling('biryani'), equals('biryani'));
+      expect(ItemParser.correctSpelling('rajma'), equals('rajma'));
+      expect(ItemParser.correctSpelling('chaat'), equals('chaat'));
+      expect(ItemParser.correctSpelling('sprouts chaat'), equals('sprouts chaat'));
+      expect(ItemParser.correctSpelling('paneer butter masala'), equals('paneer butter masala'));
     });
   });
 

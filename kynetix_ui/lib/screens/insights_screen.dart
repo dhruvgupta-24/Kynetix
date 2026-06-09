@@ -33,8 +33,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
   @override
   void initState() {
     super.initState();
+    InsightsReportService.instance.addListener(_onInsightsChanged);
     _localAchievements = List.from(InsightsReportService.instance.achievements);
     _initializeSelectedKeys();
+
+    // Trigger recompute if necessary on screen init
+    final profile = currentUserProfile;
+    if (profile != null) {
+      InsightsReportService.instance.maybeRecompute(profile).ignore();
+    }
 
     // Mark achievements as viewed after a 3-second delay so user sees the pulse animation
     Timer(const Duration(seconds: 3), () {
@@ -44,15 +51,36 @@ class _InsightsScreenState extends State<InsightsScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    InsightsReportService.instance.removeListener(_onInsightsChanged);
+    super.dispose();
+  }
+
+  void _onInsightsChanged() {
+    if (mounted) {
+      setState(() {
+        _localAchievements = List.from(InsightsReportService.instance.achievements);
+        _initializeSelectedKeys();
+      });
+    }
+  }
+
   void _initializeSelectedKeys() {
     final weeklyKeys = InsightsReportService.instance.weeklyCache.keys.toList()..sort();
     final monthlyKeys = InsightsReportService.instance.monthlyCache.keys.toList()..sort();
     final yearlyKeys = InsightsReportService.instance.yearlyCache.keys.toList()..sort();
 
     final now = DateTime.now();
-    _selectedWeekKey = weeklyKeys.isNotEmpty ? weeklyKeys.last : InsightsEngine.weekKeyOf(now);
-    _selectedMonthKey = monthlyKeys.isNotEmpty ? monthlyKeys.last : InsightsEngine.monthKeyOf(now);
-    _selectedYearKey = yearlyKeys.isNotEmpty ? yearlyKeys.last : now.year.toString();
+    if (_selectedWeekKey == null || !weeklyKeys.contains(_selectedWeekKey)) {
+      _selectedWeekKey = weeklyKeys.isNotEmpty ? weeklyKeys.last : InsightsEngine.weekKeyOf(now);
+    }
+    if (_selectedMonthKey == null || !monthlyKeys.contains(_selectedMonthKey)) {
+      _selectedMonthKey = monthlyKeys.isNotEmpty ? monthlyKeys.last : InsightsEngine.monthKeyOf(now);
+    }
+    if (_selectedYearKey == null || !yearlyKeys.contains(_selectedYearKey)) {
+      _selectedYearKey = yearlyKeys.isNotEmpty ? yearlyKeys.last : now.year.toString();
+    }
   }
 
   Future<void> _handleRefresh() async {

@@ -30,6 +30,7 @@ class PersistenceService {
 
   static bool _onboardingDone = false;
   static String? _cachedOwnerId;
+  static DateTime lastLogsChangedAt = DateTime.now();
 
   static String? get cachedOwnerId => _cachedOwnerId;
 
@@ -141,6 +142,7 @@ class PersistenceService {
   }
 
   static Future<void> saveDayLogs() async {
+    lastLogsChangedAt = DateTime.now();
     try {
       final cutoff = DateTime.now().subtract(const Duration(days: 90));
       final pruned = <String, dynamic>{};

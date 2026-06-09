@@ -60,6 +60,9 @@ class WorkoutService extends ChangeNotifier {
   bool _setupDone = false;
   bool _ready = false;
   DateTime _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastWorkoutsChangedAt = DateTime.now();
+
+  DateTime get lastWorkoutsChangedAt => _lastWorkoutsChangedAt;
 
   final Map<String, int> _additionAcceptedCounts = {};
   final Map<String, int> _additionIgnoredCounts = {};
@@ -1089,6 +1092,7 @@ class WorkoutService extends ChangeNotifier {
   /// Must be called during account switching (owner ID mismatch) so stale local
   /// data from a previous user is not shown to the newly authenticated user.
   Future<void> clearAll() async {
+    _lastWorkoutsChangedAt = DateTime.now();
     _split = null;
     _sessions = [];
     _customExercises = [];
@@ -1124,6 +1128,7 @@ class WorkoutService extends ChangeNotifier {
   // ── Persistence ──────────────────────────────────────────────────────────
 
   Future<void> _persist() async {
+    _lastWorkoutsChangedAt = DateTime.now();
     // Write-queue: if already persisting, set pending flag and return.
     // The in-flight persist will re-run once it finishes, picking up the
     // latest state — preventing concurrent writes from racing.
