@@ -136,6 +136,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       workoutTypeName: workoutTypeName,
       targetCaloriesOverride: yesterdayGymDay?.targetCaloriesOverride,
       carryForwardAdjustment: null, // Zero compounding / banking protection!
+      date: yesterday,
     );
 
     final yesterdayTarget = targetDay.calories;
@@ -393,6 +394,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       workoutTypeName:        workoutTypeName,
       targetCaloriesOverride: gymDay?.targetCaloriesOverride,
       carryForwardAdjustment: log.carryForwardAdjustment,
+      date:                   _selectedDate,
     );
   }
 

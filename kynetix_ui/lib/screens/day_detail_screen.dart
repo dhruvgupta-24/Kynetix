@@ -159,6 +159,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             workoutTypeName: workoutTypeName,
             targetCaloriesOverride: log.gymDay?.targetCaloriesOverride,
             carryForwardAdjustment: log.carryForwardAdjustment,
+            date: _currentDate,
           )
         : null;
 
@@ -649,6 +650,7 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       workoutTypeName: workoutTypeName,
       targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
       carryForwardAdjustment: _log.carryForwardAdjustment,
+      date:            widget.date,
     );
   }
 

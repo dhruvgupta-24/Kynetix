@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import '../models/workout_session.dart';
 import '../models/user_profile.dart';
 import '../services/health_service.dart';
+import '../models/day_log.dart';
 
 // ─── DayTarget ────────────────────────────────────────────────────────────────
 
@@ -161,7 +163,40 @@ class NutritionTargetEngine {
     String? workoutTypeName, // e.g. "Push", "Cardio", "Rest"
     double? targetCaloriesOverride,
     double? carryForwardAdjustment,
+    DateTime? date,
   }) {
+    if (date != null) {
+      final log = dayLogStore[dateKey(date)];
+      if (log != null && log.targetCalories != null && log.targetProtein != null) {
+        final finalCal = targetCaloriesOverride ?? log.targetCalories!;
+        final note = targetCaloriesOverride != null
+            ? 'Manual Override (${log.targetCalories!.toInt()} kcal original)'
+            : 'Saved Target (Drift Protected)';
+            
+        debugPrint('[NutritionTargetEngine] --- Calorie Target Loaded from Store (Drift Protected) ---');
+        debugPrint('[NutritionTargetEngine] Date: ${dateKey(date)}');
+        debugPrint('[NutritionTargetEngine] Saved Calorie Target: ${log.targetCalories} kcal');
+        debugPrint('[NutritionTargetEngine] Saved Protein Target: ${log.targetProtein} g');
+        if (targetCaloriesOverride != null) {
+          debugPrint('[NutritionTargetEngine]   - Manual Calorie Target Override: $targetCaloriesOverride kcal');
+        }
+        debugPrint('[NutritionTargetEngine] Final Calorie Target: $finalCal kcal');
+        debugPrint('[NutritionTargetEngine] --------------------------------------------------------');
+
+        return DayTarget(
+          calories: finalCal,
+          protein: log.targetProtein!,
+          isTrainingDay: isGymDay,
+          label: targetCaloriesOverride != null ? 'Manual Override' : _dayLabel(
+            session: session,
+            workoutTypeName: workoutTypeName,
+            isTraining: isGymDay,
+          ),
+          note: note,
+        );
+      }
+    }
+
     final plan = weeklyPlan(profile, health: health);
 
     // Determine if this is a training day — session > toggle
@@ -176,9 +211,11 @@ class NutritionTargetEngine {
     // Compute workout load offset from real session data
     int? loadScore;
     int calBonus = 0;
+    int originalCalBonus = 0;
     if (session != null && !session.isEmpty) {
       loadScore = _workoutLoadScore(session);
-      calBonus  = _loadToCalBonus(loadScore, session);
+      originalCalBonus = _loadToCalBonus(loadScore, session);
+      // calBonus is kept at 0 to prevent double-counting exercise expenditure (already budgeted in activity multiplier)
     }
 
     final baseCal = cal + calBonus + (carryForwardAdjustment ?? 0.0);
@@ -186,6 +223,30 @@ class NutritionTargetEngine {
         
     final isOverride = targetCaloriesOverride != null;
     final finalCal = targetCaloriesOverride ?? calculatedTotalCal;
+
+    // Debug logging for calorie target calculation
+    debugPrint('[NutritionTargetEngine] --- Calorie Target Calculation ---');
+    debugPrint('[NutritionTargetEngine] Date/Day Details: Label: $workoutTypeName, isGymDay: $isGymDay, actuallyTraining: $actuallyTraining');
+    debugPrint('[NutritionTargetEngine] Base calculations:');
+    debugPrint('[NutritionTargetEngine]   - BMR: ${_bmr(profile)} kcal (from UserProfile)');
+    debugPrint('[NutritionTargetEngine]   - TDEE: ${plan.maintenanceCalories} kcal (from NutritionTargetEngine._tdee)');
+    debugPrint('[NutritionTargetEngine] Modifiers applied:');
+    final tdee = plan.maintenanceCalories;
+    final goalDelta = _goalAdjustment(profile.goal, tdee);
+    debugPrint('[NutritionTargetEngine]   - Goal Adjustment (${profile.goal}): $goalDelta kcal (from NutritionTargetEngine._goalAdjustment)');
+    final cycle = _calorieCycle(profile);
+    debugPrint('[NutritionTargetEngine]   - Calorie Cycling (Training/Rest split): ${actuallyTraining ? '+' : '-'}$cycle kcal (from NutritionTargetEngine._calorieCycle)');
+    if (originalCalBonus != 0) {
+      debugPrint('[NutritionTargetEngine]   - Workout Load Calorie Bonus (Score: $loadScore): +0 kcal (originally +$originalCalBonus kcal, removed to prevent double-counting)');
+    }
+    if (carryForwardAdjustment != null && carryForwardAdjustment != 0) {
+      debugPrint('[NutritionTargetEngine]   - Carry-Forward Adjustment: ${carryForwardAdjustment > 0 ? '+' : ''}${carryForwardAdjustment.toInt()} kcal (from PersistenceService / DashboardScreen)');
+    }
+    if (isOverride) {
+      debugPrint('[NutritionTargetEngine]   - Manual Calorie Target Override: $targetCaloriesOverride kcal (from GymDay / User settings)');
+    }
+    debugPrint('[NutritionTargetEngine] Final Calorie Target: $finalCal kcal');
+    debugPrint('[NutritionTargetEngine] ----------------------------------');
 
     // Build a meaningful label from the actual split name / workout type
     final label = _dayLabel(

@@ -873,6 +873,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           currentUserProfile!,
           isGymDay: isGymDay,
           workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+          date: date,
         );
         final classification = DayStatusEngine.classify(log, target, now: date);
         outcomes.add(classification.outcome);

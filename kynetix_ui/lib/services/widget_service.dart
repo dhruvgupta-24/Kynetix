@@ -69,6 +69,7 @@ class WidgetService {
         workoutTypeName: workoutTypeName,
         targetCaloriesOverride: gymDay?.targetCaloriesOverride,
         carryForwardAdjustment: log.carryForwardAdjustment,
+        date: now,
       );
 
       final targetCalories = targetDay.calories;

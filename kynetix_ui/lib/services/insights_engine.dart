@@ -266,6 +266,7 @@ class InsightsEngine {
         isGymDay: isGymDay,
         session: session,
         workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+        date: date,
       );
 
       final cals = log.totalCaloriesMid;
@@ -980,6 +981,7 @@ class InsightsEngine {
         isGymDay: isGymDay,
         session: session,
         workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+        date: date,
       );
 
       final cals = log.totalCaloriesMid;
@@ -1093,6 +1095,7 @@ class InsightsEngine {
           isGymDay: isGymDay,
           session: session,
           workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+          date: date,
         );
         final calRat = log.totalCaloriesMid / target.calories.clamp(1.0, double.infinity);
         if (calRat >= 0.88 && calRat <= 1.08) {
@@ -1494,6 +1497,7 @@ class InsightsEngine {
         isGymDay: isGymDay,
         session: session,
         workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+        date: parsedDate,
       );
 
       final proRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);
@@ -1571,6 +1575,7 @@ class InsightsEngine {
             ),
             session: session,
             workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+            date: date,
           );
           final cRat = log.totalCaloriesMid / target.calories.clamp(1.0, double.infinity);
           final pRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);
@@ -1649,11 +1654,13 @@ class InsightsEngine {
       totalLogged++;
 
       // isGymDayProg already computed above — reuse it for nutrition target.
+      final dateVal = DateTime.parse(dateStr);
       final target = NutritionTargetEngine.instance.dayTarget(
         profile,
         isGymDay: isGymDayProg,
         session: session,
         workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+        date: dateVal,
       );
 
       final pRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);

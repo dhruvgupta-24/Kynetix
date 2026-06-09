@@ -304,6 +304,12 @@ class DayLog {
   /// Calorie carry-forward adjustment applied to this day (optional).
   double? carryForwardAdjustment;
 
+  /// Calculated target calories frozen on this day to prevent drift
+  double? targetCalories;
+
+  /// Calculated target protein frozen on this day to prevent drift
+  double? targetProtein;
+
   List<MealEntry> entriesFor(MealSection section) =>
       List.unmodifiable(_sections[section]!);
 
@@ -443,6 +449,8 @@ class DayLog {
   Map<String, dynamic> toJson() => {
     if (gymDay != null) 'gymDay': gymDay!.toJson(),
     if (carryForwardAdjustment != null) 'carryForwardAdjustment': carryForwardAdjustment,
+    if (targetCalories != null) 'targetCalories': targetCalories,
+    if (targetProtein != null) 'targetProtein': targetProtein,
     'sections': {
       for (final s in MealSection.values)
         s.name: _sections[s]!.map((e) => e.toJson()).toList(),
@@ -456,6 +464,12 @@ class DayLog {
     }
     if (j['carryForwardAdjustment'] != null) {
       log.carryForwardAdjustment = (j['carryForwardAdjustment'] as num).toDouble();
+    }
+    if (j['targetCalories'] != null) {
+      log.targetCalories = (j['targetCalories'] as num).toDouble();
+    }
+    if (j['targetProtein'] != null) {
+      log.targetProtein = (j['targetProtein'] as num).toDouble();
     }
     final sections = j['sections'] as Map<String, dynamic>? ?? {};
     for (final s in MealSection.values) {

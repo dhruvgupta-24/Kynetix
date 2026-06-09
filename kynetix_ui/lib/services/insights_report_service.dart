@@ -698,6 +698,7 @@ class InsightsReportService extends ChangeNotifier {
       isGymDay: isGymDay,
       session: session,
       workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+      date: date,
     );
 
     final pro = log.totalProteinMid;
@@ -758,6 +759,7 @@ class InsightsReportService extends ChangeNotifier {
       isGymDay: isGymDay,
       session: session,
       workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
+      date: date,
     );
 
     final cals = log.totalCaloriesMid;

@@ -14,6 +14,7 @@ import '../services/nutrition_hydration_guard.dart';
 import 'widget_service.dart';
 import 'workout_service.dart';
 import 'insights_report_service.dart';
+import 'nutrition_target_engine.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -187,17 +188,62 @@ class PersistenceService {
   static Future<void> saveDay(DateTime date) async {
     final dKey = dateKey(date);
     final log = dayLogStore[dKey];
-    if (log != null && log.gymDay == null && !log.isEmpty) {
-      final splitDay = WorkoutService.instance.splitDayFor(date);
-      if (splitDay != null && !splitDay.isRestDay) {
-        log.gymDay = GymDay(
-          didGym: true,
-          workoutType: WorkoutType.fromSplitName(splitDay.name),
-          splitDayName: splitDay.name,
-          splitOverridden: false,
-        );
-      } else {
-        log.gymDay = const GymDay(didGym: false);
+    if (log != null) {
+      if (log.gymDay == null && !log.isEmpty) {
+        final splitDay = WorkoutService.instance.splitDayFor(date);
+        if (splitDay != null && !splitDay.isRestDay) {
+          log.gymDay = GymDay(
+            didGym: true,
+            workoutType: WorkoutType.fromSplitName(splitDay.name),
+            splitDayName: splitDay.name,
+            splitOverridden: false,
+          );
+        } else {
+          log.gymDay = const GymDay(didGym: false);
+        }
+      }
+
+      // Calculate and freeze targets on save to prevent retrospective drift if user profile changes later
+      if (!log.isEmpty) {
+        final ws = WorkoutService.instance;
+        final session = ws.sessionFor(date);
+        final gymDay = log.gymDay;
+        
+        final bool isGymDayVal;
+        if (gymDay != null) {
+          isGymDayVal = gymDay.didGym || (session?.isEmpty == false);
+        } else {
+          final splitDay = ws.splitDayFor(date);
+          final splitIsTraining = splitDay != null && !splitDay.isRestDay;
+          isGymDayVal = splitIsTraining || (session?.isEmpty == false);
+        }
+
+        final String? workoutTypeName;
+        if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+          workoutTypeName = session.splitDayName;
+        } else if (gymDay?.workoutType != null) {
+          workoutTypeName = gymDay!.workoutType!.displayName;
+        } else if (gymDay?.splitDayName != null) {
+          workoutTypeName = gymDay!.splitDayName;
+        } else {
+          final splitDay = ws.splitDayFor(date);
+          workoutTypeName = (splitDay != null && !splitDay.isRestDay) ? splitDay.name : null;
+        }
+
+        final profile = ProfileService.instance.currentUserProfile;
+        if (profile != null) {
+          final resolvedTarget = NutritionTargetEngine.instance.dayTarget(
+            profile,
+            isGymDay: isGymDayVal,
+            session: session,
+            workoutTypeName: workoutTypeName,
+            targetCaloriesOverride: gymDay?.targetCaloriesOverride,
+            carryForwardAdjustment: log.carryForwardAdjustment,
+            date: null, // calculate fresh targets
+          );
+          log.targetCalories = resolvedTarget.calories;
+          log.targetProtein = resolvedTarget.protein;
+        }
       }
     }
 
