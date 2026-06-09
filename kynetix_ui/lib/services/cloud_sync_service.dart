@@ -72,6 +72,8 @@ class CloudSyncService {
       }
       // Re-save locally
       await PersistenceService.saveDayLogs();
+      PersistenceService.lastDayLogsHydratedAt = DateTime.now();
+      debugPrint('[CloudSyncService] Day logs hydration complete at: ${PersistenceService.lastDayLogsHydratedAt}');
 
       // 2. Process Workouts
       // Only add sessions that are not already in local storage.
@@ -100,6 +102,8 @@ class CloudSyncService {
       if (importedSessions.isNotEmpty) {
         await WorkoutService.instance.bulkImportCloudSessions(importedSessions);
       }
+      WorkoutService.lastWorkoutsHydratedAt = DateTime.now();
+      debugPrint('[CloudSyncService] Workout sessions hydration complete at: ${WorkoutService.lastWorkoutsHydratedAt}');
 
       // 3. Process Nutrition Memory
       final cloudOverrides = <UserMealOverride>[];

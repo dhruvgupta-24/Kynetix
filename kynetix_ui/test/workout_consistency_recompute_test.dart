@@ -23,6 +23,7 @@ import 'package:kynetix/services/insights_report_service.dart';
 import 'package:kynetix/services/persistence_service.dart';
 import 'package:kynetix/services/workout_service.dart';
 import 'package:kynetix/services/profile_service.dart';
+import 'package:kynetix/services/nutrition_hydration_guard.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -455,6 +456,10 @@ void main() {
       WorkoutService.instance.resetReadyForTesting();
       await WorkoutService.instance.init();
       
+      NutritionHydrationGuard.instance.reset();
+      NutritionHydrationGuard.instance.currentUserIdOverride = 'test-user-id';
+      NutritionHydrationGuard.instance.markComplete('test-user-id');
+      
       currentUserProfile = UserProfile(
         name: 'Dhruv',
         age: 25,
@@ -523,6 +528,26 @@ void main() {
 
       // Advance clock by 5 seconds to let the achievements viewed timer fire and dispose cleanly
       await tester.pump(const Duration(seconds: 5));
+    });
+
+    test('mergeCacheFromCloud sets lastComputed to null to force local recompute', () async {
+      final service = InsightsReportService.instance;
+      
+      // 1. Manually set lastComputed to a valid non-null time
+      await service.forceRecompute(currentUserProfile!);
+      expect(service.lastComputed, isNotNull);
+      
+      // 2. Call mergeCacheFromCloud with a mock cache
+      await service.mergeCacheFromCloud({
+        'weekly_json': {},
+        'monthly_json': {},
+        'yearly_json': {},
+        'personal_bests_json': null,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      
+      // 3. Verify lastComputed is null, forcing the next maybeRecompute to recompute
+      expect(service.lastComputed, isNull);
     });
   });
 }

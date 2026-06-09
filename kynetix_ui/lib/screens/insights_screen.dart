@@ -33,6 +33,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[InsightsScreen] initState called.');
+    debugPrint('  - lastComputed: ${InsightsReportService.instance.lastComputed}');
+    debugPrint('  - weekly cache keys: ${InsightsReportService.instance.weeklyCache.keys}');
+
     InsightsReportService.instance.addListener(_onInsightsChanged);
     _localAchievements = List.from(InsightsReportService.instance.achievements);
     _initializeSelectedKeys();
@@ -529,6 +533,17 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
   Widget _buildWeekView() {
     final report = InsightsReportService.instance.weeklyFor(_selectedWeekKey ?? '');
+
+    debugPrint('[InsightsScreen] Rendering week view.');
+    debugPrint('  - Selected key: $_selectedWeekKey');
+    debugPrint('  - Report: ${report != null ? "found (score: ${report.consistencyScore.score})" : "null"}');
+    if (report != null) {
+      debugPrint('  - Week start: ${report.weekStart}');
+      final monKey = InsightsEngine.dateKeyOf(report.weekStart);
+      final friKey = InsightsEngine.dateKeyOf(report.weekStart.add(const Duration(days: 4)));
+      debugPrint('  - Monday gym: ${InsightsEngine.isGymDay(date: report.weekStart, log: dayLogStore[monKey], session: WorkoutService.instance.sessionFor(report.weekStart))}');
+      debugPrint('  - Friday gym: ${InsightsEngine.isGymDay(date: report.weekStart.add(const Duration(days: 4)), log: dayLogStore[friKey], session: WorkoutService.instance.sessionFor(report.weekStart.add(const Duration(days: 4))))}');
+    }
 
     if (report == null) {
       return _buildEmptyState('No report generated for this week yet. Log meals 3+ days to compute insights.');

@@ -12,6 +12,7 @@ import 'cloud_sync_service.dart';
 import '../services/persistence_service.dart';
 import 'workout_service.dart';
 import 'nutrition_target_engine.dart';
+import 'nutrition_hydration_guard.dart';
 
 // ─── InsightsReportService ───────────────────────────────────────────────────
 class InsightsReportService extends ChangeNotifier {
@@ -147,17 +148,32 @@ class InsightsReportService extends ChangeNotifier {
   }
 
   // ── Compute triggers ───────────────────────────────────────────────────────
-  // Post-hydration: only recomputes if > 60 min stale or never computed
   Future<void> maybeRecompute(UserProfile profile) async {
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      debugPrint('[InsightsReportService] Hydration guard is not ready. Skipping maybeRecompute.');
+      return;
+    }
     final now = DateTime.now();
     final workoutsChanged = WorkoutService.instance.lastWorkoutsChangedAt;
     final logsChanged = PersistenceService.lastLogsChangedAt;
+
+    debugPrint('[InsightsReportService] maybeRecompute check:');
+    debugPrint('  - now: $now');
+    debugPrint('  - _lastComputed: $_lastComputed');
+    debugPrint('  - workoutsChanged: $workoutsChanged');
+    debugPrint('  - logsChanged: $logsChanged');
+    debugPrint('  - workoutHydrationCompletedAt: ${WorkoutService.lastWorkoutsHydratedAt}');
+    debugPrint('  - dayLogHydrationCompletedAt: ${PersistenceService.lastDayLogsHydratedAt}');
+    debugPrint('  - historicalRepairCompletedAt: ${PersistenceService.lastHistoricalRepairCompletedAt}');
 
     if (_lastComputed == null ||
         _lastComputed!.isBefore(workoutsChanged) ||
         _lastComputed!.isBefore(logsChanged) ||
         now.difference(_lastComputed!).inMinutes > 60) {
+      debugPrint('[InsightsReportService] Condition met. Starting recomputation...');
       await _recompute(profile);
+    } else {
+      debugPrint('[InsightsReportService] Cache is up-to-date. Skipping recomputation.');
     }
   }
 
@@ -313,8 +329,10 @@ class InsightsReportService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────────
   Future<void> _recompute(UserProfile profile) async {
+    final startTime = DateTime.now();
+    debugPrint('[InsightsReportService] _recompute started at: $startTime');
+
     // Run historical repair migration for DayLogs with null gymDay on training days
     await PersistenceService.runHistoricalRepairMigration();
 
@@ -416,6 +434,8 @@ class InsightsReportService extends ChangeNotifier {
     );
 
     _lastComputed = DateTime.now();
+    final endTime = DateTime.now();
+    debugPrint('[InsightsReportService] _recompute ended at: $endTime. Duration: ${endTime.difference(startTime).inMilliseconds}ms');
 
     await _save();
     notifyListeners();
@@ -443,6 +463,8 @@ class InsightsReportService extends ChangeNotifier {
     await prefs.setString(_kAiSummaries, jsonEncode(_aiSummaries.map((k, v) => MapEntry(k, v.toJson()))));
     if (_lastComputed != null) {
       await prefs.setString(_kLastComputed, _lastComputed!.toIso8601String());
+    } else {
+      await prefs.remove(_kLastComputed);
     }
 
     // Fire-and-forget cloud sync
@@ -624,29 +646,25 @@ class InsightsReportService extends ChangeNotifier {
 
   Future<void> mergeCacheFromCloud(Map<String, dynamic> cache) async {
     try {
-      final weeklyJson = cache['weekly_json'] as Map<String, dynamic>?;
-      final monthlyJson = cache['monthly_json'] as Map<String, dynamic>?;
-      final yearlyJson = cache['yearly_json'] as Map<String, dynamic>?;
-      final pbJson = cache['personal_bests_json'] as Map<String, dynamic>?;
-      final updatedAtStr = cache['updated_at'] as String?;
+      final weeklyJson = cache['weekly_json'] as Map?;
+      final monthlyJson = cache['monthly_json'] as Map?;
+      final yearlyJson = cache['yearly_json'] as Map?;
+      final pbJson = cache['personal_bests_json'] as Map?;
 
       if (weeklyJson != null) {
-        _weekly = weeklyJson.map((k, v) => MapEntry(k, WeeklyReport.fromJson(v as Map<String, dynamic>)));
+        _weekly = weeklyJson.map((k, v) => MapEntry(k as String, WeeklyReport.fromJson(Map<String, dynamic>.from(v as Map))));
       }
       if (monthlyJson != null) {
-        _monthly = monthlyJson.map((k, v) => MapEntry(k, MonthlyReport.fromJson(v as Map<String, dynamic>)));
+        _monthly = monthlyJson.map((k, v) => MapEntry(k as String, MonthlyReport.fromJson(Map<String, dynamic>.from(v as Map))));
       }
       if (yearlyJson != null) {
-        _yearly = yearlyJson.map((k, v) => MapEntry(k, YearlyReport.fromJson(v as Map<String, dynamic>)));
+        _yearly = yearlyJson.map((k, v) => MapEntry(k as String, YearlyReport.fromJson(Map<String, dynamic>.from(v as Map))));
       }
       if (pbJson != null) {
-        _personalBests = PersonalBests.fromJson(pbJson);
+        _personalBests = PersonalBests.fromJson(Map<String, dynamic>.from(pbJson));
       }
-      if (updatedAtStr != null) {
-        _lastComputed = DateTime.tryParse(updatedAtStr);
-      } else {
-        _lastComputed = null; // force recompute as we don't know when it was computed
-      }
+      // Force a local recompute after merging to ensure data consistency with hydrated logs/workouts.
+      _lastComputed = null;
       await _save();
       notifyListeners();
     } catch (e) {

@@ -31,6 +31,8 @@ class PersistenceService {
   static bool _onboardingDone = false;
   static String? _cachedOwnerId;
   static DateTime lastLogsChangedAt = DateTime.now();
+  static DateTime? lastDayLogsHydratedAt;
+  static DateTime? lastHistoricalRepairCompletedAt;
 
   static String? get cachedOwnerId => _cachedOwnerId;
 
@@ -185,6 +187,8 @@ class PersistenceService {
     if (migrated) {
       await saveDayLogs();
     }
+    lastHistoricalRepairCompletedAt = DateTime.now();
+    debugPrint('[PersistenceService] Historical repair migration complete at: $lastHistoricalRepairCompletedAt');
   }
 
   static Future<void> saveDay(DateTime date) async {

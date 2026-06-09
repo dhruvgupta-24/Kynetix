@@ -63,6 +63,7 @@ class WorkoutService extends ChangeNotifier {
   DateTime _lastWorkoutsChangedAt = DateTime.now();
 
   DateTime get lastWorkoutsChangedAt => _lastWorkoutsChangedAt;
+  static DateTime? lastWorkoutsHydratedAt;
 
   final Map<String, int> _additionAcceptedCounts = {};
   final Map<String, int> _additionIgnoredCounts = {};
