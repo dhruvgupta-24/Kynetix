@@ -842,21 +842,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(
             children: [
               Expanded(
-                child: _StatTile(
-                  label: 'Remaining Cal',
-                  value: '${_remainingCalories.toInt()} kcal',
-                  icon:  Icons.local_fire_department_outlined,
-                  color: const Color(0xFFFFB347),
-                ),
+                child: _consumedCalories > _targetCalories
+                    ? _StatTile(
+                        label: 'Over Target',
+                        value: '+${(_consumedCalories - _targetCalories).round()} kcal',
+                        icon:  Icons.local_fire_department_outlined,
+                        color: KColor.danger,
+                      )
+                    : _StatTile(
+                        label: 'Remaining Cal',
+                        value: '${_remainingCalories.toInt()} kcal',
+                        icon:  Icons.local_fire_department_outlined,
+                        color: const Color(0xFFFFB347),
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _StatTile(
-                  label: 'Remaining Protein',
-                  value: '${_remainingProtein.toInt()} g',
-                  icon:  Icons.fitness_center_outlined,
-                  color: const Color(0xFF60A5FA),
-                ),
+                child: _consumedProtein > _targetProtein
+                    ? _StatTile(
+                        label: 'Protein Surplus',
+                        value: '+${(_consumedProtein - _targetProtein).round()} g',
+                        icon:  Icons.fitness_center_outlined,
+                        color: KColor.green,
+                      )
+                    : _StatTile(
+                        label: 'Remaining Protein',
+                        value: '${_remainingProtein.toInt()} g',
+                        icon:  Icons.fitness_center_outlined,
+                        color: const Color(0xFF60A5FA),
+                      ),
               ),
             ],
           ),
