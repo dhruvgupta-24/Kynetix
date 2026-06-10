@@ -30,6 +30,60 @@ enum AcwrBand {
   };
 }
 
+// ─── Progression Recommendation Structures ───────────────────────────────────
+
+enum ProgressionStyle {
+  ascendingWeight,
+  fixedWeight,
+  doubleProgression,
+  reversePyramid,
+  topSetBackOff,
+  fixedLoadHypertrophy,
+  strengthLowRep,
+  volumeAccumulation,
+}
+
+extension ProgressionStyleX on ProgressionStyle {
+  String get label => switch (this) {
+    ProgressionStyle.ascendingWeight       => 'Ascending Weight',
+    ProgressionStyle.fixedWeight           => 'Fixed Weight',
+    ProgressionStyle.doubleProgression     => 'Double Progression',
+    ProgressionStyle.reversePyramid        => 'Reverse Pyramid',
+    ProgressionStyle.topSetBackOff         => 'Top Set Back-off',
+    ProgressionStyle.fixedLoadHypertrophy  => 'Fixed Load Hypertrophy',
+    ProgressionStyle.strengthLowRep       => 'Strength Low Rep',
+    ProgressionStyle.volumeAccumulation    => 'Volume Accumulation',
+  };
+}
+
+class StyleAnalysis {
+  final ProgressionStyle style;
+  final double confidence; // 0.0 to 1.0
+  final String reasoning;
+
+  const StyleAnalysis({
+    required this.style,
+    required this.confidence,
+    required this.reasoning,
+  });
+}
+
+class ProgressionRecommendation {
+  final ProgressionStyle? style;
+  final double confidence; // 0.0 to 1.0
+  final String reasoning;
+  final String recommendation;
+  final bool isDeload;
+
+  const ProgressionRecommendation({
+    this.style,
+    required this.confidence,
+    required this.reasoning,
+    required this.recommendation,
+    this.isDeload = false,
+  });
+}
+
 // ─── WorkoutService ───────────────────────────────────────────────────────────
 //
 // Singleton service — owns the workout split config, custom exercises,
@@ -817,6 +871,366 @@ class WorkoutService extends ChangeNotifier {
     } else {
       return '→ Aim to match or beat ${topReps + 1} reps at ${topW.toStringAsFixed(topW == topW.truncateToDouble() ? 0 : 1)} kg next session.';
     }
+  }
+
+  StyleAnalysis detectProgressionStyle(String exerciseId) {
+    final history = historyFor(exerciseId, limit: 5);
+    if (history.isEmpty) {
+      return const StyleAnalysis(
+        style: ProgressionStyle.fixedWeight,
+        confidence: 0.0,
+        reasoning: 'No previous session logs found to analyze training style.',
+      );
+    }
+
+    int totalValidSessions = 0;
+    int ascendingCount = 0;
+    int descendingCount = 0;
+    int topSetBackOffCount = 0;
+    int fixedCount = 0;
+    int lowRepCount = 0;
+    int highRepCount = 0;
+    int totalRepsSum = 0;
+    int totalSetsSum = 0;
+
+    for (final h in history) {
+      final entry = h.entry;
+      if (entry.isSkipped) continue;
+      final workingSets = entry.sets.where((s) => s.isMainWorkingSet).toList();
+      if (workingSets.isEmpty) continue;
+
+      totalValidSessions++;
+      totalSetsSum += workingSets.length;
+
+      // Check rep properties
+      totalRepsSum += workingSets.fold(0, (sum, s) => sum + s.reps);
+
+      if (workingSets.every((s) => s.reps <= 5)) {
+        lowRepCount++;
+      } else if (workingSets.every((s) => s.reps >= 12)) {
+        highRepCount++;
+      }
+
+      if (workingSets.length >= 2) {
+        // Ascending check: weight strictly increases set-to-set
+        bool isAsc = true;
+        for (int i = 0; i < workingSets.length - 1; i++) {
+          if (workingSets[i + 1].weight <= workingSets[i].weight) {
+            isAsc = false;
+            break;
+          }
+        }
+
+        // Descending check: weight strictly decreases set-to-set
+        bool isDesc = true;
+        for (int i = 0; i < workingSets.length - 1; i++) {
+          if (workingSets[i + 1].weight >= workingSets[i].weight) {
+            isDesc = false;
+            break;
+          }
+        }
+
+        // Top set + back-off check: first set is heaviest, all others are equal and lighter
+        bool isTopSet = false;
+        if (workingSets[0].weight > workingSets[1].weight) {
+          final backOffWeight = workingSets[1].weight;
+          if (workingSets.skip(1).every((s) => s.weight == backOffWeight)) {
+            isTopSet = true;
+          }
+        }
+
+        // Fixed weight check: all sets have equal weight
+        final firstWeight = workingSets[0].weight;
+        final isFixed = workingSets.every((s) => s.weight == firstWeight);
+
+        if (isAsc) ascendingCount++;
+        else if (isDesc) descendingCount++;
+        else if (isTopSet) topSetBackOffCount++;
+        else if (isFixed) fixedCount++;
+      } else {
+        // Single set session can count as fixed weight by default
+        fixedCount++;
+      }
+    }
+
+    if (totalValidSessions == 0) {
+      return const StyleAnalysis(
+        style: ProgressionStyle.fixedWeight,
+        confidence: 0.0,
+        reasoning: 'No valid working sets logged in history.',
+      );
+    }
+
+    final avgRepsOverall = totalSetsSum > 0 ? totalRepsSum / totalSetsSum : 0.0;
+    final avgSetsPerSession = totalValidSessions > 0 ? totalSetsSum / totalValidSessions : 0.0;
+
+    final lowRepRatio = lowRepCount / totalValidSessions;
+    final ascendingRatio = ascendingCount / totalValidSessions;
+    final descendingRatio = descendingCount / totalValidSessions;
+    final topSetBackOffRatio = topSetBackOffCount / totalValidSessions;
+    final fixedRatio = fixedCount / totalValidSessions;
+
+    ProgressionStyle style;
+    double confidence;
+    String reasoning;
+
+    if (lowRepRatio >= 0.6) {
+      style = ProgressionStyle.strengthLowRep;
+      confidence = lowRepRatio;
+      reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions logged low-rep strength work (≤5 reps).';
+    } else if (ascendingRatio >= 0.6) {
+      style = ProgressionStyle.ascendingWeight;
+      confidence = ascendingRatio;
+      reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions featured increasing weight across sets.';
+    } else if (descendingRatio >= 0.6) {
+      style = ProgressionStyle.reversePyramid;
+      confidence = descendingRatio;
+      reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions featured decreasing weight across sets (Reverse Pyramid).';
+    } else if (topSetBackOffRatio >= 0.6) {
+      style = ProgressionStyle.topSetBackOff;
+      confidence = topSetBackOffRatio;
+      reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions featured a heavy top set followed by lighter back-off sets.';
+    } else if (fixedRatio >= 0.6) {
+      // Sub-classification of Fixed Weight:
+      if (avgSetsPerSession >= 4) {
+        style = ProgressionStyle.volumeAccumulation;
+        confidence = fixedRatio;
+        reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions used identical weights across high volume (avg. ${avgSetsPerSession.toStringAsFixed(1)} sets).';
+      } else if (avgRepsOverall >= 12) {
+        style = ProgressionStyle.fixedLoadHypertrophy;
+        confidence = fixedRatio;
+        reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions used identical weights in high hypertrophy rep ranges (avg. ${avgRepsOverall.toStringAsFixed(1)} reps).';
+      } else {
+        // Double progression: weights are identical across sets, and load was maintained across consecutive sessions.
+        bool hasIdenticalWeightsAcrossSessions = false;
+        if (history.length >= 2) {
+          final w1 = history[0].entry.sets.where((s) => s.isMainWorkingSet).map((s) => s.weight).firstOrNull;
+          final w2 = history[1].entry.sets.where((s) => s.isMainWorkingSet).map((s) => s.weight).firstOrNull;
+          if (w1 != null && w1 == w2) {
+            hasIdenticalWeightsAcrossSessions = true;
+          }
+        }
+        if (hasIdenticalWeightsAcrossSessions) {
+          style = ProgressionStyle.doubleProgression;
+          confidence = fixedRatio * 0.9;
+          reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions used identical weights across sets, and load was maintained across consecutive sessions.';
+        } else {
+          style = ProgressionStyle.fixedWeight;
+          confidence = fixedRatio;
+          reasoning = '${(confidence * 100).toStringAsFixed(0)}% of sessions used identical weights across sets.';
+        }
+      }
+    } else {
+      style = ProgressionStyle.fixedWeight;
+      confidence = 0.4;
+      reasoning = 'No single dominant training pattern detected. Defaulting to Fixed Weight progression.';
+    }
+
+    if (history.length < 3) {
+      confidence = confidence * (history.length / 3.0);
+    }
+    confidence = confidence.clamp(0.0, 1.0);
+
+    return StyleAnalysis(
+      style: style,
+      confidence: confidence,
+      reasoning: reasoning,
+    );
+  }
+
+  bool detectFatigueDecline(String exerciseId) {
+    final history = historyFor(exerciseId, limit: 3);
+    if (history.length < 3) return false;
+    final e1 = history[0].entry.topWorkingSet?.estimatedOneRepMax ?? 0.0;
+    final e2 = history[1].entry.topWorkingSet?.estimatedOneRepMax ?? 0.0;
+    final e3 = history[2].entry.topWorkingSet?.estimatedOneRepMax ?? 0.0;
+    return e1 > 0 && e2 > 0 && e3 > 0 && e1 < e2 && e2 < e3;
+  }
+
+  bool _isSafetyCheckPassed(ExerciseEntry lastEntry, List<({DateTime date, ExerciseEntry entry})> history) {
+    if (lastEntry.isEmpty) return true;
+    final workingSets = lastEntry.sets.where((s) => s.isMainWorkingSet).toList();
+    if (workingSets.isEmpty) return true;
+
+    // 1. Rep target check:
+    final isCompound = lastEntry.exercise.type == ExerciseType.barbellCompound;
+    final minRepsRequired = isCompound ? 4 : 5;
+    for (final s in workingSets) {
+      if (s.reps < minRepsRequired) return false;
+    }
+
+    // 2. e1RM regression check:
+    if (history.length >= 3) {
+      final e1rms = history.take(3).map((h) => h.entry.topWorkingSet?.estimatedOneRepMax ?? 0.0).toList();
+      if (e1rms.length == 3 && e1rms[0] > 0) {
+        final avgPrior = (e1rms[1] + e1rms[2]) / 2.0;
+        if (avgPrior > 0 && (e1rms[0] < avgPrior * 0.90)) {
+          return false;
+        }
+      }
+    }
+
+    // 3. Failure / RPE check:
+    for (final s in workingSets) {
+      if (s.rpe != null && s.rpe! >= 10.0 && s.reps <= 3) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  ProgressionRecommendation getPersonalizedRecommendation(String exerciseId, String splitDayName) {
+    final history = historyFor(exerciseId, limit: 5);
+    final lastEntry = lastEntryFor(exerciseId, splitDayName);
+    final bestEver = bestSetEver(exerciseId);
+
+    // 1. Deload check:
+    if (detectFatigueDecline(exerciseId)) {
+      return const ProgressionRecommendation(
+        style: null,
+        confidence: 1.0,
+        reasoning: 'Performance (estimated 1RM) has declined steadily over the last 3 consecutive sessions.',
+        recommendation: '💡 Fatigue accumulation detected (performance has declined over last 3 sessions). Consider a deload week or reducing volume by 1-2 sets.',
+        isDeload: true,
+      );
+    }
+
+    // 2. Safety check:
+    if (lastEntry != null && !_isSafetyCheckPassed(lastEntry, history)) {
+      return const ProgressionRecommendation(
+        style: null,
+        confidence: 1.0,
+        reasoning: 'Safety limits triggered: low rep counts, hit failure, or high fatigue detected in the last session.',
+        recommendation: '💡 Safety threshold triggered due to high fatigue or low rep execution. Maintain current load and focus on recovery.',
+      );
+    }
+
+    // 3. Style analysis:
+    final analysis = detectProgressionStyle(exerciseId);
+
+    // 4. Low confidence fallback:
+    if (analysis.confidence < 0.50) {
+      return ProgressionRecommendation(
+        style: analysis.style,
+        confidence: analysis.confidence,
+        reasoning: analysis.reasoning,
+        recommendation: '💡 Insufficient historical consistency detected. Maintain current load and aim to improve total reps.',
+      );
+    }
+
+    // 5. Generate progression recommendation based on the detected style
+    final typicalSets = typicalSetsForExercise(exerciseId, splitDayName);
+    final exercise = allExercises.firstWhere(
+      (e) => e.id == exerciseId,
+      orElse: () => Exercise(
+        id: exerciseId,
+        name: 'Exercise',
+        muscleGroup: 'Strength',
+        type: ExerciseType.barbellCompound,
+      ),
+    );
+    final increment = exercise.type == ExerciseType.barbellCompound
+        ? 2.5
+        : exercise.type == ExerciseType.dumbbell
+            ? 2.0
+            : exercise.type == ExerciseType.cableMachine
+                ? 5.0
+                : 2.0;
+
+    String recommendationText = '';
+    final lastTop = lastEntry?.topWorkingSet ?? lastEntry?.topSet;
+
+    if (lastTop == null) {
+      if (bestEver != null) {
+        recommendationText = 'Start at or slightly below your best weight of ${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg and aim to hit 8-10 reps.';
+      } else {
+        recommendationText = 'Use a controlled first session and find a stable working weight for $typicalSets sets.';
+      }
+    } else {
+      final currentWeight = lastTop.weight;
+      final currentReps = lastTop.reps;
+      
+      final workingSets = lastEntry?.sets.where((s) => s.isMainWorkingSet).toList() ?? [];
+      final targetRepMax = exercise.targetRepMax;
+      final allWorkingSetsHitCeiling = workingSets.length >= typicalSets &&
+          workingSets.every((s) => s.reps >= targetRepMax);
+      
+      switch (analysis.style) {
+        case ProgressionStyle.strengthLowRep:
+          if (currentReps >= 5) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase load to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg for low-rep strength sets.';
+          } else {
+            recommendationText = 'Maintain ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and push to hit 5 reps.';
+          }
+          break;
+        case ProgressionStyle.ascendingWeight:
+          final nextW = currentWeight + increment;
+          recommendationText = 'Continue ascending weight. Push top set to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg if RPE was <= 8.';
+          break;
+        case ProgressionStyle.reversePyramid:
+          if (currentReps >= 8) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase first top set weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg, then drop 10% for subsequent sets.';
+          } else {
+            recommendationText = 'Maintain top set of ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and aim for 8 reps.';
+          }
+          break;
+        case ProgressionStyle.topSetBackOff:
+          if (currentReps >= 6) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase heavy top set weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg, maintaining back-off sets.';
+          } else {
+            recommendationText = 'Maintain heavy top set weight of ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and build reps.';
+          }
+          break;
+        case ProgressionStyle.doubleProgression:
+          if (allWorkingSetsHitCeiling) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg since all working sets reached target reps ($targetRepMax).';
+          } else {
+            recommendationText = 'Maintain ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and attempt to complete all sets at the target first.';
+          }
+          break;
+        case ProgressionStyle.fixedLoadHypertrophy:
+          if (allWorkingSetsHitCeiling) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg and drop reps back to ${exercise.targetRepMin}-${exercise.targetRepMax}.';
+          } else {
+            recommendationText = 'Maintain ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and focus on high-rep endurance across all sets.';
+          }
+          break;
+        case ProgressionStyle.volumeAccumulation:
+          if (allWorkingSetsHitCeiling) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg and accumulate sets.';
+          } else {
+            recommendationText = 'Maintain ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and focus on set consistency.';
+          }
+          break;
+        case ProgressionStyle.fixedWeight:
+        default:
+          if (allWorkingSetsHitCeiling) {
+            final nextW = currentWeight + increment;
+            recommendationText = 'Increase weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg since all working sets reached target reps ($targetRepMax).';
+          } else {
+            recommendationText = 'Maintain ${currentWeight.toStringAsFixed(currentWeight == currentWeight.truncateToDouble() ? 0 : 1)} kg and aim to build reps across all sets.';
+          }
+          break;
+      }
+    }
+
+    if (analysis.confidence >= 0.50 && analysis.confidence < 0.80) {
+      recommendationText = '💡 Moderate confidence in training style: ${analysis.style.label}. $recommendationText';
+    }
+
+    return ProgressionRecommendation(
+      style: analysis.style,
+      confidence: analysis.confidence,
+      reasoning: analysis.reasoning,
+      recommendation: recommendationText,
+    );
   }
 
   List<SplitDay> selectableWorkoutDaysFor(DateTime date) {

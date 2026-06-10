@@ -129,9 +129,17 @@ class ExerciseEntry {
 
   double get totalVolume => sets.fold(0, (sum, s) => sum + s.volume);
 
-  // Volume from main working sets only (excludes warm-ups from set-count math)
-  double get workingVolume =>
+  /// Volume from primary working sets only (normal, supersetA, supersetB).
+  /// Excludes warm-ups, drop sets, and burnouts.
+  double get primaryWorkingVolume =>
+      sets.where((s) => s.isMainWorkingSet).fold(0, (sum, s) => sum + s.volume);
+
+  /// Volume from all sets providing stimulus (excludes warm-up sets only).
+  double get totalStimulusVolume =>
       sets.where((s) => s.countsAsVolume).fold(0, (sum, s) => sum + s.volume);
+
+  /// Redirected for backwards-compatibility to return primary working volume.
+  double get workingVolume => primaryWorkingVolume;
 
   double get bestOneRepMax => sets.isEmpty
       ? 0
@@ -264,8 +272,16 @@ class WorkoutSession {
   double get totalVolume =>
       entries.fold(0, (sum, e) => sum + e.totalVolume);
 
-  double get totalWorkingVolume =>
-      entries.fold(0, (sum, e) => sum + e.workingVolume);
+  /// Total primary working volume across all exercises (normal, supersetA, supersetB).
+  double get primaryWorkingVolume =>
+      entries.fold(0, (sum, e) => sum + e.primaryWorkingVolume);
+
+  /// Total stimulus volume across all exercises (all except warm-up).
+  double get totalStimulusVolume =>
+      entries.fold(0, (sum, e) => sum + e.totalStimulusVolume);
+
+  /// Redirected for backwards-compatibility to return primary working volume.
+  double get totalWorkingVolume => primaryWorkingVolume;
 
   int get totalSets =>
       entries.fold(0, (sum, e) => sum + e.sets.length);

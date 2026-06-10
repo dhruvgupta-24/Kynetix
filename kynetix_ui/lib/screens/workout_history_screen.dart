@@ -3193,18 +3193,26 @@ class _ExerciseDetailCard extends StatelessWidget {
                       ),
                     ),
                   if (!entry.isSkipped && entry.sets.isNotEmpty) ...[
-                    if (entry.sets.length < service.typicalSetsForExercise(entry.exercise.id, splitDayName))
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFB347).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: const Text(
-                          '⚠ Partial',
-                          style: TextStyle(color: Color(0xFFFFB347), fontSize: 9, fontWeight: FontWeight.w700),
-                        ),
-                      ),
+                    Builder(
+                      builder: (context) {
+                        final wsets = entry.sets.where((s) => s.isMainWorkingSet).length;
+                        final target = service.typicalSetsForExercise(entry.exercise.id, splitDayName);
+                        final isTrained = wsets >= target;
+                        final label = isTrained ? '✓ Trained' : 'Logged';
+                        final color = isTrained ? KColor.green : const Color(0xFF9CA3AF);
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            label,
+                            style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700),
+                          ),
+                        );
+                      },
+                    ),
                   ],
                   if (isPr)
                     Container(

@@ -86,6 +86,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // Floating text particles tracker
   final List<_FloatingTextData> _floatingTexts = [];
   final ValueNotifier<int> _scoreNotifier = ValueNotifier<int>(0);
+  double _scoreCompletion = 0.0;
+  double _scoreVolume = 0.0;
+  double _scoreSets = 0.0;
+  double _scorePrs = 0.0;
+  int _e1rmPrsCount = 0;
 
   // PR Celebration State (Non-blocking)
   bool _showPrToast = false;
@@ -754,55 +759,102 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     return vol;
   }
 
+  double get _primaryWorkingVolume {
+    double vol = 0.0;
+    _sets.forEach((_, list) {
+      for (final s in list) {
+        if (s.isMainWorkingSet) {
+          vol += s.volume;
+        }
+      }
+    });
+    return vol;
+  }
+
   double get _completionProgress {
     if (_sessionExercises.isEmpty) return 0.0;
-    final completedCount = _sessionExercises
-        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty || (_skippedExercises[ex.id] == true))
-        .length;
-    return completedCount / _sessionExercises.length;
+    double totalRatio = 0.0;
+    for (final ex in _sessionExercises) {
+      final isSkipped = _skippedExercises[ex.id] ?? false;
+      if (isSkipped) {
+        totalRatio += 1.0;
+        continue;
+      }
+      final workingSets = (_sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).toList();
+      final targetSets = ex.targetSets;
+      final targetRepMin = ex.targetRepMin;
+      
+      final setRatio = targetSets > 0 ? workingSets.length / targetSets : 1.0;
+      
+      double totalSetRepScore = 0.0;
+      for (final s in workingSets) {
+        if (targetRepMin > 0) {
+          totalSetRepScore += (s.reps / targetRepMin).clamp(0.0, 1.0);
+        } else {
+          totalSetRepScore += 1.0;
+        }
+      }
+      final repRatio = targetSets > 0 ? totalSetRepScore / targetSets : 1.0;
+      
+      final ratioEx = (setRatio < repRatio ? setRatio : repRatio).clamp(0.0, 1.0);
+      totalRatio += ratioEx;
+    }
+    return totalRatio / _sessionExercises.length;
   }
 
   void _updateLiveScore() {
     if (_sessionExercises.isEmpty) {
+      _scoreCompletion = 0.0;
+      _scoreVolume = 0.0;
+      _scoreSets = 0.0;
+      _scorePrs = 0.0;
+      _e1rmPrsCount = 0;
       _scoreNotifier.value = 0;
       return;
     }
     
-    // 1. Completion of exercises (up to 30 points)
-    final completedCount = _sessionExercises
-        .where((ex) => (_sets[ex.id] ?? []).isNotEmpty || (_skippedExercises[ex.id] == true))
-        .length;
-    final completionScore = (completedCount / _sessionExercises.length) * 30;
+    // 1. Completion of exercises (up to 30 points) using rep midpoint ratio
+    final avgCompletionRatio = _completionProgress;
+    final completionScore = avgCompletionRatio * 30.0;
     
-    // 2. Volume score (up to 30 points)
-    final currentVolume = _totalVolume;
-    final lastVolume = widget.previousSession?.totalVolume ?? 2000.0;
-    final volumeScore = lastVolume > 0 ? (currentVolume / lastVolume * 30).clamp(0.0, 30.0) : 15.0;
+    // 2. Volume score (up to 30 points) based on primary working volume only
+    final currentVolume = _primaryWorkingVolume;
+    final lastVolume = widget.previousSession?.primaryWorkingVolume ?? 2000.0;
+    final volumeScore = lastVolume > 0 ? (currentVolume / lastVolume * 30.0).clamp(0.0, 30.0) : 15.0;
     
-    // 3. Set completion score (up to 25 points)
-    // Reward logging sets: based on logging sets vs standard baseline (3 sets per non-skipped exercise)
+    // 3. Set completion score (up to 25 points) based on primary working sets vs target
     double loggedSetsScore = 0.0;
     int activeExercises = 0;
     for (final ex in _sessionExercises) {
       final isSkipped = _skippedExercises[ex.id] ?? false;
       if (isSkipped) continue;
       activeExercises++;
-      final logged = (_sets[ex.id] ?? []).length;
-      loggedSetsScore += (logged / 3.0).clamp(0.0, 1.0);
+      final logged = (_sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).length;
+      final target = ex.targetSets > 0 ? ex.targetSets : 3;
+      loggedSetsScore += (logged / target).clamp(0.0, 1.0);
     }
-    final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25 : 25.0;
+    final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25.0 : 25.0;
     
-    // 4. PRs score (up to 15 points)
+    // 4. PRs score (up to 15 points) based on e1RM PRs from primary working sets
     int prCount = 0;
     _sets.forEach((exId, list) {
       for (final s in list) {
-        final previousBest = _service.bestSetBefore(exId, widget.date);
-        if (previousBest != null && s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01) {
-          prCount++;
+        if (s.isMainWorkingSet) {
+          final previousBest = _service.bestSetBefore(exId, widget.date);
+          if (previousBest != null && s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01) {
+            prCount++;
+          }
         }
       }
     });
     final prScore = (prCount * 5.0).clamp(0.0, 15.0);
+
+    // Save breakdown values
+    _scoreCompletion = completionScore;
+    _scoreVolume = volumeScore;
+    _scoreSets = setsScore;
+    _scorePrs = prScore;
+    _e1rmPrsCount = prCount;
 
     _scoreNotifier.value = (completionScore + volumeScore + setsScore + prScore).round().clamp(0, 100);
   }
@@ -1342,6 +1394,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 session: _completedSessionSummary,
                 previousSession: widget.previousSession,
                 score: _scoreNotifier.value,
+                scoreCompletion: _scoreCompletion,
+                scoreVolume: _scoreVolume,
+                scoreSets: _scoreSets,
+                scorePrs: _scorePrs,
+                e1rmPrsCount: _e1rmPrsCount,
                 duration: DateTime.now().difference(_startTime),
                 onDone: () => Navigator.of(context).pop(true),
               ),
@@ -2423,42 +2480,92 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           const SizedBox(height: 14),
           
           // Recommended Next Set Card
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.3), width: 1.0),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFFB347).withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  spreadRadius: 1,
-                )
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Builder(
+            builder: (context) {
+              final rec = WorkoutService.instance.getPersonalizedRecommendation(widget.exercise.id, widget.splitDayName);
+              final hasStyle = rec.style != null && !rec.isDeload && rec.confidence >= 0.50;
+              final isDeloadOrSafety = rec.isDeload || rec.style == null;
+              final cardColor = isDeloadOrSafety 
+                  ? KColor.danger.withValues(alpha: 0.08) 
+                  : const Color(0xFF1E1E2C).withValues(alpha: 0.8);
+              final borderColor = isDeloadOrSafety 
+                  ? KColor.danger.withValues(alpha: 0.25) 
+                  : const Color(0xFFFFB347).withValues(alpha: 0.3);
+              final iconColor = isDeloadOrSafety 
+                  ? KColor.danger 
+                  : const Color(0xFFFFB347);
+
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor, width: 1.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: iconColor.withValues(alpha: 0.08),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    )
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.offline_bolt_rounded, color: Color(0xFFFFB347), size: 14),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Recommended Next Set: $recSet',
-                        style: const TextStyle(color: Color(0xFFFFB347), fontSize: 11, fontWeight: FontWeight.w900),
+                    Row(
+                      children: [
+                        Icon(
+                          isDeloadOrSafety ? Icons.warning_amber_rounded : Icons.offline_bolt_rounded, 
+                          color: iconColor, 
+                          size: 14,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            isDeloadOrSafety ? 'TRAINING ADVICE' : 'PROGRESSION RECOMMENDATION',
+                            style: TextStyle(color: iconColor, fontSize: 10.5, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    if (hasStyle) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Style: ${rec.style!.label}',
+                              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Confidence: ${(rec.confidence * 100).toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              color: rec.confidence >= 0.8 ? KColor.green : const Color(0xFFFFB347), 
+                              fontSize: 11, 
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Reason: ${rec.reasoning}',
+                        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10.5, fontStyle: FontStyle.italic),
+                      ),
+                      const Divider(color: Color(0xFF374151), height: 12, thickness: 0.5),
+                    ],
+                    Text(
+                      rec.recommendation,
+                      style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  recReason,
-                  style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.3),
-                ),
-              ],
-            ),
+              );
+            }
           ),
 
           // Temporary Exercise Permanent addition recommendation
@@ -3485,80 +3592,41 @@ class _BottomDockWidget extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(exercises.length, (idx) {
                 final ex = exercises[idx];
-                final lSets = sets[ex.id]?.length ?? 0;
+                final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
+                final wsets = (sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).length;
+                final targetSets = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
                 
                 final skipped = skippedExercises[ex.id] ?? false;
                 final sub = substitutedExercises[ex.id] ?? false;
-                final added = temporaryAdditions != null ? (temporaryAdditions![ex.id] ?? false) : false;
                 final active = idx == selectedIndex;
 
-                String displayLabel = '';
-                if (skipped) {
-                  displayLabel = sub ? '🔄 Replace' : '🚫 Skip';
-                } else if (added) {
-                  displayLabel = '➕ Added';
-                } else if (lSets > 0) {
-                  final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
-                  if (lSets < typical) {
-                    displayLabel = '⚠ Partial';
-                  } else {
-                    final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
-                    displayLabel = '✓ $truncatedName';
-                  }
-                } else {
-                  final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
-                  displayLabel = truncatedName;
-                }
-
-                Color bgColor;
+                String displayLabel;
                 Color textColor;
+                Color bgColor;
                 BorderSide border;
 
-                if (active) {
-                  if (skipped) {
-                    textColor = sub ? KColor.blue : KColor.danger;
-                  } else if (added) {
-                    textColor = KColor.green;
-                  } else if (lSets > 0) {
-                    final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
-                    textColor = lSets < typical ? const Color(0xFFFFB347) : KColor.green;
-                  } else {
-                    textColor = KColor.blue;
-                  }
-                  bgColor = textColor.withValues(alpha: 0.2);
-                  border = BorderSide(color: textColor, width: 1.5);
+                if (skipped) {
+                  displayLabel = sub ? '🔄 $truncatedName' : '🚫 $truncatedName';
+                  textColor = sub ? KColor.blue : KColor.danger;
+                  bgColor = active ? textColor.withValues(alpha: 0.2) : textColor.withValues(alpha: 0.08);
+                  border = BorderSide(color: textColor, width: active ? 1.5 : 0.8);
+                } else if (wsets >= targetSets) {
+                  displayLabel = '✓ $truncatedName';
+                  textColor = KColor.green;
+                  bgColor = active ? textColor.withValues(alpha: 0.2) : textColor.withValues(alpha: 0.08);
+                  border = BorderSide(color: textColor, width: active ? 1.5 : 0.8);
+                } else if (wsets > 0) {
+                  // Logged state (factual name without checkmark, neutral gray colors)
+                  displayLabel = truncatedName;
+                  textColor = const Color(0xFF9CA3AF);
+                  bgColor = active ? const Color(0xFF374151) : const Color(0xFF1F2937);
+                  border = BorderSide(color: active ? KColor.blue : const Color(0xFF4B5563), width: active ? 1.5 : 0.8);
                 } else {
-                  if (skipped) {
-                    textColor = sub ? KColor.blue : KColor.danger;
-                  } else if (added) {
-                    textColor = KColor.green;
-                  } else if (lSets > 0) {
-                    final typical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
-                    textColor = lSets < typical ? const Color(0xFFFFB347) : KColor.green;
-                  } else {
-                    textColor = KColor.textSecondary;
-                  }
-                  bgColor = skipped
-                      ? (sub ? KColor.blue.withValues(alpha: 0.08) : KColor.danger.withValues(alpha: 0.08))
-                      : (added 
-                          ? KColor.green.withValues(alpha: 0.08) 
-                          : (lSets > 0 
-                              ? (lSets < WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName) 
-                                  ? const Color(0xFFFFB347).withValues(alpha: 0.08) 
-                                  : KColor.green.withValues(alpha: 0.08))
-                              : const Color(0xFF1E1E2C)));
-                  border = BorderSide(
-                    color: skipped
-                        ? (sub ? KColor.blue.withValues(alpha: 0.2) : KColor.danger.withValues(alpha: 0.2))
-                        : (added 
-                            ? KColor.green.withValues(alpha: 0.2) 
-                            : (lSets > 0 
-                                ? (lSets < WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName) 
-                                    ? const Color(0xFFFFB347).withValues(alpha: 0.2) 
-                                    : KColor.green.withValues(alpha: 0.2))
-                                : const Color(0xFF2E2E3E))),
-                    width: 0.8,
-                  );
+                  // Not Started
+                  displayLabel = truncatedName;
+                  textColor = KColor.textSecondary;
+                  bgColor = active ? KColor.blue.withValues(alpha: 0.2) : const Color(0xFF1E1E2C);
+                  border = BorderSide(color: active ? KColor.blue : const Color(0xFF2E2E3E), width: active ? 1.5 : 0.8);
                 }
 
                 return GestureDetector(
@@ -4648,6 +4716,11 @@ class _WorkoutCompletionOverlay extends StatefulWidget {
   final WorkoutSession session;
   final WorkoutSession? previousSession;
   final int score;
+  final double scoreCompletion;
+  final double scoreVolume;
+  final double scoreSets;
+  final double scorePrs;
+  final int e1rmPrsCount;
   final Duration duration;
   final VoidCallback onDone;
 
@@ -4655,6 +4728,11 @@ class _WorkoutCompletionOverlay extends StatefulWidget {
     required this.session,
     this.previousSession,
     required this.score,
+    required this.scoreCompletion,
+    required this.scoreVolume,
+    required this.scoreSets,
+    required this.scorePrs,
+    required this.e1rmPrsCount,
     required this.duration,
     required this.onDone,
   });
@@ -4895,6 +4973,15 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                             runSpacing: 6,
                             children: muscles.map((m) => KChip(m)).toList(),
                           ),
+                          _ScoreBreakdownPanel(
+                            scoreCompletion: widget.scoreCompletion,
+                            scoreVolume: widget.scoreVolume,
+                            scoreSets: widget.scoreSets,
+                            scorePrs: widget.scorePrs,
+                            e1rmPrsCount: widget.e1rmPrsCount,
+                            session: session,
+                            previousSession: widget.previousSession,
+                          ),
                         ],
                       ),
                     ),
@@ -5037,6 +5124,172 @@ class _AnimatedCountUpTextState extends State<_AnimatedCountUpText> with SingleT
           style: widget.style,
         );
       },
+    );
+  }
+}
+
+// ─── Score Breakdown Panel Widget ───────────────────────────────────────────
+
+class _ScoreBreakdownPanel extends StatefulWidget {
+  final double scoreCompletion;
+  final double scoreVolume;
+  final double scoreSets;
+  final double scorePrs;
+  final int e1rmPrsCount;
+  final WorkoutSession session;
+  final WorkoutSession? previousSession;
+
+  const _ScoreBreakdownPanel({
+    required this.scoreCompletion,
+    required this.scoreVolume,
+    required this.scoreSets,
+    required this.scorePrs,
+    required this.e1rmPrsCount,
+    required this.session,
+    this.previousSession,
+  });
+
+  @override
+  State<_ScoreBreakdownPanel> createState() => _ScoreBreakdownPanelState();
+}
+
+class _ScoreBreakdownPanelState extends State<_ScoreBreakdownPanel> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    int totalPlannedWorkingSets = 0;
+    int completedWorkingSets = 0;
+    for (final entry in widget.session.entries) {
+      if (entry.isSkipped) continue;
+      totalPlannedWorkingSets += entry.exercise.targetSets;
+      completedWorkingSets += entry.sets.where((s) => s.isMainWorkingSet).length;
+    }
+
+    final currentVol = widget.session.primaryWorkingVolume;
+    final prevVol = widget.previousSession?.primaryWorkingVolume ?? 0.0;
+    double volDiffPct = 0.0;
+    if (prevVol > 0) {
+      volDiffPct = ((currentVol - prevVol) / prevVol) * 100;
+    }
+
+    double loggedSetsScore = 0.0;
+    int activeExercises = 0;
+    for (final entry in widget.session.entries) {
+      if (entry.isSkipped) continue;
+      activeExercises++;
+      final logged = entry.sets.where((s) => s.isMainWorkingSet).length;
+      final target = entry.exercise.targetSets > 0 ? entry.exercise.targetSets : 3;
+      loggedSetsScore += (logged / target).clamp(0.0, 1.0);
+    }
+    final adherencePct = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 100 : 100.0;
+
+    final totalScore = (widget.scoreCompletion + widget.scoreVolume + widget.scoreSets + widget.scorePrs).round().clamp(0, 100);
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF13131F),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2E2E3E), width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'WORKOUT SCORE: $totalScore / 100',
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _expanded = !_expanded;
+                  });
+                },
+                child: Text(
+                  _expanded ? 'Hide Details ▲' : 'Tap for Details ▼',
+                  style: const TextStyle(color: KColor.blue, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _buildRow('├─ Completion:', '${widget.scoreCompletion.toStringAsFixed(1)} / 30'),
+          _buildRow('├─ Volume:', '${widget.scoreVolume.toStringAsFixed(1)} / 30'),
+          _buildRow('├─ Sets:', '${widget.scoreSets.toStringAsFixed(1)} / 25'),
+          _buildRow('└─ PR Bonus:', '${widget.scorePrs.toStringAsFixed(1)} / 15'),
+          
+          if (_expanded) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Divider(color: Color(0xFF2E2E3E), thickness: 0.5),
+            ),
+            _buildDetailSection(
+              'Completion',
+              '$completedWorkingSets of $totalPlannedWorkingSets planned working sets completed',
+            ),
+            const SizedBox(height: 6),
+            _buildDetailSection(
+              'Volume',
+              '${currentVol.toStringAsFixed(0)} kg vs ${prevVol.toStringAsFixed(0)} kg previous (${volDiffPct >= 0 ? "+" : ""}${volDiffPct.toStringAsFixed(1)}%)',
+            ),
+            const SizedBox(height: 6),
+            _buildDetailSection(
+              'Sets',
+              '${adherencePct.toStringAsFixed(0)}% adherence to planned sets',
+            ),
+            const SizedBox(height: 6),
+            _buildDetailSection(
+              'PR Bonus',
+              '${widget.e1rmPrsCount} e1RM PRs achieved',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRow(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, fontFamily: 'monospace'),
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailSection(String title, String detail) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '  • $title:',
+          style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          '    $detail',
+          style: const TextStyle(color: Colors.white, fontSize: 11),
+        ),
+      ],
     );
   }
 }
