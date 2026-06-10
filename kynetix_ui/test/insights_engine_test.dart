@@ -2,9 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/models/insights_models.dart';
 import 'package:kynetix/services/insights_engine.dart';
 import 'package:kynetix/models/day_log.dart';
-import 'package:kynetix/models/workout_session.dart';
 import 'package:kynetix/screens/onboarding_screen.dart'; // UserProfile
-import 'package:kynetix/services/insights_report_service.dart';
 import 'package:kynetix/models/day_status.dart';
 import 'package:kynetix/models/nutrition_result.dart';
 import 'package:kynetix/services/mock_estimation_service.dart' show NutrientRange;
@@ -205,6 +203,153 @@ void main() {
       expect(report.deltaVsPrior!.loggingConsistencyDelta, closeTo(0.50, 0.01)); // current 1.0 vs prior 0.5
       expect(report.topImprovement, isNotNull);
       expect(report.topImprovement!.metric, equals(ImprovementMetric.proteinAdherence));
+    });
+  });
+
+  group('Ongoing Week Calculations and Future Dates ignoring', () {
+    late UserProfile profile;
+
+    setUp(() {
+      profile = const UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 175.0,
+        weight: 75.0,
+        workoutDaysMin: 3,
+        workoutDaysMax: 3,
+        goal: 'Fat Loss',
+      );
+    });
+
+    test('Monday of a new week (Ongoing) returns null due to less than 3 logged days', () {
+      final logs = <String, DayLog>{
+        '2026-06-15': _makeDayLog(date: DateTime(2026, 6, 15), meals: [(name: 'M1', calories: 2000, protein: 160, score: null)]),
+        '2026-06-16': _makeDayLog(date: DateTime(2026, 6, 16), meals: [(name: 'M2', calories: 2000, protein: 160, score: null)]),
+        '2026-06-17': _makeDayLog(date: DateTime(2026, 6, 17), meals: [(name: 'M3', calories: 2000, protein: 160, score: null)]),
+      };
+
+      final report = InsightsEngine.computeWeek(
+        weekKey: '2026-W25',
+        profile: profile,
+        logs: logs,
+        sessions: [],
+        priorWeek: null,
+        now: DateTime(2026, 6, 15), // Monday
+      );
+
+      // June 16 and 17 are future dates relative to June 15, so they are skipped.
+      // Thus loggedDaysCount is 1, which is < 3, so report is null.
+      expect(report, isNull);
+    });
+
+    test('Mid-week (Wednesday, Ongoing): 3 logged days out of 3 elapsed = 100% logging consistency', () {
+      final logs = <String, DayLog>{
+        '2026-06-08': _makeDayLog(date: DateTime(2026, 6, 8), meals: [(name: 'M1', calories: 2382, protein: 160, score: null)], didGym: true),
+        '2026-06-09': _makeDayLog(date: DateTime(2026, 6, 9), meals: [(name: 'M2', calories: 2382, protein: 160, score: null)], didGym: true),
+        '2026-06-10': _makeDayLog(date: DateTime(2026, 6, 10), meals: [(name: 'M3', calories: 2382, protein: 160, score: null)], didGym: true),
+        // June 11-14 are not logged/occurred yet
+      };
+
+      final report = InsightsEngine.computeWeek(
+        weekKey: '2026-W24',
+        profile: profile,
+        logs: logs,
+        sessions: [],
+        priorWeek: null,
+        now: DateTime(2026, 6, 10), // Wednesday
+      );
+
+      expect(report, isNotNull);
+      expect(report!.loggedDaysCount, equals(3));
+      // Denominator should be elapsedDays = 3
+      expect(report.consistencyScore.loggingConsistency, equals(1.0)); // 3 / 3 = 100%
+      expect(report.gymDaysCount, equals(3));
+      // expectedGymDays is 3, scaled for 3 days = 3 * (3 / 7) = 1.28
+      // 3 / 1.28 clamps to 1.0 (100% workout consistency)
+      expect(report.consistencyScore.gymAttendance, equals(1.0));
+      expect(report.consistencyScore.calorieAdherence, equals(1.0));
+      expect(report.consistencyScore.proteinAdherence, equals(1.0));
+      expect(report.consistencyScore.score, equals(100)); // 100% overall consistency score
+    });
+
+    test('Mid-week (Thursday, Ongoing) with a missed day: 3 logged days out of 4 elapsed = 75% logging consistency', () {
+      final logs = <String, DayLog>{
+        '2026-06-08': _makeDayLog(date: DateTime(2026, 6, 8), meals: [(name: 'M1', calories: 2382, protein: 160, score: null)], didGym: true),
+        // June 9 is unlogged (missed)
+        '2026-06-10': _makeDayLog(date: DateTime(2026, 6, 10), meals: [(name: 'M2', calories: 2382, protein: 160, score: null)], didGym: true),
+        '2026-06-11': _makeDayLog(date: DateTime(2026, 6, 11), meals: [(name: 'M3', calories: 2200, protein: 160, score: null)]),
+        // June 12-14 are future
+      };
+
+      final report = InsightsEngine.computeWeek(
+        weekKey: '2026-W24',
+        profile: profile,
+        logs: logs,
+        sessions: [],
+        priorWeek: null,
+        now: DateTime(2026, 6, 11), // Thursday
+      );
+
+      expect(report, isNotNull);
+      expect(report!.loggedDaysCount, equals(3));
+      // Denominator should be elapsedDays = 4
+      expect(report.consistencyScore.loggingConsistency, equals(0.75)); // 3 / 4 = 75%
+      expect(report.gymDaysCount, equals(2));
+      // expectedGymDays = 3, scaled = 3 * (4 / 7) = 1.714
+      // gymAttendance = 2 / 1.714 = 1.17 -> clamped to 1.0 (100%)
+      expect(report.consistencyScore.gymAttendance, equals(1.0));
+      expect(report.consistencyScore.calorieAdherence, equals(1.0));
+      expect(report.consistencyScore.proteinAdherence, equals(1.0));
+      expect(report.consistencyScore.score, equals(90));
+    });
+
+    test('Sunday of an ongoing week (Sunday before week ends): denominator is 7', () {
+      final logs = <String, DayLog>{
+        '2026-06-08': _makeDayLog(date: DateTime(2026, 6, 8), meals: [(name: 'M1', calories: 2200, protein: 160, score: null)]),
+        '2026-06-09': _makeDayLog(date: DateTime(2026, 6, 9), meals: [(name: 'M2', calories: 2200, protein: 160, score: null)]),
+        '2026-06-10': _makeDayLog(date: DateTime(2026, 6, 10), meals: [(name: 'M3', calories: 2200, protein: 160, score: null)]),
+        '2026-06-11': _makeDayLog(date: DateTime(2026, 6, 11), meals: [(name: 'M4', calories: 2200, protein: 160, score: null)]),
+        '2026-06-12': _makeDayLog(date: DateTime(2026, 6, 12), meals: [(name: 'M5', calories: 2200, protein: 160, score: null)]),
+        '2026-06-13': _makeDayLog(date: DateTime(2026, 6, 13), meals: [(name: 'M6', calories: 2200, protein: 160, score: null)]),
+        '2026-06-14': _makeDayLog(date: DateTime(2026, 6, 14), meals: [(name: 'M7', calories: 2200, protein: 160, score: null)]),
+      };
+
+      final report = InsightsEngine.computeWeek(
+        weekKey: '2026-W24',
+        profile: profile,
+        logs: logs,
+        sessions: [],
+        priorWeek: null,
+        now: DateTime(2026, 6, 14), // Sunday
+      );
+
+      expect(report, isNotNull);
+      expect(report!.loggedDaysCount, equals(7));
+      expect(report.consistencyScore.loggingConsistency, equals(1.0)); // 7 / 7 = 100%
+    });
+
+    test('Completed historical week: denominator is 7, future days are not ignored because it is not ongoing', () {
+      final logs = <String, DayLog>{
+        '2026-06-08': _makeDayLog(date: DateTime(2026, 6, 8), meals: [(name: 'M1', calories: 2200, protein: 160, score: null)]),
+        '2026-06-09': _makeDayLog(date: DateTime(2026, 6, 9), meals: [(name: 'M2', calories: 2200, protein: 160, score: null)]),
+        '2026-06-10': _makeDayLog(date: DateTime(2026, 6, 10), meals: [(name: 'M3', calories: 2200, protein: 160, score: null)]),
+        // June 11-14 are not logged, but the week is already completed (since today is June 18)
+      };
+
+      final report = InsightsEngine.computeWeek(
+        weekKey: '2026-W24',
+        profile: profile,
+        logs: logs,
+        sessions: [],
+        priorWeek: null,
+        now: DateTime(2026, 6, 18), // Thursday of next week
+      );
+
+      expect(report, isNotNull);
+      expect(report!.loggedDaysCount, equals(3));
+      // Denominator should be 7
+      expect(report.consistencyScore.loggingConsistency, closeTo(3 / 7, 0.01)); // 3 / 7 = 42.8%
     });
   });
 

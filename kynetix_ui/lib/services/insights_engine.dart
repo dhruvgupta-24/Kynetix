@@ -5,7 +5,7 @@ import '../models/insights_models.dart';
 import '../models/workout_session.dart';
 import '../models/user_profile.dart';
 import '../services/nutrition_target_engine.dart';
-import '../services/workout_service.dart';
+
 
 // ─── AchievementRegistry ──────────────────────────────────────────────────────
 class AchievementRegistry {
@@ -213,12 +213,18 @@ class InsightsEngine {
     required Map<String, DayLog> logs,
     required List<WorkoutSession> sessions,
     required WeeklyReport? priorWeek,
+    DateTime? now,
   }) {
     final parts = weekKey.split('-W');
     if (parts.length < 2) return null;
     final year = int.parse(parts[0]);
     final week = int.parse(parts[1]);
     final DateTime weekStart = mondayOfIsoWeek(year, week);
+
+    final today = now ?? DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+    final isOngoing = !todayDateOnly.isBefore(weekStart) && todayDateOnly.isBefore(weekStart.add(const Duration(days: 7)));
+    final elapsedDays = (todayDateOnly.difference(weekStart).inDays + 1).clamp(1, 7);
 
     final sessionsByDate = {for (final s in sessions) dateKeyOf(s.date): s};
 
@@ -240,6 +246,9 @@ class InsightsEngine {
 
     for (int i = 0; i < 7; i++) {
       final date = weekStart.add(Duration(days: i));
+      if (isOngoing && date.isAfter(todayDateOnly)) {
+        continue;
+      }
       final dKey = dateKeyOf(date);
       final log = logs[dKey];
       final session = sessionsByDate[dKey];
@@ -308,13 +317,17 @@ class InsightsEngine {
     final double avgProtein = totalPro / loggedDaysCount;
     final double avgFiber = totalFib / loggedDaysCount;
 
-    final double loggingConsistency = loggedDaysCount / 7.0;
-    final double proteinAdherence = proteinHitDays / loggedDaysCount;
-    final double calorieAdherence = calorieHitDays / loggedDaysCount;
+    final double denominator = isOngoing ? elapsedDays.toDouble() : 7.0;
+    final double loggingConsistency = (loggedDaysCount / denominator).clamp(0.0, 1.0);
+    final double proteinAdherence = (loggedDaysCount > 0) ? proteinHitDays / loggedDaysCount : 0.0;
+    final double calorieAdherence = (loggedDaysCount > 0) ? calorieHitDays / loggedDaysCount : 0.0;
 
     final double expectedGymDays = (profile.workoutDaysMin + profile.workoutDaysMax) / 2.0;
-    final double gymAttendance = (expectedGymDays > 0)
-        ? (gymDaysCount / expectedGymDays).clamp(0.0, 1.0)
+    final double scaledExpectedGymDays = isOngoing
+        ? expectedGymDays * (elapsedDays / 7.0)
+        : expectedGymDays;
+    final double gymAttendance = (scaledExpectedGymDays > 0)
+        ? (gymDaysCount / scaledExpectedGymDays).clamp(0.0, 1.0)
         : 1.0;
 
     final double mealQuality = (scoredMealsCount > 0) ? (mealQualitySum / scoredMealsCount) / 100.0 : 0.0;
@@ -458,9 +471,14 @@ class InsightsEngine {
     // ─── Weekly Training Review & Muscle Recovery Analysis ───
     final weekSessions = sessions.where((s) {
       final d = s.date;
-      return !s.isEmpty &&
-          !d.isBefore(weekStart) &&
-          d.isBefore(weekStart.add(const Duration(days: 7)));
+      if (s.isEmpty) return false;
+      if (d.isBefore(weekStart)) return false;
+      if (!d.isBefore(weekStart.add(const Duration(days: 7)))) return false;
+      if (isOngoing) {
+        final sessionDateOnly = DateTime(d.year, d.month, d.day);
+        if (sessionDateOnly.isAfter(todayDateOnly)) return false;
+      }
+      return true;
     }).toList();
 
     const targetMuscleGroups = [
@@ -625,12 +643,14 @@ class InsightsEngine {
     final List<String> qualitySuccesses = [];
     final List<String> spacingSuccesses = [];
     final List<String> volumeSuccesses = [];
-    final List<String> balanceSuccesses = [];
     final List<String> consistencySuccesses = [];
 
     // ─── 1. Consistency Score ───
     final double actualExpected = expectedGymDays > 0 ? expectedGymDays : 4.0;
-    final int trainingConsistencyScore = ((gymDaysCount / actualExpected) * 100).round().clamp(0, 100);
+    final double targetForConsistency = isOngoing
+        ? actualExpected * (elapsedDays / 7.0)
+        : actualExpected;
+    final int trainingConsistencyScore = ((gymDaysCount / targetForConsistency) * 100).round().clamp(0, 100);
 
     if (trainingConsistencyScore >= 90) {
       consistencySuccesses.add('Trained $gymDaysCount days, matching your target of ${actualExpected.toStringAsFixed(0)} days.');
@@ -681,7 +701,12 @@ class InsightsEngine {
     } else if (gymDaysCount > 0 && gymDaysCount <= 2) {
       spacingIssues.add('Trained $gymDaysCount days, providing ample recovery but lower stimulus.');
     } else if (gymDaysCount > 0) {
-      spacingSuccesses.add('Optimal recovery structure with ${7 - gymDaysCount} rest days.');
+      final int restDays = (isOngoing ? elapsedDays : 7) - gymDaysCount;
+      if (restDays > 0) {
+        spacingSuccesses.add('Optimal recovery structure with $restDays rest days.');
+      } else {
+        spacingIssues.add('Trained on all $elapsedDays elapsed days so far. Remember to schedule rest days.');
+      }
     }
 
     if (trainingRecoveryScore == 100 && gymDaysCount > 0) {
@@ -693,6 +718,7 @@ class InsightsEngine {
         : (spacingSuccesses.isNotEmpty ? spacingSuccesses.join(' ') : 'Good recovery spacing maintained.');
 
     // ─── 3. Volume Score ───
+    final double minVolumeSets = isOngoing ? (6.0 * elapsedDays / 7.0) : 6.0;
     int volumeDeductions = 0;
     final List<String> undertrainedMuscles = [];
     final List<String> overtrainedMuscles = [];
@@ -702,17 +728,21 @@ class InsightsEngine {
     final int quadSets = muscleHardSets['Quads'] ?? 0;
     final int hamSets = muscleHardSets['Hamstrings'] ?? 0;
     if (quadSets == 0 && hamSets == 0) {
-      volumeDeductions += 30;
-      undertrainedMuscles.add('Legs');
-      coachingNeedsImprovement.add('Legs were not trained this week.');
-      coachingRecommendations.add('Add 4-6 hamstring sets and 4-6 quad sets.');
+      if (!isOngoing) {
+        volumeDeductions += 30;
+        undertrainedMuscles.add('Legs');
+        coachingNeedsImprovement.add('Legs were not trained this week.');
+        coachingRecommendations.add('Add 4-6 hamstring sets and 4-6 quad sets.');
+      }
     } else {
       if (quadSets == 0) {
-        volumeDeductions += 15;
-        undertrainedMuscles.add('Quads');
-        coachingNeedsImprovement.add('Quads were not trained this week.');
-        coachingRecommendations.add('Add 4-6 quad sets next week.');
-      } else if (quadSets < 6) {
+        if (!isOngoing) {
+          volumeDeductions += 15;
+          undertrainedMuscles.add('Quads');
+          coachingNeedsImprovement.add('Quads were not trained this week.');
+          coachingRecommendations.add('Add 4-6 quad sets next week.');
+        }
+      } else if (quadSets < minVolumeSets) {
         volumeDeductions += 10;
         undertrainedMuscles.add('Quads');
         coachingNeedsImprovement.add('Quads volume below recommended range.');
@@ -727,11 +757,13 @@ class InsightsEngine {
       }
 
       if (hamSets == 0) {
-        volumeDeductions += 15;
-        undertrainedMuscles.add('Hamstrings');
-        coachingNeedsImprovement.add('Hamstrings were not trained this week.');
-        coachingRecommendations.add('Add 4-6 hamstring sets next week.');
-      } else if (hamSets < 6) {
+        if (!isOngoing) {
+          volumeDeductions += 15;
+          undertrainedMuscles.add('Hamstrings');
+          coachingNeedsImprovement.add('Hamstrings were not trained this week.');
+          coachingRecommendations.add('Add 4-6 hamstring sets next week.');
+        }
+      } else if (hamSets < minVolumeSets) {
         volumeDeductions += 10;
         undertrainedMuscles.add('Hamstrings');
         coachingNeedsImprovement.add('Hamstrings volume below recommended range.');
@@ -750,11 +782,13 @@ class InsightsEngine {
     for (final m in majorMusclesToCheck) {
       final sets = muscleHardSets[m] ?? 0;
       if (sets == 0) {
-        volumeDeductions += 15;
-        undertrainedMuscles.add(m);
-        coachingNeedsImprovement.add('$m was not trained this week.');
-        coachingRecommendations.add('Add 4-6 sets for $m next week.');
-      } else if (sets < 6) {
+        if (!isOngoing) {
+          volumeDeductions += 15;
+          undertrainedMuscles.add(m);
+          coachingNeedsImprovement.add('$m was not trained this week.');
+          coachingRecommendations.add('Add 4-6 sets for $m next week.');
+        }
+      } else if (sets < minVolumeSets) {
         volumeDeductions += 10;
         undertrainedMuscles.add(m);
         coachingNeedsImprovement.add('$m volume below recommended range.');
@@ -822,7 +856,9 @@ class InsightsEngine {
 
     for (final m in ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings']) {
       if ((muscleHardSets[m] ?? 0) == 0) {
-        trainingBalanceScore -= 15;
+        if (!isOngoing) {
+          trainingBalanceScore -= 15;
+        }
       }
     }
     trainingBalanceScore = trainingBalanceScore.clamp(0, 100);
@@ -834,8 +870,13 @@ class InsightsEngine {
     // ─── 5. Training Quality Score ───
     int trainingQualityScore = 100;
     for (final m in ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings']) {
-      if ((muscleHardSets[m] ?? 0) < 6) {
-        trainingQualityScore -= 15;
+      final sets = muscleHardSets[m] ?? 0;
+      if (sets < minVolumeSets) {
+        if (sets == 0 && isOngoing) {
+          // Skip deduction for untrained muscle in ongoing week
+        } else {
+          trainingQualityScore -= 15;
+        }
       }
     }
     for (final m in targetMuscleGroups) {
