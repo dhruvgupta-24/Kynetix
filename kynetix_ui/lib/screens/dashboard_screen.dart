@@ -207,7 +207,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 // Save inside today's gymDay so it syncs to cloud
                 final todayLog = logFor(today);
-                todayLog.gymDay = (todayLog.gymDay ?? const GymDay(didGym: false)).withCarryForwardRecord(record);
+                final splitDay = WorkoutService.instance.splitDayFor(today);
+                final GymDay defaultGymDay;
+                if (splitDay == null || splitDay.isRestDay) {
+                  defaultGymDay = const GymDay(didGym: false);
+                } else {
+                  defaultGymDay = GymDay(
+                    didGym:          true,
+                    workoutType:     WorkoutType.fromSplitName(splitDay.name),
+                    splitDayName:    splitDay.name,
+                    splitOverridden: false,
+                  );
+                }
+                todayLog.gymDay = (todayLog.gymDay ?? defaultGymDay).withCarryForwardRecord(record);
                 await PersistenceService.saveDay(today);
               },
               child: const Text('Ignore', style: TextStyle(color: Color(0xFF9CA3AF))),
@@ -233,7 +245,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 final todayLog = logFor(today);
                 todayLog.carryForwardAdjustment = adjustmentAmount;
-                todayLog.gymDay = (todayLog.gymDay ?? const GymDay(didGym: false)).withCarryForwardRecord(record);
+                final splitDay = WorkoutService.instance.splitDayFor(today);
+                final GymDay defaultGymDay;
+                if (splitDay == null || splitDay.isRestDay) {
+                  defaultGymDay = const GymDay(didGym: false);
+                } else {
+                  defaultGymDay = GymDay(
+                    didGym:          true,
+                    workoutType:     WorkoutType.fromSplitName(splitDay.name),
+                    splitDayName:    splitDay.name,
+                    splitOverridden: false,
+                  );
+                }
+                todayLog.gymDay = (todayLog.gymDay ?? defaultGymDay).withCarryForwardRecord(record);
                 await PersistenceService.saveDay(today);
 
                 if (mounted) {

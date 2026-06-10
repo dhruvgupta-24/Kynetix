@@ -825,7 +825,11 @@ class _GymCard extends StatelessWidget {
   void _toggleGym(bool didGym) {
     if (!didGym) {
       // User explicitly said No → clear, persist rest-day state.
-      log.gymDay = const GymDay(didGym: false);
+      if (log.gymDay != null) {
+        log.gymDay = log.gymDay!.withGym(false);
+      } else {
+        log.gymDay = const GymDay(didGym: false);
+      }
       onChanged();
       return;
     }

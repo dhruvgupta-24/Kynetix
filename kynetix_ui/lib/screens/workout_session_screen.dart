@@ -1025,8 +1025,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     // Save logs integration
     final log = logFor(widget.date);
     if (log.gymDay?.didGym != true) {
-      log.gymDay = const GymDay(didGym: true);
-      await PersistenceService.saveDayLogs();
+      if (log.gymDay != null) {
+        log.gymDay = log.gymDay!.withGym(true);
+      } else {
+        log.gymDay = const GymDay(didGym: true);
+      }
+      await PersistenceService.saveDay(widget.date);
     }
 
     // Reset draft and recovery values

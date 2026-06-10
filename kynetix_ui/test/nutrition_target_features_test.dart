@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/screens/onboarding_screen.dart';
 import 'package:kynetix/services/nutrition_target_engine.dart';
+import 'package:kynetix/models/day_log.dart';
+import 'package:kynetix/models/carry_forward_record.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -129,6 +131,110 @@ void main() {
 
       // 5000 kcal * 14 / 1000 = 70.0 g -> clamp ceiling to 60.0 g
       expect(plan.fiberTargetG, 60.0);
+    });
+  });
+
+  group('NutritionTargetEngine - Calorie Carry-Forward Preservation & Single Source of Truth', () {
+    test('DayLog.carryForwardAdjustment acts as a dynamic getter prioritizing accepted carryForwardRecord', () {
+      final log = DayLog();
+      
+      // Initially null
+      expect(log.carryForwardAdjustment, isNull);
+
+      // Setting manually falls back
+      log.carryForwardAdjustment = 150.0;
+      expect(log.carryForwardAdjustment, 150.0);
+
+      // Adding an accepted record overrides the fallback value
+      final recordAccepted = CarryForwardRecord(
+        date: '2026-06-11',
+        yesterdayDate: '2026-06-10',
+        yesterdayTarget: 2000.0,
+        yesterdayConsumed: 2200.0,
+        difference: 200.0,
+        adjustmentAmount: -200.0,
+        accepted: true,
+      );
+      log.gymDay = GymDay(didGym: true, carryForwardRecord: recordAccepted);
+      expect(log.carryForwardAdjustment, -200.0);
+
+      // Adding a non-accepted record does not apply adjustment and returns null
+      final recordIgnored = CarryForwardRecord(
+        date: '2026-06-11',
+        yesterdayDate: '2026-06-10',
+        yesterdayTarget: 2000.0,
+        yesterdayConsumed: 2200.0,
+        difference: 200.0,
+        adjustmentAmount: -200.0,
+        accepted: false,
+      );
+      log.gymDay = GymDay(didGym: true, carryForwardRecord: recordIgnored);
+      expect(log.carryForwardAdjustment, isNull);
+    });
+
+    test('Accepted carry-forward record survives GymDay status changes and split overrides', () {
+      final record = CarryForwardRecord(
+        date: '2026-06-11',
+        yesterdayDate: '2026-06-10',
+        yesterdayTarget: 2000.0,
+        yesterdayConsumed: 2200.0,
+        difference: 200.0,
+        adjustmentAmount: -200.0,
+        accepted: true,
+      );
+      
+      var gymDay = GymDay(
+        didGym: true,
+        workoutType: WorkoutType.legs,
+        splitDayName: 'Legs',
+        carryForwardRecord: record,
+      );
+
+      // Toggle Gym to false (Rest Day) using withGym(false)
+      gymDay = gymDay.withGym(false);
+      expect(gymDay.didGym, isFalse);
+      expect(gymDay.workoutType, isNull);
+      expect(gymDay.carryForwardRecord, isNotNull);
+      expect(gymDay.carryForwardRecord!.accepted, isTrue);
+      expect(gymDay.carryForwardRecord!.adjustmentAmount, -200.0);
+
+      // Toggle Gym back to true using withGym(true)
+      gymDay = gymDay.withGym(true);
+      expect(gymDay.didGym, isTrue);
+      expect(gymDay.carryForwardRecord, isNotNull);
+      expect(gymDay.carryForwardRecord!.adjustmentAmount, -200.0);
+
+      // User split override preserves carryForwardRecord
+      gymDay = gymDay.withUserOverride(splitName: 'Push', type: WorkoutType.push);
+      expect(gymDay.didGym, isTrue);
+      expect(gymDay.workoutType, WorkoutType.push);
+      expect(gymDay.splitDayName, 'Push');
+      expect(gymDay.carryForwardRecord, isNotNull);
+      expect(gymDay.carryForwardRecord!.adjustmentAmount, -200.0);
+    });
+
+    test('Cloud sync JSON serialization/deserialization retains carry-forward record', () {
+      final record = CarryForwardRecord(
+        date: '2026-06-11',
+        yesterdayDate: '2026-06-10',
+        yesterdayTarget: 2000.0,
+        yesterdayConsumed: 2200.0,
+        difference: 200.0,
+        adjustmentAmount: -200.0,
+        accepted: true,
+      );
+      final originalLog = DayLog();
+      originalLog.gymDay = GymDay(didGym: true, carryForwardRecord: record);
+
+      // Serialize originalLog.gymDay (simulates Supabase gym_day_json storage)
+      final gymDayJson = originalLog.gymDay!.toJson();
+
+      // Deserialize on hydration
+      final hydratedLog = DayLog();
+      hydratedLog.gymDay = GymDay.fromJson(gymDayJson);
+
+      // Verify the carry-forward adjustment resolves correctly
+      expect(hydratedLog.carryForwardAdjustment, -200.0);
     });
   });
 }

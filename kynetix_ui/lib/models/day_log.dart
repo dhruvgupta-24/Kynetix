@@ -301,8 +301,20 @@ class DayLog {
   /// Gym status for this day — mutable, set from DayDetailScreen.
   GymDay? gymDay;
 
+  double? _carryForwardAdjustment;
+
   /// Calorie carry-forward adjustment applied to this day (optional).
-  double? carryForwardAdjustment;
+  double? get carryForwardAdjustment {
+    final record = gymDay?.carryForwardRecord;
+    if (record != null) {
+      return record.accepted ? record.adjustmentAmount : null;
+    }
+    return _carryForwardAdjustment;
+  }
+
+  set carryForwardAdjustment(double? value) {
+    _carryForwardAdjustment = value;
+  }
 
   /// Calculated target calories frozen on this day to prevent drift
   double? targetCalories;
