@@ -2530,31 +2530,42 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                     ),
                     const SizedBox(height: 6),
                     if (hasStyle) ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Style: ${rec.style!.label}',
-                              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Confidence: ${(rec.confidence * 100).toStringAsFixed(0)}%',
-                            style: TextStyle(
-                              color: rec.confidence >= 0.8 ? KColor.green : const Color(0xFFFFB347), 
-                              fontSize: 11, 
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'Style: ${rec.style!.label}',
+                        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        'Reason: ${rec.reasoning}',
-                        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10.5, fontStyle: FontStyle.italic),
+                      Builder(
+                        builder: (context) {
+                          final history = WorkoutService.instance.historyFor(widget.exercise.id, limit: 4);
+                          final sessionLines = <String>[];
+                          for (final h in history) {
+                            final workingSets = h.entry.sets.where((s) => s.isMainWorkingSet).toList();
+                            if (workingSets.isNotEmpty) {
+                              final setString = workingSets
+                                  .map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}×${s.reps}')
+                                  .join(', ');
+                              sessionLines.add(setString);
+                            }
+                          }
+                          final evidenceText = sessionLines.isNotEmpty
+                              ? 'Last ${sessionLines.length} sessions:\n${sessionLines.map((line) => '• $line').join('\n')}'
+                              : rec.reasoning;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Evidence:',
+                                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                evidenceText,
+                                style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10.5, fontStyle: FontStyle.italic, height: 1.35),
+                              ),
+                            ],
+                          );
+                        }
                       ),
                       const Divider(color: Color(0xFF374151), height: 12, thickness: 0.5),
                     ],

@@ -264,23 +264,350 @@ function computeDailyNutritionScore(sectionsJson: any): number | null {
   return Math.max(0, Math.min(100, Math.round(sumScores / entriesWithScore.length)));
 }
 
-// ── Build food memory snippet ──────────────────────────────────────────────────
-function buildFoodMemory(memoryRows: any[]): string {
-  if (!memoryRows.length) return '(no food memory yet)';
-  return memoryRows
-    .slice(0, 30)
-    .map((r: any) => {
-      // calories/protein columns store PER-UNIT values (e.g. 0.65 kcal per ml).
-      // Multiply by reference_quantity to get the correct serving-size total.
-      const qty    = parseFloat(r.reference_quantity ?? 1);
-      const calPer = parseFloat(r.calories_per_unit ?? r.calories ?? 0);
-      const proPer = parseFloat(r.protein_per_unit  ?? r.protein  ?? 0);
-      const cal    = Math.round(calPer * qty);
-      const pro    = Math.round(proPer * qty);
-      const label  = r.reference_unit ? `${qty} ${r.reference_unit}` : '1 serving';
-      return `• ${r.canonical_meal}: ${cal} kcal, ${pro}g protein — for ${label}`;
-    })
-    .join('\n');
+interface MemoryEntry {
+  canonical_meal: string;
+  calories?: number;
+  protein?: number;
+  calories_per_unit?: number;
+  protein_per_unit?: number;
+  reference_quantity?: number;
+  reference_unit?: string;
+  times_used: number;
+  updated_at: string;
+}
+
+function getRelevantFoodMemory(memoryRows: MemoryEntry[], queryText: string): string {
+  const fillerWords = new Set(['and', 'with', 'some', 'a', 'an', 'of', 'the', 'in', 'at', 'on', 'for', 'to', 'my', 'had', 'ate', 'eaten', 'having']);
+  
+  function tokenize(text: string): Set<string> {
+    return new Set(
+      text
+        .toLowerCase()
+        .replace(/[',.\-!?+&]/g, '')
+        .split(/\s+/)
+        .filter(t => t.length > 0 && !fillerWords.has(t))
+    );
+  }
+
+  const queryTokens = tokenize(queryText);
+  
+  // If query is empty, or has no meaningful tokens, we return the top frequently/recently logged foods
+  if (queryTokens.size === 0) {
+    return buildDefaultMemoryList(memoryRows);
+  }
+
+  const scored: Array<{ entry: MemoryEntry; score: number }> = [];
+  const now = new Date();
+
+  for (const r of memoryRows) {
+    const name = r.canonical_meal;
+    const tokens = tokenize(name);
+    if (tokens.size === 0) continue;
+
+    // Jaccard similarity
+    let intersectionSize = 0;
+    for (const t of queryTokens) {
+      if (tokens.has(t)) intersectionSize++;
+    }
+    
+    if (intersectionSize === 0) continue; // No match
+
+    const unionSize = queryTokens.size + tokens.size - intersectionSize;
+    const similarity = intersectionSize / unionSize;
+
+    // Exact containment bonus
+    let exactBonus = 0;
+    const qLower = queryText.toLowerCase();
+    const nameLower = name.toLowerCase();
+    if (qLower.includes(nameLower) || nameLower.includes(qLower)) {
+      exactBonus = 0.3;
+    }
+
+    // Frequency bonus
+    const timesUsed = r.times_used ?? 1;
+    const freqBonus = Math.min(0.2, timesUsed * 0.01);
+
+    // Recency bonus
+    let recencyBonus = 0;
+    if (r.updated_at) {
+      const updatedDate = new Date(r.updated_at);
+      const diffDays = Math.abs(now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays <= 1) recencyBonus = 0.2;
+      else if (diffDays <= 7) recencyBonus = 0.1;
+    }
+
+    const score = similarity + exactBonus + freqBonus + recencyBonus;
+    scored.push({ entry: r, score });
+  }
+
+  // If we found relevant matches, sort and return them
+  if (scored.length > 0) {
+    scored.sort((a, b) => b.score - a.score);
+    const unique = new Set<string>();
+    const selected: MemoryEntry[] = [];
+    for (const s of scored) {
+      const nameKey = s.entry.canonical_meal.toLowerCase();
+      if (!unique.has(nameKey)) {
+        unique.add(nameKey);
+        selected.push(s.entry);
+        if (selected.length >= 10) break; // return up to 10 relevant matches
+      }
+    }
+    return formatMemoryEntries(selected);
+  }
+
+  // Fallback: no similarity overlap, return top frequent/recent
+  return buildDefaultMemoryList(memoryRows);
+}
+
+function buildDefaultMemoryList(memoryRows: MemoryEntry[]): string {
+  // Frequently logged (top 8 by times_used)
+  const frequent = [...memoryRows]
+    .sort((a, b) => (b.times_used ?? 0) - (a.times_used ?? 0));
+  
+  // Recently logged (top 8 by updated_at)
+  const recent = [...memoryRows]
+    .filter(r => r.updated_at)
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+  const selected = new Set<MemoryEntry>();
+  const uniqueNames = new Set<string>();
+
+  // Add top 5 frequent
+  let added = 0;
+  for (const r of frequent) {
+    const key = r.canonical_meal.toLowerCase();
+    if (!uniqueNames.has(key)) {
+      uniqueNames.add(key);
+      selected.add(r);
+      added++;
+      if (added >= 5) break;
+    }
+  }
+
+  // Add top 5 recent
+  added = 0;
+  for (const r of recent) {
+    const key = r.canonical_meal.toLowerCase();
+    if (!uniqueNames.has(key)) {
+      uniqueNames.add(key);
+      selected.add(r);
+      added++;
+      if (added >= 5) break;
+    }
+  }
+
+  return formatMemoryEntries(Array.from(selected));
+}
+
+function formatMemoryEntries(entries: MemoryEntry[]): string {
+  if (entries.length === 0) return '(no food memory entries found)';
+  return entries.map(r => {
+    const qty = parseFloat((r.reference_quantity ?? 1).toString());
+    const calPer = parseFloat((r.calories_per_unit ?? r.calories ?? 0).toString());
+    const proPer = parseFloat((r.protein_per_unit ?? r.protein ?? 0).toString());
+    const cal = Math.round(calPer * qty);
+    const pro = Math.round(proPer * qty);
+    const label = r.reference_unit ? `${qty} ${r.reference_unit}` : '1 serving';
+    return `• ${r.canonical_meal}: ${cal} kcal, ${pro}g protein — for ${label}`;
+  }).join('\n');
+}
+
+function getDayCal(row: any): number {
+  const sections = row.sections_json ?? {};
+  let cal = 0;
+  const sectionKeys = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
+  for (const key of sectionKeys) {
+    const items = sections[key] ?? [];
+    for (const item of items) {
+      cal += parseFloat(item?.result?.calories?.mid ?? item?.result?.calories?.max ?? 0);
+    }
+  }
+  return cal;
+}
+
+function getDayPro(row: any): number {
+  const sections = row.sections_json ?? {};
+  let pro = 0;
+  const sectionKeys = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
+  for (const key of sectionKeys) {
+    const items = sections[key] ?? [];
+    for (const item of items) {
+      pro += parseFloat(item?.result?.protein?.mid ?? item?.result?.protein?.max ?? 0);
+    }
+  }
+  return pro;
+}
+
+function getMostFrequentFoods30Days(trendRows: any[]): string[] {
+  const counts: Record<string, number> = {};
+  const sectionKeys = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
+
+  for (const row of trendRows) {
+    const sections = row.sections_json;
+    if (!sections) continue;
+    for (const key of sectionKeys) {
+      const items = sections[key];
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const name = item?.result?.canonicalMeal ?? item?.rawInput;
+          if (name && typeof name === 'string') {
+            const cleanName = name.trim();
+            if (cleanName) {
+              counts[cleanName] = (counts[cleanName] ?? 0) + 1;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(entry => entry[0]);
+}
+
+function deriveUserEnvironment(trendRows: any[], userMessage: string): 'Mess' | 'Home' | 'Restaurant-heavy' | 'Mixed' {
+  let messCount = 0;
+  let restaurantCount = 0;
+  let homeCount = 0;
+
+  const msg = userMessage.toLowerCase();
+  
+  if (msg.includes('mess') || msg.includes('canteen') || msg.includes('hostel') || msg.includes('hall') || msg.includes('ladle')) {
+    messCount += 5;
+  }
+  if (msg.includes('restaurant') || msg.includes('order') || msg.includes('swiggy') || msg.includes('zomato') || msg.includes('cafe') || msg.includes('dine out')) {
+    restaurantCount += 5;
+  }
+  if (msg.includes('home') || msg.includes('cook') || msg.includes('mom') || msg.includes('wife') || msg.includes('made at')) {
+    homeCount += 5;
+  }
+
+  const sectionKeys = ['breakfast', 'lunch', 'eveningSnack', 'dinner', 'lateNight'];
+  for (const row of trendRows) {
+    const sections = row.sections_json;
+    if (!sections) continue;
+    for (const key of sectionKeys) {
+      const items = sections[key];
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const name = (item?.result?.canonicalMeal ?? item?.rawInput ?? '').toLowerCase();
+          const mode = item?.result?.estimationMode ?? '';
+          
+          if (name.includes('mess') || name.includes('canteen') || name.includes('hostel') || name.includes('ladle')) {
+            messCount++;
+          }
+          if (name.includes('restaurant') || name.includes('order') || name.includes('swiggy') || name.includes('zomato') || mode === 'outside_restaurant' || mode === 'outside') {
+            restaurantCount++;
+          }
+          if (name.includes('home') || name.includes('cook') || name.includes('mom') || name.includes('made at')) {
+            homeCount++;
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[deriveUserEnvironment] Scores - Mess: ${messCount}, Restaurant: ${restaurantCount}, Home: ${homeCount}`);
+
+  if (messCount > restaurantCount && messCount > homeCount && messCount >= 2) {
+    return 'Mess';
+  }
+  if (restaurantCount > messCount && restaurantCount > homeCount && restaurantCount >= 2) {
+    return 'Restaurant-heavy';
+  }
+  if (homeCount > messCount && homeCount > restaurantCount && homeCount >= 2) {
+    return 'Home';
+  }
+  
+  return 'Mixed';
+}
+
+function buildUserPersonalizationBlock(profile: any, portionAnchorHint: string | null, environment: 'Mess' | 'Home' | 'Restaurant-heavy' | 'Mixed', memoryRows: MemoryEntry[]): string {
+  const lines: string[] = [];
+
+  // Goal-specific behaviour
+  const goal = (profile.goal ?? 'Fat Loss').toLowerCase();
+  if (goal.includes('fat loss') || goal.includes('cut')) {
+    lines.push('User is in a fat loss phase — prioritize protein and fiber density over calorie density to maximize satiety.');
+  } else if (goal.includes('bulk') || goal.includes('gain')) {
+    lines.push('User is in a bulk phase — prioritize meeting a calorie surplus and suggest calorie-dense foods if lagging.');
+  } else if (goal.includes('recomp')) {
+    lines.push('User is in a recomposition phase — maintain clean nutrition and target calories precisely.');
+  }
+
+  // Portion anchor
+  if (portionAnchorHint) {
+    lines.push(`Eating/Portion style: ${portionAnchorHint}`);
+  }
+
+  // Environment-specific assumptions
+  lines.push(`Derived eating environment: ${environment}`);
+  if (environment === 'Mess') {
+    lines.push('User eats in a college mess/hostel environment — assume moderate to high oil/ghee in all cooked foods. Default portion assumptions (like mess chapati or mess ladles of rice/dal) are highly relevant.');
+  } else if (environment === 'Home') {
+    lines.push('User eats mostly home-cooked meals — assume controlled oil/ghee usage, lean preparation styles, and standard home portions.');
+  } else if (environment === 'Restaurant-heavy') {
+    lines.push('User eats restaurant or ordered food frequently — assume hidden fats (cream, butter, extra oil), wider calorie ranges, and larger/denser portion sizes.');
+  } else {
+    lines.push('User eats in a mixed environment — do not default globally to mess or home assumptions. Tailor estimates dynamically based on the specific food mentioned (e.g. assume home-style defaults for simple home foods, and restaurant defaults for outside food).');
+  }
+
+  // Count whey usage dynamic rule
+  const hasWheyInMemory = memoryRows.some((r: any) => {
+    const name = (r.canonical_meal ?? '').toLowerCase();
+    return name.includes('whey') || name.includes('protein powder') || name.includes('protein shake');
+  });
+  if (hasWheyInMemory) {
+    lines.push('User already consumes whey protein regularly. Avoid recommending they add whey protein unless they specifically ask or are far behind on protein targets.');
+  }
+
+  return lines.length > 0
+    ? `• ${lines.join('\n• ')}`
+    : '(no user-specific habits set)';
+}
+
+function buildTrendSummary(trendRows: any[], targetCal: number, targetPro: number): string {
+  if (!trendRows || trendRows.length === 0) return '(no historical data yet)';
+
+  const last7 = trendRows.slice(0, 7);
+  const last30 = trendRows;
+
+  const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((sum, v) => sum + v, 0) / arr.length : 0;
+
+  const avgCal7 = avg(last7.map(r => getDayCal(r)));
+  const avgPro7 = avg(last7.map(r => getDayPro(r)));
+  const avgCal30 = avg(last30.map(r => getDayCal(r)));
+  const avgPro30 = avg(last30.map(r => getDayPro(r)));
+
+  const adherence7 = last7.filter(r => Math.abs(getDayCal(r) - targetCal) <= targetCal * 0.10).length;
+  const adherence30 = last30.filter(r => Math.abs(getDayCal(r) - targetCal) <= targetCal * 0.10).length;
+
+  const gymDays7 = last7.filter(r => r.gym_day_json?.didGym === true).length;
+  const gymDays30 = last30.filter(r => r.gym_day_json?.didGym === true).length;
+
+  const mostFrequentFoods = getMostFrequentFoods30Days(trendRows);
+  const freqFoodsStr = mostFrequentFoods.length > 0
+    ? mostFrequentFoods.map(f => `• ${f}`).join('\n')
+    : '(no frequent foods logged yet)';
+
+  return `
+LAST 7 DAYS:
+• Avg calories: ${Math.round(avgCal7)} kcal (target: ${targetCal})
+• Avg protein: ${Math.round(avgPro7)} g (target: ${targetPro})
+• Days within 10% of calorie target: ${adherence7}/7
+• Training days: ${gymDays7}/7
+
+LAST 30 DAYS:
+• Avg calories: ${Math.round(avgCal30)} kcal
+• Avg protein: ${Math.round(avgPro30)} g
+• Adherence rate: ${Math.round(adherence30 / last30.length * 100)}% of days within target
+• Training days: ${gymDays30}/${last30.length}
+
+MOST FREQUENT FOODS (30 DAYS):
+${freqFoodsStr}`;
 }
 
 // ── Build complete system prompt ───────────────────────────────────────────────
@@ -310,11 +637,13 @@ function buildSystemPrompt(params: {
   caloriePct:         number;
   proteinPct:         number;
   fiberPct:           number;
+  trendSummary:       string;
+  personalizationBlock: string;
 }): string {
   const { profile, targetCal, targetPro, targetFiber, targetCarbs, targetFat, dayLabel, mealContext,
           totalCal, totalPro, totalCarbs, totalFat, totalFiber, totalSugar, totalSatFat, totalSodium,
           remainCal, remainPro, foodMemory, isGymDay, isManualOverride,
-          dailyNutritionScore, caloriePct, proteinPct, fiberPct } = params;
+          dailyNutritionScore, caloriePct, proteinPct, fiberPct, trendSummary, personalizationBlock } = params;
 
   // When user has manually set a calorie target for the day, tell the AI explicitly
   // so it doesn't express surprise or confusion about an unusual number.
@@ -323,116 +652,87 @@ function buildSystemPrompt(params: {
     : '';
 
   return `You are Kyno — a personal nutrition coach embedded inside the Kynetix fitness app.
-You already have full access to this user's data for today. Use it to give SPECIFIC, PRACTICAL advice.
+You already have full access to this user's data. Use it to give SPECIFIC, PRACTICAL advice.
 
-═══════════════════════════════════════════════════
-USER PROFILE
-═══════════════════════════════════════════════════
-Name: ${profile.name ?? 'User'}
-Goal: ${profile.goal ?? 'Fat Loss'}
-Weight: ${profile.weight_kg} kg
-Height: ${profile.height_cm} cm
-Age: ${profile.age}
-Gender: ${profile.gender}
-Gym days/week: ${profile.workout_days_min}–${profile.workout_days_max}
+=====================================================
+LAYER 1: GLOBAL RULES & BASELINES (COMMON TO ALL USERS)
+=====================================================
+Nutrition science guidelines:
+- Realism over fake precision.
+- Primary recommendations should represent the most likely true intake.
+- When recommending, prioritize nutrient-dense, high-protein, and high-fiber foods.
+- Respect remaining targets — never suggest more than what fits in the remaining budget.
+- Focus on behavior modification, consistency, and safe progression.
 
-═══════════════════════════════════════════════════
+REFERENCE BASELINES (standard Indian portion defaults):
+• 1 plain tawa roti / chapati: ~80-100 kcal, 3g protein
+• 1 medium bowl cooked plain white rice: ~200-210 kcal, 4g protein
+• 1 katori plain dal (home style): ~100-120 kcal, 5-6g protein
+• 1 katori rajma/chole (home style): ~130-150 kcal, 6-7g protein
+• 1 serving dry mixed vegetable sabzi: ~90-110 kcal, 2g protein
+• 100g plain raw paneer: 295 kcal, 18g protein, 22g fat
+• 100g raw tofu: 135-150 kcal, 14-16g protein
+• 3 egg whites: 51 kcal, 11g protein
+• 1 whole egg: 75 kcal, 6.5g protein
+• 100g plain curd: 60 kcal, 3.5g protein
+• 1 tbsp peanut butter: 95 kcal, 3.5g protein
+• 1 medium banana: 90 kcal, 1.2g protein
+
+RESPONSE RULES:
+1. Always give EXACT quantities (e.g. "2 roti", "150g paneer", "3 egg whites")
+2. Always include calories AND protein per recommendation
+3. Refer to today's logged meals and historical patterns in your reasoning
+4. Keep responses concise, direct, and actionable (coach style, not textbook)
+5. When recommending meals, present: food name + quantity + calories + protein + remaining budget after
+6. Avoid referencing or suggesting whey protein if the personalization context notes they already take it regularly.
+
+=====================================================
+LAYER 2: USER PERSONALIZATION CONTEXT (DYNAMICALLY BUILT)
+=====================================================
+USER PROFILE:
+• Name: ${profile.name ?? 'User'}
+• Goal: ${profile.goal ?? 'Fat Loss'}
+• Weight: ${profile.weight_kg} kg
+• Height: ${profile.height_cm} cm
+• Age: ${profile.age}
+• Gender: ${profile.gender}
+• Gym frequency: ${profile.workout_days_min}–${profile.workout_days_max} days/week
+
+EATING HABITS & ENVIRONMENT CONTEXT:
+${personalizationBlock}
+
+HISTORICAL TRENDS:
+${trendSummary}
+
+=====================================================
+LAYER 3: MEAL & CONTEXT DEFINITIONS (CURRENT SESSION)
+=====================================================
 TODAY'S TARGETS & ACHIEVEMENTS — ${dayLabel}${isManualOverride ? ' (Manual Override)' : ''}
-═══════════════════════════════════════════════════
-Calorie target:            ${targetCal} kcal${overrideNote} (Achievement: ${caloriePct}%)
-Protein target:            ${targetPro} g (Achievement: ${proteinPct}%)
-Fiber target:              ${targetFiber} g (Achievement: ${fiberPct}%)
-Estimated Carbs target:    ${Math.round(targetCarbs)} g
-Estimated Fat target:      ${Math.round(targetFat)} g
-Day type:                  ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}${isManualOverride ? '\n⚠️  Note: calorie target for today was manually overridden by the user. The number above is the actual target to use — NOT a formula estimate.' : ''}
+• Calorie target:            ${targetCal} kcal${overrideNote} (Achievement: ${caloriePct}%)
+• Protein target:            ${targetPro} g (Achievement: ${proteinPct}%)
+• Fiber target:              ${targetFiber} g (Achievement: ${fiberPct}%)
+• Estimated Carbs target:    ${Math.round(targetCarbs)} g
+• Estimated Fat target:      ${Math.round(targetFat)} g
+• Day type:                  ${isGymDay ? '🏋️ Training Day (higher calories)' : '😴 Rest Day (lower calories)'}${isManualOverride ? '\n⚠️ Note: calorie target was manually overridden by user.' : ''}
 
-═══════════════════════════════════════════════════
-TODAY'S NUTRITION TOTALS & QUALITY SCORE
-═══════════════════════════════════════════════════
-Daily Nutrition Quality Score: ${dailyNutritionScore !== null ? `${dailyNutritionScore} / 100` : 'No score computed yet (need meal entries)'}
+TODAY'S NUTRITION TOTALS & QUALITY SCORE:
+• Daily Nutrition Quality Score: ${dailyNutritionScore !== null ? `${dailyNutritionScore} / 100` : 'No score computed yet (need meal entries)'}
+• Calories consumed:  ${totalCal} kcal (Target: ${targetCal} kcal, Remaining: ${remainCal} kcal)
+• Protein consumed:   ${totalPro} g (Target: ${targetPro} g, Remaining: ${remainPro} g)
+• Fiber consumed:     ${totalFiber} g (Target: ${targetFiber} g, Remaining: ${Math.max(0, targetFiber - totalFiber).toFixed(1)} g)
+• Carbs consumed:     ${totalCarbs} g (Target: ${Math.round(targetCarbs)} g)
+• Fat consumed:       ${totalFat} g (Target: ${Math.round(targetFat)} g)
+• Sugar consumed:     ${totalSugar} g
+• Saturated Fat:      ${totalSatFat} g
+• Sodium consumed:    ${totalSodium} mg
 
-TOTALS CONSUMED SO FAR:
-• Calories:       ${totalCal} kcal (Target: ${targetCal} kcal, Remaining: ${remainCal} kcal)
-• Protein:        ${totalPro} g (Target: ${targetPro} g, Remaining: ${remainPro} g)
-• Dietary Fiber:  ${totalFiber} g (Target: ${targetFiber} g, Remaining: ${Math.max(0, targetFiber - totalFiber).toFixed(1)} g)
-• Carbohydrates:  ${totalCarbs} g (Target: ${Math.round(targetCarbs)} g, Remaining: ${Math.max(0, targetCarbs - totalCarbs).toFixed(1)} g)
-• Fat:            ${totalFat} g (Target: ${Math.round(targetFat)} g, Remaining: ${Math.max(0, targetFat - totalFat).toFixed(1)} g)
-
-OPTIONAL MACROS CONSUMED:
-• Sugar:          ${totalSugar} g
-• Saturated Fat:  ${totalSatFat} g
-• Sodium:         ${totalSodium} mg
-
-═══════════════════════════════════════════════════
-TODAY'S LOGGED MEALS & INDIVIDUAL QUALITY SCORES
-═══════════════════════════════════════════════════
+TODAY'S LOGGED MEALS:
 ${mealContext}
 
-═══════════════════════════════════════════════════
-USER'S KNOWN EATING HABITS (follow these strictly)
-═══════════════════════════════════════════════════
-• Prefers ROTI over rice (default to roti unless asked)
-• Typically eats 2 roti per meal (standard portion)
-• Rice is measured in ladles — 1 plain ladle ≈ 130 kcal; 1 ladle jeera/tadka rice ≈ 150 kcal (oil + tempering)
-• Sabzi/dal is eaten only to finish roti/rice — not a full bowl
-• Paneer is fully eaten (no plate leftover)
-• Whey protein is ALREADY consumed daily — NEVER suggest "take whey" or "1 scoop whey"
-• Outside food / restaurant: widen calorie range, lean toward upper bound
-• Mess context: ALWAYS assume oil/ghee is added to vegetables, gravy, and rice. Never assume dry preparation.
-• NEVER describe a mess meal with paneer, ghee rice or oily sabzi as "light" or "clean".
-
-═══════════════════════════════════════════════════
-USER'S CONFIRMED FOOD MACROS — GROUND TRUTH
-═══════════════════════════════════════════════════
-WARNING: These calorie and protein values have been personally confirmed by the
-user in their food tracker. They OVERRIDE your training data completely.
-If a food the user mentions matches (or is close to) any food listed below,
-you MUST use the EXACT numbers shown below — do NOT substitute your own estimate.
+USER'S CONFIRMED FOOD MACROS (HIGHEST PRIORITY):
+WARNING: The following values represent ground truth confirmed by the user. If they ask about or log any food matching these entries, you MUST use these exact calorie and protein numbers.
 ${foodMemory}
-
-═══════════════════════════════════════════════════
-RESPONSE RULES (non-negotiable)
-═══════════════════════════════════════════════════
-1. Always give EXACT quantities (e.g., "2 roti", "150g paneer", "3 egg whites", "1 ladle rice")
-2. Always include calories AND protein per recommendation
-3. Respect remaining targets — don't suggest more than what fits
-4. Never suggest whey (it's already taken)
-5. Reference today's logged meals in your reasoning
-6. If user asks about a food NOT listed in their food memory, estimate using the baselines below
-7. For image analysis: compare options against remaining targets and recommend the best fit
-8. Keep response concise but complete — coach speak, not textbook
-9. When recommending, show: food + quantity + calories + protein + remaining after
-10. MOST IMPORTANT: If a food matches the user's confirmed food macros section above, use
-    those EXACT numbers. Never use a different calorie/protein estimate for a confirmed food.
-
-═══════════════════════════════════════════════════
-REFERENCE BASELINES (use when food not in memory)
-═══════════════════════════════════════════════════
-IMPORTANT: This user eats at a college mess. Mess food is ALWAYS cooked in oil/ghee.
-Never use dry/lean estimates. When in doubt, use the upper end of the range.
-
-1 roti / chapati (mess/tawa): 110–120 kcal, 3g protein
-1 ladle plain rice (mess): 130–145 kcal, 3g protein
-1 ladle jeera/tadka/pulao rice: 150–180 kcal, 3g protein (oil + tempering overhead)
-1 mess compartment paneer dish (gravy/makhani/dry): 140–170 kcal, 5–7g protein per compartment
-  → 1 compartment ≈ ~80–100g paneer + gravy with oil; paneer alone is 295 kcal/100g, 15g protein
-  → For 3 compartments: 420–510 kcal, 15–21g protein is realistic
-1 katori plain dal (mess): 120–150 kcal, 6g protein
-1 katori rajma/chhole (mess): 150–180 kcal, 7–9g protein
-1 mess serving sabzi (potato, mixed veg, etc.): 120–180 kcal, 2–4g protein
-100g paneer (restaurant/mess, with oil): 340–370 kcal, 16–18g protein
-150g tofu (firm/extra-firm): 206 kcal, 22g protein
-3 egg whites: 51 kcal, 11g protein
-1 whole egg: 75 kcal, 6.5g protein
-100g curd: 60 kcal, 3.5g protein
-1 tbsp peanut butter: 95 kcal, 3.5g protein
-1 medium banana: 90 kcal, 1.2g protein
-
-MESS FOOD RULES:
-• Paneer is fat-heavy (52g fat/100g). Even "dry paneer" at mess has oil coating.
-• Jeera rice / pulao always has more calories than plain rice — add 20–40 kcal/ladle.
-• When estimating a meal that wasn't logged, always give a realistic range and state your assumptions.
-• If a meal sounds heavy (paneer + rice + sabzi), call it out honestly. Don't say it's light or fits comfortably unless it actually does after realistic estimation.`;
+`;;
 }
 
 // ── Main handler ───────────────────────────────────────────────────────────────
@@ -495,11 +795,16 @@ Deno.serve(async (req: Request) => {
 
     console.log(`[ai-meal-coach] user=${user.id} date=${dateKey} hasImages=${imagesBase64.length}`);
 
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().slice(0, 10);
+
     // ── Fetch all data in parallel ────────────────────────────────────────────
-    const [profileRes, dayLogRes, memoryRes] = await Promise.all([
+    const [profileRes, dayLogRes, memoryRes, trendRes] = await Promise.all([
       supabaseAdmin.from('profiles').select('*').eq('id', user.id).maybeSingle(),
       supabaseAdmin.from('day_logs').select('sections_json, gym_day_json').eq('user_id', user.id).eq('date_key', dateKey).maybeSingle(),
-      supabaseAdmin.from('user_nutrition_memory').select('canonical_meal, calories, protein, calories_per_unit, protein_per_unit, reference_quantity, reference_unit, times_used').eq('user_id', user.id).order('times_used', { ascending: false }).limit(30),
+      supabaseAdmin.from('user_nutrition_memory').select('canonical_meal, calories, protein, calories_per_unit, protein_per_unit, reference_quantity, reference_unit, times_used, updated_at').eq('user_id', user.id).order('times_used', { ascending: false }).limit(100),
+      supabaseAdmin.from('day_logs').select('date_key, sections_json, gym_day_json').eq('user_id', user.id).gte('date_key', thirtyDaysAgoStr).order('date_key', { ascending: false }).limit(30),
     ]);
 
     const profile = profileRes.data;
@@ -561,7 +866,7 @@ Deno.serve(async (req: Request) => {
     const remainPro = Math.max(0, targetPro - totalPro);
 
     // ── Build food memory ─────────────────────────────────────────────────────
-    const foodMemory = buildFoodMemory(memoryRes.data ?? []);
+    const foodMemory = getRelevantFoodMemory(memoryRes.data ?? [], userMessage);
 
     // ── Calculate daily nutrition score ───────────────────────────────────────
     const dailyNutritionScore = computeDailyNutritionScore(dayLogRes.data?.sections_json ?? {});
@@ -578,6 +883,12 @@ Deno.serve(async (req: Request) => {
     const targetCarbs = remainingCal * 0.65 / 4;
 
     console.log(`[ai-meal-coach] targets=${targetCal}kcal/${targetPro}g consumed=${totalCal}/${totalPro} remain=${remainCal}/${remainPro}`);
+
+    // ── Build trend summary & personalization block ──────────────────────────
+    const trendRows = trendRes.data ?? [];
+    const derivedEnv = deriveUserEnvironment(trendRows, userMessage);
+    const personalizationBlock = buildUserPersonalizationBlock(profile, body.portion_anchor_hint ?? null, derivedEnv, memoryRes.data ?? []);
+    const trendSummary = buildTrendSummary(trendRows, targetCal, targetPro);
 
     // ── Build messages for ai-chat-router ────────────────────────────────────
     const systemPrompt = buildSystemPrompt({
@@ -606,6 +917,8 @@ Deno.serve(async (req: Request) => {
       caloriePct,
       proteinPct,
       fiberPct,
+      trendSummary,
+      personalizationBlock,
     });
 
     // Construct user message content (text + optional images)

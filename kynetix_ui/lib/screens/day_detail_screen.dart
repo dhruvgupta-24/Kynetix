@@ -1717,7 +1717,7 @@ class _EntryTile extends StatelessWidget {
                           ),
                           const Color(0xFF52B788),
                         ),
-                        if (calMid >= 100 && entry.result.mealQualityScore != null) ...[
+                        if (calMid >= 50 && entry.result.mealQualityScore != null) ...[
                           const SizedBox(width: 6),
                           _MacroBadge(
                             'Quality: ${entry.result.mealQualityScore}',
@@ -1731,6 +1731,9 @@ class _EntryTile extends StatelessWidget {
                         if (entry.edited || entry.result.macrosLockedByUser || entry.userCorrected || entry.result.userCorrected) ...[
                           const SizedBox(width: 6),
                           const _MacroBadge('Manually Edited', Color(0xFF60A5FA)),
+                        ] else ...[
+                          const SizedBox(width: 6),
+                          _SourceBadge(entry.result.source),
                         ],
                       ],
                     ),
@@ -1840,6 +1843,9 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                             ],
                           ),
                         ),
+                      ] else ...[
+                        const SizedBox(height: 6),
+                        _SourceBadge(entry.result.source),
                       ],
                     ],
                   ),
@@ -2730,5 +2736,57 @@ class _NumField extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(vertical: 10),
     ),
   );
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  const _SourceBadge(this.source);
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, icon, color) = _getAttribution(source);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 9.5)),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  (String, String, Color) _getAttribution(String src) {
+    switch (src) {
+      case 'memory_exact':
+      case 'personal_exact':
+      case 'personal_template':
+        return ('From your saved foods', '📋', const Color(0xFF60A5FA));
+      case 'cache':
+      case 'memory_recurring_promoted':
+        return ('Matched from your history', '🔄', const Color(0xFF2DD4BF));
+      case 'user_override':
+        return ('Your confirmed macros', '✏️', const Color(0xFF3B82F6));
+      case 'local_hybrid':
+      case 'local_fallback':
+        return ('Local estimate', '📊', const Color(0xFF9CA3AF));
+      default:
+        return ('AI estimate', '🤖', const Color(0xFF9CA3AF));
+    }
+  }
 }
 

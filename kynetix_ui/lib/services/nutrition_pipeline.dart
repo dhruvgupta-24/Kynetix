@@ -82,6 +82,10 @@ class NutritionPipeline {
     
     final needsEstimation = <ParsedFoodItem>[];
 
+    final matchesUsed = <String>[];
+    final priorityLevels = <String>{};
+    final uncertaintyFactors = <String>[];
+
     // ── 2. ITEM-LEVEL MEMORY LOOKUP ─────────────────────────────────────────
     for (final parsed in parsedItems) {
       // Normalize quantity and unit to base units (g, ml, or count).
@@ -107,6 +111,8 @@ class NutritionPipeline {
           debugPrint('[Pipeline] ✅ USER OVERRIDE "$name" '
               '(${normParsed.quantity} ${normParsed.unit}) — AI BLOCKED');
           finalItems.add(candidate);
+          matchesUsed.add('user_override: $name');
+          priorityLevels.add('User Memory');
           continue;
         } else {
           debugPrint('[Pipeline] 🚨 USER OVERRIDE REJECTED (insane value) '
@@ -124,6 +130,8 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           debugPrint('[Pipeline] ✅ PERSONAL EXACT "$name"');
           finalItems.add(candidate);
+          matchesUsed.add('personal_exact: ${_constructItemString(normParsed)}');
+          priorityLevels.add('Saved Meal');
           continue;
         } else {
           debugPrint('[Pipeline] 🚨 PERSONAL EXACT REJECTED (insane) "$name"');
@@ -139,6 +147,8 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE "$name"');
           finalItems.add(candidate);
+          matchesUsed.add('personal_template: ${_constructItemString(normParsed)}');
+          priorityLevels.add('Saved Meal');
           continue;
         } else {
           debugPrint('[Pipeline] 🚨 PERSONAL TEMPLATE REJECTED (insane) "$name"');
@@ -154,6 +164,10 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           debugPrint('[Pipeline] ✅ EXACT KNOWN "$name"');
           finalItems.add(candidate);
+          matchesUsed.add('exact_known: ${_constructItemString(normParsed)}');
+          final isBoot = MealMemory.instance.allKnownFoods.containsKey(name) &&
+                         !UserNutritionMemory.instance.allOverrides.any((o) => o.canonicalMeal == name);
+          priorityLevels.add(isBoot ? 'Branded Food' : 'User Memory');
           continue;
         } else {
           debugPrint('[Pipeline] 🚨 EXACT KNOWN REJECTED (insane) "$name"');
@@ -171,6 +185,8 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           debugPrint('[Pipeline] ✅ RECURRING MEMORY "$name"');
           finalItems.add(candidate);
+          matchesUsed.add('recurring_memory: ${_constructItemString(normParsed)}');
+          priorityLevels.add('User Memory');
           continue;
         } else {
           debugPrint('[Pipeline] 🚨 RECURRING MEMORY REJECTED (insane) "$name" ${candidate.calories.max.toStringAsFixed(0)} kcal');
@@ -198,6 +214,9 @@ class NutritionPipeline {
         final item = _pullBestItem(localResult, parsed);
         finalItems.add(item);
         localHybridUsed = true;
+        matchesUsed.add('local_fallback: $itemStr');
+        priorityLevels.add('AI Estimate');
+        uncertaintyFactors.add('local fallback');
       } else {
         if (AiNutritionService.instance.isConfigured) {
           debugPrint('[Pipeline] 🚀 calling AI for item: "$itemStr"...');
@@ -216,18 +235,29 @@ class NutritionPipeline {
             final item = _pullBestItem(aiResult, parsed);
             finalItems.add(item);
             aiUsed = true;
+            matchesUsed.add('ai_estimate: $itemStr');
+            priorityLevels.add('AI Estimate');
+            if (classification.category != MealDensityCategory.light) {
+              uncertaintyFactors.add('mixed meal components');
+            }
           } catch (e) {
             debugPrint('[Pipeline] ❌ AI failed for item "$itemStr": $e');
             final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI escalation required; AI failed for item');
             final item = _pullBestItem(localResult, parsed);
             finalItems.add(item);
             localHybridUsed = true;
+            matchesUsed.add('local_fallback: $itemStr');
+            priorityLevels.add('AI Estimate');
+            uncertaintyFactors.add('local fallback (AI failed)');
           }
         } else {
           final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI escalation required; No AI key');
           final item = _pullBestItem(localResult, parsed);
           finalItems.add(item);
           localHybridUsed = true;
+          matchesUsed.add('local_fallback: $itemStr');
+          priorityLevels.add('AI Estimate');
+          uncertaintyFactors.add('local fallback (AI unavailable)');
         }
       }
     }
@@ -274,6 +304,18 @@ class NutritionPipeline {
       source = 'ai';
     } else if (localHybridUsed) {
       source = 'local_hybrid';
+    } else if (matchesUsed.isNotEmpty) {
+      if (matchesUsed.any((m) => m.startsWith('personal_exact:'))) {
+        source = 'personal_exact';
+      } else if (matchesUsed.any((m) => m.startsWith('personal_template:'))) {
+        source = 'personal_template';
+      } else if (matchesUsed.any((m) => m.startsWith('exact_known:'))) {
+        source = 'memory_exact';
+      } else if (matchesUsed.any((m) => m.startsWith('recurring_memory:'))) {
+        source = 'cache';
+      } else if (matchesUsed.any((m) => m.startsWith('user_override:'))) {
+        source = 'user_override';
+      }
     }
 
     final midCal = (sumCalMin + sumCalMax) / 2;
@@ -294,6 +336,25 @@ class NutritionPipeline {
     CloudSyncService.instance.syncMealContextsBackground().ignore();
     CloudSyncService.instance.syncEatingPatternsBackground().ignore();
 
+    String memoryPriorityLevel = 'AI Estimate';
+    if (priorityLevels.contains('User Memory')) {
+      memoryPriorityLevel = 'User Memory';
+    } else if (priorityLevels.contains('Saved Meal')) {
+      memoryPriorityLevel = 'Saved Meal';
+    } else if (priorityLevels.contains('Branded Food')) {
+      memoryPriorityLevel = 'Branded Food';
+    }
+
+    final audit = EstimationAudit(
+      memoryMatchUsed: matchesUsed.isNotEmpty ? matchesUsed.join('; ') : 'none — AI fallback',
+      portionAssumption: ProfileService.instance.currentUserProfile?.portionAnchor?.toString() ?? 'PortionAnchor.balanced',
+      environmentAssumption: 'behavior-based (default)',
+      finalChoiceReason: aiUsed ? 'AI estimation successful' : (localHybridUsed ? 'local pipeline fallback' : 'memory exact match'),
+      uncertaintyFactors: uncertaintyFactors,
+      pipelineConfidence: aiUsed ? 0.95 : 0.90,
+      memoryPriorityLevel: memoryPriorityLevel,
+    );
+
     return NutritionResult(
       canonicalMeal: trimmed,
       items: finalItems,
@@ -313,6 +374,7 @@ class NutritionPipeline {
       mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, trimmed),
       mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
       mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
+      estimationAudit: audit,
     );
   }
 

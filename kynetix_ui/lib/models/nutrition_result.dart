@@ -35,6 +35,48 @@ enum EstimationMode {
       };
 }
 
+// ─── EstimationAudit ─────────────────────────────────────────────────────────
+
+class EstimationAudit {
+  final String memoryMatchUsed;       // e.g. "memory_exact: 400 ml milk"
+  final String portionAssumption;     // e.g. "PortionAnchor.carbAnchored"
+  final String environmentAssumption; // e.g. "mess context, oil assumed"
+  final String finalChoiceReason;     // e.g. "local pipeline exact match"
+  final List<String> uncertaintyFactors; // e.g. ["restaurant food", "no quantity given"]
+  final double pipelineConfidence;
+  final String memoryPriorityLevel;   // e.g. "User Memory", "Saved Meal", "Branded Food", "AI Estimate"
+
+  const EstimationAudit({
+    required this.memoryMatchUsed,
+    required this.portionAssumption,
+    required this.environmentAssumption,
+    required this.finalChoiceReason,
+    required this.uncertaintyFactors,
+    required this.pipelineConfidence,
+    required this.memoryPriorityLevel,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'memoryMatchUsed': memoryMatchUsed,
+        'portionAssumption': portionAssumption,
+        'environmentAssumption': environmentAssumption,
+        'finalChoiceReason': finalChoiceReason,
+        'uncertaintyFactors': uncertaintyFactors,
+        'pipelineConfidence': pipelineConfidence,
+        'memoryPriorityLevel': memoryPriorityLevel,
+      };
+
+  factory EstimationAudit.fromJson(Map<String, dynamic> j) => EstimationAudit(
+        memoryMatchUsed: j['memoryMatchUsed'] as String? ?? '',
+        portionAssumption: j['portionAssumption'] as String? ?? '',
+        environmentAssumption: j['environmentAssumption'] as String? ?? '',
+        finalChoiceReason: j['finalChoiceReason'] as String? ?? '',
+        uncertaintyFactors: List<String>.from(j['uncertaintyFactors'] as List<dynamic>? ?? const []),
+        pipelineConfidence: (j['pipelineConfidence'] as num?)?.toDouble() ?? 0.0,
+        memoryPriorityLevel: j['memoryPriorityLevel'] as String? ?? 'AI Estimate',
+      );
+}
+
 // ─── NutritionItem ────────────────────────────────────────────────────────────
 
 class NutritionItem {
@@ -222,6 +264,8 @@ class NutritionResult {
   /// The pipeline MUST NOT overwrite any macro on a locked result.
   final bool                macrosLockedByUser;
   final bool                userCorrected;
+  final EstimationAudit?    estimationAudit;
+
 
   const NutritionResult({
     required this.canonicalMeal,
@@ -250,6 +294,7 @@ class NutritionResult {
     this.mealQualityImprovement,
     this.macrosLockedByUser = false,
     this.userCorrected = false,
+    this.estimationAudit,
   });
 
   NutritionResult copyWith({
@@ -269,6 +314,7 @@ class NutritionResult {
     String? mealQualityImprovement,
     bool? macrosLockedByUser,
     bool? userCorrected,
+    EstimationAudit? estimationAudit,
   }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
         items:          items,
@@ -296,6 +342,7 @@ class NutritionResult {
         mealQualityImprovement: mealQualityImprovement ?? this.mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser ?? this.macrosLockedByUser,
         userCorrected:  userCorrected ?? this.userCorrected,
+        estimationAudit: estimationAudit ?? this.estimationAudit,
       );
 
   /// Guardrails-specific copy — replaces macros + warnings without touching items.
@@ -341,6 +388,7 @@ class NutritionResult {
         mealQualityImprovement: mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser,
         userCorrected:  userCorrected,
+        estimationAudit: estimationAudit,
       );
   }
 
@@ -374,6 +422,7 @@ class NutritionResult {
         mealQualityPositive: mealQualityPositive,
         mealQualityImprovement: mealQualityImprovement,
         macrosLockedByUser: macrosLockedByUser,
+        estimationAudit: estimationAudit,
       );
   }
 
@@ -478,6 +527,7 @@ class NutritionResult {
       mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
       macrosLockedByUser: true,
       userCorrected: true,
+      estimationAudit: estimationAudit,
     );
   }
 
@@ -873,6 +923,7 @@ class NutritionResult {
         if (mealQualityImprovement != null) 'mealQualityImprovement': mealQualityImprovement,
         if (macrosLockedByUser) 'macrosLockedByUser': true,
         if (userCorrected) 'userCorrected': true,
+        if (estimationAudit != null) 'estimationAudit': estimationAudit!.toJson(),
       };
 
   factory NutritionResult.fromJson(Map<String, dynamic> j) {
@@ -966,6 +1017,7 @@ class NutritionResult {
       mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
       macrosLockedByUser: locked,
       userCorrected: userCorr,
+      estimationAudit: j['estimationAudit'] != null ? EstimationAudit.fromJson(j['estimationAudit'] as Map<String, dynamic>) : null,
     ).normalizedUncertainty().rebuildFromIngredientsAndOverrides();
   }
 

@@ -7,6 +7,9 @@ import '../models/user_profile.dart';
 import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
+import 'user_nutrition_memory.dart';
+import 'personal_nutrition_memory.dart';
+import 'meal_memory.dart';
 
 class AiEscalationContext {
   final String localInterpretation;
@@ -59,9 +62,10 @@ class AiNutritionService {
     // ── Route through backend ai-chat-router ─────────────────────────────────
     // The backend handles provider selection: OpenAI first, OpenRouter fallback.
     // No API keys or provider logic on the client.
+    final relevantMemory = _getRelevantFoodMemory(rawInput);
     final messages = [
       {'role': 'system', 'content': _systemPrompt()},
-      {'role': 'user',   'content': _userPrompt(rawInput, context: context)},
+      {'role': 'user',   'content': _userPrompt(rawInput, context: context, foodMemoryBlock: relevantMemory)},
     ];
 
     final session = Supabase.instance.client.auth.currentSession;
@@ -551,7 +555,10 @@ ACCURACY RULES (NON-NEGOTIABLE)
     "warnings":   []
   }''';
 
-  String _userPrompt(String rawInput, {AiEscalationContext? context}) {
+  String _userPrompt(String rawInput, {
+    AiEscalationContext? context,
+    String? foodMemoryBlock,
+  }) {
     final profile = ProfileService.instance.currentUserProfile;
     final profileContext = profile == null
         ? 'No user profile available. Use generalized defaults only.'
@@ -580,7 +587,20 @@ Use this context as prior evidence:
 - If local collapsed multi-item meals, reconstruct full meal items.
 - Never drop obvious components (e.g., drink in combo meals).''';
 
+  final memorySection = foodMemoryBlock == null || foodMemoryBlock.isEmpty
+      ? ''
+      : '''
+══ USER'S CONFIRMED FOOD MEMORY (HIGHEST PRIORITY) ══
+The following entries have been personally confirmed by this user.
+If the meal you are estimating matches ANY entry below, you MUST use
+those exact values — do NOT substitute your own estimate.
+
+$foodMemoryBlock
+═══════════════════════════════════════════════════''';
+
     return '''$profileContext
+
+$memorySection
 
 $contextBlock
 
@@ -589,4 +609,186 @@ $rawInput
 
 Return JSON only.''';
   }
+
+  String _getRelevantFoodMemory(String queryText) {
+    final fillerWords = {'and', 'with', 'some', 'a', 'an', 'of', 'the', 'in', 'at', 'on', 'for', 'to', 'my', 'had', 'ate', 'eaten', 'having'};
+    
+    Set<String> tokenize(String text) {
+      return text
+          .toLowerCase()
+          .replaceAll(RegExp(r"[',.\-!?+&]"), '')
+          .split(RegExp(r'\s+'))
+          .where((t) => t.isNotEmpty && !fillerWords.contains(t))
+          .toSet();
+    }
+
+    final queryTokens = tokenize(queryText);
+    if (queryTokens.isEmpty) return '';
+
+    // List of candidates
+    final candidates = <_MemoryCandidate>[];
+
+    // 1. User overrides (UserNutritionMemory)
+    for (final override in UserNutritionMemory.instance.allOverrides) {
+      final name = override.canonicalMeal;
+      final tokens = tokenize(name);
+      candidates.add(_MemoryCandidate(
+        name: name,
+        calories: override.caloriesPerUnit * override.referenceQuantity,
+        protein: override.proteinPerUnit * override.referenceQuantity,
+        unit: override.referenceUnit,
+        quantity: override.referenceQuantity,
+        tokens: tokens,
+        source: 'User Override',
+        priority: 0.3,
+        timesUsed: override.correctionCount,
+        updatedAt: override.savedAt,
+      ));
+    }
+
+    // 2. Personal overrides (PersonalNutritionMemory user overrides)
+    for (final map in PersonalNutritionMemory.instance.allUserOverrides) {
+      final name = map['label'] as String? ?? '';
+      final tokens = tokenize(name);
+      candidates.add(_MemoryCandidate(
+        name: name,
+        calories: (map['kcal'] as num?)?.toDouble() ?? 0,
+        protein: (map['protein'] as num?)?.toDouble() ?? 0,
+        unit: 'serving',
+        quantity: 1,
+        tokens: tokens,
+        source: 'Saved Food/Recipe',
+        priority: 0.2,
+        timesUsed: 1,
+        updatedAt: DateTime.now(),
+      ));
+    }
+
+    // 3. Known Foods (MealMemory._knownFoods)
+    for (final entry in MealMemory.instance.allKnownFoods.entries) {
+      final name = entry.key;
+      final tokens = tokenize(name);
+      final result = entry.value;
+      candidates.add(_MemoryCandidate(
+        name: name,
+        calories: result.calories.mid,
+        protein: result.protein.mid,
+        unit: result.items.isNotEmpty ? result.items.first.unit : 'serving',
+        quantity: result.items.isNotEmpty ? result.items.first.quantity : 1,
+        tokens: tokens,
+        source: 'Known Food',
+        priority: 0.1,
+        timesUsed: 1,
+        updatedAt: DateTime.now(),
+      ));
+    }
+
+    // 4. Cached / Recurring history (MealMemory._store)
+    for (final entry in MealMemory.instance.allEntries) {
+      final name = entry.rawInput;
+      final tokens = tokenize(name);
+      candidates.add(_MemoryCandidate(
+        name: name,
+        calories: entry.result.calories.mid,
+        protein: entry.result.protein.mid,
+        unit: entry.result.items.isNotEmpty ? entry.result.items.first.unit : 'serving',
+        quantity: entry.result.items.isNotEmpty ? entry.result.items.first.quantity : 1,
+        tokens: tokens,
+        source: 'History Match',
+        priority: 0.0,
+        timesUsed: entry.timesUsed,
+        updatedAt: entry.updatedAt,
+      ));
+    }
+
+    // Score and filter
+    final scored = <_ScoredCandidate>[];
+    final now = DateTime.now();
+
+    for (final cand in candidates) {
+      if (cand.tokens.isEmpty) continue;
+
+      final intersection = queryTokens.intersection(cand.tokens);
+      if (intersection.isEmpty) continue;
+
+      final union = queryTokens.union(cand.tokens);
+      final similarity = intersection.length / union.length;
+
+      // Exact containment bonus
+      double exactBonus = 0;
+      final qLower = queryText.toLowerCase();
+      final nameLower = cand.name.toLowerCase();
+      if (qLower.contains(nameLower) || nameLower.contains(qLower)) {
+        exactBonus = 0.3;
+      }
+
+      // Frequency bonus
+      final freqBonus = (cand.timesUsed * 0.01).clamp(0.0, 0.2);
+
+      // Recency bonus
+      double recencyBonus = 0;
+      final diffDays = now.difference(cand.updatedAt).inDays;
+      if (diffDays <= 1) recencyBonus = 0.2;
+      else if (diffDays <= 7) recencyBonus = 0.1;
+
+      final score = similarity + exactBonus + cand.priority + freqBonus + recencyBonus;
+      scored.add(_ScoredCandidate(candidate: cand, score: score));
+    }
+
+    // Sort descending by score
+    scored.sort((a, b) => b.score.compareTo(a.score));
+
+    // Format top 5 matches
+    final buffer = StringBuffer();
+    final seen = <String>{};
+    int count = 0;
+
+    for (final item in scored) {
+      if (count >= 5) break;
+      final name = item.candidate.name;
+      if (seen.contains(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+
+      final cand = item.candidate;
+      final cal = cand.calories.round();
+      final pro = cand.protein.round();
+      buffer.writeln('• ${cand.name}: $cal kcal, ${pro}g protein (${cand.source})');
+      count++;
+    }
+
+    return buffer.toString().trim();
+  }
+}
+
+class _MemoryCandidate {
+  final String name;
+  final double calories;
+  final double protein;
+  final String unit;
+  final double quantity;
+  final Set<String> tokens;
+  final String source;
+  final double priority;
+  final int timesUsed;
+  final DateTime updatedAt;
+
+  _MemoryCandidate({
+    required this.name,
+    required this.calories,
+    required this.protein,
+    required this.unit,
+    required this.quantity,
+    required this.tokens,
+    required this.source,
+    required this.priority,
+    required this.timesUsed,
+    required this.updatedAt,
+  });
+}
+
+class _ScoredCandidate {
+  final _MemoryCandidate candidate;
+  final double score;
+
+  _ScoredCandidate({required this.candidate, required this.score});
 }

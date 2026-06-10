@@ -211,5 +211,23 @@ void main() {
       expect(result!.mealQualityScore, isNotNull);
       expect(result.mealQualityScore, greaterThan(0));
     });
+
+    test('Source attribution priority routing in pipeline', () async {
+      // 1. exact_known (branded food) should set source to memory_exact
+      final pipeline = NutritionPipeline.instance;
+      final pbResult = await pipeline.estimateMeal('2 tbsp peanut butter');
+      expect(pbResult.source, equals('memory_exact'));
+      expect(pbResult.estimationAudit?.memoryPriorityLevel, equals('User Memory'));
+
+      // 2. personal template should set source to personal_template
+      final wheyResult = await pipeline.estimateMeal('1 scoop whey');
+      expect(wheyResult.source, equals('personal_template'));
+      expect(wheyResult.estimationAudit?.memoryPriorityLevel, equals('Saved Meal'));
+    });
+
+    test('Low calorie food (e.g. 60 kcal) gets a quality score above the 50 kcal threshold', () {
+      final score = NutritionResult.calculateLocalQualityScore(60.0, 5.0, 'low cal high protein snack');
+      expect(score, greaterThan(0));
+    });
   });
 }
