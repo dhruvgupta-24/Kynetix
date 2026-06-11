@@ -3,9 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/day_log.dart';
-import '../models/user_profile.dart';
 import 'profile_service.dart';
-import '../services/workout_service.dart';
 import '../services/nutrition_target_engine.dart';
 
 class WidgetService {
@@ -34,42 +32,10 @@ class WidgetService {
         return;
       }
 
-      // 3. Targets (mirroring the dashboard's _effectiveDayTarget exactly)
-      final ws = WorkoutService.instance;
-      final session = ws.sessionFor(now);
-      final splitDay = ws.splitDayFor(now);
-      final gymDay = log.gymDay;
-
-      final bool isGymDay;
-      if (gymDay != null) {
-        isGymDay = gymDay.didGym || (session?.isEmpty == false);
-      } else {
-        final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-        isGymDay = splitIsTraining || (session?.isEmpty == false);
-      }
-
-      final String? workoutTypeName;
-      if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-        workoutTypeName = session.splitDayName;
-      } else if (gymDay?.workoutType != null) {
-        workoutTypeName = gymDay!.workoutType!.displayName;
-      } else if (gymDay?.splitDayName != null) {
-        workoutTypeName = gymDay!.splitDayName;
-      } else if (splitDay != null && !splitDay.isRestDay) {
-        workoutTypeName = splitDay.name;
-      } else {
-        workoutTypeName = null;
-      }
-
-      final targetDay = NutritionTargetEngine().dayTarget(
-        profile,
-        isGymDay: isGymDay,
-        health: null, // Health Connect steps cached on profile if synced
-        session: session,
-        workoutTypeName: workoutTypeName,
-        targetCaloriesOverride: gymDay?.targetCaloriesOverride,
-        carryForwardAdjustment: log.carryForwardAdjustment,
-        date: now,
+      // 3. Targets (using the canonical target engine)
+      final targetDay = NutritionTargetEngine().effectiveTargetForDate(
+        now,
+        profile: profile,
       );
 
       final targetCalories = targetDay.calories;

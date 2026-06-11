@@ -3,6 +3,7 @@ import 'package:kynetix/screens/onboarding_screen.dart';
 import 'package:kynetix/services/nutrition_target_engine.dart';
 import 'package:kynetix/models/day_log.dart';
 import 'package:kynetix/models/carry_forward_record.dart';
+import 'package:kynetix/services/health_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -235,6 +236,67 @@ void main() {
 
       // Verify the carry-forward adjustment resolves correctly
       expect(hydratedLog.carryForwardAdjustment, -200.0);
+    });
+  });
+
+  group('NutritionTargetEngine - effectiveTargetForDate & Health caching', () {
+    test('effectiveTargetForDate uses HealthService.instance.lastSyncResult when health parameter is null', () {
+      final engine = NutritionTargetEngine();
+      final healthService = HealthService();
+      
+      // Set the cached sync result
+      final cachedHealth = HealthSyncResult(
+        effectiveAverageSteps: 12000.0, // active tier -> higher target
+        syncedAt: DateTime(2026, 6, 11),
+      );
+      healthService.lastSyncResult = cachedHealth;
+
+      final target = engine.effectiveTargetForDate(
+        DateTime(2026, 6, 11),
+        profile: baseProfile,
+      );
+
+      // Compute expected target manually with the cached steps
+      final expected = engine.dayTarget(
+        baseProfile,
+        isGymDay: true, // baseProfile workoutDaysMin=5, workoutDaysMax=6 -> training day by split default
+        health: cachedHealth,
+      );
+
+      expect(target.calories, expected.calories);
+      
+      // Reset cached result to not affect other tests
+      healthService.lastSyncResult = null;
+    });
+
+    test('effectiveTargetForDate frozen vs recalculated target behavior', () {
+      final engine = NutritionTargetEngine();
+      final date = DateTime(2026, 6, 11);
+      final log = logFor(date);
+
+      // Setup initial target values
+      log.targetCalories = 2200.0;
+      log.targetProtein = 150.0;
+
+      // 1. Without forceRecalculate, it must return the frozen targets
+      final targetFrozen = engine.effectiveTargetForDate(
+        date,
+        profile: baseProfile,
+      );
+      expect(targetFrozen.calories, 2200.0);
+      expect(targetFrozen.protein, 150.0);
+
+      // 2. With forceRecalculate: true, it must recalculate dynamically
+      final targetRecalc = engine.effectiveTargetForDate(
+        date,
+        profile: baseProfile,
+        forceRecalculate: true,
+      );
+      expect(targetRecalc.calories, isNot(2200.0));
+
+      // Clean up log targets to prevent leaking state
+      log.targetCalories = null;
+      log.targetProtein = null;
     });
   });
 }

@@ -720,14 +720,9 @@ class InsightsReportService extends ChangeNotifier {
 
   bool _isProteinHit(DayLog log, UserProfile profile, DateTime date) {
     if (log.isEmpty) return false;
-    final session = WorkoutService.instance.sessionFor(date);
-    final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
-    final target = NutritionTargetEngine.instance.dayTarget(
-      profile,
-      isGymDay: isGymDay,
-      session: session,
-      workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-      date: date,
+    final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+      date,
+      profile: profile,
     );
 
     final pro = log.totalProteinMid;
@@ -781,14 +776,9 @@ class InsightsReportService extends ChangeNotifier {
 
   bool _isCalorieHit(DayLog log, UserProfile profile, DateTime date) {
     if (log.isEmpty) return false;
-    final session = WorkoutService.instance.sessionFor(date);
-    final isGymDay = (log.gymDay?.didGym == true) || (session != null && !session.isEmpty);
-    final target = NutritionTargetEngine.instance.dayTarget(
-      profile,
-      isGymDay: isGymDay,
-      session: session,
-      workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-      date: date,
+    final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+      date,
+      profile: profile,
     );
 
     final cals = log.totalCaloriesMid;

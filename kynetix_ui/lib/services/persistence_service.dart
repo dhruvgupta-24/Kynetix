@@ -211,41 +211,12 @@ class PersistenceService {
 
       // Calculate and freeze targets on save to prevent retrospective drift if user profile changes later
       if (!log.isEmpty) {
-        final ws = WorkoutService.instance;
-        final session = ws.sessionFor(date);
-        final gymDay = log.gymDay;
-        
-        final bool isGymDayVal;
-        if (gymDay != null) {
-          isGymDayVal = gymDay.didGym || (session?.isEmpty == false);
-        } else {
-          final splitDay = ws.splitDayFor(date);
-          final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-          isGymDayVal = splitIsTraining || (session?.isEmpty == false);
-        }
-
-        final String? workoutTypeName;
-        if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-          workoutTypeName = session.splitDayName;
-        } else if (gymDay?.workoutType != null) {
-          workoutTypeName = gymDay!.workoutType!.displayName;
-        } else if (gymDay?.splitDayName != null) {
-          workoutTypeName = gymDay!.splitDayName;
-        } else {
-          final splitDay = ws.splitDayFor(date);
-          workoutTypeName = (splitDay != null && !splitDay.isRestDay) ? splitDay.name : null;
-        }
-
         final profile = ProfileService.instance.currentUserProfile;
         if (profile != null) {
-          final resolvedTarget = NutritionTargetEngine.instance.dayTarget(
-            profile,
-            isGymDay: isGymDayVal,
-            session: session,
-            workoutTypeName: workoutTypeName,
-            targetCaloriesOverride: gymDay?.targetCaloriesOverride,
-            carryForwardAdjustment: log.carryForwardAdjustment,
-            date: null, // calculate fresh targets
+          final resolvedTarget = NutritionTargetEngine.instance.effectiveTargetForDate(
+            date,
+            profile: profile,
+            forceRecalculate: true,
           );
           log.targetCalories = resolvedTarget.calories;
           log.targetProtein = resolvedTarget.protein;

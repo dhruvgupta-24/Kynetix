@@ -380,47 +380,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   WeeklyTargetPlan get _weeklyPlan =>
       NutritionTargetEngine().weeklyPlan(_profile, health: _syncResult);
 
-  DayTarget? get _effectiveDayTarget {
-    final ws      = WorkoutService.instance;
-    final log     = _selectedLog;
-    final session = ws.sessionFor(_selectedDate);
-    final splitDay = ws.splitDayFor(_selectedDate);
-    final gymDay  = log.gymDay;
-
-    // isGymDay: mirrors DayDetail logic exactly.
-    final bool isGymDay;
-    if (gymDay != null) {
-      isGymDay = gymDay.didGym || (session?.isEmpty == false);
-    } else {
-      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-      isGymDay = splitIsTraining || (session?.isEmpty == false);
-    }
-
-    // Best available workout type name: session > user-chosen > split.
-    final String? workoutTypeName;
-    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-      workoutTypeName = session.splitDayName;
-    } else if (gymDay?.workoutType != null) {
-      workoutTypeName = gymDay!.workoutType!.displayName;
-    } else if (gymDay?.splitDayName != null) {
-      workoutTypeName = gymDay!.splitDayName;
-    } else if (splitDay != null && !splitDay.isRestDay) {
-      workoutTypeName = splitDay.name;
-    } else {
-      workoutTypeName = null;
-    }
-
-    return NutritionTargetEngine().dayTarget(
-      _profile,
-      isGymDay:               isGymDay,
-      health:                 _syncResult,
-      session:                session,
-      workoutTypeName:        workoutTypeName,
-      targetCaloriesOverride: gymDay?.targetCaloriesOverride,
-      carryForwardAdjustment: log.carryForwardAdjustment,
-      date:                   _selectedDate,
-    );
-  }
+  DayTarget? get _effectiveDayTarget =>
+      NutritionTargetEngine().effectiveTargetForDate(_selectedDate, profile: _profile, health: _syncResult);
 
   // Live reads from the global store
   DayLog get _selectedLog      => logFor(_selectedDate);

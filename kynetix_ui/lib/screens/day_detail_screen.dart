@@ -130,36 +130,13 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     final log = logFor(_currentDate);
     final profile = currentUserProfile;
 
-    final session = WorkoutService.instance.sessionFor(_currentDate);
-    final splitDay = WorkoutService.instance.splitDayFor(_currentDate);
-    final gymDay = log.gymDay;
-    final bool isGymDay = gymDay != null
-        ? (gymDay.didGym || (session?.isEmpty == false))
-        : ((splitDay != null && !splitDay.isRestDay) || (session?.isEmpty == false));
 
-    final String? workoutTypeName;
-    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-      workoutTypeName = session.splitDayName;
-    } else if (gymDay?.workoutType != null) {
-      workoutTypeName = gymDay!.workoutType!.displayName;
-    } else if (gymDay?.splitDayName != null) {
-      workoutTypeName = gymDay!.splitDayName;
-    } else if (splitDay != null && !splitDay.isRestDay) {
-      workoutTypeName = splitDay.name;
-    } else {
-      workoutTypeName = null;
-    }
 
     final target = profile != null
-        ? NutritionTargetEngine().dayTarget(
-            profile,
-            isGymDay: isGymDay,
+        ? NutritionTargetEngine().effectiveTargetForDate(
+            _currentDate,
+            profile: profile,
             health: widget.health,
-            session: session,
-            workoutTypeName: workoutTypeName,
-            targetCaloriesOverride: log.gymDay?.targetCaloriesOverride,
-            carryForwardAdjustment: log.carryForwardAdjustment,
-            date: _currentDate,
           )
         : null;
 
@@ -172,7 +149,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               dateKey:                _dateKey,
               isGymDay:               target?.isTrainingDay,
               workoutType:            target?.isTrainingDay == true ? target?.label : null,
-              targetCaloriesOverride: log.gymDay?.targetCaloriesOverride,
+              targetCaloriesOverride: target?.calories,
               weightContext:          widget.weightContext,
             ),
           ),
@@ -617,42 +594,11 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       );
   }
 
-  DayTarget? get _dayTarget {
-    final profile = currentUserProfile;
-    if (profile == null) return null;
-
-    final session = WorkoutService.instance.sessionFor(widget.date);
-    final splitDay = WorkoutService.instance.splitDayFor(widget.date);
-    final gymDay = _log.gymDay;
-
-    final bool isGymDay = gymDay != null
-        ? (gymDay.didGym || (session?.isEmpty == false))
-        : ((splitDay != null && !splitDay.isRestDay) || (session?.isEmpty == false));
-
-    final String? workoutTypeName;
-    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-      workoutTypeName = session.splitDayName;
-    } else if (gymDay?.workoutType != null) {
-      workoutTypeName = gymDay!.workoutType!.displayName;
-    } else if (gymDay?.splitDayName != null) {
-      workoutTypeName = gymDay!.splitDayName;
-    } else if (splitDay != null && !splitDay.isRestDay) {
-      workoutTypeName = splitDay.name;
-    } else {
-      workoutTypeName = null;
-    }
-
-    return NutritionTargetEngine().dayTarget(
-      profile,
-      isGymDay:        isGymDay,
-      health:          widget.health,
-      session:         session,
-      workoutTypeName: workoutTypeName,
-      targetCaloriesOverride: _log.gymDay?.targetCaloriesOverride,
-      carryForwardAdjustment: _log.carryForwardAdjustment,
-      date:            widget.date,
-    );
-  }
+  DayTarget? get _dayTarget =>
+      NutritionTargetEngine().effectiveTargetForDate(
+        widget.date,
+        health: widget.health,
+      );
 
   double get _targetFiber {
     final target = _dayTarget;

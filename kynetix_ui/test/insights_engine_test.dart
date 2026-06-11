@@ -11,10 +11,18 @@ DayLog _makeDayLog({
   required DateTime date,
   List<({String name, double calories, double protein, int? score})> meals = const [],
   bool didGym = false,
+  double? targetCalories,
+  double? targetProtein,
 }) {
   final log = DayLog();
   if (didGym) {
     log.gymDay = const GymDay(didGym: true);
+  }
+  if (targetCalories != null) {
+    log.targetCalories = targetCalories;
+  }
+  if (targetProtein != null) {
+    log.targetProtein = targetProtein;
   }
   for (final m in meals) {
     final entry = MealEntry(
@@ -178,13 +186,13 @@ void main() {
 
       // Current week
       final logs = <String, DayLog>{
-        '2026-06-01': _makeDayLog(date: DateTime(2026, 6, 1), meals: [(name: 'M1', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-02': _makeDayLog(date: DateTime(2026, 6, 2), meals: [(name: 'M2', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-03': _makeDayLog(date: DateTime(2026, 6, 3), meals: [(name: 'M3', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-04': _makeDayLog(date: DateTime(2026, 6, 4), meals: [(name: 'M4', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-05': _makeDayLog(date: DateTime(2026, 6, 5), meals: [(name: 'M5', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-06': _makeDayLog(date: DateTime(2026, 6, 6), meals: [(name: 'M6', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
-        '2026-06-07': _makeDayLog(date: DateTime(2026, 6, 7), meals: [(name: 'M7', calories: 2000, protein: 160, score: null)]), // Pro Hit, Cal Hit
+        '2026-06-01': _makeDayLog(date: DateTime(2026, 6, 1), meals: [(name: 'M1', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-02': _makeDayLog(date: DateTime(2026, 6, 2), meals: [(name: 'M2', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-03': _makeDayLog(date: DateTime(2026, 6, 3), meals: [(name: 'M3', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-04': _makeDayLog(date: DateTime(2026, 6, 4), meals: [(name: 'M4', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-05': _makeDayLog(date: DateTime(2026, 6, 5), meals: [(name: 'M5', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-06': _makeDayLog(date: DateTime(2026, 6, 6), meals: [(name: 'M6', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
+        '2026-06-07': _makeDayLog(date: DateTime(2026, 6, 7), meals: [(name: 'M7', calories: 2000, protein: 160, score: null)], targetCalories: 2000, targetProtein: 160), // Pro Hit, Cal Hit
       };
 
       final report = InsightsEngine.computeWeek(

@@ -269,13 +269,10 @@ class InsightsEngine {
 
       loggedDaysCount++;
 
-      // isGymDay already computed above — reuse it for nutrition target.
-      final target = NutritionTargetEngine.instance.dayTarget(
-        profile,
-        isGymDay: isGymDay,
-        session: session,
-        workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-        date: date,
+      final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+        date,
+        profile: profile,
+        log: log,
       );
 
       final cals = log.totalCaloriesMid;
@@ -1016,13 +1013,10 @@ class InsightsEngine {
 
       totalLoggedDays++;
 
-      // isGymDay already computed above — reuse it for nutrition target.
-      final target = NutritionTargetEngine.instance.dayTarget(
-        profile,
-        isGymDay: isGymDay,
-        session: session,
-        workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-        date: date,
+      final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+        date,
+        profile: profile,
+        log: log,
       );
 
       final cals = log.totalCaloriesMid;
@@ -1125,18 +1119,10 @@ class InsightsEngine {
         final dKey = dateKeyOf(date);
         final log = logs[dKey];
         if (log == null || log.isEmpty) continue;
-        final session = sessionsByDate[dKey];
-        final isGymDay = InsightsEngine.isGymDay(
-          date: date,
+        final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+          date,
+          profile: profile,
           log: log,
-          session: session,
-        );
-        final target = NutritionTargetEngine.instance.dayTarget(
-          profile,
-          isGymDay: isGymDay,
-          session: session,
-          workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-          date: date,
         );
         final calRat = log.totalCaloriesMid / target.calories.clamp(1.0, double.infinity);
         if (calRat >= 0.88 && calRat <= 1.08) {
@@ -1532,17 +1518,13 @@ class InsightsEngine {
 
       totalLoggedDays++;
 
-      // isGymDay already computed above — reuse it for nutrition target.
-      final target = NutritionTargetEngine.instance.dayTarget(
-        profile,
-        isGymDay: isGymDay,
-        session: session,
-        workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-        date: parsedDate,
+      final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+        parsedDate,
+        profile: profile,
+        log: log,
       );
 
       final proRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);
-      final calRat = log.totalCaloriesMid / target.calories.clamp(1.0, double.infinity);
 
       final proteinHit = proRat >= 0.90;
 
@@ -1606,17 +1588,10 @@ class InsightsEngine {
             perfect = false;
             break;
           }
-          final session = sessionsByDate[dKey];
-          final target = NutritionTargetEngine.instance.dayTarget(
-            profile,
-            isGymDay: isGymDay(
-              date: date,
-              log: log,
-              session: session,
-            ),
-            session: session,
-            workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-            date: date,
+          final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+            date,
+            profile: profile,
+            log: log,
           );
           final cRat = log.totalCaloriesMid / target.calories.clamp(1.0, double.infinity);
           final pRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);
@@ -1694,14 +1669,10 @@ class InsightsEngine {
       }
       totalLogged++;
 
-      // isGymDayProg already computed above — reuse it for nutrition target.
-      final dateVal = DateTime.parse(dateStr);
-      final target = NutritionTargetEngine.instance.dayTarget(
-        profile,
-        isGymDay: isGymDayProg,
-        session: session,
-        workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-        date: dateVal,
+      final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+        DateTime.parse(dateStr),
+        profile: profile,
+        log: log,
       );
 
       final pRat = log.totalProteinMid / target.protein.clamp(1.0, double.infinity);

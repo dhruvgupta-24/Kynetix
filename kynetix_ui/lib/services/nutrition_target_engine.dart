@@ -3,6 +3,8 @@ import '../models/workout_session.dart';
 import '../models/user_profile.dart';
 import '../services/health_service.dart';
 import '../models/day_log.dart';
+import 'profile_service.dart';
+import 'workout_service.dart';
 
 // ─── DayTarget ────────────────────────────────────────────────────────────────
 
@@ -94,6 +96,90 @@ class NutritionTargetEngine {
   factory NutritionTargetEngine() => instance;
 
   // ── Public API ────────────────────────────────────────────────────────────
+
+  /// Unifies target calculation to a single source of truth for a given date.
+  /// Resolves profile, day log, workout split default splits, overrides, carry-forward,
+  /// and live step correction caching.
+  DayTarget effectiveTargetForDate(
+    DateTime date, {
+    UserProfile? profile,
+    HealthSyncResult? health,
+    bool forceRecalculate = false,
+    DayLog? log,
+  }) {
+    final prof = profile ?? ProfileService.instance.currentUserProfile;
+    if (prof == null) {
+      return const DayTarget(
+        calories: 2000.0,
+        protein: 140.0,
+        isTrainingDay: false,
+        label: 'Default',
+        note: 'No Profile Loaded',
+      );
+    }
+
+    final resolvedLog = log ?? logFor(date);
+    final effectiveHealth = health ?? HealthService().lastSyncResult;
+
+    // 1. Return frozen targets if not forcing recalculation
+    if (!forceRecalculate && resolvedLog.targetCalories != null && resolvedLog.targetProtein != null) {
+      final override = resolvedLog.gymDay?.targetCaloriesOverride;
+      if (override != null) {
+        return DayTarget(
+          calories: override,
+          protein: resolvedLog.targetProtein!,
+          isTrainingDay: resolvedLog.gymDay?.didGym == true,
+          label: 'Manual Override',
+          note: 'Saved Target (Drift Protected)',
+        );
+      }
+      return DayTarget(
+        calories: resolvedLog.targetCalories!,
+        protein: resolvedLog.targetProtein!,
+        isTrainingDay: resolvedLog.gymDay?.didGym == true,
+        label: 'Saved Target',
+        note: 'Saved Target (Drift Protected)',
+      );
+    }
+
+    // 2. Resolve inputs dynamically
+    final ws = WorkoutService.instance;
+    final session = ws.sessionFor(date);
+    final splitDay = ws.splitDayFor(date);
+    final gymDay = resolvedLog.gymDay;
+
+    final bool isGymDay;
+    if (gymDay != null) {
+      isGymDay = gymDay.didGym || (session?.isEmpty == false);
+    } else {
+      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
+      isGymDay = splitIsTraining || (session?.isEmpty == false);
+    }
+
+    final String? workoutTypeName;
+    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+      workoutTypeName = session.splitDayName;
+    } else if (gymDay?.workoutType != null) {
+      workoutTypeName = gymDay?.workoutType?.displayName;
+    } else if (gymDay?.splitDayName != null) {
+      workoutTypeName = gymDay?.splitDayName;
+    } else if (splitDay != null && !splitDay.isRestDay) {
+      workoutTypeName = splitDay.name;
+    } else {
+      workoutTypeName = null;
+    }
+
+    return dayTarget(
+      prof,
+      isGymDay: isGymDay,
+      health: effectiveHealth,
+      session: session,
+      workoutTypeName: workoutTypeName,
+      targetCaloriesOverride: gymDay?.targetCaloriesOverride,
+      carryForwardAdjustment: resolvedLog.carryForwardAdjustment,
+      date: null,
+    );
+  }
 
   WeeklyTargetPlan weeklyPlan(
     UserProfile profile, {

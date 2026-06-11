@@ -466,6 +466,8 @@ class HealthService {
 
   final _health = Health();
 
+  HealthSyncResult? lastSyncResult;
+
   static const _stepTypes       = [HealthDataType.STEPS];
   static const _stepPermissions = [HealthDataAccess.READ];
   static const _weightTypes       = [HealthDataType.WEIGHT];
@@ -658,7 +660,7 @@ class HealthService {
         effective = avg14 ?? avg30;
       }
 
-      return HealthSyncResult(
+      final result = HealthSyncResult(
         dailySteps14d:        last14.isEmpty ? null : last14,
         dailySteps30d:        last30.isEmpty ? null : last30,
         dailyRecords:         dailyRecords,
@@ -672,11 +674,15 @@ class HealthService {
             : ActivityTier.sedentary,
         syncedAt: now,
       );
+      lastSyncResult = result;
+      return result;
     } catch (e) {
-      return HealthSyncResult(
+      final failResult = HealthSyncResult(
         syncedAt: now,
         error: 'Sync failed: ${e.toString().split('\n').first}',
       );
+      lastSyncResult = failResult;
+      return failResult;
     }
   }
 

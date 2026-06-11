@@ -906,17 +906,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
       if (log != null && !log.isEmpty) {
         // Mock a day outcome by reading its status or classification
         // Let's classify it using the engine target
-        final session = WorkoutService.instance.sessionFor(date);
-        final isGymDay = InsightsEngine.isGymDay(
-          date: date,
-          log: log,
-          session: session,
-        );
-        final target = NutritionTargetEngine.instance.dayTarget(
-          currentUserProfile!,
-          isGymDay: isGymDay,
-          workoutTypeName: log.gymDay?.workoutType?.displayName ?? log.gymDay?.splitDayName,
-          date: date,
+        final target = NutritionTargetEngine.instance.effectiveTargetForDate(
+          date,
+          profile: currentUserProfile,
         );
         final classification = DayStatusEngine.classify(log, target, now: date);
         outcomes.add(classification.outcome);
