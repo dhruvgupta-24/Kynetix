@@ -1021,6 +1021,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     }
 
     await _service.saveSession(session);
+    await _service.clearDraftSession();
 
     // Save logs integration
     final log = logFor(widget.date);

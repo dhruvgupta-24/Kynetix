@@ -198,4 +198,75 @@ void main() {
     // Ensure we exited without exceptions
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Flow 5: Start Custom Workout -> Exit -> Resume -> Finish Workout -> Verify Draft Cleanup', (WidgetTester tester) async {
+    // 1. Start Workout Session
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: WorkoutSessionScreen(
+          splitDay: emptySplitDay,
+          date: DateTime.now(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Add exercise
+    await tester.tap(find.byKey(const Key('center_add_exercise_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bench Press'));
+    await tester.pumpAndSettle();
+
+    // Log set
+    await tester.tap(find.text('LOG SET 1'));
+    await tester.pumpAndSettle();
+
+    // Exit workout via Close button
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+
+    // Pause Dialog shows up, select "Save & Leave"
+    expect(find.text('Pause Workout?'), findsOneWidget);
+    await tester.tap(find.text('Save & Leave'));
+    await tester.pumpAndSettle();
+
+    // Verify draft was created
+    final draft = WorkoutService.instance.draftSession;
+    expect(draft, isNotNull);
+    expect(WorkoutService.instance.draftStartedAt, isNotNull);
+
+    // 2. Resume from draft
+    await tester.pumpWidget(
+      MaterialApp(
+        key: UniqueKey(),
+        theme: ThemeData.dark(),
+        home: WorkoutSessionScreen(
+          splitDay: emptySplitDay,
+          date: DateTime.now(),
+          draftSession: draft,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Bench Press is present
+    expect(find.text('Bench Press'), findsOneWidget);
+
+    // Click Finish
+    await tester.tap(find.text('Finish'));
+    await tester.pumpAndSettle();
+
+    // Dialog pops up: choose "Finish Workout"
+    expect(find.text('End Workout Session'), findsOneWidget);
+    await tester.tap(find.text('Finish Workout'));
+    await tester.pumpAndSettle();
+
+    // Verify draft and draftStartedAt are both cleaned up (null)
+    expect(WorkoutService.instance.draftSession, isNull);
+    expect(WorkoutService.instance.draftStartedAt, isNull);
+
+    // Ensure we exited without exceptions
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -61,6 +61,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _calendarPageController = PageController(initialPage: _monthIndex(_focusedMonth));
+    WorkoutService.instance.addListener(_onWorkoutServiceChange);
     // Show a loading indicator if user already connected
     if (currentUserProfile?.healthSyncEnabled == true) {
       _syncing = true;
@@ -75,8 +76,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    WorkoutService.instance.removeListener(_onWorkoutServiceChange);
     _calendarPageController.dispose();
     super.dispose();
+  }
+
+  void _onWorkoutServiceChange() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _checkCalorieCarryForward() async {

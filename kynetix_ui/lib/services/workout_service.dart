@@ -1335,6 +1335,7 @@ class WorkoutService extends ChangeNotifier {
     // Once explicitly saved to active history, dispose of any matching draft.
     if (_draftSession?.splitDayName == session.splitDayName) {
       _draftSession = null;
+      _draftStartedAt = null;
     }
 
     await _persist();
@@ -1374,7 +1375,7 @@ class WorkoutService extends ChangeNotifier {
   }
 
   Future<void> clearDraftSession() async {
-    if (_draftSession == null) return;
+    if (_draftSession == null && _draftStartedAt == null) return;
     _draftSession = null;
     _draftStartedAt = null;
     await _persist();
