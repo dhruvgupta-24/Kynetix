@@ -25,8 +25,6 @@ import 'workout_setup_screen.dart' show showCreateCustomExerciseSheet;
 //   6. Anatomical vector torso custom painted silhouette.
 //   7. Non-blocking sliding PR toasts.
 //   8. State isolation at the page level for locked 60 FPS.
-//   9. Fullscreen complete session dashboard.
-//   10. Auto-save recovery on every change to prevent data loss.
 
 class WorkoutSessionScreen extends StatefulWidget {
   final SplitDay splitDay;
@@ -51,6 +49,7 @@ class WorkoutSessionScreen extends StatefulWidget {
 class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with WidgetsBindingObserver {
   late final PageController _pageController;
   int _selectedIndex = 0;
+  int get selectedIndex => _selectedIndex;
   bool _isSaving = false;
   bool _isDiscarding = false;
 
@@ -106,6 +105,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     
+    print('initState _selectedIndex: $_selectedIndex');
+    print('initState draftSession: ${widget.draftSession}');
     _startTime = widget.draftSession?.date ?? DateTime.now();
     _pageController = PageController(initialPage: _selectedIndex);
     _loadRpeSetting();
@@ -771,20 +772,33 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     return vol;
   }
 
+  ExerciseEntry buildEntry(Exercise ex) {
+    return ExerciseEntry(
+      exercise: ex,
+      sets: _sets[ex.id] ?? [],
+      isSkipped: _skippedExercises[ex.id] ?? false,
+      notes: _exerciseNotes[ex.id],
+      isSubstitution: _substitutedExercises[ex.id] ?? false,
+      substitutedForExerciseId: _substitutedForIds[ex.id],
+      substitutedForExerciseName: _substitutedForNames[ex.id],
+      isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
+    );
+  }
+
   double get _completionProgress {
     if (_sessionExercises.isEmpty) return 0.0;
     double totalRatio = 0.0;
     for (final ex in _sessionExercises) {
-      final isSkipped = _skippedExercises[ex.id] ?? false;
-      if (isSkipped) {
+      final entry = buildEntry(ex);
+      if (entry.isSkipped) {
         totalRatio += 1.0;
         continue;
       }
-      final workingSets = (_sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).toList();
-      final targetSets = ex.targetSets;
-      final targetRepMin = ex.targetRepMin;
+      final targetSets = entry.exercise.targetSets;
+      final targetRepMin = entry.exercise.targetRepMin;
+      final workingSets = entry.sets.where((s) => s.isMainWorkingSet).toList();
       
-      final setRatio = targetSets > 0 ? workingSets.length / targetSets : 1.0;
+      final setRatio = targetSets > 0 ? entry.completedWorkingSetsCount / targetSets : 1.0;
       
       double totalSetRepScore = 0.0;
       for (final s in workingSets) {
@@ -826,11 +840,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     double loggedSetsScore = 0.0;
     int activeExercises = 0;
     for (final ex in _sessionExercises) {
-      final isSkipped = _skippedExercises[ex.id] ?? false;
-      if (isSkipped) continue;
+      final entry = buildEntry(ex);
+      if (entry.isSkipped) continue;
       activeExercises++;
-      final logged = (_sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).length;
-      final target = ex.targetSets > 0 ? ex.targetSets : 3;
+      final logged = entry.completedWorkingSetsCount;
+      final target = entry.exercise.targetSets > 0 ? entry.exercise.targetSets : 3;
       loggedSetsScore += (logged / target).clamp(0.0, 1.0);
     }
     final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25.0 : 25.0;
@@ -887,6 +901,34 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (isPr) {
       HapticFeedback.heavyImpact();
       _triggerPRNotification(w, r, newSet.estimatedOneRepMax);
+    }
+
+    // Auto-advance if completed
+    final entry = buildEntry(ex);
+    if (entry.isCompleted) {
+      if (_selectedIndex < _sessionExercises.length - 1) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) {
+            // Find current index of this exercise (in case list was modified)
+            final currentIdx = _sessionExercises.indexWhere((e) => e.id == ex.id);
+            if (currentIdx == _selectedIndex && _selectedIndex < _sessionExercises.length - 1) {
+              final currentEntryAfterDelay = buildEntry(ex);
+              if (currentEntryAfterDelay.isCompleted) {
+                setState(() {
+                  _selectedIndex++;
+                });
+                if (_pageController.hasClients) {
+                  _pageController.animateToPage(
+                    _selectedIndex,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
+                  );
+                }
+              }
+            }
+          }
+        });
+      }
     }
   }
 
@@ -1258,6 +1300,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                           controller: _pageController,
                           itemCount: _sessionExercises.length,
                           onPageChanged: (index) {
+                            print('PageView onPageChanged called with index: $index');
+                            print(StackTrace.current.toString().split('\n').take(60).join('\n'));
                             HapticFeedback.selectionClick();
                             setState(() => _selectedIndex = index);
                             _saveRecoveryState();
@@ -3361,8 +3405,8 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
     if (!_scrollController.hasClients) return;
     final key = _chipKeys[widget.selected];
     if (key != null && key.currentContext != null) {
-      Scrollable.ensureVisible(
-        key.currentContext!,
+      _scrollController.position.ensureVisible(
+        key.currentContext!.findRenderObject()!,
         duration: const Duration(milliseconds: 150),
         alignment: 0.5,
         curve: Curves.easeInOut,
@@ -3538,6 +3582,39 @@ class _BottomDockWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // RUNTIME INVESTIGATION TRACE
+    print('=== RUNTIME INVESTIGATION TRACE ===');
+    print('Active Selected Index: $selectedIndex');
+    for (int idx = 0; idx < exercises.length; idx++) {
+      final ex = exercises[idx];
+      final exSets = sets[ex.id] ?? [];
+      final isSkippedEx = skippedExercises[ex.id] ?? false;
+      final targetSetsPrescription = ex.targetSets;
+      final targetSetsTypical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
+      final totalLogged = exSets.length;
+      final workingSets = exSets.where((s) => s.isMainWorkingSet).length;
+      final warmUpSets = exSets.where((s) => s.setType == SetType.warmUp).length;
+      final remainingWorking = (targetSetsPrescription - workingSets).clamp(0, 99);
+      final isCompletedValue = !isSkippedEx && workingSets >= targetSetsPrescription;
+      
+      print('Exercise Index: $idx, ID: ${ex.id}, Name: ${ex.name}');
+      print('  - exercise.targetSets: $targetSetsPrescription (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
+      print('  - typicalSetsForExercise: $targetSetsTypical (file: lib/services/workout_service.dart, class: WorkoutService, method: typicalSetsForExercise, line: 522)');
+      print('  - entry.sets.length: $totalLogged (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: sets.length, line: 105)');
+      print('  - workingSetsCount: $workingSets (file: lib/models/workout_session.dart, class: SetEntry, getter: isMainWorkingSet, line: 56)');
+      print('  - warmUpSetsCount: $warmUpSets (file: lib/models/workout_session.dart, class: SetType.warmUp, line: 31)');
+      print('  - remainingWorkingSets: $remainingWorking (calculated on the fly)');
+      print('  - entry.isCompleted (custom logic): $isCompletedValue (calculated on the fly)');
+      
+      // Control values
+      print('  - Value controlling green check: ${workingSets >= targetSetsPrescription} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3629)');
+      print('  - Value controlling progress circles (color): ${workingSets >= targetSetsPrescription ? "green" : (workingSets > 0 ? "gray" : "dark")} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3629)');
+      print('  - Value controlling Log Set button: ${workingSets < targetSetsPrescription && !isSkippedEx} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3580)');
+      print('  - Value controlling auto-advance: ${workingSets >= targetSetsPrescription && !isSkippedEx} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3581)');
+      print('  - Value controlling workout completion score: ${workingSets / (targetSetsPrescription > 0 ? targetSetsPrescription : 1)} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, getter: _completionProgress, line: 787)');
+    }
+    print('====================================');
+
     if (exercises.isEmpty) {
       return Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -3578,6 +3655,7 @@ class _BottomDockWidget extends StatelessWidget {
     final loggedList = sets[activeEx.id] ?? [];
     final isSkipped = skippedExercises[activeEx.id] ?? false;
     final canLog = !isSkipped;
+    final activeWsets = loggedList.where((s) => s.isMainWorkingSet).length;
 
     final hasPrev = selectedIndex > 0;
     final hasNext = selectedIndex < exercises.length - 1;
@@ -3610,7 +3688,7 @@ class _BottomDockWidget extends StatelessWidget {
                 final ex = exercises[idx];
                 final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
                 final wsets = (sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).length;
-                final targetSets = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
+                final targetSets = ex.targetSets;
                 
                 final skipped = skippedExercises[ex.id] ?? false;
                 final sub = substitutedExercises[ex.id] ?? false;
@@ -3756,38 +3834,58 @@ class _BottomDockWidget extends StatelessWidget {
               Expanded(
                 child: SizedBox(
                   height: 52,
-                  child: ElevatedButton(
-                    onPressed: canLog ? onLogSet : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isSkipped
-                          ? const Color(0xFF1F1F2E)
-                          : KColor.green,
-                      foregroundColor: Colors.white,
-                      shadowColor: KColor.green.withValues(alpha: 0.4),
-                      elevation: isSkipped ? 0 : 8,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide.none,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(isSkipped ? Icons.block_rounded : Icons.add_task_rounded, size: 18),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            isSkipped
-                                ? 'EXERCISE SKIPPED'
-                                : 'LOG SET ${loggedList.length + 1}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                  child: (activeWsets >= activeEx.targetSets && !isSkipped)
+                      ? Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF141624).withValues(alpha: 0.8),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: KColor.green.withValues(alpha: 0.3), width: 1),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.check_circle_rounded, color: KColor.green, size: 18),
+                              SizedBox(width: 6),
+                              Text(
+                                'EXERCISE COMPLETE',
+                                style: TextStyle(color: KColor.green, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ElevatedButton(
+                          onPressed: canLog ? onLogSet : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isSkipped
+                                ? const Color(0xFF1F1F2E)
+                                : KColor.green,
+                            foregroundColor: Colors.white,
+                            shadowColor: KColor.green.withValues(alpha: 0.4),
+                            elevation: isSkipped ? 0 : 8,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide.none,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(isSkipped ? Icons.block_rounded : Icons.add_task_rounded, size: 18),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  isSkipped
+                                      ? 'EXERCISE SKIPPED'
+                                      : 'LOG SET ${loggedList.length + 1}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(width: 8),

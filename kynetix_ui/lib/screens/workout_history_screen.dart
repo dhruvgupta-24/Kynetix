@@ -3195,9 +3195,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                   if (!entry.isSkipped && entry.sets.isNotEmpty) ...[
                     Builder(
                       builder: (context) {
-                        final wsets = entry.sets.where((s) => s.isMainWorkingSet).length;
-                        final target = service.typicalSetsForExercise(entry.exercise.id, splitDayName);
-                        final isTrained = wsets >= target;
+                        final isTrained = entry.isCompleted;
                         final label = isTrained ? '✓ Trained' : 'Logged';
                         final color = isTrained ? KColor.green : const Color(0xFF9CA3AF);
                         return Container(

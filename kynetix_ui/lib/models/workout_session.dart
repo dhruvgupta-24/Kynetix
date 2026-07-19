@@ -127,6 +127,24 @@ class ExerciseEntry {
 
   bool get isEmpty => sets.isEmpty && !isSkipped;
 
+  bool get isCompleted {
+    if (isSkipped) return true;
+    return completedWorkingSetsCount >= exercise.targetSets;
+  }
+
+  int get completedWorkingSetsCount =>
+      sets.where((s) => s.isMainWorkingSet).length;
+
+  int get warmUpSetsCount =>
+      sets.where((s) => s.setType == SetType.warmUp).length;
+
+  int get totalSetsCount => sets.length;
+
+  int get remainingWorkingSetsCount {
+    final rem = exercise.targetSets - completedWorkingSetsCount;
+    return rem < 0 ? 0 : rem;
+  }
+
   double get totalVolume => sets.fold(0, (sum, s) => sum + s.volume);
 
   /// Volume from primary working sets only (normal, supersetA, supersetB).
