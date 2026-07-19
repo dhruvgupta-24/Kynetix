@@ -92,108 +92,110 @@ class NutritionPipeline {
       // This ensures 0.15 kg == 150 g when matching saved memories.
       final normParsed = _normalizeParsed(parsed);
       final name = normParsed.normalizedName;
+      final itemStr = _constructItemString(normParsed);
+
+      debugPrint('[Pipeline] --- Lookup for item: "$itemStr" (normalized: "$name") ---');
 
       // ── USER OVERRIDE ───────────────────────────────────────────────────────────
       // Source: stores PER-UNIT-1 values. MUST scale by normParsed.quantity.
       // Hard blocks AI when matched. Unit-category guard applied.
+      debugPrint('[Pipeline]   [1/5] Checking UserNutritionMemory...');
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
         final storedUnit = UserNutritionMemory.instance.storedUnit(name);
         if (storedUnit != null &&
             !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
-          debugPrint('[Pipeline] ⚠️  unit mismatch: stored=$storedUnit '
-              'input=${normParsed.unit} for "$name" — skipping user memory');
-          needsEstimation.add(normParsed);
-          continue;
-        }
-        final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
-        if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline] ✅ USER OVERRIDE "$name" '
-              '(${normParsed.quantity} ${normParsed.unit}) — AI BLOCKED');
-          finalItems.add(candidate);
-          matchesUsed.add('user_override: $name');
-          priorityLevels.add('User Memory');
-          continue;
+          debugPrint('[Pipeline]     ⚠️  unit mismatch: stored=$storedUnit input=${normParsed.unit} — skipping UserNutritionMemory');
         } else {
-          debugPrint('[Pipeline] 🚨 USER OVERRIDE REJECTED (insane value) '
-              '"$name" — falling through to estimation');
+          final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
+          if (_isSane(candidate, name)) {
+            debugPrint('[Pipeline]     ✅ Match in UserNutritionMemory: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+            finalItems.add(candidate);
+            matchesUsed.add('user_override: $name');
+            priorityLevels.add('User Memory');
+            continue;
+          } else {
+            debugPrint('[Pipeline]     🚨 Matched but insane values — skipping UserNutritionMemory');
+          }
         }
+      } else {
+        debugPrint('[Pipeline]     No match in UserNutritionMemory');
       }
 
-      // ── PERSONAL EXACT ─────────────────────────────────────────────────────────
-      // Source: returns TOTAL calories for the full portion already.
-      // MUST NOT scale by quantity. Use result directly.
-      final personalExact = PersonalNutritionMemory.instance.lookupExact(
-          _constructItemString(normParsed));
+      // ── PERSONAL EXACT / TEMPLATE ──────────────────────────────────────────────
+      debugPrint('[Pipeline]   [2/5] Checking PersonalNutritionMemory...');
+      final personalExact = PersonalNutritionMemory.instance.lookupExact(itemStr);
       if (personalExact != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalExact);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline] ✅ PERSONAL EXACT "$name"');
+          debugPrint('[Pipeline]     ✅ Match in PersonalNutritionMemory (exact): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
           finalItems.add(candidate);
-          matchesUsed.add('personal_exact: ${_constructItemString(normParsed)}');
+          matchesUsed.add('personal_exact: $itemStr');
           priorityLevels.add('Saved Meal');
           continue;
-        } else {
-          debugPrint('[Pipeline] 🚨 PERSONAL EXACT REJECTED (insane) "$name"');
         }
       }
-
-      // ── PERSONAL TEMPLATE ─────────────────────────────────────────────────────────
-      // Same: returns TOTAL portion values. Do NOT scale.
-      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(
-          _constructItemString(normParsed));
+      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(itemStr);
       if (personalTemplate != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalTemplate);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline] ✅ PERSONAL TEMPLATE "$name"');
+          debugPrint('[Pipeline]     ✅ Match in PersonalNutritionMemory (template): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
           finalItems.add(candidate);
-          matchesUsed.add('personal_template: ${_constructItemString(normParsed)}');
+          matchesUsed.add('personal_template: $itemStr');
           priorityLevels.add('Saved Meal');
           continue;
-        } else {
-          debugPrint('[Pipeline] 🚨 PERSONAL TEMPLATE REJECTED (insane) "$name"');
         }
       }
+      debugPrint('[Pipeline]     No match in PersonalNutritionMemory');
 
-      // ── EXACT KNOWN FOOD ─────────────────────────────────────────────────────────
-      // Source: returns TOTAL portion values. Do NOT scale.
-      final exactKnown = MealMemory.instance.lookupExactKnownFood(
-          _constructItemString(normParsed));
+      // ── EXACT KNOWN FOOD / RECURRING MEMORY ──────────────────────────────────────
+      debugPrint('[Pipeline]   [3/5] Checking MealMemory (known/recurring)...');
+      final exactKnown = MealMemory.instance.lookupExactKnownFood(itemStr);
       if (exactKnown != null) {
         final candidate = _itemFromPortionMemory(normParsed, exactKnown);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline] ✅ EXACT KNOWN "$name"');
+          debugPrint('[Pipeline]     ✅ Match in MealMemory (exact known): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
           finalItems.add(candidate);
-          matchesUsed.add('exact_known: ${_constructItemString(normParsed)}');
+          matchesUsed.add('exact_known: $itemStr');
           final isBoot = MealMemory.instance.allKnownFoods.containsKey(name) &&
                          !UserNutritionMemory.instance.allOverrides.any((o) => o.canonicalMeal == name);
           priorityLevels.add(isBoot ? 'Branded Food' : 'User Memory');
           continue;
-        } else {
-          debugPrint('[Pipeline] 🚨 EXACT KNOWN REJECTED (insane) "$name"');
         }
       }
-
-      // ── RECURRING MEMORY ──────────────────────────────────────────────────────────
-      // Source: stores the FULL meal NutritionResult (promoted AI candidates).
-      // Value semantics: represents the exact rawInput, not per-unit.
-      // Do NOT scale. Use result directly.
-      final cached = MealMemory.instance.lookupRecurring(
-          _constructItemString(normParsed));
+      final cached = MealMemory.instance.lookupRecurring(itemStr);
       if (cached != null) {
         final candidate = _itemFromPortionMemory(normParsed, cached);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline] ✅ RECURRING MEMORY "$name"');
+          debugPrint('[Pipeline]     ✅ Match in MealMemory (recurring cache): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
           finalItems.add(candidate);
-          matchesUsed.add('recurring_memory: ${_constructItemString(normParsed)}');
+          matchesUsed.add('recurring_memory: $itemStr');
           priorityLevels.add('User Memory');
           continue;
-        } else {
-          debugPrint('[Pipeline] 🚨 RECURRING MEMORY REJECTED (insane) "$name" ${candidate.calories.max.toStringAsFixed(0)} kcal');
         }
       }
+      debugPrint('[Pipeline]     No match in MealMemory');
 
-      // No valid memory match — needs AI or local estimation.
+      // ── FOOD LIBRARY (LOCAL DATABASE) ───────────────────────────────────────────
+      debugPrint('[Pipeline]   [4/5] Checking Food Library (local database)...');
+      final localAnalysis = analyzeLocalEstimation(itemStr);
+      if (localAnalysis.coverageConfidence >= 0.9 && localAnalysis.estimation.items.isNotEmpty) {
+        final localResult = NutritionResult.fromEstimationResult(localAnalysis.estimation, itemStr)
+            .copyWith(source: 'local_hybrid');
+        final candidate = _pullBestItem(localResult, normParsed);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline]     ✅ Match in Food Library: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          // Important: mark it true so portion anchor pass doesn't scale it!
+          finalItems.add(candidate.withScalar(1.0));
+          matchesUsed.add('food_library: $name');
+          priorityLevels.add('Branded Food');
+          continue;
+        }
+      }
+      debugPrint('[Pipeline]     No match in Food Library');
+
+      // ── AI ESTIMATE ESCALATION GATED ─────────────────────────────────────────────
+      debugPrint('[Pipeline]   [5/5] All memory and database lookups failed for "$name". Escalation to AI/estimation required.');
       needsEstimation.add(normParsed);
     }
 
@@ -455,6 +457,7 @@ class NutritionPipeline {
       sodium: mem.sodium != null
           ? NutrientRange(min: mem.sodium!.min * scale, max: mem.sodium!.max * scale)
           : null,
+      eatingPatternScalarApplied: true,
     );
   }
 
@@ -549,6 +552,7 @@ class NutritionPipeline {
       sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : const NutrientRange(min: 0, max: 0),
       saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : const NutrientRange(min: 0, max: 0),
       sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : const NutrientRange(min: 0, max: 0),
+      eatingPatternScalarApplied: true,
     );
   }
 
@@ -847,6 +851,12 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
       }
 
+      final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(itemStr);
+      if (personalTemplate != null) {
+        final candidate = _itemFromPortionMemory(normParsed, personalTemplate);
+        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
       final exactKnown = MealMemory.instance.lookupExactKnownFood(itemStr);
       if (exactKnown != null) {
         final candidate = _itemFromPortionMemory(normParsed, exactKnown);
@@ -857,6 +867,17 @@ class NutritionPipeline {
       if (cached != null) {
         final candidate = _itemFromPortionMemory(normParsed, cached);
         if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+      }
+
+      final localAnalysis = analyzeLocalEstimation(itemStr);
+      if (localAnalysis.coverageConfidence >= 0.9 && localAnalysis.estimation.items.isNotEmpty) {
+        final localResult = NutritionResult.fromEstimationResult(localAnalysis.estimation, itemStr)
+            .copyWith(source: 'local_hybrid');
+        final candidate = _pullBestItem(localResult, normParsed);
+        if (_isSane(candidate, name)) {
+          finalItems.add(candidate.withScalar(1.0));
+          continue;
+        }
       }
 
       return null; // Atomic item missed memory, requires AI -> fail sync lookup
@@ -932,9 +953,9 @@ class NutritionPipeline {
     if (items.isEmpty) return items;
 
     // Check if the pass has already been applied to prevent double application
-    if (items.any((item) => item.eatingPatternScalarApplied)) {
+    if (items.isNotEmpty && items.every((item) => item.eatingPatternScalarApplied)) {
       if (kDebugMode) {
-        debugPrint('[Pipeline Pass] ⚠️  Skipping Portion Anchor pass: already applied.');
+        debugPrint('[Pipeline Pass] ⚠️  Skipping Portion Anchor pass: already applied to all.');
       }
       return items;
     }
@@ -994,6 +1015,14 @@ class NutritionPipeline {
     }
 
     for (final item in items) {
+      if (item.eatingPatternScalarApplied) {
+        if (kDebugMode) {
+          debugPrint('[Pipeline Pass] 🔒 Skipping Portion Anchor scalar for memory-matched item: "${item.name}"');
+        }
+        result.add(item);
+        continue;
+      }
+
       final role = roles[item]!;
       double? finalScalar;
 

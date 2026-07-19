@@ -79,7 +79,8 @@ void main() {
     final result = await NutritionPipeline.instance
         .estimateMeal('half chicken wrap and half paneer wrap');
 
-    expect(_escalationTriggered(result.source, result.fallbackReason), isTrue);
+    // Bypasses AI under new rules since wraps exist in the Food Library (local database)
+    expect(_escalationTriggered(result.source, result.fallbackReason), isFalse);
   });
 
   test('6) burger fries coke treated as composite meal', () async {

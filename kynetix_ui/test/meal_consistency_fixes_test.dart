@@ -12,6 +12,10 @@ import 'package:kynetix/services/meal_memory.dart';
 import 'package:kynetix/services/nutrition_target_engine.dart';
 import 'package:kynetix/services/user_nutrition_memory.dart';
 import 'package:kynetix/services/personal_nutrition_memory.dart';
+import 'package:kynetix/models/user_profile.dart';
+import 'package:kynetix/services/profile_service.dart';
+import 'package:kynetix/services/eating_pattern_service.dart';
+import 'package:kynetix/services/nutrition_pipeline.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -604,6 +608,47 @@ void main() {
       final canonicalMatch = MealMemory.instance.lookup('Aloo Paratha');
       expect(canonicalMatch, isNotNull);
       expect(canonicalMatch!.calories.min, equals(350));
+    });
+
+    test('11. User overrides are the single source of truth and ignore portion anchors', () async {
+      // 1. Setup User Profile with Curry Anchored
+      ProfileService.instance.currentUserProfile = const UserProfile(
+        name: 'Dhruv',
+        age: 25,
+        gender: 'Male',
+        height: 175.0,
+        weight: 75.0,
+        workoutDaysMin: 3,
+        workoutDaysMax: 3,
+        goal: 'Fat Loss',
+        portionAnchor: PortionAnchor.curryAnchored,
+      );
+      EatingPatternService.instance.seedFromPortionAnchor(PortionAnchor.curryAnchored);
+
+      // 2. Save a custom override for "butter chicken"
+      // Let's say 1.0 serving has 815 kcal and 45 g protein
+      await UserNutritionMemory.instance.saveOverride(
+        'butter chicken',
+        815,
+        45,
+        referenceQuantity: 1.0,
+        referenceUnit: 'serving',
+      );
+
+      // 3. Estimate "butter chicken" at 1.0 quantity
+      final result1 = await NutritionPipeline.instance.estimateMeal('butter chicken');
+      expect(result1.calories.mid, equals(815.0));
+      expect(result1.protein.mid, equals(45.0));
+
+      // 4. Estimate "0.5 butter chicken"
+      final resultHalf = await NutritionPipeline.instance.estimateMeal('0.5 butter chicken');
+      expect(resultHalf.calories.mid, equals(407.5));
+      expect(resultHalf.protein.mid, equals(22.5));
+
+      // 5. Estimate "2.0 butter chicken"
+      final resultDouble = await NutritionPipeline.instance.estimateMeal('2.0 butter chicken');
+      expect(resultDouble.calories.mid, equals(1630.0));
+      expect(resultDouble.protein.mid, equals(90.0));
     });
   });
 }

@@ -53,40 +53,26 @@ enum PortionAnchor {
 class TargetChangeRecord {
   final DateTime timestamp;
   final String sourceType; // "System Calculated" or "Custom Targets"
-  final double? maintenanceCalories;
-  final double? trainingDayCalories;
-  final double? restDayCalories;
-  final double? proteinTarget;
-  final Map<String, dynamic>? previousValues;
+  final Map<String, dynamic>? profileSnapshot;
 
   const TargetChangeRecord({
     required this.timestamp,
     required this.sourceType,
-    this.maintenanceCalories,
-    this.trainingDayCalories,
-    this.restDayCalories,
-    this.proteinTarget,
-    this.previousValues,
+    this.profileSnapshot,
   });
 
   Map<String, dynamic> toJson() => {
     'timestamp': timestamp.toIso8601String(),
     'sourceType': sourceType,
-    if (maintenanceCalories != null) 'maintenanceCalories': maintenanceCalories,
-    if (trainingDayCalories != null) 'trainingDayCalories': trainingDayCalories,
-    if (restDayCalories != null) 'restDayCalories': restDayCalories,
-    if (proteinTarget != null) 'proteinTarget': proteinTarget,
-    if (previousValues != null) 'previousValues': previousValues,
+    if (profileSnapshot != null) 'profileSnapshot': profileSnapshot,
   };
 
   factory TargetChangeRecord.fromJson(Map<String, dynamic> json) => TargetChangeRecord(
     timestamp: DateTime.parse(json['timestamp'] as String),
     sourceType: json['sourceType'] as String,
-    maintenanceCalories: (json['maintenanceCalories'] as num?)?.toDouble(),
-    trainingDayCalories: (json['trainingDayCalories'] as num?)?.toDouble(),
-    restDayCalories: (json['restDayCalories'] as num?)?.toDouble(),
-    proteinTarget: (json['proteinTarget'] as num?)?.toDouble(),
-    previousValues: json['previousValues'] as Map<String, dynamic>?,
+    profileSnapshot: json['profileSnapshot'] != null
+        ? Map<String, dynamic>.from(json['profileSnapshot'] as Map)
+        : null,
   );
 }
 
@@ -277,4 +263,30 @@ class UserProfile {
   }
 
   double get bmi => weight / ((height / 100) * (height / 100));
+
+  Map<String, dynamic> toSnapshotJson() {
+    final map = toJson();
+    map.remove('targetChangeHistory');
+    return map;
+  }
+
+  UserProfile? profileActiveOn(DateTime date) {
+    if (targetChangeHistory.isEmpty) return null;
+
+    final sorted = List<TargetChangeRecord>.from(targetChangeHistory)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    TargetChangeRecord? activeRecord;
+    for (final record in sorted) {
+      if (record.timestamp.isAfter(date)) {
+        break;
+      }
+      activeRecord = record;
+    }
+
+    final snap = activeRecord?.profileSnapshot ?? sorted.first.profileSnapshot;
+    if (snap == null) return null;
+    final reconstructed = UserProfile.fromJson(snap);
+    return reconstructed.copyWith(targetChangeHistory: targetChangeHistory);
+  }
 }

@@ -13,6 +13,7 @@ import '../services/nutrition_target_engine.dart';
 import '../services/meal_memory.dart';
 import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
+import '../services/user_nutrition_memory.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
@@ -352,13 +353,15 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     return DayDetailScreen.getSectionForTimeAndDate(DateTime.now(), widget.date);
   }
 
-  void _quickAddMeal({
+  Future<void> _quickAddMeal({
     required String name,
     required double calories,
     required double protein,
     MealSection? section,
-  }) {
+  }) async {
     final sec = section ?? _currentSection;
+    final resolvedResult = await NutritionPipeline.instance.estimateMeal(name);
+
     final entry = MealEntry(
       rawInput:        name,
       finalSavedInput: name,
@@ -367,13 +370,15 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       dayOfWeek:       widget.date.weekday,
       parsedFoods:     [name],
       userCorrected:   true,
-      result: NutritionResult.createCustom(
-        canonicalMeal: name,
-        calories: calories,
-        protein: protein,
-        source: 'quick_add',
-        userCorrected: true,
-      ),
+      result: resolvedResult.calories.mid > 0
+          ? resolvedResult
+          : NutritionResult.createCustom(
+              canonicalMeal: name,
+              calories: calories,
+              protein: protein,
+              source: 'quick_add',
+              userCorrected: true,
+            ),
     );
     _log.add(sec, entry);
     MealMemory.instance.store(
@@ -1678,13 +1683,6 @@ class _EntryTile extends StatelessWidget {
                                     : const Color(0xFFEF4444)),
                           ),
                         ],
-                        if (entry.edited || entry.result.macrosLockedByUser || entry.userCorrected || entry.result.userCorrected) ...[
-                          const SizedBox(width: 6),
-                          const _MacroBadge('Manually Edited', Color(0xFF60A5FA)),
-                        ] else ...[
-                          const SizedBox(width: 6),
-                          _SourceBadge(entry.result.source),
-                        ],
                       ],
                     ),
                   ],
@@ -1764,39 +1762,7 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                           color: Color(0xFF6B7280),
                         ),
                       ),
-                      // ── Edited macros indicator ─────────────────────────────
-                      if (entry.result.macrosLockedByUser || entry.result.userCorrected || entry.userCorrected) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF60A5FA).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: const Color(0xFF60A5FA).withValues(alpha: 0.4),
-                              width: 0.8,
-                            ),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.edit_rounded, size: 9.5, color: Color(0xFF60A5FA)),
-                              SizedBox(width: 4),
-                              Text(
-                                'Manually Edited',
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF60A5FA),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ] else ...[
-                        const SizedBox(height: 6),
-                        _SourceBadge(entry.result.source),
-                      ],
+
                     ],
                   ),
                 ),
@@ -2215,14 +2181,31 @@ class _QuickAddCardState extends State<_QuickAddCard> {
     const QuickAddItem(id: 'builtin_eggs', name: '4 egg whites + 400ml milk', calories: 328, protein: 27, emoji: '🥚', builtIn: true),
   ];
 
+  Map<String, NutritionResult> _resolvedResults = {};
+
   @override
   void initState() {
     super.initState();
+    _resolveItems();
+  }
+
+  Future<void> _resolveItems() async {
+    final allItems = [..._builtIn, ...QuickAddService.instance.customItems];
+    final map = <String, NutritionResult>{};
+    for (final item in allItems) {
+      final res = await NutritionPipeline.instance.estimateMeal(item.name);
+      map[item.id] = res;
+    }
+    if (mounted) {
+      setState(() {
+        _resolvedResults = map;
+      });
+    }
   }
 
   Future<void> _deleteCustomItem(QuickAddItem item) async {
-    setState(() {}); // trigger rebuild
     await QuickAddService.instance.deleteItem(item);
+    await _resolveItems();
   }
 
   Future<void> _openAddCustom() async {
@@ -2242,8 +2225,15 @@ class _QuickAddCardState extends State<_QuickAddCard> {
       );
       return;
     }
+    await UserNutritionMemory.instance.saveOverride(
+      result.name,
+      result.calories,
+      result.protein,
+      referenceQuantity: 1.0,
+      referenceUnit: 'serving',
+    );
     await QuickAddService.instance.saveItem(result);
-    setState(() {});
+    await _resolveItems();
   }
 
   @override
@@ -2296,15 +2286,18 @@ class _QuickAddCardState extends State<_QuickAddCard> {
           ...allItems.asMap().entries.map((entry) {
             final i = entry.key;
             final item = entry.value;
+            final resolved = _resolvedResults[item.id];
+            final cals = resolved?.calories.mid ?? item.calories;
+            final prot = resolved?.protein.mid ?? item.protein;
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _QuickAddRow(
                   emoji: item.emoji,
                   title: item.name,
-                  meta: '${item.calories.toInt()} kcal  ·  ${item.protein.toInt()}g protein',
+                  meta: '${cals.toInt()} kcal  ·  ${prot.toInt()}g protein',
                   isCustom: !item.builtIn,
-                  onTap: () => widget.onAdd(name: item.name, calories: item.calories, protein: item.protein),
+                  onTap: () => widget.onAdd(name: item.name, calories: cals, protein: prot),
                   onDelete: !item.builtIn ? () => _deleteCustomItem(item) : null,
                 ),
                 if (i < allItems.length - 1)

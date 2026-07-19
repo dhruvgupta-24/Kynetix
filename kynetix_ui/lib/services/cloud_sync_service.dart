@@ -68,6 +68,10 @@ class CloudSyncService {
             }
           }
         }
+        // Load frozen target values from Supabase to prevent drift on hydration
+        log.targetCalories = (row['target_calories'] as num?)?.toDouble();
+        log.targetProtein = (row['target_protein'] as num?)?.toDouble();
+
         dayLogStore[dateKey] = log;
       }
       // Re-save locally
@@ -301,6 +305,8 @@ class CloudSyncService {
               for (final s in MealSection.values)
                 s.name: log.entriesFor(s).map((e) => e.toJson()).toList(),
             },
+            'target_calories': log.targetCalories,
+            'target_protein': log.targetProtein,
             'updated_at': DateTime.now().toIso8601String(),
           }, onConflict: 'user_id, date_key').catchError((e) {
             debugPrint('[CloudSyncService] Failed to sync day log $dateKey: $e');

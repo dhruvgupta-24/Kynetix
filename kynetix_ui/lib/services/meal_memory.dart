@@ -204,6 +204,12 @@ class MealMemory {
     }
   }
 
+  /// Internal ownership synchronization method called only by PersistenceService.
+  void setOwnerId(String userId) {
+    _ownerUserId = userId;
+    debugPrint('[MealMemory] 🔒 cached owner ID synchronized to: $userId');
+  }
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   /// Returns a cached result for [rawInput] if one exists, else null.

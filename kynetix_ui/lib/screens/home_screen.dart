@@ -7,6 +7,7 @@ import '../services/nutrition_pipeline.dart';
 import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
 import '../services/meal_memory.dart';
+import '../services/user_nutrition_memory.dart';
 
 // ─── HomeScreen (Redesigned as Quick Macro Estimator Sheet) ─────────────────
 //
@@ -171,6 +172,13 @@ class _HomeScreenState extends State<HomeScreen> {
       protein: protein,
       emoji: '⚡',
       builtIn: false,
+    );
+    await UserNutritionMemory.instance.saveOverride(
+      name,
+      calories,
+      protein,
+      referenceQuantity: 1.0,
+      referenceUnit: 'serving',
     );
     await QuickAddService.instance.saveItem(item);
 

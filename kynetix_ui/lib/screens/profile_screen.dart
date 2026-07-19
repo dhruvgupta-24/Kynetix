@@ -1274,27 +1274,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxValue: 6000,
                 currentValue: profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories,
                 onSave: (val) {
-                  final prev = {
-                    'useCustomTargets': profile.useCustomTargets,
-                    'customMaintenanceCalories': profile.customMaintenanceCalories,
-                    'customTrainingDayCalories': profile.customTrainingDayCalories,
-                    'customRestDayCalories': profile.customRestDayCalories,
-                    'customProteinTarget': profile.customProteinTarget,
-                  };
                   final updated = profile.copyWith(
                     customMaintenanceCalories: val,
-                    targetChangeHistory: [
-                      ...profile.targetChangeHistory,
-                      TargetChangeRecord(
-                        timestamp: DateTime.now(),
-                        sourceType: 'Custom Targets',
-                        maintenanceCalories: val,
-                        trainingDayCalories: profile.customTrainingDayCalories,
-                        restDayCalories: profile.customRestDayCalories,
-                        proteinTarget: profile.customProteinTarget,
-                        previousValues: prev,
-                      ),
-                    ],
                   );
                   _saveProfile(updated);
                 },
@@ -1311,27 +1292,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxValue: 6000,
                 currentValue: profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories,
                 onSave: (val) {
-                  final prev = {
-                    'useCustomTargets': profile.useCustomTargets,
-                    'customMaintenanceCalories': profile.customMaintenanceCalories,
-                    'customTrainingDayCalories': profile.customTrainingDayCalories,
-                    'customRestDayCalories': profile.customRestDayCalories,
-                    'customProteinTarget': profile.customProteinTarget,
-                  };
                   final updated = profile.copyWith(
                     customTrainingDayCalories: val,
-                    targetChangeHistory: [
-                      ...profile.targetChangeHistory,
-                      TargetChangeRecord(
-                        timestamp: DateTime.now(),
-                        sourceType: 'Custom Targets',
-                        maintenanceCalories: profile.customMaintenanceCalories,
-                        trainingDayCalories: val,
-                        restDayCalories: profile.customRestDayCalories,
-                        proteinTarget: profile.customProteinTarget,
-                        previousValues: prev,
-                      ),
-                    ],
                   );
                   _saveProfile(updated);
                 },
@@ -1348,27 +1310,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxValue: 6000,
                 currentValue: profile.customRestDayCalories ?? enginePlan.restDayCalories,
                 onSave: (val) {
-                  final prev = {
-                    'useCustomTargets': profile.useCustomTargets,
-                    'customMaintenanceCalories': profile.customMaintenanceCalories,
-                    'customTrainingDayCalories': profile.customTrainingDayCalories,
-                    'customRestDayCalories': profile.customRestDayCalories,
-                    'customProteinTarget': profile.customProteinTarget,
-                  };
                   final updated = profile.copyWith(
                     customRestDayCalories: val,
-                    targetChangeHistory: [
-                      ...profile.targetChangeHistory,
-                      TargetChangeRecord(
-                        timestamp: DateTime.now(),
-                        sourceType: 'Custom Targets',
-                        maintenanceCalories: profile.customMaintenanceCalories,
-                        trainingDayCalories: profile.customTrainingDayCalories,
-                        restDayCalories: val,
-                        proteinTarget: profile.customProteinTarget,
-                        previousValues: prev,
-                      ),
-                    ],
                   );
                   _saveProfile(updated);
                 },
@@ -1385,27 +1328,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxValue: 350,
                 currentValue: profile.customProteinTarget ?? enginePlan.avgDailyProtein,
                 onSave: (val) {
-                  final prev = {
-                    'useCustomTargets': profile.useCustomTargets,
-                    'customMaintenanceCalories': profile.customMaintenanceCalories,
-                    'customTrainingDayCalories': profile.customTrainingDayCalories,
-                    'customRestDayCalories': profile.customRestDayCalories,
-                    'customProteinTarget': profile.customProteinTarget,
-                  };
                   final updated = profile.copyWith(
                     customProteinTarget: val,
-                    targetChangeHistory: [
-                      ...profile.targetChangeHistory,
-                      TargetChangeRecord(
-                        timestamp: DateTime.now(),
-                        sourceType: 'Custom Targets',
-                        maintenanceCalories: profile.customMaintenanceCalories,
-                        trainingDayCalories: profile.customTrainingDayCalories,
-                        restDayCalories: profile.customRestDayCalories,
-                        proteinTarget: val,
-                        previousValues: prev,
-                      ),
-                    ],
                   );
                   _saveProfile(updated);
                 },
@@ -1626,27 +1550,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                final prev = {
-                  'useCustomTargets': _profile.useCustomTargets,
-                  'customMaintenanceCalories': _profile.customMaintenanceCalories,
-                  'customTrainingDayCalories': _profile.customTrainingDayCalories,
-                  'customRestDayCalories': _profile.customRestDayCalories,
-                  'customProteinTarget': _profile.customProteinTarget,
-                };
                 final updated = _profile.copyWith(
                   useCustomTargets: useCustom,
-                  targetChangeHistory: [
-                    ..._profile.targetChangeHistory,
-                    TargetChangeRecord(
-                      timestamp: DateTime.now(),
-                      sourceType: useCustom ? 'Custom Targets' : 'System Calculated',
-                      maintenanceCalories: _profile.customMaintenanceCalories,
-                      trainingDayCalories: _profile.customTrainingDayCalories,
-                      restDayCalories: _profile.customRestDayCalories,
-                      proteinTarget: _profile.customProteinTarget,
-                      previousValues: prev,
-                    ),
-                  ],
                 );
                 _saveProfile(updated);
               },
@@ -1831,31 +1736,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                final prev = {
-                  'useCustomTargets': _profile.useCustomTargets,
-                  'customMaintenanceCalories': _profile.customMaintenanceCalories,
-                  'customTrainingDayCalories': _profile.customTrainingDayCalories,
-                  'customRestDayCalories': _profile.customRestDayCalories,
-                  'customProteinTarget': _profile.customProteinTarget,
-                };
                 final updated = _profile.copyWith(
                   useCustomTargets: false,
                   customMaintenanceCalories: null,
                   customTrainingDayCalories: null,
                   customRestDayCalories: null,
                   customProteinTarget: null,
-                  targetChangeHistory: [
-                    ..._profile.targetChangeHistory,
-                    TargetChangeRecord(
-                      timestamp: DateTime.now(),
-                      sourceType: 'System Calculated',
-                      maintenanceCalories: null,
-                      trainingDayCalories: null,
-                      restDayCalories: null,
-                      proteinTarget: null,
-                      previousValues: prev,
-                    ),
-                  ],
                 );
                 _saveProfile(updated);
               },

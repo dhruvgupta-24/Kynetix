@@ -209,6 +209,12 @@ class UserNutritionMemory {
     debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId)');
   }
 
+  /// Internal ownership synchronization method called only by PersistenceService.
+  void setOwnerId(String userId) {
+    _ownerUserId = userId;
+    debugPrint('[UserNutritionMemory] 🔒 cached owner ID synchronized to: $userId');
+  }
+
   // ── Write ──────────────────────────────────────────────────────────────────
 
   /// Save a per-unit-1 override for [rawMealName].
@@ -432,24 +438,42 @@ class UserNutritionMemory {
         fiber: bestMatch.fiberPerUnit,
       );
 
+      final cal = NutrientRange(min: bestMatch.caloriesPerUnit, max: bestMatch.caloriesPerUnit);
+      final pro = NutrientRange(min: bestMatch.proteinPerUnit, max: bestMatch.proteinPerUnit);
+      final carbs = bestMatch.carbohydratesPerUnit != null
+          ? NutrientRange(min: bestMatch.carbohydratesPerUnit!, max: bestMatch.carbohydratesPerUnit!)
+          : null;
+      final fat = bestMatch.fatPerUnit != null
+          ? NutrientRange(min: bestMatch.fatPerUnit!, max: bestMatch.fatPerUnit!)
+          : null;
+      final fiber = bestMatch.fiberPerUnit != null
+          ? NutrientRange(min: bestMatch.fiberPerUnit!, max: bestMatch.fiberPerUnit!)
+          : null;
+
       return NutritionResult(
         canonicalMeal: bestMatch.canonicalMeal,
-        items:         [],
-        calories:      NutrientRange(
-            min: bestMatch.caloriesPerUnit, max: bestMatch.caloriesPerUnit),
-        protein:       NutrientRange(
-            min: bestMatch.proteinPerUnit, max: bestMatch.proteinPerUnit),
-        carbohydrates: bestMatch.carbohydratesPerUnit != null
-            ? NutrientRange(min: bestMatch.carbohydratesPerUnit!, max: bestMatch.carbohydratesPerUnit!)
-            : null,
-        fat: bestMatch.fatPerUnit != null
-            ? NutrientRange(min: bestMatch.fatPerUnit!, max: bestMatch.fatPerUnit!)
-            : null,
-        fiber: bestMatch.fiberPerUnit != null
-            ? NutrientRange(min: bestMatch.fiberPerUnit!, max: bestMatch.fiberPerUnit!)
-            : null,
+        items: [
+          NutritionItem(
+            name: bestMatch.canonicalMeal,
+            quantity: bestMatch.referenceQuantity,
+            unit: bestMatch.referenceUnit,
+            estimated: false,
+            mode: EstimationMode.packagedKnown,
+            calories: cal,
+            protein: pro,
+            carbohydrates: carbs,
+            fat: fat,
+            fiber: fiber,
+            eatingPatternScalarApplied: true,
+          ),
+        ],
+        calories:      cal,
+        protein:       pro,
+        carbohydrates: carbs,
+        fat:           fat,
+        fiber:         fiber,
         confidence:    0.99,
-        warnings:      [],
+        warnings:      const [],
         source:        'user_override',
         createdAt:     DateTime.now(),
         mealQualityScore: score,

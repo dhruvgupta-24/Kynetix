@@ -68,6 +68,12 @@ class PersonalNutritionMemory {
                '${_defaultTemplates.length} built-in templates (owner: $_ownerUserId)');
   }
 
+  /// Internal ownership synchronization method called only by PersistenceService.
+  void setOwnerId(String userId) {
+    _ownerUserId = userId;
+    debugPrint('[PersonalMemory] 🔒 cached owner ID synchronized to: $userId');
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /// Step 1: exact normalized match against built-in defaults + user overrides.

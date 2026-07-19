@@ -462,6 +462,7 @@ class NutritionResult {
           sugar: item.sugar,
           saturatedFat: item.saturatedFat,
           sodium: item.sodium,
+          eatingPatternScalarApplied: true,
         ));
       } else {
         updatedItems.add(item);

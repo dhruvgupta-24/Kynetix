@@ -41,6 +41,10 @@ class PersistenceService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('cached_owner_user_id_v1', userId);
+      // Synchronize in-memory owner IDs immediately
+      UserNutritionMemory.instance.setOwnerId(userId);
+      PersonalNutritionMemory.instance.setOwnerId(userId);
+      MealMemory.instance.setOwnerId(userId);
     } catch (_) {}
   }
 
@@ -130,7 +134,43 @@ class PersistenceService {
   static Future<void> saveProfile(UserProfile p) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kProfile, jsonEncode(p.toJson()));
+
+      final oldRaw = prefs.getString(_kProfile);
+      UserProfile? oldProfile;
+      if (oldRaw != null) {
+        try {
+          oldProfile = UserProfile.fromJson(jsonDecode(oldRaw) as Map<String, dynamic>);
+        } catch (_) {}
+      }
+
+      final hasChanged = oldProfile == null ||
+          oldProfile.goal != p.goal ||
+          oldProfile.weight != p.weight ||
+          oldProfile.height != p.height ||
+          oldProfile.age != p.age ||
+          oldProfile.gender != p.gender ||
+          oldProfile.workoutDaysMin != p.workoutDaysMin ||
+          oldProfile.workoutDaysMax != p.workoutDaysMax ||
+          oldProfile.useCustomTargets != p.useCustomTargets ||
+          oldProfile.customMaintenanceCalories != p.customMaintenanceCalories ||
+          oldProfile.customTrainingDayCalories != p.customTrainingDayCalories ||
+          oldProfile.customRestDayCalories != p.customRestDayCalories ||
+          oldProfile.customProteinTarget != p.customProteinTarget;
+
+      UserProfile finalProfile = p;
+      if (hasChanged) {
+        final record = TargetChangeRecord(
+          timestamp: DateTime.now(),
+          sourceType: p.useCustomTargets ? 'Custom Targets' : 'System Calculated',
+          profileSnapshot: p.toSnapshotJson(),
+        );
+
+        final newHistory = List<TargetChangeRecord>.from(p.targetChangeHistory)..add(record);
+        finalProfile = p.copyWith(targetChangeHistory: newHistory);
+        ProfileService.instance.currentUserProfile = finalProfile;
+      }
+
+      await prefs.setString(_kProfile, jsonEncode(finalProfile.toJson()));
       WidgetService.updateWidgetData().ignore();
     } catch (_) {}
   }
@@ -164,28 +204,51 @@ class PersistenceService {
 
     for (final entry in dayLogStore.entries) {
       final log = entry.value;
+      final date = DateTime.tryParse(entry.key);
+      if (date == null) continue;
+
       if (log.gymDay == null && !log.isEmpty) {
-        final date = DateTime.tryParse(entry.key);
-        if (date != null) {
-          final splitDay = WorkoutService.instance.splitDayFor(date);
-          if (splitDay != null && !splitDay.isRestDay) {
-            log.gymDay = GymDay(
-              didGym: true,
-              workoutType: WorkoutType.fromSplitName(splitDay.name),
-              splitDayName: splitDay.name,
-              splitOverridden: false,
-            );
-            migrated = true;
-          } else {
-            log.gymDay = const GymDay(didGym: false);
-            migrated = true;
+        final splitDay = WorkoutService.instance.splitDayFor(date);
+        if (splitDay != null && !splitDay.isRestDay) {
+          log.gymDay = GymDay(
+            didGym: true,
+            workoutType: WorkoutType.fromSplitName(splitDay.name),
+            splitDayName: splitDay.name,
+            splitOverridden: false,
+          );
+          migrated = true;
+        } else {
+          log.gymDay = const GymDay(didGym: false);
+          migrated = true;
+        }
+      }
+
+      // Freeze missing targets for any historical days that have null values
+      if (log.targetCalories == null || log.targetProtein == null) {
+        final profile = ProfileService.instance.currentUserProfile;
+        if (profile != null) {
+          final historicalProfile = profile.profileActiveOn(date);
+          if (historicalProfile == null) {
+            debugPrint('[PersistenceService] Skipping target freeze for $entry: insufficient timeline history');
+            continue;
           }
+          final resolvedTarget = NutritionTargetEngine.instance.effectiveTargetForDate(
+            date,
+            profile: historicalProfile,
+            forceRecalculate: true,
+          );
+          log.targetCalories = resolvedTarget.calories;
+          log.targetProtein = resolvedTarget.protein;
+          migrated = true;
+          debugPrint('[PersistenceService] Freezing targets on startup for $entry using historical profile: '
+              '${resolvedTarget.calories} kcal / ${resolvedTarget.protein}g');
         }
       }
     }
 
     if (migrated) {
       await saveDayLogs();
+      CloudSyncService.instance.syncDayLogsBackground().ignore();
     }
     lastHistoricalRepairCompletedAt = DateTime.now();
     debugPrint('[PersistenceService] Historical repair migration complete at: $lastHistoricalRepairCompletedAt');
@@ -210,12 +273,16 @@ class PersistenceService {
       }
 
       // Calculate and freeze targets on save to prevent retrospective drift if user profile changes later
-      if (!log.isEmpty) {
+      // Ensure: whenever a DayLog is actually persisted for any reason, if targetCalories or targetProtein are null,
+      // compute them once, write them, and never overwrite them again.
+      // Every newly created DayLog must freeze targets immediately using the historical profile active on that date.
+      if (log.targetCalories == null || log.targetProtein == null) {
         final profile = ProfileService.instance.currentUserProfile;
         if (profile != null) {
+          final historicalProfile = profile.profileActiveOn(date) ?? profile;
           final resolvedTarget = NutritionTargetEngine.instance.effectiveTargetForDate(
             date,
-            profile: profile,
+            profile: historicalProfile,
             forceRecalculate: true,
           );
           log.targetCalories = resolvedTarget.calories;
