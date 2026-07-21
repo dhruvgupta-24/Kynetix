@@ -3589,29 +3589,64 @@ class _BottomDockWidget extends StatelessWidget {
       final ex = exercises[idx];
       final exSets = sets[ex.id] ?? [];
       final isSkippedEx = skippedExercises[ex.id] ?? false;
+      final isSub = substitutedExercises[ex.id] ?? false;
+      final isTemp = (temporaryAdditions != null && temporaryAdditions![ex.id] == true);
+      
+      String source = 'default split';
+      if (isSub) {
+        source = 'substituted';
+      } else if (isTemp) {
+        source = 'temporary';
+      }
+
       final targetSetsPrescription = ex.targetSets;
-      final targetSetsTypical = WorkoutService.instance.typicalSetsForExercise(ex.id, splitDayName);
-      final totalLogged = exSets.length;
       final workingSets = exSets.where((s) => s.isMainWorkingSet).length;
       final warmUpSets = exSets.where((s) => s.setType == SetType.warmUp).length;
+      final dropSets = exSets.where((s) => s.setType == SetType.dropSet).length;
+      final failureSets = exSets.where((s) => s.setType == SetType.burnout).length;
+      final allNonWorking = exSets.where((s) => !s.isMainWorkingSet).length;
       final remainingWorking = (targetSetsPrescription - workingSets).clamp(0, 99);
-      final isCompletedValue = !isSkippedEx && workingSets >= targetSetsPrescription;
-      
+      final requiredWorking = targetSetsPrescription;
+
+      final entryObj = ExerciseEntry(
+        exercise: ex,
+        sets: exSets,
+        isSkipped: isSkippedEx,
+      );
+      final isCompletedValue = entryObj.isCompleted;
+
+      final isActive = idx == selectedIndex;
+      final shouldShowComplete = isActive && (workingSets >= targetSetsPrescription) && !isSkippedEx;
+      final shouldShowLog = isActive && (workingSets < targetSetsPrescription) && !isSkippedEx;
+
+      String capsuleState = 'not_started';
+      if (isSkippedEx) {
+        capsuleState = 'skipped';
+      } else if (workingSets >= targetSetsPrescription) {
+        capsuleState = 'completed (green check)';
+      } else if (workingSets > 0) {
+        capsuleState = 'in_progress (gray)';
+      }
+
       print('Exercise Index: $idx, ID: ${ex.id}, Name: ${ex.name}');
-      print('  - exercise.targetSets: $targetSetsPrescription (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
-      print('  - typicalSetsForExercise: $targetSetsTypical (file: lib/services/workout_service.dart, class: WorkoutService, method: typicalSetsForExercise, line: 522)');
-      print('  - entry.sets.length: $totalLogged (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: sets.length, line: 105)');
-      print('  - workingSetsCount: $workingSets (file: lib/models/workout_session.dart, class: SetEntry, getter: isMainWorkingSet, line: 56)');
-      print('  - warmUpSetsCount: $warmUpSets (file: lib/models/workout_session.dart, class: SetType.warmUp, line: 31)');
-      print('  - remainingWorkingSets: $remainingWorking (calculated on the fly)');
-      print('  - entry.isCompleted (custom logic): $isCompletedValue (calculated on the fly)');
-      
-      // Control values
-      print('  - Value controlling green check: ${workingSets >= targetSetsPrescription} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3629)');
-      print('  - Value controlling progress circles (color): ${workingSets >= targetSetsPrescription ? "green" : (workingSets > 0 ? "gray" : "dark")} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3629)');
-      print('  - Value controlling Log Set button: ${workingSets < targetSetsPrescription && !isSkippedEx} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3580)');
-      print('  - Value controlling auto-advance: ${workingSets >= targetSetsPrescription && !isSkippedEx} (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3581)');
-      print('  - Value controlling workout completion score: ${workingSets / (targetSetsPrescription > 0 ? targetSetsPrescription : 1)} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, getter: _completionProgress, line: 787)');
+      print('  - exercise.id: ${ex.id} (file: lib/models/workout_split.dart, class: Exercise, field: id, line: 35)');
+      print('  - exercise.name: ${ex.name} (file: lib/models/workout_split.dart, class: Exercise, field: name, line: 36)');
+      print('  - exercise.type: ${ex.type.name} (file: lib/models/workout_split.dart, class: Exercise, field: type, line: 38)');
+      print('  - defaultTargetSets: ${ex.defaultTargetSets} (file: lib/models/workout_split.dart, class: Exercise, field: defaultTargetSets, line: 31)');
+      print('  - resolved targetSets: ${ex.targetSets} (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
+      print('  - prescribedWorkingSets: ${ex.targetSets} (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
+      print('  - source of prescription: $source (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: source, line: 115)');
+      print('  - completedWorkingSetsCount: $workingSets (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: completedWorkingSetsCount, line: 135)');
+      print('  - warmUpSetsCount: $warmUpSets (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: warmUpSetsCount, line: 138)');
+      print('  - dropSetsCount: $dropSets (file: lib/models/workout_session.dart, class: SetEntry, field: setType == SetType.dropSet, line: 13)');
+      print('  - failureSetsCount: $failureSets (file: lib/models/workout_session.dart, class: SetEntry, field: setType == SetType.burnout, line: 16)');
+      print('  - allNonWorkingSetCount: $allNonWorking (file: lib/models/workout_session.dart, class: ExerciseEntry, calculated: sets.where((s) => !s.isMainWorkingSet).length, line: 105)');
+      print('  - remainingWorkingSets: $remainingWorking (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: remainingWorkingSetsCount, line: 143)');
+      print('  - requiredWorkingSets: $requiredWorking (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
+      print('  - entry.isCompleted: $isCompletedValue (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: isCompleted, line: 130)');
+      print('  - shouldShowExerciseComplete: $shouldShowComplete (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3837)');
+      print('  - shouldShowLogSet: $shouldShowLog (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3857)');
+      print('  - progressCapsuleState: $capsuleState (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3707)');
     }
     print('====================================');
 

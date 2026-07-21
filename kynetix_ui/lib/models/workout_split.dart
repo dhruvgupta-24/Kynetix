@@ -42,15 +42,8 @@ class Exercise {
     this.notes,
   });
 
-  int get targetSets =>
-      defaultTargetSets ??
-      switch (type) {
-        ExerciseType.barbellCompound => 4,
-        ExerciseType.dumbbell => 3,
-        ExerciseType.cableMachine => 3,
-        ExerciseType.isolation => 3,
-        ExerciseType.bodyweight => 3,
-      };
+  int get targetSets => defaultTargetSets ?? 3;
+  int get prescribedWorkingSets => targetSets;
 
   int get targetRepMin =>
       defaultRepMin ??
@@ -79,9 +72,9 @@ class Exercise {
     'name': name,
     'muscleGroup': muscleGroup,
     'type': type.index,
+    'defaultTargetSets': targetSets,
     if (defaultRepMin != null) 'defaultRepMin': defaultRepMin,
     if (defaultRepMax != null) 'defaultRepMax': defaultRepMax,
-    if (defaultTargetSets != null) 'defaultTargetSets': defaultTargetSets,
     if (notes != null && notes!.trim().isNotEmpty) 'notes': notes,
   };
 
@@ -97,7 +90,7 @@ class Exercise {
             0],
     defaultRepMin: (j['defaultRepMin'] as num?)?.toInt(),
     defaultRepMax: (j['defaultRepMax'] as num?)?.toInt(),
-    defaultTargetSets: (j['defaultTargetSets'] as num?)?.toInt(),
+    defaultTargetSets: (j['defaultTargetSets'] as num?)?.toInt() ?? 3,
     notes: j['notes'] as String?,
   );
 
