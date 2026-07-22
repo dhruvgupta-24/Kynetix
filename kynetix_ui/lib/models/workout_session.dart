@@ -11,28 +11,19 @@ enum SetType {
   normal,     // Primary working set — used for progression decisions
   warmUp,     // Excluded from progression; shown muted in UI
   dropSet,    // Reduced weight after working set; counts for volume
-  supersetA,  // Paired exercise A in superset
-  supersetB,  // Paired exercise B in superset
-  burnout,    // Max reps at end; counts for volume, not progression
 }
 
 extension SetTypeX on SetType {
   String get label => switch (this) {
-    SetType.normal    => 'Working',
-    SetType.warmUp    => 'Warm-up',
-    SetType.dropSet   => 'Drop',
-    SetType.supersetA => 'SS-A',
-    SetType.supersetB => 'SS-B',
-    SetType.burnout   => 'Burnout',
+    SetType.normal  => 'Working',
+    SetType.warmUp  => 'Warm-up',
+    SetType.dropSet => 'Drop',
   };
 
   String get shortLabel => switch (this) {
-    SetType.normal    => 'W',
-    SetType.warmUp    => 'WU',
-    SetType.dropSet   => 'D',
-    SetType.supersetA => 'A',
-    SetType.supersetB => 'B',
-    SetType.burnout   => '🔥',
+    SetType.normal  => 'W',
+    SetType.warmUp  => 'WU',
+    SetType.dropSet => 'D',
   };
 }
 
@@ -51,12 +42,8 @@ class SetEntry {
     this.setType = SetType.normal,
   });
 
-  /// Only normal + superset sets drive progression decisions.
-  /// Warm-up sets are intentionally lighter and skew the analysis.
-  bool get isMainWorkingSet =>
-      setType == SetType.normal ||
-      setType == SetType.supersetA ||
-      setType == SetType.supersetB;
+  /// Only normal sets drive primary target set completion decisions.
+  bool get isMainWorkingSet => setType == SetType.normal;
 
   bool get drivesProgression => setType == SetType.normal;
 

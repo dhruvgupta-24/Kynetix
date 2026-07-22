@@ -40,11 +40,11 @@ void main() {
           SetEntry(weight: 80, reps: 8, setType: SetType.normal), // Primary working
           SetEntry(weight: 80, reps: 7, setType: SetType.normal), // Primary working
           SetEntry(weight: 60, reps: 10, setType: SetType.dropSet), // Total stimulus only
-          SetEntry(weight: 50, reps: 12, setType: SetType.burnout), // Total stimulus only
+          SetEntry(weight: 50, reps: 12, setType: SetType.dropSet), // Total stimulus only
         ],
       );
 
-      // Primary working sets: normal, supersetA, supersetB.
+      // Primary working sets: normal.
       // 80*8 + 80*7 = 640 + 560 = 1200
       expect(entry.primaryWorkingVolume, 1200.0);
       expect(entry.workingVolume, 1200.0); // backwards-compatible

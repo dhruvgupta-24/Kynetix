@@ -127,7 +127,7 @@ void main() {
 
     // Tap on the Bench Press capsule (index 0) to switch back to it and verify its final completed state
     print('--- SWITCHING BACK TO BENCH PRESS ---');
-    await tester.tap(find.text('✓ Bench P…'));
+    await tester.tap(find.text('Bench Press').first);
     await tester.pumpAndSettle();
     expect(state.selectedIndex, equals(0));
 
@@ -150,14 +150,13 @@ void main() {
     print('VERIFY: entry.isCompleted is ${entry.isCompleted}');
     expect(entry.isCompleted, isTrue);
 
-    // 5. Green check is true (shown in progress capsules)
+    // 5. Green check icon is true (shown in progress capsules)
     print('VERIFY: Green check is true');
-    expect(find.text('✓ Bench P…'), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle_rounded), findsAtLeastNWidgets(1));
 
-    // 6. Log Set button is hidden (shows EXERCISE COMPLETE instead)
-    print('VERIFY: Log Set button is hidden and EXERCISE COMPLETE is displayed');
-    expect(find.textContaining('LOG SET'), findsNothing);
-    expect(find.text('EXERCISE COMPLETE'), findsOneWidget);
+    // 6. Log Set button remains unlocked for extra sets
+    print('VERIFY: Log Set button remains persistent for logging extra sets');
+    expect(find.textContaining('LOG SET'), findsAtLeastNWidgets(1));
 
     // 7. Workout score (completion ratio) for this exercise remains 1.0
     final targetSetsVal = entry.exercise.targetSets;
@@ -176,7 +175,7 @@ void main() {
     final entryAfterRemoval = state.buildEntry(exerciseWith4Sets);
     print('VERIFY AFTER WARM UP REMOVAL: entry.isCompleted is ${entryAfterRemoval.isCompleted}');
     expect(entryAfterRemoval.isCompleted, isTrue);
-    expect(find.text('EXERCISE COMPLETE'), findsOneWidget);
+    expect(find.textContaining('LOG SET'), findsAtLeastNWidgets(1));
 
     print('--- STEP 6: VERIFY FINAL STATE ---');
     await tester.pump(const Duration(seconds: 5));

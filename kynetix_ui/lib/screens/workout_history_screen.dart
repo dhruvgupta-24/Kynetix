@@ -3283,9 +3283,6 @@ class _ExerciseDetailCard extends StatelessWidget {
         SetType.normal => KColor.green,
         SetType.warmUp => const Color(0xFF60A5FA),
         SetType.dropSet => const Color(0xFFFF6B6B),
-        SetType.supersetA => const Color(0xFFFFB347),
-        SetType.supersetB => const Color(0xFFDDA0DD),
-        SetType.burnout => const Color(0xFFFF6B6B),
       };
 }
 

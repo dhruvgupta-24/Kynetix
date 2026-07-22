@@ -133,8 +133,6 @@ void main() {
 
     // CASE C: 1 drop set + 3 working sets -> complete
     print('--- TESTING CASE C ---');
-    await tester.tap(find.text(' + More'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Drop'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('LOG SET 1'));

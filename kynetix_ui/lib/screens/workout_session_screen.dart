@@ -1400,6 +1400,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 bottom: 0,
                 child: _BottomDockWidget(
                 exercises: _sessionExercises,
+                originalSplitExerciseCount: widget.splitDay.exercises.length,
                 sets: _sets,
                 skippedExercises: _skippedExercises,
                 substitutedExercises: _substitutedExercises,
@@ -3229,9 +3230,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     SetType.normal => KColor.green,
     SetType.warmUp => KColor.textMuted,
     SetType.dropSet => KColor.amber,
-    SetType.supersetA => KColor.blue,
-    SetType.supersetB => const Color(0xFFA78BFA),
-    SetType.burnout => KColor.danger,
   };
 }
 
@@ -3417,22 +3415,7 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final forceShowSelected = widget.selected != SetType.normal && widget.selected != SetType.warmUp;
-    final displayAll = _showAll || forceShowSelected;
-
-    final visibleOptions = displayAll
-        ? [
-            SetType.normal,
-            SetType.warmUp,
-            SetType.dropSet,
-            SetType.supersetA,
-            SetType.supersetB,
-            SetType.burnout,
-          ]
-        : [
-            SetType.normal,
-            SetType.warmUp,
-          ];
+    final visibleOptions = SetType.values;
 
     final showLeftFade = _canScrollLeft;
     final showRightFade = _canScrollRight;
@@ -3443,67 +3426,34 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
       physics: const BouncingScrollPhysics(),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [
-          ...visibleOptions.map((type) {
-            final isSelected = widget.selected == type;
-            return GestureDetector(
-              key: _chipKeys[type],
-              onTap: () {
-                HapticFeedback.selectionClick();
-                widget.onChanged(type);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: isSelected ? KColor.green : Colors.transparent,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  type.label,
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : KColor.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            );
-          }),
-          GestureDetector(
+        children: visibleOptions.map((type) {
+          final isSelected = widget.selected == type;
+          return GestureDetector(
+            key: _chipKeys[type],
             onTap: () {
               HapticFeedback.selectionClick();
-              setState(() {
-                _showAll = !_showAll;
-              });
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _scrollSelectedIntoView();
-              });
+              widget.onChanged(type);
             },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              color: Colors.transparent,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    displayAll ? ' Less' : ' + More',
-                    style: const TextStyle(
-                      color: KColor.blue,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Icon(
-                    displayAll ? Icons.keyboard_arrow_left_rounded : Icons.keyboard_arrow_right_rounded,
-                    color: KColor.blue,
-                    size: 14,
-                  ),
-                ],
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                color: isSelected ? KColor.green : const Color(0xFF1E1E2C),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: isSelected ? KColor.green : const Color(0xFF3E3E50), width: 0.5),
+              ),
+              child: Text(
+                type.label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : KColor.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
-        ],
+          );
+        }).toList(),
       ),
     );
 
@@ -3542,10 +3492,9 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
   }
 }
 
-// ─── Pinned Bottom Command Center Dock (Change 2) ───────────────────────────
-
 class _BottomDockWidget extends StatelessWidget {
   final List<Exercise> exercises;
+  final int originalSplitExerciseCount;
   final Map<String, List<SetEntry>> sets;
   final Map<String, bool> skippedExercises;
   final Map<String, bool> substitutedExercises;
@@ -3561,6 +3510,7 @@ class _BottomDockWidget extends StatelessWidget {
 
   const _BottomDockWidget({
     required this.exercises,
+    required this.originalSplitExerciseCount,
     required this.sets,
     required this.skippedExercises,
     required this.substitutedExercises,
@@ -3582,72 +3532,27 @@ class _BottomDockWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // RUNTIME INVESTIGATION TRACE
-    print('=== RUNTIME INVESTIGATION TRACE ===');
-    print('Active Selected Index: $selectedIndex');
-    for (int idx = 0; idx < exercises.length; idx++) {
-      final ex = exercises[idx];
-      final exSets = sets[ex.id] ?? [];
-      final isSkippedEx = skippedExercises[ex.id] ?? false;
-      final isSub = substitutedExercises[ex.id] ?? false;
-      final isTemp = (temporaryAdditions != null && temporaryAdditions![ex.id] == true);
-      
-      String source = 'default split';
-      if (isSub) {
-        source = 'substituted';
-      } else if (isTemp) {
-        source = 'temporary';
-      }
+    final currentWorkoutCount = exercises.length;
+    final completedCount = exercises.where((e) {
+      final wsets = (sets[e.id] ?? []).where((s) => s.isMainWorkingSet).length;
+      final isSkip = skippedExercises[e.id] ?? false;
+      return isSkip || (wsets >= e.targetSets);
+    }).length;
+    final activeIndex = selectedIndex;
+    final displayedNumber = selectedIndex + 1;
+    final displayedTotal = exercises.length;
 
-      final targetSetsPrescription = ex.targetSets;
-      final workingSets = exSets.where((s) => s.isMainWorkingSet).length;
-      final warmUpSets = exSets.where((s) => s.setType == SetType.warmUp).length;
-      final dropSets = exSets.where((s) => s.setType == SetType.dropSet).length;
-      final failureSets = exSets.where((s) => s.setType == SetType.burnout).length;
-      final allNonWorking = exSets.where((s) => !s.isMainWorkingSet).length;
-      final remainingWorking = (targetSetsPrescription - workingSets).clamp(0, 99);
-      final requiredWorking = targetSetsPrescription;
-
-      final entryObj = ExerciseEntry(
-        exercise: ex,
-        sets: exSets,
-        isSkipped: isSkippedEx,
-      );
-      final isCompletedValue = entryObj.isCompleted;
-
-      final isActive = idx == selectedIndex;
-      final shouldShowComplete = isActive && (workingSets >= targetSetsPrescription) && !isSkippedEx;
-      final shouldShowLog = isActive && (workingSets < targetSetsPrescription) && !isSkippedEx;
-
-      String capsuleState = 'not_started';
-      if (isSkippedEx) {
-        capsuleState = 'skipped';
-      } else if (workingSets >= targetSetsPrescription) {
-        capsuleState = 'completed (green check)';
-      } else if (workingSets > 0) {
-        capsuleState = 'in_progress (gray)';
-      }
-
-      print('Exercise Index: $idx, ID: ${ex.id}, Name: ${ex.name}');
-      print('  - exercise.id: ${ex.id} (file: lib/models/workout_split.dart, class: Exercise, field: id, line: 35)');
-      print('  - exercise.name: ${ex.name} (file: lib/models/workout_split.dart, class: Exercise, field: name, line: 36)');
-      print('  - exercise.type: ${ex.type.name} (file: lib/models/workout_split.dart, class: Exercise, field: type, line: 38)');
-      print('  - defaultTargetSets: ${ex.defaultTargetSets} (file: lib/models/workout_split.dart, class: Exercise, field: defaultTargetSets, line: 31)');
-      print('  - resolved targetSets: ${ex.targetSets} (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
-      print('  - prescribedWorkingSets: ${ex.targetSets} (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
-      print('  - source of prescription: $source (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: source, line: 115)');
-      print('  - completedWorkingSetsCount: $workingSets (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: completedWorkingSetsCount, line: 135)');
-      print('  - warmUpSetsCount: $warmUpSets (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: warmUpSetsCount, line: 138)');
-      print('  - dropSetsCount: $dropSets (file: lib/models/workout_session.dart, class: SetEntry, field: setType == SetType.dropSet, line: 13)');
-      print('  - failureSetsCount: $failureSets (file: lib/models/workout_session.dart, class: SetEntry, field: setType == SetType.burnout, line: 16)');
-      print('  - allNonWorkingSetCount: $allNonWorking (file: lib/models/workout_session.dart, class: ExerciseEntry, calculated: sets.where((s) => !s.isMainWorkingSet).length, line: 105)');
-      print('  - remainingWorkingSets: $remainingWorking (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: remainingWorkingSetsCount, line: 143)');
-      print('  - requiredWorkingSets: $requiredWorking (file: lib/models/workout_split.dart, class: Exercise, getter: targetSets, line: 45)');
-      print('  - entry.isCompleted: $isCompletedValue (file: lib/models/workout_session.dart, class: ExerciseEntry, getter: isCompleted, line: 130)');
-      print('  - shouldShowExerciseComplete: $shouldShowComplete (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3837)');
-      print('  - shouldShowLogSet: $shouldShowLog (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3857)');
-      print('  - progressCapsuleState: $capsuleState (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3707)');
-    }
+    print('=== WORKOUT SESSION STATE TRACE ===');
+    print('  - originalSplitExerciseCount: $originalSplitExerciseCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: widget.splitDay.exercises.length, line: 1402)');
+    print('  - currentWorkoutExerciseCount: $currentWorkoutCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, getter: _activeSessionExercises.length, line: 115)');
+    print('  - completedExerciseCount: $completedCount (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3538)');
+    print('  - activeExerciseIndex: $activeIndex (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _selectedIndex, line: 95)');
+    print('  - displayedExerciseNumber: $displayedNumber (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
+    print('  - displayedTotalExercises: $displayedTotal (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
+    print('  - skippedExercises: ${skippedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _skippedExercises, line: 85)');
+    print('  - replacedExercises: ${substitutedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _substitutedExercises, line: 86)');
+    print('  - temporaryExercises: ${temporaryAdditions?.entries.where((e) => e.value).map((e) => e.key).toList() ?? []} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _temporaryAdditions, line: 87)');
+    print('  - removedExercises: ${originalSplitExerciseCount - currentWorkoutCount} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, method: _removeExerciseFromSession, line: 1198)');
     print('====================================');
 
     if (exercises.isEmpty) {
@@ -3711,125 +3616,88 @@ class _BottomDockWidget extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 1. Horizontal scrollable progress pills representing Exercise-level completion
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(exercises.length, (idx) {
-                final ex = exercises[idx];
-                final truncatedName = ex.name.length > 8 ? '${ex.name.substring(0, 7)}…' : ex.name;
-                final wsets = (sets[ex.id] ?? []).where((s) => s.isMainWorkingSet).length;
-                final targetSets = ex.targetSets;
-                
-                final skipped = skippedExercises[ex.id] ?? false;
-                final sub = substitutedExercises[ex.id] ?? false;
-                final active = idx == selectedIndex;
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 1. Interactive Progress Capsules Row
+            SizedBox(
+              height: 34,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: exercises.length,
+                itemBuilder: (context, idx) {
+                  final ex = exercises[idx];
+                  final exSets = sets[ex.id] ?? [];
+                  final isSkippedEx = skippedExercises[ex.id] ?? false;
+                  final wsets = exSets.where((s) => s.isMainWorkingSet).length;
+                  final isSelected = idx == selectedIndex;
+                  final isCompleted = wsets >= ex.targetSets;
 
-                String displayLabel;
-                Color textColor;
-                Color bgColor;
-                BorderSide border;
+                  Color borderCol = const Color(0xFF2E2E3E);
+                  Color textCol = KColor.textMuted;
 
-                if (skipped) {
-                  displayLabel = sub ? '🔄 $truncatedName' : '🚫 $truncatedName';
-                  textColor = sub ? KColor.blue : KColor.danger;
-                  bgColor = active ? textColor.withValues(alpha: 0.2) : textColor.withValues(alpha: 0.08);
-                  border = BorderSide(color: textColor, width: active ? 1.5 : 0.8);
-                } else if (wsets >= targetSets) {
-                  displayLabel = '✓ $truncatedName';
-                  textColor = KColor.green;
-                  bgColor = active ? textColor.withValues(alpha: 0.2) : textColor.withValues(alpha: 0.08);
-                  border = BorderSide(color: textColor, width: active ? 1.5 : 0.8);
-                } else if (wsets > 0) {
-                  // Logged state (factual name without checkmark, neutral gray colors)
-                  displayLabel = truncatedName;
-                  textColor = const Color(0xFF9CA3AF);
-                  bgColor = active ? const Color(0xFF374151) : const Color(0xFF1F2937);
-                  border = BorderSide(color: active ? KColor.blue : const Color(0xFF4B5563), width: active ? 1.5 : 0.8);
-                } else {
-                  // Not Started
-                  displayLabel = truncatedName;
-                  textColor = KColor.textSecondary;
-                  bgColor = active ? KColor.blue.withValues(alpha: 0.2) : const Color(0xFF1E1E2C);
-                  border = BorderSide(color: active ? KColor.blue : const Color(0xFF2E2E3E), width: active ? 1.5 : 0.8);
-                }
+                  if (isSelected) {
+                    borderCol = KColor.green;
+                    textCol = Colors.white;
+                  }
 
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onSelectExercise(idx);
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: bgColor,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.fromBorderSide(border),
-                    ),
-                    child: Text(
-                      displayLabel,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 10.5,
-                        fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                  return GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onSelectExercise(idx);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isSelected ? KColor.green.withValues(alpha: 0.15) : const Color(0xFF161622),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: borderCol, width: isSelected ? 1.5 : 0.8),
+                      ),
+                      child: Row(
+                        children: [
+                          if (isSkippedEx) ...[
+                            const Icon(Icons.block_rounded, color: KColor.textMuted, size: 12),
+                            const SizedBox(width: 4),
+                          ] else if (isCompleted) ...[
+                            const Icon(Icons.check_circle_rounded, color: KColor.green, size: 12),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            _truncateName(ex.name, 14),
+                            style: TextStyle(
+                              color: textCol,
+                              fontSize: 11,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                );
-              }),
+                  );
+                },
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
 
-          // 2. Exercise Navigation Row (Pill Buttons with Prev/Next Names)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Previous Exercise Button
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: hasPrev
-                      ? TextButton.icon(
-                          onPressed: onPrevious,
-                          icon: const Icon(Icons.chevron_left_rounded, color: KColor.textSecondary, size: 18),
-                          label: Text(
-                            _truncateName(prevName, 12),
-                            style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ),
-              
-              // Active Exercise Short Stats
-              Text(
-                'EXERCISE ${selectedIndex + 1} OF ${exercises.length}',
-                style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
-              ),
-
-              // Next Exercise Button
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: hasNext
-                      ? Directionality(
-                          textDirection: TextDirection.rtl,
-                          child: TextButton.icon(
-                            onPressed: onNext,
-                            icon: const Icon(Icons.chevron_right_rounded, color: KColor.textSecondary, size: 18),
+            // 2. Exercise Navigation Row (Pill Buttons with Prev/Next Names)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Previous Exercise Button
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: hasPrev
+                        ? TextButton.icon(
+                            onPressed: onPrevious,
+                            icon: const Icon(Icons.chevron_left_rounded, color: KColor.textSecondary, size: 18),
                             label: Text(
-                              _truncateName(nextName, 12),
+                              _truncateName(prevName, 12),
                               style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
                             ),
                             style: TextButton.styleFrom(
@@ -3837,111 +3705,131 @@ class _BottomDockWidget extends StatelessWidget {
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                          ),
-                        )
-                      : const SizedBox.shrink(),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
 
-          // 3. Command Center Action Row: Add Exercise, Log Set, Delete Exercise
-          Row(
-            children: [
-              // Add Exercise Button (Thumb size)
-              Container(
-                width: 48,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
+                // Active Exercise Short Stats
+                Text(
+                  'EXERCISE ${selectedIndex + 1} OF ${exercises.length}',
+                  style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
                 ),
-                child: IconButton(
-                  icon: const Icon(Icons.playlist_add_rounded, color: Colors.white, size: 24),
-                  onPressed: onAddExercise,
-                ),
-              ),
-              const SizedBox(width: 8),
 
-              // Main "Log Set" CTA
-              Expanded(
-                child: SizedBox(
-                  height: 52,
-                  child: (activeWsets >= activeEx.targetSets && !isSkipped)
-                      ? Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF141624).withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: KColor.green.withValues(alpha: 0.3), width: 1),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.check_circle_rounded, color: KColor.green, size: 18),
-                              SizedBox(width: 6),
-                              Text(
-                                'EXERCISE COMPLETE',
-                                style: TextStyle(color: KColor.green, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
+                // Next Exercise Button
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: hasNext
+                        ? Directionality(
+                            textDirection: TextDirection.rtl,
+                            child: TextButton.icon(
+                              onPressed: onNext,
+                              icon: const Icon(Icons.chevron_right_rounded, color: KColor.textSecondary, size: 18),
+                              label: Text(
+                                _truncateName(nextName, 12),
+                                style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
-                            ],
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // 3. Command Center Action Row: Add Exercise, Log Set, Delete Exercise
+            Row(
+              children: [
+                // Add Exercise Button (Thumb size)
+                Container(
+                  width: 48,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E2C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.playlist_add_rounded, color: Colors.white, size: 24),
+                    onPressed: onAddExercise,
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Main "Log Set" CTA - UNLOCKED REGARDLESS OF COMPLETION!
+                Expanded(
+                  child: SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: canLog ? onLogSet : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isSkipped
+                            ? const Color(0xFF1F1F2E)
+                            : (activeWsets >= activeEx.targetSets
+                                ? const Color(0xFF15803D)
+                                : KColor.green),
+                        foregroundColor: Colors.white,
+                        shadowColor: KColor.green.withValues(alpha: 0.4),
+                        elevation: isSkipped ? 0 : 8,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide.none,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isSkipped
+                                ? Icons.block_rounded
+                                : (activeWsets >= activeEx.targetSets
+                                    ? Icons.check_circle_rounded
+                                    : Icons.add_task_rounded),
+                            size: 18,
                           ),
-                        )
-                      : ElevatedButton(
-                          onPressed: canLog ? onLogSet : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isSkipped
-                                ? const Color(0xFF1F1F2E)
-                                : KColor.green,
-                            foregroundColor: Colors.white,
-                            shadowColor: KColor.green.withValues(alpha: 0.4),
-                            elevation: isSkipped ? 0 : 8,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              side: BorderSide.none,
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              isSkipped
+                                  ? 'EXERCISE SKIPPED'
+                                  : 'LOG SET ${loggedList.length + 1}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
                             ),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(isSkipped ? Icons.block_rounded : Icons.add_task_rounded, size: 18),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  isSkipped
-                                      ? 'EXERCISE SKIPPED'
-                                      : 'LOG SET ${loggedList.length + 1}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
 
-              // Remove Exercise Button (Thumb size)
-              Container(
-                width: 48,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2C1E1E),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF503E3E), width: 0.5),
+                // Delete/Remove Exercise Button
+                Container(
+                  width: 48,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E2C),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF87171), size: 22),
+                    onPressed: onRemoveExercise,
+                  ),
                 ),
-                child: IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded, color: KColor.danger, size: 22),
-                  onPressed: onRemoveExercise,
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

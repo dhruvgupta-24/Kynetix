@@ -74,12 +74,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // 2. Select the first exercise (e.g. Bench Press) in list
-    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
     await tester.tap(find.text('Bench Press'));
     await tester.pumpAndSettle();
 
     // Verify Bench Press is added to the session
-    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
     expect(find.text('Empty Workout Session'), findsNothing);
 
     // 3. Log a Set
@@ -123,7 +123,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify exercise is present
-    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
 
     // 2. Remove Exercise
     await tester.tap(find.byIcon(Icons.delete_outline_rounded));
@@ -192,7 +192,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify draft was restored correctly: Bench Press is present and set counts are retrieved
-    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
     expect(find.text('LOG SET 2'), findsOneWidget); // since set 1 was logged
 
     // Ensure we exited without exceptions
@@ -251,7 +251,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify Bench Press is present
-    expect(find.text('Bench Press'), findsOneWidget);
+    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
 
     // Click Finish
     await tester.tap(find.text('Finish'));
