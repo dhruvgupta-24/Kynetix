@@ -68,8 +68,13 @@ class NutritionHydrationGuard {
   }
 
   /// Call when cloud hydration starts. Distinguishes "never hydrated"
-  /// from "actively hydrating" in logs, but both block reads.
-  void beginHydration() {
+  /// from "actively hydrating" in logs. If already Ready for current user and
+  /// this is a background update, keeps existing Ready state active.
+  void beginHydration({bool isBackgroundUpdate = false}) {
+    if (_state == _HydrationState.ready && isBackgroundUpdate) {
+      debugPrint('[HydrationGuard] 🔄 HYDRATING IN BACKGROUND — keeping existing ready state active for $_hydratedUserId');
+      return;
+    }
     _state = _HydrationState.hydrating;
     debugPrint('[HydrationGuard] 🔄 HYDRATING — nutrition memory reads blocked');
   }

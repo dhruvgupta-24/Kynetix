@@ -4,7 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/quick_add_item.dart';
+import '../models/day_log.dart';
+import '../models/nutrition_result.dart';
 import '../config/supabase_client.dart';
+import 'nutrition_hydration_guard.dart';
+import 'nutrition_pipeline.dart';
+import 'meal_memory.dart';
+import 'persistence_service.dart';
+import 'nutrition_target_engine.dart';
 
 class QuickAddService {
   QuickAddService._();
@@ -17,6 +24,74 @@ class QuickAddService {
   List<QuickAddItem> get customItems => List.unmodifiable(_customItems);
 
   SupabaseClient get _supabase => supabase;
+
+  /// Public service method to execute a Quick Add operation cleanly:
+  ///   1. Ensures hydration guard is ready for current user.
+  ///   2. Loads today's DayLog.
+  ///   3. Resolves estimation via NutritionPipeline.
+  ///   4. Inserts MealEntry into DayLog.
+  ///   5. Remembers meal in MealMemory.
+  ///   6. Awaits PersistenceService.saveDay(date).
+  ///   7. Refreshes nutrition targets via NutritionTargetEngine.
+  /// Returns the inserted MealEntry upon successful persistence.
+  Future<MealEntry> addMealToDay({
+    required DateTime date,
+    required String name,
+    required double calories,
+    required double protein,
+    required MealSection section,
+  }) async {
+    // 1. Ensure hydration guard is ready for current user
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      final currentUserId = _supabase.auth.currentUser?.id;
+      if (currentUserId != null) {
+        NutritionHydrationGuard.instance.markComplete(currentUserId);
+      }
+    }
+
+    // 2. Load DayLog
+    final dayLog = logFor(date);
+
+    // 3. Resolve result & construct entry
+    final resolvedResult = await NutritionPipeline.instance.estimateMeal(name);
+    final entry = MealEntry(
+      rawInput:        name,
+      finalSavedInput: name,
+      section:         section,
+      addedAt:         DateTime.now(),
+      dayOfWeek:       date.weekday,
+      parsedFoods:     [name],
+      userCorrected:   true,
+      result: resolvedResult.calories.mid > 0
+          ? resolvedResult
+          : NutritionResult.createCustom(
+              canonicalMeal: name,
+              calories: calories,
+              protein: protein,
+              source: 'quick_add',
+              userCorrected: true,
+            ),
+    );
+
+    // 4. Insert meal into DayLog
+    dayLog.add(section, entry);
+
+    // 5. Store in MealMemory
+    await MealMemory.instance.store(
+      name,
+      entry.result,
+      finalSavedInput: name,
+      canonicalMeal: name,
+    );
+
+    // 6. Persist successfully to disk before returning
+    await PersistenceService.saveDay(date);
+
+    // 7. Refresh target calculations for date
+    await NutritionTargetEngine.instance.refreshTargetForDate(date, force: true);
+
+    return entry;
+  }
 
   Future<void> init() async {
     try {

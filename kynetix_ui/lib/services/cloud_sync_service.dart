@@ -27,7 +27,7 @@ class CloudSyncService {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
 
-    NutritionHydrationGuard.instance.beginHydration();
+    NutritionHydrationGuard.instance.beginHydration(isBackgroundUpdate: true);
     debugPrint('[CloudSyncService] Starting cloud hydration for user: $userId');
 
     try {
@@ -54,8 +54,10 @@ class CloudSyncService {
         final gymDayJson = row['gym_day_json'];
         final sectionsJson = row['sections_json'];
 
-        final log = DayLog();
-        if (gymDayJson != null) {
+        final existingLocalLog = dayLogStore[dateKey];
+        final log = existingLocalLog ?? DayLog();
+
+        if (gymDayJson != null && log.gymDay == null) {
           log.gymDay = GymDay.fromJson(gymDayJson as Map<String, dynamic>);
         }
         if (sectionsJson != null) {
@@ -63,14 +65,27 @@ class CloudSyncService {
           for (final sectionName in sectionsMap.keys) {
             final sectionEnum = MealSection.values.firstWhere((e) => e.name == sectionName, orElse: () => MealSection.breakfast);
             final entries = sectionsMap[sectionName] as List<dynamic>;
-            for (final entryJson in entries) {
-              log.add(sectionEnum, MealEntry.fromJson(entryJson as Map<String, dynamic>));
+            final cloudEntries = entries.map((e) => MealEntry.fromJson(e as Map<String, dynamic>)).toList();
+
+            for (final cloudEntry in cloudEntries) {
+              final localEntries = log.entriesFor(sectionEnum);
+              final alreadyPresent = localEntries.any((local) =>
+                local.rawInput == cloudEntry.rawInput &&
+                local.addedAt.millisecondsSinceEpoch == cloudEntry.addedAt.millisecondsSinceEpoch
+              );
+              if (!alreadyPresent) {
+                log.add(sectionEnum, cloudEntry);
+              }
             }
           }
         }
         // Load frozen target values from Supabase to prevent drift on hydration
-        log.targetCalories = (row['target_calories'] as num?)?.toDouble();
-        log.targetProtein = (row['target_protein'] as num?)?.toDouble();
+        if (row['target_calories'] != null && log.targetCalories == null) {
+          log.targetCalories = (row['target_calories'] as num?)?.toDouble();
+        }
+        if (row['target_protein'] != null && log.targetProtein == null) {
+          log.targetProtein = (row['target_protein'] as num?)?.toDouble();
+        }
 
         dayLogStore[dateKey] = log;
       }

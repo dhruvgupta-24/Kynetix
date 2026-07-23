@@ -10,8 +10,6 @@ import '../services/coach_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/nutrition_target_engine.dart';
-import '../services/meal_memory.dart';
-import '../services/persistence_service.dart';
 import '../services/quick_add_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/workout_service.dart';
@@ -128,7 +126,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final log = logFor(_currentDate);
     final profile = currentUserProfile;
 
 
@@ -360,34 +357,19 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     MealSection? section,
   }) async {
     final sec = section ?? _currentSection;
-    final resolvedResult = await NutritionPipeline.instance.estimateMeal(name);
 
-    final entry = MealEntry(
-      rawInput:        name,
-      finalSavedInput: name,
-      section:         sec,
-      addedAt:         DateTime.now(),
-      dayOfWeek:       widget.date.weekday,
-      parsedFoods:     [name],
-      userCorrected:   true,
-      result: resolvedResult.calories.mid > 0
-          ? resolvedResult
-          : NutritionResult.createCustom(
-              canonicalMeal: name,
-              calories: calories,
-              protein: protein,
-              source: 'quick_add',
-              userCorrected: true,
-            ),
+    // Delegate business logic & persistence to QuickAddService
+    await QuickAddService.instance.addMealToDay(
+      date: widget.date,
+      name: name,
+      calories: calories,
+      protein: protein,
+      section: sec,
     );
-    _log.add(sec, entry);
-    MealMemory.instance.store(
-      name,
-      entry.result,
-      finalSavedInput: name,
-      canonicalMeal: name,
-    ).ignore();
+
     _refresh();
+
+    if (!mounted) return;
     kHapticMedium();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

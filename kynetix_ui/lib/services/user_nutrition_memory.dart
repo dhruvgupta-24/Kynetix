@@ -281,7 +281,9 @@ class UserNutritionMemory {
     _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
 
     await _persist();
-    CloudSyncService.instance.syncMemoryBackground(override);
+    try {
+      CloudSyncService.instance.syncMemoryBackground(override).catchError((_) {}).ignore();
+    } catch (_) {}
 
     debugPrint('[UserNutritionMemory] saved: "$normName" '
         '${finalCal.toStringAsFixed(3)} kcal/$normUnit '
