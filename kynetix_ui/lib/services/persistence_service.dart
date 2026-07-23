@@ -33,6 +33,12 @@ class PersistenceService {
   static DateTime lastLogsChangedAt = DateTime.now();
   static DateTime? lastDayLogsHydratedAt;
   static DateTime? lastHistoricalRepairCompletedAt;
+  static final ValueNotifier<int> dayLogNotifier = ValueNotifier<int>(0);
+
+  static void notifyLogsChanged() {
+    lastLogsChangedAt = DateTime.now();
+    dayLogNotifier.value++;
+  }
 
   static String? get cachedOwnerId => _cachedOwnerId;
 
@@ -293,10 +299,12 @@ class PersistenceService {
 
     await saveDayLogs();
     
-    WidgetService.updateWidgetData().ignore();
+    WidgetService.updateWidgetData().catchError((_) {}).ignore();
     
     // Fire-and-forget sync to Supabase
-    CloudSyncService.instance.syncDayLogsBackground();
+    try {
+      CloudSyncService.instance.syncDayLogsBackground().catchError((_) {}).ignore();
+    } catch (_) {}
     
     final profile = ProfileService.instance.currentUserProfile;
     if (profile != null) {

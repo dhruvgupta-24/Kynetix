@@ -253,10 +253,10 @@ class _DayDetailContentState extends State<_DayDetailContent> {
   }
 
   void _refresh() {
+    NutritionTargetEngine.instance.refreshTargetForDate(widget.date, force: true).ignore();
     setState(() {
       _log = logFor(widget.date);
     });
-    PersistenceService.saveDay(widget.date).ignore();
   }
 
   Future<void> _openAddMeal(MealSection section) async {

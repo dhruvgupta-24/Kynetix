@@ -6,6 +6,7 @@ import '../models/workout_split.dart';
 import '../models/workout_session.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/recovery_service.dart';
+import 'nutrition_target_engine.dart';
 
 // ─── ACWR / Fatigue Analytics ─────────────────────────────────────────────────
 
@@ -1339,10 +1340,23 @@ class WorkoutService extends ChangeNotifier {
     }
 
     await _persist();
+    NutritionTargetEngine.instance.refreshTargetForDate(session.date).ignore();
     notifyListeners();
     
     // Background cloud sync
-    CloudSyncService.instance.syncWorkoutBackground(session);
+    try {
+      CloudSyncService.instance.syncWorkoutBackground(session).catchError((_) {}).ignore();
+    } catch (_) {}
+  }
+
+  Future<void> deleteSession(String id) async {
+    final matches = _sessions.where((s) => s.id == id).toList();
+    if (matches.isEmpty) return;
+    final sessionDate = matches.first.date;
+    _sessions.removeWhere((s) => s.id == id);
+    await _persist();
+    NutritionTargetEngine.instance.refreshTargetForDate(sessionDate).ignore();
+    notifyListeners();
   }
 
   Future<void> bulkImportCloudSessions(List<WorkoutSession> importedSessions) async {
@@ -1375,10 +1389,12 @@ class WorkoutService extends ChangeNotifier {
   }
 
   Future<void> clearDraftSession() async {
+    final sessionDate = _draftSession?.date ?? DateTime.now();
     if (_draftSession == null && _draftStartedAt == null) return;
     _draftSession = null;
     _draftStartedAt = null;
     await _persist();
+    NutritionTargetEngine.instance.refreshTargetForDate(sessionDate).ignore();
     notifyListeners();
   }
 
@@ -1387,10 +1403,13 @@ class WorkoutService extends ChangeNotifier {
     _setupDone = true;
     _splitUpdatedAt = DateTime.now();
     await _persist();
+    NutritionTargetEngine.instance.refreshTargetForDate(DateTime.now()).ignore();
     notifyListeners();
 
     // Sync to cloud
-    CloudSyncService.instance.syncWorkoutSplitBackground(newSplit, _customExercises);
+    try {
+      CloudSyncService.instance.syncWorkoutSplitBackground(newSplit, _customExercises).catchError((_) {}).ignore();
+    } catch (_) {}
   }
 
   Future<void> loadSplitAndCustomExercisesFromCloud(

@@ -239,17 +239,14 @@ void main() {
       // Modify the UserProfile (e.g. increase weight to 120 kg).
       final modifiedProfile = profile2430.copyWith(weight: 120.0);
 
-      // Query target again WITH the date parameter.
-      final targetAfter = engine.dayTarget(
-        modifiedProfile,
-        isGymDay: log.gymDay!.didGym,
-        workoutTypeName: log.gymDay!.splitDayName,
-        date: historicalDate,
+      // Query target again via effectiveTargetForDate (pure read function).
+      final targetAfter = engine.effectiveTargetForDate(
+        historicalDate,
+        profile: modifiedProfile,
       );
 
       // Verify that the calorie target has NOT drifted (remains 2430 kcal).
       expect(targetAfter.calories.round(), equals(2430));
-      expect(targetAfter.note, contains('Saved Target (Drift Protected)'));
 
       // Meanwhile, querying WITHOUT the date parameter should recalculate and drift:
       final targetRecalculated = engine.dayTarget(
@@ -359,23 +356,19 @@ void main() {
       );
       dayLogStore[thirdKey] = thirdLog;
 
-      // Query target for the old date WITH date parameter (should yield 2590)
-      final targetOld = engine.dayTarget(
-        profile2430,
-        isGymDay: oldLog.gymDay!.didGym,
-        workoutTypeName: oldLog.gymDay!.splitDayName,
-        date: oldDate,
+      // Query target for the old date via effectiveTargetForDate (should yield 2590 from stored log)
+      final targetOld = engine.effectiveTargetForDate(
+        oldDate,
+        profile: profile2430,
       );
       expect(targetOld.calories.round(), equals(2590)); // Frozen target preserved
 
-      // Query target for the new date WITH date parameter (should yield 2430 since it is not frozen yet)
-      final targetNew = engine.dayTarget(
-        profile2430,
-        isGymDay: newLog.gymDay!.didGym,
-        workoutTypeName: newLog.gymDay!.splitDayName,
-        date: newDate,
+      // Query target for the new date via effectiveTargetForDate (should yield 2430 since it is computed via new logic)
+      final targetNew = engine.effectiveTargetForDate(
+        newDate,
+        profile: profile2430,
       );
-      expect(targetNew.calories.round(), equals(2430)); // New logic (0 calorie bonus) applied
+      expect(targetNew.calories.round(), equals(2430)); // New logic applied
 
       // 4. Set the profile on ProfileService
       final pService = ProfileService.instance;

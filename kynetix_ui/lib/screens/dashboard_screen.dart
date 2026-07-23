@@ -62,6 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _calendarPageController = PageController(initialPage: _monthIndex(_focusedMonth));
     WorkoutService.instance.addListener(_onWorkoutServiceChange);
+    PersistenceService.dayLogNotifier.addListener(_onDayLogChange);
     // Show a loading indicator if user already connected
     if (currentUserProfile?.healthSyncEnabled == true) {
       _syncing = true;
@@ -77,11 +78,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     WorkoutService.instance.removeListener(_onWorkoutServiceChange);
+    PersistenceService.dayLogNotifier.removeListener(_onDayLogChange);
     _calendarPageController.dispose();
     super.dispose();
   }
 
   void _onWorkoutServiceChange() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onDayLogChange() {
     if (mounted) {
       setState(() {});
     }

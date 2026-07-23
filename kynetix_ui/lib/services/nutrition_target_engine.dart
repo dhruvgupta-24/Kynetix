@@ -5,6 +5,7 @@ import '../services/health_service.dart';
 import '../models/day_log.dart';
 import 'profile_service.dart';
 import 'workout_service.dart';
+import 'persistence_service.dart';
 
 // ─── DayTarget ────────────────────────────────────────────────────────────────
 
@@ -97,9 +98,7 @@ class NutritionTargetEngine {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /// Unifies target calculation to a single source of truth for a given date.
-  /// Resolves profile, day log, workout split default splits, overrides, carry-forward,
-  /// and live step correction caching.
+  /// Pure read function. Resolves current DayTarget for a given date without mutating DayLog or triggering notifications.
   DayTarget effectiveTargetForDate(
     DateTime date, {
     UserProfile? profile,
@@ -121,7 +120,7 @@ class NutritionTargetEngine {
     final resolvedLog = log ?? logFor(date);
     final effectiveHealth = health ?? HealthService().lastSyncResult;
 
-    // 1. Return frozen targets if not forcing recalculation
+    // Return stored/frozen targets if present and not forcing recalculation
     if (!forceRecalculate && resolvedLog.targetCalories != null && resolvedLog.targetProtein != null) {
       final override = resolvedLog.gymDay?.targetCaloriesOverride;
       if (override != null) {
@@ -142,7 +141,7 @@ class NutritionTargetEngine {
       );
     }
 
-    // 2. Resolve inputs dynamically
+    // Pure dynamic calculation for display if target is not stored yet
     final ws = WorkoutService.instance;
     final session = ws.sessionFor(date);
     final splitDay = ws.splitDayFor(date);
@@ -179,6 +178,77 @@ class NutritionTargetEngine {
       carryForwardAdjustment: resolvedLog.carryForwardAdjustment,
       date: null,
     );
+  }
+
+  /// Centralized write pipeline for target calculation and persistence.
+  /// Refreshes automatically-managed nutrition targets when workout/day state changes.
+  /// Preserves manual target overrides (targetCaloriesOverride / custom targets).
+  Future<void> refreshTargetForDate(
+    DateTime date, {
+    UserProfile? profile,
+    bool force = false,
+    bool notify = true,
+  }) async {
+    final prof = profile ?? ProfileService.instance.currentUserProfile;
+    if (prof == null) return;
+
+    final log = logFor(date);
+
+    // Preserve manual target override if present
+    if (log.gymDay?.targetCaloriesOverride != null) {
+      debugPrint('[NutritionTargetEngine] Preserving manual calorie override for ${dateKey(date)}: ${log.gymDay!.targetCaloriesOverride} kcal');
+      return;
+    }
+
+    final ws = WorkoutService.instance;
+    final session = ws.sessionFor(date);
+    final splitDay = ws.splitDayFor(date);
+    final gymDay = log.gymDay;
+
+    final bool isGymDay;
+    if (gymDay != null) {
+      isGymDay = gymDay.didGym || (session?.isEmpty == false);
+    } else {
+      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
+      isGymDay = splitIsTraining || (session?.isEmpty == false);
+    }
+
+    final String? workoutTypeName;
+    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
+      workoutTypeName = session.splitDayName;
+    } else if (gymDay?.workoutType != null) {
+      workoutTypeName = gymDay?.workoutType?.displayName;
+    } else if (gymDay?.splitDayName != null) {
+      workoutTypeName = gymDay?.splitDayName;
+    } else if (splitDay != null && !splitDay.isRestDay) {
+      workoutTypeName = splitDay.name;
+    } else {
+      workoutTypeName = null;
+    }
+
+    final freshTarget = dayTarget(
+      prof,
+      isGymDay: isGymDay,
+      health: HealthService().lastSyncResult,
+      session: session,
+      workoutTypeName: workoutTypeName,
+      targetCaloriesOverride: null, // Only refresh automatic target
+      carryForwardAdjustment: log.carryForwardAdjustment,
+      date: date,
+    );
+
+    final changed = force ||
+        log.targetCalories != freshTarget.calories ||
+        log.targetProtein != freshTarget.protein;
+
+    if (changed) {
+      log.targetCalories = freshTarget.calories;
+      log.targetProtein = freshTarget.protein;
+      await PersistenceService.saveDay(date);
+      if (notify) {
+        PersistenceService.notifyLogsChanged();
+      }
+    }
   }
 
   WeeklyTargetPlan weeklyPlan(
@@ -251,38 +321,6 @@ class NutritionTargetEngine {
     double? carryForwardAdjustment,
     DateTime? date,
   }) {
-    if (date != null) {
-      final log = dayLogStore[dateKey(date)];
-      if (log != null && log.targetCalories != null && log.targetProtein != null) {
-        final finalCal = targetCaloriesOverride ?? log.targetCalories!;
-        final note = targetCaloriesOverride != null
-            ? 'Manual Override (${log.targetCalories!.toInt()} kcal original)'
-            : 'Saved Target (Drift Protected)';
-            
-        debugPrint('[NutritionTargetEngine] --- Calorie Target Loaded from Store (Drift Protected) ---');
-        debugPrint('[NutritionTargetEngine] Date: ${dateKey(date)}');
-        debugPrint('[NutritionTargetEngine] Saved Calorie Target: ${log.targetCalories} kcal');
-        debugPrint('[NutritionTargetEngine] Saved Protein Target: ${log.targetProtein} g');
-        if (targetCaloriesOverride != null) {
-          debugPrint('[NutritionTargetEngine]   - Manual Calorie Target Override: $targetCaloriesOverride kcal');
-        }
-        debugPrint('[NutritionTargetEngine] Final Calorie Target: $finalCal kcal');
-        debugPrint('[NutritionTargetEngine] --------------------------------------------------------');
-
-        return DayTarget(
-          calories: finalCal,
-          protein: log.targetProtein!,
-          isTrainingDay: isGymDay,
-          label: targetCaloriesOverride != null ? 'Manual Override' : _dayLabel(
-            session: session,
-            workoutTypeName: workoutTypeName,
-            isTraining: isGymDay,
-          ),
-          note: note,
-        );
-      }
-    }
-
     final plan = weeklyPlan(profile, health: health);
 
     // Determine if this is a training day — session > toggle
