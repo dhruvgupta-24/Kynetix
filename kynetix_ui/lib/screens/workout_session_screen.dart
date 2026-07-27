@@ -77,6 +77,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   final Map<String, bool> _substitutedExercises = {};
   final Map<String, String> _substitutedForIds = {};
   final Map<String, String> _substitutedForNames = {};
+  final Map<String, Exercise> _replacedOriginalExercises = {};
   final Map<String, bool> _temporaryAdditions = {};
 
   final _service = WorkoutService.instance;
@@ -255,6 +256,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       'substitutedExercises': _substitutedExercises,
       'substitutedForIds': _substitutedForIds,
       'substitutedForNames': _substitutedForNames,
+      'replacedOriginalExercises': _replacedOriginalExercises.map((k, v) => MapEntry(k, v.toJson())),
       'temporaryAdditions': _temporaryAdditions,
     };
     await prefs.setString('kynetix_workout_recovery', jsonEncode(recoveryData));
@@ -350,6 +352,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
             subbedNames.forEach((k, v) => _substitutedForNames[k] = v as String);
           }
 
+          final replacedOrig = data['replacedOriginalExercises'] as Map<String, dynamic>?;
+          if (replacedOrig != null) {
+            replacedOrig.forEach((k, v) {
+              try {
+                _replacedOriginalExercises[k] = Exercise.fromJson(v as Map<String, dynamic>);
+              } catch (_) {}
+            });
+          }
+
           final tempAdditions = data['temporaryAdditions'] as Map<String, dynamic>?;
           if (tempAdditions != null) {
             tempAdditions.forEach((k, v) => _temporaryAdditions[k] = v as bool);
@@ -428,16 +439,54 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _saveRecoveryState();
   }
 
+  @visibleForTesting
+  List<Exercise> get activeSessionExercisesForTest => _sessionExercises;
+
+  @visibleForTesting
+  void replaceExerciseForTest(String originalId, Exercise replacement) => _replaceExercise(originalId, replacement);
+
+  @visibleForTesting
+  void undoReplacementForTest(String originalId) => _undoReplacement(originalId);
+
+  void _printReplacementRuntimeAuditTrace(String action) {
+    final originalWorkoutCount = widget.splitDay.exercises.length;
+    final activeCount = _sessionExercises.length;
+    final navCount = _sessionExercises.length;
+    final progressCount = _sessionExercises.length;
+    final headerTotalCount = _sessionExercises.length;
+    final activeIds = _sessionExercises.map((e) => e.id).toList();
+    final masterIds = _sessionExercises.map((e) => e.id).toList();
+    final replacedIds = _substitutedForIds.values.toList();
+    final replacementMap = _substitutedForIds.map((repId, origId) => MapEntry(origId, repId));
+    final currentIdx = _selectedIndex;
+    final displayedXofY = 'EXERCISE ${currentIdx + 1} OF $headerTotalCount';
+
+    print('\n=================== EXERCISE REPLACEMENT RUNTIME AUDIT TRACE ($action) ===================');
+    print('  - Original workout exercise count: $originalWorkoutCount');
+    print('  - Active exercise count:           $activeCount');
+    print('  - Navigation exercise count:       $navCount');
+    print('  - Progress exercise count:         $progressCount');
+    print('  - Header total count:              $headerTotalCount');
+    print('  - Exercise IDs in active list:     $activeIds');
+    print('  - Exercise IDs in master workout list: $masterIds');
+    print('  - Exercise IDs marked as replaced: $replacedIds');
+    print('  - Replacement mapping (old -> new): $replacementMap');
+    print('  - Current exercise index:          $currentIdx');
+    print('  - Displayed "X of Y":              $displayedXofY');
+    print('========================================================================================\n');
+  }
+
   void _replaceExercise(String originalId, Exercise replacement) {
     final idx = _sessionExercises.indexWhere((e) => e.id == originalId);
     if (idx == -1) return;
     
+    final originalEx = _sessionExercises[idx];
+    final repId = replacement.id;
+
     setState(() {
-      _skippedExercises[originalId] = true;
-      _skipReasons[originalId] = 'Substituted';
-      _substitutedExercises[originalId] = true;
-      
-      final repId = replacement.id;
+      _replacedOriginalExercises[originalId] = originalEx;
+      _replacedOriginalExercises[repId] = originalEx;
+
       _sets[repId] = [];
       _setTypeSelections[repId] = SetType.normal;
       _rpeSelections[repId] = 8.0;
@@ -446,13 +495,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       
       _substitutedExercises[repId] = true;
       _substitutedForIds[repId] = originalId;
-      final originalEx = _sessionExercises[idx];
       _substitutedForNames[repId] = originalEx.name;
       
-      _sessionExercises.insert(idx + 1, replacement);
-      _selectedIndex = idx + 1;
+      // Replace IN-PLACE in the single canonical active exercise list
+      _sessionExercises[idx] = replacement;
+      _selectedIndex = idx;
     });
-    
+
+    _printReplacementRuntimeAuditTrace('REPLACE_EXERCISE');
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients) {
         _pageController.animateToPage(
@@ -469,15 +520,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _undoReplacement(String originalId) {
-    final idx = _sessionExercises.indexWhere((e) => _substitutedForIds[e.id] == originalId);
-    setState(() {
-      _skippedExercises[originalId] = false;
-      _skipReasons.remove(originalId);
-      _substitutedExercises.remove(originalId);
-      
-      if (idx != -1) {
-        final replacement = _sessionExercises[idx];
-        _sessionExercises.removeAt(idx);
+    final idx = _sessionExercises.indexWhere((e) => _substitutedForIds[e.id] == originalId || e.id == originalId);
+    if (idx == -1) return;
+
+    final replacement = _sessionExercises[idx];
+    final originalEx = _replacedOriginalExercises[originalId] ?? _replacedOriginalExercises[replacement.id];
+
+    if (originalEx != null) {
+      setState(() {
+        _sessionExercises[idx] = originalEx;
         _sets.remove(replacement.id);
         _weightSelections.remove(replacement.id);
         _repsSelections.remove(replacement.id);
@@ -486,22 +537,24 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         _substitutedExercises.remove(replacement.id);
         _substitutedForIds.remove(replacement.id);
         _substitutedForNames.remove(replacement.id);
-      }
-      
-      final originalIdx = _sessionExercises.indexWhere((e) => e.id == originalId);
-      if (originalIdx != -1) {
-        _selectedIndex = originalIdx;
-      }
-    });
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(_selectedIndex);
-      }
-    });
-    HapticFeedback.lightImpact();
-    _updateLiveScore();
-    _saveRecoveryState();
+        _replacedOriginalExercises.remove(originalId);
+        _replacedOriginalExercises.remove(replacement.id);
+        _skippedExercises.remove(originalId);
+        _skipReasons.remove(originalId);
+        _selectedIndex = idx;
+      });
+
+      _printReplacementRuntimeAuditTrace('UNDO_REPLACEMENT');
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(_selectedIndex);
+        }
+      });
+      HapticFeedback.lightImpact();
+      _updateLiveScore();
+      _saveRecoveryState();
+    }
   }
 
   Future<void> _addExtraExercise(Exercise relativeTo, bool before) async {
