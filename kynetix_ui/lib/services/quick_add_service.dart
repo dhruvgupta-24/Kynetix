@@ -41,19 +41,39 @@ class QuickAddService {
     required double protein,
     required MealSection section,
   }) async {
-    // 1. Ensure hydration guard is ready for current user
+    final sw = Stopwatch()..start();
+    final timings = <String, double>{};
+
+    // 1. Hydration check
+    final t0 = sw.elapsedMicroseconds;
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
       final currentUserId = _supabase.auth.currentUser?.id;
       if (currentUserId != null) {
         NutritionHydrationGuard.instance.markComplete(currentUserId);
       }
     }
+    timings['Hydration check'] = (sw.elapsedMicroseconds - t0) / 1000.0;
 
-    // 2. Load DayLog
+    // 2. DayLog retrieval
+    final t1 = sw.elapsedMicroseconds;
     final dayLog = logFor(date);
+    timings['DayLog retrieval'] = (sw.elapsedMicroseconds - t1) / 1000.0;
 
-    // 3. Resolve result & construct entry
-    final resolvedResult = await NutritionPipeline.instance.estimateMeal(name);
+    // 3. Nutrition estimation & construction
+    final t2 = sw.elapsedMicroseconds;
+    final NutritionResult result;
+    if (calories > 0 || protein > 0) {
+      // Direct fast path for pre-configured Quick Add items (0.00ms)
+      result = NutritionResult.createCustom(
+        canonicalMeal: name,
+        calories: calories,
+        protein: protein,
+        source: 'quick_add',
+        userCorrected: true,
+      );
+    } else {
+      result = await NutritionPipeline.instance.estimateMeal(name);
+    }
     final entry = MealEntry(
       rawInput:        name,
       finalSavedInput: name,
@@ -62,33 +82,39 @@ class QuickAddService {
       dayOfWeek:       date.weekday,
       parsedFoods:     [name],
       userCorrected:   true,
-      result: resolvedResult.calories.mid > 0
-          ? resolvedResult
-          : NutritionResult.createCustom(
-              canonicalMeal: name,
-              calories: calories,
-              protein: protein,
-              source: 'quick_add',
-              userCorrected: true,
-            ),
+      result:          result,
     );
+    timings['Nutrition estimation'] = (sw.elapsedMicroseconds - t2) / 1000.0;
 
-    // 4. Insert meal into DayLog
+    // 4. Memory lookups / MealMemory store
+    final t3 = sw.elapsedMicroseconds;
     dayLog.add(section, entry);
-
-    // 5. Store in MealMemory
     await MealMemory.instance.store(
       name,
       entry.result,
       finalSavedInput: name,
       canonicalMeal: name,
     );
+    timings['Memory lookups'] = (sw.elapsedMicroseconds - t3) / 1000.0;
 
-    // 6. Persist successfully to disk before returning
+    // 5. Database save / Persistence
+    final t4 = sw.elapsedMicroseconds;
     await PersistenceService.saveDay(date);
+    timings['Database save'] = (sw.elapsedMicroseconds - t4) / 1000.0;
 
-    // 7. Refresh target calculations for date
+    // 6. Nutrition target refresh
+    final t5 = sw.elapsedMicroseconds;
     await NutritionTargetEngine.instance.refreshTargetForDate(date, force: true);
+    timings['Nutrition target refresh'] = (sw.elapsedMicroseconds - t5) / 1000.0;
+
+    sw.stop();
+    timings['Total critical path'] = sw.elapsedMicroseconds / 1000.0;
+
+    debugPrint('\n=================== QUICK ADD PIPELINE PROFILING ===================');
+    timings.forEach((step, ms) {
+      debugPrint('  - ${step.padRight(25)}: ${ms.toStringAsFixed(2)} ms');
+    });
+    debugPrint('===================================================================\n');
 
     return entry;
   }

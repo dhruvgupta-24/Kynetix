@@ -1458,8 +1458,9 @@ class _RingStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio    = (consumed / target).clamp(0.0, 1.0);
-    final isOver   = consumed > target;
+    final ratio     = target > 0 ? (consumed / target).clamp(0.0, 1.0) : 0.0;
+    final realPct   = target > 0 ? ((consumed / target) * 100).round() : 0;
+    final isOver    = target > 0 && consumed > target;
     final ringColor = isOver ? KColor.warning : color;
     return KCard(
       padding: const EdgeInsets.all(KSpacing.lg),
@@ -1480,7 +1481,7 @@ class _RingStatCard extends StatelessWidget {
                   ringColor.withValues(alpha: 0.6),
                 ],
                 child: Text(
-                  '${(value * 100).toInt()}%',
+                  '$realPct%',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
@@ -3168,7 +3169,9 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
     required String unit,
     required Color color,
   }) {
-    final pct = target > 0 ? (consumed / target).clamp(0.0, 1.0) : 0.0;
+    final progressRatio = target > 0 ? (consumed / target).clamp(0.0, 1.0) : 0.0;
+    final realPct       = target > 0 ? ((consumed / target) * 100).round() : 0;
+    final isOver        = target > 0 && consumed > target;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3180,14 +3183,18 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
               style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             Text(
-              '${consumed.toStringAsFixed(1)} / ${target.toStringAsFixed(0)} $unit (${(pct * 100).toStringAsFixed(0)}%)',
-              style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+              '${consumed.toStringAsFixed(1)} / ${target.toStringAsFixed(0)} $unit ($realPct%${isOver ? ' — over goal' : ''})',
+              style: TextStyle(
+                color: isOver ? const Color(0xFFFFB347) : const Color(0xFF9CA3AF),
+                fontSize: 11,
+                fontWeight: isOver ? FontWeight.w600 : FontWeight.normal,
+              ),
             ),
           ],
         ),
         const SizedBox(height: 6),
         TweenAnimationBuilder<double>(
-          tween: Tween<double>(begin: 0.0, end: pct),
+          tween: Tween<double>(begin: 0.0, end: progressRatio),
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOutCubic,
           builder: (context, value, child) {
@@ -3197,7 +3204,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
                 value: value,
                 minHeight: 6,
                 backgroundColor: const Color(0xFF2E2E3E),
-                valueColor: AlwaysStoppedAnimation<Color>(color),
+                valueColor: AlwaysStoppedAnimation<Color>(isOver ? const Color(0xFFFFB347) : color),
               ),
             );
           },

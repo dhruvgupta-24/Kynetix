@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
@@ -1308,10 +1309,10 @@ class _MacroProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasTarget = target != null && target! > 0;
-    final ratio = hasTarget ? (consumed / target!).clamp(0.0, 1.0) : 0.0;
-    final pct = (ratio * 100).toInt();
-    final overGoal = hasTarget && consumed > target!;
+    final hasTarget     = target != null && target! > 0;
+    final progressRatio = hasTarget ? (consumed / target!).clamp(0.0, 1.0) : 0.0;
+    final realPct       = hasTarget ? ((consumed / target!) * 100).round() : 0;
+    final overGoal      = hasTarget && consumed > target!;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1359,7 +1360,7 @@ class _MacroProgress extends StatelessWidget {
         if (hasTarget) ...[
           const SizedBox(height: 5),
           TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: ratio),
+            tween: Tween(begin: 0, end: progressRatio),
             duration: const Duration(milliseconds: 600),
             curve: Curves.easeOutCubic,
             builder: (_, v, _) => ClipRRect(
@@ -1376,7 +1377,7 @@ class _MacroProgress extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            '$pct%${overGoal ? ' — over goal' : ''}',
+            '$realPct%${overGoal ? ' — over goal' : ''}',
             style: TextStyle(
               fontSize: 9,
               color: overGoal
@@ -2144,7 +2145,7 @@ class _CoachInsightRow extends StatelessWidget {
 // ─── Quick Add card ───────────────────────────────────────────────────────────
 
 class _QuickAddCard extends StatefulWidget {
-  final void Function({
+  final Future<void> Function({
     required String name,
     required double calories,
     required double protein,
@@ -2164,6 +2165,7 @@ class _QuickAddCardState extends State<_QuickAddCard> {
   ];
 
   Map<String, NutritionResult> _resolvedResults = {};
+  String? _loadingItemId;
 
   @override
   void initState() {
@@ -2172,16 +2174,37 @@ class _QuickAddCardState extends State<_QuickAddCard> {
   }
 
   Future<void> _resolveItems() async {
-    final allItems = [..._builtIn, ...QuickAddService.instance.customItems];
+    final List<QuickAddItem> allItems = [..._builtIn, ...QuickAddService.instance.customItems];
     final map = <String, NutritionResult>{};
     for (final item in allItems) {
-      final res = await NutritionPipeline.instance.estimateMeal(item.name);
-      map[item.id] = res;
+      final userMem = UserNutritionMemory.instance.lookup(item.name);
+      final double cals = userMem != null ? userMem.calories.mid : item.calories;
+      final double prot = userMem != null ? userMem.protein.mid : item.protein;
+      map[item.id] = NutritionResult.createCustom(
+        canonicalMeal: item.name,
+        calories: cals,
+        protein: prot,
+        source: 'quick_add',
+        userCorrected: true,
+      );
     }
     if (mounted) {
       setState(() {
         _resolvedResults = map;
       });
+    }
+  }
+
+  Future<void> _handleAdd(QuickAddItem item, double calories, double protein) async {
+    if (_loadingItemId != null) return;
+    setState(() => _loadingItemId = item.id);
+    HapticFeedback.lightImpact();
+    try {
+      await widget.onAdd(name: item.name, calories: calories, protein: protein);
+    } finally {
+      if (mounted) {
+        setState(() => _loadingItemId = null);
+      }
     }
   }
 
@@ -2271,6 +2294,7 @@ class _QuickAddCardState extends State<_QuickAddCard> {
             final resolved = _resolvedResults[item.id];
             final cals = resolved?.calories.mid ?? item.calories;
             final prot = resolved?.protein.mid ?? item.protein;
+            final isLoading = _loadingItemId == item.id;
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2279,7 +2303,8 @@ class _QuickAddCardState extends State<_QuickAddCard> {
                   title: item.name,
                   meta: '${cals.toInt()} kcal  ·  ${prot.toInt()}g protein',
                   isCustom: !item.builtIn,
-                  onTap: () => widget.onAdd(name: item.name, calories: cals, protein: prot),
+                  isLoading: isLoading,
+                  onTap: () => _handleAdd(item, cals, prot),
                   onDelete: !item.builtIn ? () => _deleteCustomItem(item) : null,
                 ),
                 if (i < allItems.length - 1)
@@ -2301,6 +2326,7 @@ class _QuickAddRow extends StatelessWidget {
   final String       title;
   final String       meta;
   final bool         isCustom;
+  final bool         isLoading;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
 
@@ -2309,6 +2335,7 @@ class _QuickAddRow extends StatelessWidget {
     required this.title,
     required this.meta,
     required this.isCustom,
+    this.isLoading = false,
     required this.onTap,
     this.onDelete,
   });
@@ -2316,8 +2343,8 @@ class _QuickAddRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: onTap,
-      onLongPress: isCustom && onDelete != null
+      onTap: isLoading ? null : onTap,
+      onLongPress: (isCustom && onDelete != null && !isLoading)
           ? () => showDialog(
                 context: context,
                 builder: (_) => AlertDialog(
@@ -2342,45 +2369,59 @@ class _QuickAddRow extends StatelessWidget {
               )
           : null,
       borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: Row(
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 18)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(title,
-                            style: const TextStyle(color: Colors.white, fontSize: 13,
-                                fontWeight: FontWeight.w600, height: 1.3)),
-                      ),
-                      if (isCustom) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text('custom',
-                              style: TextStyle(color: Color(0xFF52B788), fontSize: 9,
-                                  fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 150),
+        opacity: isLoading ? 0.6 : 1.0,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 18)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(title,
+                              style: const TextStyle(color: Colors.white, fontSize: 13,
+                                  fontWeight: FontWeight.w600, height: 1.3)),
                         ),
+                        if (isCustom) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('custom',
+                                style: TextStyle(color: Color(0xFF52B788), fontSize: 9,
+                                    fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
-                ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
+                  ],
+                ),
               ),
-            ),
-            const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
-          ],
+              if (isLoading)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF52B788)),
+                  ),
+                )
+              else
+                const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
+            ],
+          ),
         ),
       ),
     );
