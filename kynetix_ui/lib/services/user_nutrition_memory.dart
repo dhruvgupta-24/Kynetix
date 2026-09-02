@@ -246,9 +246,9 @@ class UserNutritionMemory {
     // so it's really 0.002 kcal/g.  The multiplier is (1 g / 1000 g per kg).
     double finalCal = caloriesPerUnit;
     double finalPro = proteinPerUnit;
-    double? finalCarbs = carbohydratesPerUnit;
-    double? finalFat = fatPerUnit;
-    double? finalFiber = fiberPerUnit;
+    double? finalCarbs = carbohydratesPerUnit ?? existing?.carbohydratesPerUnit;
+    double? finalFat   = fatPerUnit ?? existing?.fatPerUnit;
+    double? finalFiber = fiberPerUnit ?? existing?.fiberPerUnit;
     if (referenceUnit.trim().toLowerCase() != normUnit) {
       final mult = UnitNormalizer.normalizeQuantity(1.0, referenceUnit);
       if (mult > 0) {
@@ -278,6 +278,7 @@ class UserNutritionMemory {
     _overrides.removeWhere(
         (o) => o.canonicalMeal == normName);
     _overrides.add(override);
+    _ready = true;
     _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
 
     await _persist();

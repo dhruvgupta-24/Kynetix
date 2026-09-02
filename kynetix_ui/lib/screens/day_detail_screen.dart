@@ -357,9 +357,9 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     required double protein,
     MealSection? section,
   }) async {
+    final sw = Stopwatch()..start();
     final sec = section ?? _currentSection;
 
-    // Delegate business logic & persistence to QuickAddService
     await QuickAddService.instance.addMealToDay(
       date: widget.date,
       name: name,
@@ -368,7 +368,13 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       section: sec,
     );
 
+    final tRebuild = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ UI rebuild started: T+${tRebuild.toStringAsFixed(2)} ms');
+
     _refresh();
+
+    final tVisible = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Meal visible in list: T+${tVisible.toStringAsFixed(2)} ms');
 
     if (!mounted) return;
     kHapticMedium();
@@ -391,6 +397,9 @@ class _DayDetailContentState extends State<_DayDetailContent> {
         margin: const EdgeInsets.all(12),
       ),
     );
+
+    final tSnackbar = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Snackbar shown: T+${tSnackbar.toStringAsFixed(2)} ms');
   }
 
   Future<void> _openEditMeal(MealEntry entry) async {
@@ -2197,8 +2206,17 @@ class _QuickAddCardState extends State<_QuickAddCard> {
 
   Future<void> _handleAdd(QuickAddItem item, double calories, double protein) async {
     if (_loadingItemId != null) return;
+    final sw = Stopwatch()..start();
+    final t0 = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Tap received: T+${t0.toStringAsFixed(2)} ms (Item: "${item.name}")');
+
     setState(() => _loadingItemId = item.id);
     HapticFeedback.lightImpact();
+
+    await WidgetsBinding.instance.endOfFrame;
+    final t1 = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Loading state displayed: T+${t1.toStringAsFixed(2)} ms');
+
     try {
       await widget.onAdd(name: item.name, calories: calories, protein: protein);
     } finally {

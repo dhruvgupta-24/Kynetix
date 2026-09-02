@@ -266,6 +266,12 @@ class _AddMealScreenState extends State<AddMealScreen>
       _rows.add(row);
     }
     _updateTotalsAndValidate();
+    debugPrint('''
+=================== REAL APP RUNTIME AUDIT TRACE (EDIT SCREEN INITIALIZED) ===================
+  7. Detail sheet values          : Calories=${result.calories.mid}, Pro=${result.protein.mid}, Carbs=${result.carbohydrates?.mid}, Fat=${result.fat?.mid}, Fiber=${result.fiber?.mid}, Score=${result.mealQualityScore}
+  8. Edit screen values before Calc: Calories=$_totalCal, Pro=$_totalPro, Carbs=$_totalCarb, Fat=$_totalFat, Fiber=$_totalFib
+=============================================================================================
+''');
   }
 
   String _constructItemString(ParsedFoodItem parsed) {
@@ -549,6 +555,12 @@ class _AddMealScreenState extends State<AddMealScreen>
       macrosLockedByUser: true,
       userCorrected: true,
     );
+    
+    debugPrint('''
+=================== REAL APP RUNTIME AUDIT TRACE (AFTER CALCULATE / SAVE) ===================
+  9. Detail sheet values after Calc: Calories=${finalResult.calories.mid}, Pro=${finalResult.protein.mid}, Carbs=${finalResult.carbohydrates?.mid}, Fat=${finalResult.fat?.mid}, Fiber=${finalResult.fiber?.mid}, Score=${finalResult.mealQualityScore}
+=============================================================================================
+''');
     
     final isEditing = widget.initialEntry != null;
     final entry = MealEntry(

@@ -842,19 +842,41 @@ class NutritionResult {
     bool userCorrected = true,
     List<NutritionItem>? items,
   }) {
-    final carbsRange = carbohydrates != null
-        ? NutrientRange(min: carbohydrates, max: carbohydrates)
-        : estimateCarbsLocally(calories, protein, canonicalMeal);
-    final fatRange = fat != null
-        ? NutrientRange(min: fat, max: fat)
-        : estimateFatLocally(calories, protein, canonicalMeal);
-    final fiberRange = fiber != null
-        ? NutrientRange(min: fiber, max: fiber)
-        : estimateFiberLocally(calories, canonicalMeal);
+    double effectiveCal = calories;
+    double effectivePro = protein;
+    double? effectiveCarb = carbohydrates;
+    double? effectiveFat = fat;
+    double? effectiveFib = fiber;
+
+    if (items != null && items.isNotEmpty && items.length > 1) {
+      double sumCal = 0, sumPro = 0, sumCarb = 0, sumFat = 0, sumFib = 0;
+      for (final it in items) {
+        sumCal += it.calories.mid;
+        sumPro += it.protein.mid;
+        sumCarb += it.carbohydrates?.mid ?? 0;
+        sumFat += it.fat?.mid ?? 0;
+        sumFib += it.fiber?.mid ?? 0;
+      }
+      effectiveCal = sumCal;
+      effectivePro = sumPro;
+      effectiveCarb = sumCarb;
+      effectiveFat = sumFat;
+      effectiveFib = sumFib;
+    }
+
+    final carbsRange = effectiveCarb != null
+        ? NutrientRange(min: effectiveCarb, max: effectiveCarb)
+        : estimateCarbsLocally(effectiveCal, effectivePro, canonicalMeal);
+    final fatRange = effectiveFat != null
+        ? NutrientRange(min: effectiveFat, max: effectiveFat)
+        : estimateFatLocally(effectiveCal, effectivePro, canonicalMeal);
+    final fiberRange = effectiveFib != null
+        ? NutrientRange(min: effectiveFib, max: effectiveFib)
+        : estimateFiberLocally(effectiveCal, canonicalMeal);
 
     final score = calculateLocalQualityScore(
-      calories,
-      protein,
+      effectiveCal,
+      effectivePro,
       canonicalMeal,
       carbs: carbsRange.mid,
       fat: fatRange.mid,
@@ -870,15 +892,15 @@ class NutritionResult {
           unit:      'serving',
           estimated: false,
           mode:      EstimationMode.packagedKnown,
-          calories:  NutrientRange(min: calories, max: calories),
-          protein:   NutrientRange(min: protein,  max: protein),
+          calories:  NutrientRange(min: effectiveCal, max: effectiveCal),
+          protein:   NutrientRange(min: effectivePro, max: effectivePro),
           carbohydrates: carbsRange,
           fat:           fatRange,
           fiber:         fiberRange,
         ),
       ],
-      calories:      NutrientRange(min: calories, max: calories),
-      protein:       NutrientRange(min: protein,  max: protein),
+      calories:      NutrientRange(min: effectiveCal, max: effectiveCal),
+      protein:       NutrientRange(min: effectivePro, max: effectivePro),
       confidence:    1.0,
       warnings:      const [],
       source:        source,

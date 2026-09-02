@@ -130,9 +130,9 @@ class NutritionHydrationGuard {
   String? get currentUserId {
     if (_currentUserIdOverride != null) return _currentUserIdOverride;
     try {
-      return Supabase.instance.client.auth.currentUser?.id;
+      return Supabase.instance.client.auth.currentUser?.id ?? _hydratedUserId ?? 'guest';
     } catch (_) {
-      return null;
+      return _hydratedUserId ?? 'guest';
     }
   }
 

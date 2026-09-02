@@ -12,6 +12,8 @@ import 'nutrition_pipeline.dart';
 import 'meal_memory.dart';
 import 'persistence_service.dart';
 import 'nutrition_target_engine.dart';
+import 'user_nutrition_memory.dart';
+import 'item_parser.dart';
 
 class QuickAddService {
   QuickAddService._();
@@ -42,38 +44,34 @@ class QuickAddService {
     required MealSection section,
   }) async {
     final sw = Stopwatch()..start();
-    final timings = <String, double>{};
+    final tapTimeMs = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ QuickAddService entered: T+${tapTimeMs.toStringAsFixed(2)} ms');
 
     // 1. Hydration check
     final t0 = sw.elapsedMicroseconds;
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      final currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId != null) {
-        NutritionHydrationGuard.instance.markComplete(currentUserId);
-      }
+      final currentUserId = _supabase.auth.currentUser?.id ?? 'guest';
+      NutritionHydrationGuard.instance.markComplete(currentUserId);
     }
-    timings['Hydration check'] = (sw.elapsedMicroseconds - t0) / 1000.0;
 
     // 2. DayLog retrieval
-    final t1 = sw.elapsedMicroseconds;
     final dayLog = logFor(date);
-    timings['DayLog retrieval'] = (sw.elapsedMicroseconds - t1) / 1000.0;
 
-    // 3. Nutrition estimation & construction
-    final t2 = sw.elapsedMicroseconds;
-    final NutritionResult result;
-    if (calories > 0 || protein > 0) {
-      // Direct fast path for pre-configured Quick Add items (0.00ms)
-      result = NutritionResult.createCustom(
-        canonicalMeal: name,
-        calories: calories,
-        protein: protein,
-        source: 'quick_add',
-        userCorrected: true,
-      );
+    // 3. Strict Single Source of Truth Lookup Chain
+    final userMem = UserNutritionMemory.instance.lookup(name);
+    final mealMem = MealMemory.instance.lookupExactKnownFood(name) ??
+                    MealMemory.instance.lookupRecurring(name);
+
+    final NutritionResult selectedResult;
+    if (userMem != null) {
+      selectedResult = userMem;
+    } else if (mealMem != null) {
+      selectedResult = mealMem;
     } else {
-      result = await NutritionPipeline.instance.estimateMeal(name);
+      selectedResult = await NutritionPipeline.instance.estimateMeal(name);
     }
+
+    // 4. Construct immutable MealEntry using selectedResult directly
     final entry = MealEntry(
       rawInput:        name,
       finalSavedInput: name,
@@ -82,12 +80,10 @@ class QuickAddService {
       dayOfWeek:       date.weekday,
       parsedFoods:     [name],
       userCorrected:   true,
-      result:          result,
+      result:          selectedResult,
     );
-    timings['Nutrition estimation'] = (sw.elapsedMicroseconds - t2) / 1000.0;
 
-    // 4. Memory lookups / MealMemory store
-    final t3 = sw.elapsedMicroseconds;
+    // 5. Store in DayLog and MealMemory
     dayLog.add(section, entry);
     await MealMemory.instance.store(
       name,
@@ -95,26 +91,32 @@ class QuickAddService {
       finalSavedInput: name,
       canonicalMeal: name,
     );
-    timings['Memory lookups'] = (sw.elapsedMicroseconds - t3) / 1000.0;
 
-    // 5. Database save / Persistence
-    final t4 = sw.elapsedMicroseconds;
+    // 6. Persistence
+    final pStartMs = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Persistence started: T+${pStartMs.toStringAsFixed(2)} ms');
+
     await PersistenceService.saveDay(date);
-    timings['Database save'] = (sw.elapsedMicroseconds - t4) / 1000.0;
 
-    // 6. Nutrition target refresh
-    final t5 = sw.elapsedMicroseconds;
-    await NutritionTargetEngine.instance.refreshTargetForDate(date, force: true);
-    timings['Nutrition target refresh'] = (sw.elapsedMicroseconds - t5) / 1000.0;
+    final pEndMs = sw.elapsedMicroseconds / 1000.0;
+    debugPrint('[QuickAddTap] ⏱️ Persistence finished: T+${pEndMs.toStringAsFixed(2)} ms');
 
-    sw.stop();
-    timings['Total critical path'] = sw.elapsedMicroseconds / 1000.0;
+    // 7. Verification trace of zero mutations across pipeline
+    final dayLogReloaded = logFor(date);
+    final reloadedEntry = dayLogReloaded.entriesFor(section).firstWhere((e) => e == entry);
 
-    debugPrint('\n=================== QUICK ADD PIPELINE PROFILING ===================');
-    timings.forEach((step, ms) {
-      debugPrint('  - ${step.padRight(25)}: ${ms.toStringAsFixed(2)} ms');
-    });
-    debugPrint('===================================================================\n');
+    debugPrint('''
+=================== REAL APP RUNTIME AUDIT TRACE (QUICK ADD) ===================
+  1. Quick Add item selected     : "$name" (preset: ${calories}kcal, ${protein}g pro)
+  2. UserNutritionMemory lookup  : ${userMem != null ? 'Calories=${userMem.calories.mid}, Pro=${userMem.protein.mid}, Carbs=${userMem.carbohydrates?.mid}, Fat=${userMem.fat?.mid}, Score=${userMem.mealQualityScore}' : 'NULL'}
+  3. MealMemory lookup           : ${mealMem != null ? 'Calories=${mealMem.calories.mid}, Pro=${mealMem.protein.mid}, Carbs=${mealMem.carbohydrates?.mid}, Fat=${mealMem.fat?.mid}, Score=${mealMem.mealQualityScore}' : 'NULL'}
+  4. NutritionPipeline output    : Calories=${selectedResult.calories.mid}, Pro=${selectedResult.protein.mid}, Carbs=${selectedResult.carbohydrates?.mid}, Fat=${selectedResult.fat?.mid}, Fiber=${selectedResult.fiber?.mid}, Score=${selectedResult.mealQualityScore} (Source: ${selectedResult.source})
+  5. MealEntry.result before save: Calories=${entry.result.calories.mid}, Pro=${entry.result.protein.mid}, Carbs=${entry.result.carbohydrates?.mid}, Fat=${entry.result.fat?.mid}, Score=${entry.result.mealQualityScore}
+  6. MealEntry.result after save : Calories=${reloadedEntry.result.calories.mid}, Pro=${reloadedEntry.result.protein.mid}, Carbs=${reloadedEntry.result.carbohydrates?.mid}, Fat=${reloadedEntry.result.fat?.mid}, Score=${reloadedEntry.result.mealQualityScore}
+================================================================================
+''');
+
+    await NutritionTargetEngine.instance.refreshTargetForDate(date);
 
     return entry;
   }
