@@ -3,6 +3,7 @@ import '../models/exercise_definition.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
 import '../config/app_theme.dart';
+import '../widgets/exercise_media_widget.dart';
 
 /// Shows the detailed anatomical information, step-by-step cues, equipment info,
 /// and personal historical PR stats for an exercise.
@@ -140,6 +141,13 @@ class ExerciseDetailSheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               physics: const BouncingScrollPhysics(),
               children: [
+                // 0. Visual Demonstration & Media Card
+                ExerciseMediaWidget(
+                  definition: definition,
+                  height: 190,
+                ),
+                const SizedBox(height: 16),
+
                 // 1. Muscle Anatomy Section
                 _buildSectionHeader('ANATOMICAL TARGETS', Icons.accessibility_new_rounded),
                 const SizedBox(height: 10),

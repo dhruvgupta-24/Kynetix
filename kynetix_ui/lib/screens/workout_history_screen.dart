@@ -2,9 +2,11 @@ import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/workout_session.dart';
+import '../models/workout_split.dart';
 import '../models/workout_history_view_model.dart';
 import '../services/workout_service.dart';
 import '../services/achievement_engine.dart' show AchievementInfo;
+import '../widgets/muscle_body_map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── WorkoutHistoryScreen ─────────────────────────────────────────────────────
@@ -1069,7 +1071,21 @@ class _MuscleAnalyticsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Training Volume Balance', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+
+          // Anatomical Body Heatmap
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: MuscleBodyMap(
+                view: BodyView.sideBySide,
+                muscleHeatmap: _computeMuscleHeatmap(vm),
+                height: 160,
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
+
           _BalanceBar(
             title: 'Push vs Pull',
             leftPct: vm.pushPullRatio,
@@ -1122,6 +1138,19 @@ class _MuscleAnalyticsCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Map<String, double> _computeMuscleHeatmap(WorkoutHistoryViewModel vm) {
+    final heatmap = <String, double>{};
+    final maxVol = vm.muscleVolumes.values.fold(0.0, (m, v) => v > m ? v : m);
+    if (maxVol <= 0) return heatmap;
+
+    for (final entry in vm.muscleVolumes.entries) {
+      final canonical = entry.key.toLowerCase();
+      final intensity = (entry.value / maxVol).clamp(0.1, 1.0);
+      heatmap[canonical] = intensity;
+    }
+    return heatmap;
   }
 }
 

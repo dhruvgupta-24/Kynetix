@@ -890,7 +890,6 @@ class WorkoutService extends ChangeNotifier {
     int topSetBackOffCount = 0;
     int fixedCount = 0;
     int lowRepCount = 0;
-    int highRepCount = 0;
     int totalRepsSum = 0;
     int totalSetsSum = 0;
 
@@ -908,8 +907,6 @@ class WorkoutService extends ChangeNotifier {
 
       if (workingSets.every((s) => s.reps <= 5)) {
         lowRepCount++;
-      } else if (workingSets.every((s) => s.reps >= 12)) {
-        highRepCount++;
       }
 
       if (workingSets.length >= 2) {
@@ -1211,7 +1208,6 @@ class WorkoutService extends ChangeNotifier {
           }
           break;
         case ProgressionStyle.fixedWeight:
-        default:
           if (allWorkingSetsHitCeiling) {
             final nextW = currentWeight + increment;
             recommendationText = 'Increase weight to ${nextW.toStringAsFixed(nextW == nextW.truncateToDouble() ? 0 : 1)} kg since all working sets reached target reps ($targetRepMax).';

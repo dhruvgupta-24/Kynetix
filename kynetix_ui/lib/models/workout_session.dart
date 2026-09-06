@@ -34,12 +34,16 @@ class SetEntry {
   final int     reps;
   final double? rpe;    // 1–10, optional
   final SetType setType;
+  final int?    durationSeconds; // Optional for timed exercises / cardio
+  final double? distanceMeters;  // Optional for cardio
 
   const SetEntry({
     required this.weight,
     required this.reps,
     this.rpe,
     this.setType = SetType.normal,
+    this.durationSeconds,
+    this.distanceMeters,
   });
 
   SetEntry copyWith({
@@ -47,12 +51,16 @@ class SetEntry {
     int? reps,
     double? rpe,
     SetType? setType,
+    int? durationSeconds,
+    double? distanceMeters,
   }) {
     return SetEntry(
       weight: weight ?? this.weight,
       reps: reps ?? this.reps,
       rpe: rpe ?? this.rpe,
       setType: setType ?? this.setType,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      distanceMeters: distanceMeters ?? this.distanceMeters,
     );
   }
 
@@ -74,6 +82,8 @@ class SetEntry {
         'reps':    reps,
         'setType': setType.name,
         if (rpe != null) 'rpe': rpe,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
+        if (distanceMeters != null) 'distanceMeters': distanceMeters,
       };
 
   factory SetEntry.fromJson(Map<String, dynamic> j) => SetEntry(
@@ -81,6 +91,8 @@ class SetEntry {
         reps:    (j['reps']    as num?)?.toInt()    ?? 0,
         rpe:     (j['rpe']     as num?)?.toDouble(),
         setType: _parseSetType(j['setType'] as String?),
+        durationSeconds: (j['durationSeconds'] as num?)?.toInt(),
+        distanceMeters:  (j['distanceMeters'] as num?)?.toDouble(),
       );
 
   static SetType _parseSetType(String? raw) {
@@ -93,10 +105,19 @@ class SetEntry {
   }
 
   @override
-  String toString() =>
-      '${weight.toStringAsFixed(1)} kg × $reps'
-      '${rpe != null ? " @ RPE $rpe" : ""}'
-      ' [${setType.label}]';
+  String toString() {
+    if (durationSeconds != null) {
+      final mins = durationSeconds! ~/ 60;
+      final secs = durationSeconds! % 60;
+      final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+      return '$timeStr ${weight > 0 ? "($weight kg)" : ""}'
+          '${rpe != null ? " @ RPE $rpe" : ""}'
+          ' [${setType.label}]';
+    }
+    return '${weight.toStringAsFixed(1)} kg × $reps'
+        '${rpe != null ? " @ RPE $rpe" : ""}'
+        ' [${setType.label}]';
+  }
 }
 
 // ─── SetPhase & SetStructure ──────────────────────────────────────────────────
@@ -195,9 +216,16 @@ class LogicalSetGroup {
     final p = (j['phase'] == 'warmUp' || main.setType == SetType.warmUp)
         ? SetPhase.warmUp
         : SetPhase.work;
-    final s = j['structure'] != null
-        ? SetStructure.values.byName(j['structure'] as String)
-        : (sub.isNotEmpty ? SetStructure.dropSet : SetStructure.straight);
+    SetStructure s = SetStructure.straight;
+    if (j['structure'] != null) {
+      try {
+        s = SetStructure.values.byName(j['structure'] as String);
+      } catch (_) {
+        s = sub.isNotEmpty ? SetStructure.dropSet : SetStructure.straight;
+      }
+    } else {
+      s = sub.isNotEmpty ? SetStructure.dropSet : SetStructure.straight;
+    }
     return LogicalSetGroup(
       mainSet: main,
       subSets: sub,

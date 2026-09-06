@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/cloud_sync_service.dart';

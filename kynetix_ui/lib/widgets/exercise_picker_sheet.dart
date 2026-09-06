@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../models/exercise_definition.dart';
 import '../models/workout_split.dart';
 import '../services/exercise_library_service.dart';
 import '../services/workout_service.dart';

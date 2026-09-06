@@ -5,12 +5,23 @@ import 'package:kynetix/models/workout_split.dart';
 import 'package:kynetix/screens/exercise_detail_sheet.dart';
 import 'package:kynetix/services/exercise_library_service.dart';
 import 'package:kynetix/widgets/exercise_picker_sheet.dart';
+import 'package:kynetix/widgets/muscle_body_map.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
     await ExerciseLibraryService.instance.initialize();
+    MuscleBodyMap.setCachedGeometryForTesting({
+      'front': {
+        'viewBox': '0 0 100 100',
+        'paths': {'chest': 'M 0 0 L 10 10 Z'}
+      },
+      'back': {
+        'viewBox': '0 0 100 100',
+        'paths': {'lats': 'M 0 0 L 10 10 Z'}
+      }
+    });
   });
 
   group('ExercisePickerSheet & ExerciseDetailSheet UI Widget Tests', () {
@@ -98,16 +109,16 @@ void main() {
       expect(find.text('DUMBBELL'), findsWidgets);
 
       // Verify Anatomical Section
-      expect(find.text('ANATOMICAL TARGETS'), findsOneWidget);
-      expect(find.text('Primary Agonist:'), findsOneWidget);
-      expect(find.text('Shoulders, Triceps'), findsOneWidget);
+      expect(find.text('ANATOMICAL TARGETS', skipOffstage: false), findsOneWidget);
+      expect(find.text('Primary Agonist:', skipOffstage: false), findsOneWidget);
+      expect(find.text('Shoulders, Triceps', skipOffstage: false), findsOneWidget);
 
       // Verify Instructions
-      expect(find.text('EXECUTION & CUES'), findsOneWidget);
-      expect(find.text('Set an incline bench to roughly 30 degrees.'), findsOneWidget);
+      expect(find.text('EXECUTION & CUES', skipOffstage: false), findsOneWidget);
+      expect(find.text('Set an incline bench to roughly 30 degrees.', skipOffstage: false), findsOneWidget);
 
       // Verify CTA
-      expect(find.text('ADD TO WORKOUT'), findsOneWidget);
+      expect(find.text('ADD TO WORKOUT', skipOffstage: false), findsOneWidget);
     });
   });
 }

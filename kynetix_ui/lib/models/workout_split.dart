@@ -19,6 +19,14 @@ enum ExerciseType {
   bodyweight, // index 4 — rep-first progression
 }
 
+enum ExerciseExecutionMode {
+  weightReps,
+  bodyweightReps,
+  weightedBodyweight,
+  timed,
+  cardio,
+}
+
 // ─── Exercise ─────────────────────────────────────────────────────────────────
 
 class Exercise {
@@ -30,6 +38,8 @@ class Exercise {
   final int? defaultRepMax;
   final int? defaultTargetSets;
   final String? notes;
+  final ExerciseExecutionMode executionMode;
+  final String? supersetGroupId;
 
   const Exercise({
     required this.id,
@@ -40,6 +50,8 @@ class Exercise {
     this.defaultRepMax,
     this.defaultTargetSets,
     this.notes,
+    this.executionMode = ExerciseExecutionMode.weightReps,
+    this.supersetGroupId,
   });
 
   int get targetSets => defaultTargetSets ?? 3;
@@ -76,23 +88,57 @@ class Exercise {
     if (defaultRepMin != null) 'defaultRepMin': defaultRepMin,
     if (defaultRepMax != null) 'defaultRepMax': defaultRepMax,
     if (notes != null && notes!.trim().isNotEmpty) 'notes': notes,
+    if (executionMode != ExerciseExecutionMode.weightReps)
+      'executionMode': executionMode.name,
+    if (supersetGroupId != null && supersetGroupId!.isNotEmpty)
+      'supersetGroupId': supersetGroupId,
   };
 
   factory Exercise.fromJson(Map<String, dynamic> j) => Exercise(
     id: j['id'] as String? ?? '',
     name: j['name'] as String? ?? '',
     muscleGroup: j['muscleGroup'] as String? ?? '',
-    type:
-        ExerciseType.values[(j['type'] as int?)?.clamp(
-              0,
-              ExerciseType.values.length - 1,
-            ) ??
-            0],
-    defaultRepMin: (j['defaultRepMin'] as num?)?.toInt(),
-    defaultRepMax: (j['defaultRepMax'] as num?)?.toInt(),
-    defaultTargetSets: (j['defaultTargetSets'] as num?)?.toInt() ?? 3,
+    type: _parseExerciseType(j['type']),
+    defaultRepMin: _parseInt(j['defaultRepMin']),
+    defaultRepMax: _parseInt(j['defaultRepMax']),
+    defaultTargetSets: _parseInt(j['defaultTargetSets'] ?? j['target_sets']) ?? 3,
     notes: j['notes'] as String?,
+    executionMode: _parseExecutionMode(j['executionMode'] as String?),
+    supersetGroupId: j['supersetGroupId'] as String?,
   );
+
+  static ExerciseType _parseExerciseType(dynamic raw) {
+    if (raw == null) return ExerciseType.barbellCompound;
+    if (raw is int) {
+      return ExerciseType.values[raw.clamp(0, ExerciseType.values.length - 1)];
+    }
+    if (raw is String) {
+      final parsedInt = int.tryParse(raw);
+      if (parsedInt != null) {
+        return ExerciseType.values[parsedInt.clamp(0, ExerciseType.values.length - 1)];
+      }
+      try {
+        return ExerciseType.values.byName(raw);
+      } catch (_) {}
+    }
+    return ExerciseType.barbellCompound;
+  }
+
+  static int? _parseInt(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
+  static ExerciseExecutionMode _parseExecutionMode(String? raw) {
+    if (raw == null) return ExerciseExecutionMode.weightReps;
+    try {
+      return ExerciseExecutionMode.values.byName(raw);
+    } catch (_) {
+      return ExerciseExecutionMode.weightReps;
+    }
+  }
 
   @override
   bool operator ==(Object other) => other is Exercise && other.id == id;
@@ -107,6 +153,8 @@ class Exercise {
     int? defaultRepMax,
     int? defaultTargetSets,
     String? notes,
+    ExerciseExecutionMode? executionMode,
+    String? supersetGroupId,
   }) => Exercise(
     id: id,
     name: name ?? this.name,
@@ -116,6 +164,8 @@ class Exercise {
     defaultRepMax: defaultRepMax ?? this.defaultRepMax,
     defaultTargetSets: defaultTargetSets ?? this.defaultTargetSets,
     notes: notes ?? this.notes,
+    executionMode: executionMode ?? this.executionMode,
+    supersetGroupId: supersetGroupId ?? this.supersetGroupId,
   );
 }
 

@@ -93,6 +93,7 @@ void main() {
       ],
     );
     await WorkoutService.instance.saveSplit(splitWithRestToday);
+    await NutritionTargetEngine.instance.refreshTargetForDate(today, force: true);
 
     final s3EffRest = NutritionTargetEngine.instance.effectiveTargetForDate(today, profile: profile);
     print('\n--- SCENARIO 3: Changing Today\'s Split to Rest Day ---');
@@ -110,6 +111,7 @@ void main() {
       ],
     );
     await WorkoutService.instance.saveSplit(splitWithTrainingToday);
+    await NutritionTargetEngine.instance.refreshTargetForDate(today, force: true);
 
     final s3EffTrain = NutritionTargetEngine.instance.effectiveTargetForDate(today, profile: profile);
     print('--- SCENARIO 3: Changing Today\'s Split to Push Heavy (Training) ---');
@@ -122,6 +124,7 @@ void main() {
     // ─────────────────────────────────────────────────────────────────────────
     final emptySplit = const WorkoutSplit(id: 'empty', name: 'Empty', days: []);
     await WorkoutService.instance.saveSplit(emptySplit);
+    await NutritionTargetEngine.instance.refreshTargetForDate(today, force: true);
 
     final s4Eff = NutritionTargetEngine.instance.effectiveTargetForDate(today, profile: profile);
     print('\n--- SCENARIO 4: Removing Today\'s Split ---');

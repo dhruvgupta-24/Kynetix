@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
-import '../models/user_profile.dart';
 import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart' show WeightContext;

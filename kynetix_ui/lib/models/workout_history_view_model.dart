@@ -50,6 +50,7 @@ class WorkoutHistoryViewModel {
   // ── Muscle Analytics
   final Map<String, int> muscleFrequencies;
   final Map<String, double> muscleVolumes;
+  Map<String, double> get muscleVolumeBreakdown => muscleVolumes;
   final double pushPullRatio; // 0.0 to 1.0 (pushSets / total)
   final double upperLowerRatio; // 0.0 to 1.0 (upperSets / total)
   final double pushPullBalanceScore; // 0.0 to 100.0

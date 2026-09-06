@@ -11,8 +11,9 @@ import '../models/day_log.dart';
 import '../services/workout_service.dart';
 import '../services/persistence_service.dart';
 import '../widgets/exercise_picker_sheet.dart';
-import 'exercise_detail_sheet.dart';
-import 'workout_setup_screen.dart' show showCreateCustomExerciseSheet;
+import '../widgets/barbell_plate_calculator.dart';
+import '../services/wakelock_service.dart';
+import '../services/superset_flow_service.dart';
 
 // ─── WorkoutSessionScreen ─────────────────────────────────────────────────────
 //
@@ -94,6 +95,54 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   double _scorePrs = 0.0;
   int _e1rmPrsCount = 0;
 
+  // Rest Timer State
+  int _restSecondsRemaining = 0;
+  Timer? _restTimer;
+  bool _isRestTimerActive = false;
+
+  void _startRestTimer({int durationSeconds = 90}) {
+    _restTimer?.cancel();
+    setState(() {
+      _restSecondsRemaining = durationSeconds;
+      _isRestTimerActive = true;
+    });
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_restSecondsRemaining <= 1) {
+        timer.cancel();
+        setState(() {
+          _restSecondsRemaining = 0;
+          _isRestTimerActive = false;
+        });
+        HapticFeedback.heavyImpact();
+      } else {
+        setState(() {
+          _restSecondsRemaining--;
+        });
+      }
+    });
+  }
+
+  void _adjustRestTimer(int deltaSeconds) {
+    if (!_isRestTimerActive) return;
+    setState(() {
+      _restSecondsRemaining = (_restSecondsRemaining + deltaSeconds).clamp(5, 600);
+    });
+    HapticFeedback.selectionClick();
+  }
+
+  void _skipRestTimer() {
+    _restTimer?.cancel();
+    setState(() {
+      _restSecondsRemaining = 0;
+      _isRestTimerActive = false;
+    });
+    HapticFeedback.lightImpact();
+  }
+
   // PR Celebration State (Non-blocking)
   bool _showPrToast = false;
   String _prToastMsg = '';
@@ -107,6 +156,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WakelockService.instance.enable();
     
     print('initState _selectedIndex: $_selectedIndex');
     print('initState draftSession: ${widget.draftSession}');
@@ -209,6 +259,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _restTimer?.cancel();
+    WakelockService.instance.disable();
     _pageController.dispose();
     _scoreNotifier.dispose();
     _debounceTimer?.cancel();
@@ -940,6 +992,35 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _triggerPRNotification(w, r, newSet.estimatedOneRepMax);
     }
 
+    // Start rest timer on set completion
+    _startRestTimer(durationSeconds: ex.type == ExerciseType.barbellCompound ? 90 : 60);
+
+    // Superset round auto-navigation
+    if (ex.supersetGroupId != null && ex.supersetGroupId!.isNotEmpty) {
+      final status = SupersetFlowService.getStatusForGroup(
+        supersetGroupId: ex.supersetGroupId!,
+        allExercises: _sessionExercises,
+        entriesMap: {for (final e in _sessionExercises) e.id: buildEntry(e)},
+      );
+      if (status != null && !status.isCompleted && status.nextExercise != null) {
+        final nextEx = status.nextExercise!;
+        final nextIdx = _sessionExercises.indexWhere((e) => e.id == nextEx.id);
+        if (nextIdx != -1 && nextIdx != _selectedIndex) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted && _pageController.hasClients) {
+              setState(() => _selectedIndex = nextIdx);
+              _pageController.animateToPage(
+                nextIdx,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOutCubic,
+              );
+            }
+          });
+          return;
+        }
+      }
+    }
+
     // Auto-advance if completed
     final entry = buildEntry(ex);
     if (entry.isCompleted) {
@@ -1419,6 +1500,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               ),
             ),
 
+            // Floating Rest Timer Bar
+            _buildFloatingRestTimer(),
+
             // Pinned Bottom Command Center Dock
             if (MediaQuery.of(context).viewInsets.bottom == 0)
               Positioned(
@@ -1481,6 +1565,110 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 onDone: () => Navigator.of(context).pop(true),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloatingRestTimer() {
+    if (!_isRestTimerActive || _restSecondsRemaining <= 0) return const SizedBox.shrink();
+    final mins = _restSecondsRemaining ~/ 60;
+    final secs = _restSecondsRemaining % 60;
+    final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: _dockHeight + 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141628),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: KColor.green.withValues(alpha: 0.5)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: KColor.green,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'REST',
+                style: TextStyle(
+                  color: KColor.green,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                timeStr,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _buildRestTimerBtn('-15s', () => _adjustRestTimer(-15)),
+              const SizedBox(width: 6),
+              _buildRestTimerBtn('+30s', () => _adjustRestTimer(30)),
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: _skipRestTimer,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'SKIP',
+                    style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRestTimerBtn(String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E2034),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF2E3248)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
         ),
       ),
     );
@@ -2419,11 +2607,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
         .where((val) => val > 0.0)
         .toList();
 
-    // Progression Coach Decision Engine (Objective History-Based)
-    final lastTopSet = widget.lastEntry?.topSet;
-    final currentSets = widget.sets;
-    final bestEver = WorkoutService.instance.bestSetEver(widget.exercise.id);
-    
     // Calculate typical trends from history
     double totalSetsCount = 0;
     int sessionsWithSetsCount = 0;
@@ -2469,80 +2652,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       typicalTrendStr = '$typicalWeightStr × $typicalRepsStr';
       if (typicalSetsStr.isNotEmpty) {
         typicalTrendStr += ' ($typicalSetsStr)';
-      }
-    }
-
-    String recSet = '';
-    String recReason = '';
-
-    final type = widget.exercise.type;
-    final increment = type == ExerciseType.barbellCompound
-        ? 2.5
-        : type == ExerciseType.dumbbell
-            ? 2.0
-            : type == ExerciseType.cableMachine
-                ? 5.0
-                : 2.0;
-
-    if (currentSets.isEmpty) {
-      if (lastTopSet != null) {
-        if (lastTopSet.reps >= 10) {
-          final nextWeight = lastTopSet.weight + increment;
-          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-          recReason = 'You completed ${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg last session, exceeding typical volume. Increase weight to $recSet.';
-        } else if (lastTopSet.reps < 6) {
-          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-          recReason = 'Last session was relatively heavy (${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg). Keep weight here and focus on building reps.';
-        } else {
-          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 10 reps';
-          recReason = 'You completed ${lastTopSet.reps} reps at ${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg last session. Strive to hit 10 reps before adding weight.';
-        }
-      } else if (bestEver != null) {
-        recSet = '${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-        recReason = 'Establishing baseline. Lifetime best is ${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps}. Start at or slightly below this to gauge today\'s strength.';
-      } else {
-        final startW = type == ExerciseType.barbellCompound ? 40.0 : 15.0;
-        recSet = '${startW.toStringAsFixed(0)} kg × 8 reps';
-        recReason = 'No previous session logs found. Establish your starting volume baseline today around $recSet.';
-      }
-    } else {
-      final currentWorkingSets = currentSets.where((s) => s.isMainWorkingSet).toList();
-      final currentTopSet = currentWorkingSets.isNotEmpty
-          ? currentWorkingSets.reduce((a, b) => a.estimatedOneRepMax >= b.estimatedOneRepMax ? a : b)
-          : currentSets.last;
-
-      if (lastTopSet != null) {
-        if (currentTopSet.weight > lastTopSet.weight ||
-            (currentTopSet.weight == lastTopSet.weight && currentTopSet.reps > lastTopSet.reps)) {
-          final nextWeight = currentTopSet.weight + increment;
-          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-          recReason = 'You exceeded your previous session performance (${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps) by hitting ${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${currentTopSet.reps} reps today. Increase weight to $recSet.';
-        } else if (currentTopSet.weight == lastTopSet.weight && currentTopSet.reps == lastTopSet.reps) {
-          recSet = '${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${(currentTopSet.reps + 1)} reps';
-          recReason = 'You matched your previous performance (${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps). Push for one more rep at this weight.';
-        } else {
-          recSet = '${lastTopSet.weight.toStringAsFixed(lastTopSet.weight == lastTopSet.weight.truncateToDouble() ? 0 : 1)} kg × ${lastTopSet.reps} reps';
-          recReason = 'Working set completed. Focus on recovery and try to match your previous session best ($recSet).';
-        }
-      } else if (bestEver != null) {
-        if (currentTopSet.weight > bestEver.weight ||
-            (currentTopSet.weight == bestEver.weight && currentTopSet.reps > bestEver.reps)) {
-          final nextWeight = currentTopSet.weight + increment;
-          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-          recReason = 'New Lifetime Best! You exceeded your previous record of ${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps} reps. Recommend stepping up to $recSet.';
-        } else {
-          recSet = '${bestEver.weight.toStringAsFixed(bestEver.weight == bestEver.weight.truncateToDouble() ? 0 : 1)} kg × ${bestEver.reps} reps';
-          recReason = 'Set logged. Strive to match your lifetime best of $recSet today.';
-        }
-      } else {
-        if (currentTopSet.reps >= 10) {
-          final nextWeight = currentTopSet.weight + increment;
-          recSet = '${nextWeight.toStringAsFixed(nextWeight == nextWeight.truncateToDouble() ? 0 : 1)} kg × 8 reps';
-          recReason = 'Strong set of ${currentTopSet.reps} reps. Increase load to $recSet to build intensity.';
-        } else {
-          recSet = '${currentTopSet.weight.toStringAsFixed(currentTopSet.weight == currentTopSet.weight.truncateToDouble() ? 0 : 1)} kg × 10 reps';
-          recReason = 'Set logged. Focus on matching this weight on subsequent sets and strive for 10 reps.';
-        }
       }
     }
 
@@ -3020,7 +3129,52 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+
+          // Contextual Barbell Plate Breakdown
+          if (widget.exercise.type == ExerciseType.barbellCompound && _selectedWeight >= 20.0) ...[
+            const SizedBox(height: 8),
+            BarbellPlateStackView(targetWeightKg: _selectedWeight),
+          ],
+
+          // Ghost Previous Performance Indicator
+          Builder(
+            builder: (context) {
+              final nextSetIdx = widget.sets.length;
+              final lastSets = widget.lastEntry?.sets ?? [];
+              final prevSet = nextSetIdx < lastSets.length ? lastSets[nextSetIdx] : null;
+              if (prevSet == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.history_rounded, size: 13, color: Color(0xFF9CA3AF)),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Last time: ${prevSet.weight.toStringAsFixed(1)} kg × ${prevSet.reps} reps (Set ${nextSetIdx + 1})',
+                          style: const TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 14),
 
           // Double vertical selector wheels
           Row(
@@ -3441,7 +3595,6 @@ class _SetTypeSelector extends StatefulWidget {
 }
 
 class _SetTypeSelectorState extends State<_SetTypeSelector> {
-  bool _showAll = false;
   late ScrollController _scrollController;
   bool _canScrollLeft = false;
   bool _canScrollRight = false;
@@ -4550,186 +4703,6 @@ class _ConfettiPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// ─── Exercise Picker bottom sheet ──────────────────────────────────────────
-
-class _SessionExercisePickerSheet extends StatefulWidget {
-  final List<Exercise> exercises;
-  const _SessionExercisePickerSheet({required this.exercises});
-
-  @override
-  State<_SessionExercisePickerSheet> createState() =>
-      _SessionExercisePickerSheetState();
-}
-
-class _SessionExercisePickerSheetState
-    extends State<_SessionExercisePickerSheet> {
-  late final TextEditingController _controller;
-  late final FocusNode _searchFocusNode;
-  String _query = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController();
-    _searchFocusNode = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _searchFocusNode.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _searchFocusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = widget.exercises
-        .where(
-          (e) =>
-              e.name.toLowerCase().contains(_query.toLowerCase()) ||
-              e.muscleGroup.toLowerCase().contains(_query.toLowerCase()),
-        )
-        .toList();
-
-    final splitIds = WorkoutService.instance.split.days.expand((d) => d.exercises).map((e) => e.id).toSet();
-    final recentIds = WorkoutService.instance.recentSessions(limit: 10).expand((s) => s.entries).map((e) => e.exercise.id).toSet();
-
-    filtered.sort((a, b) {
-      int scoreA = 0;
-      if (splitIds.contains(a.id)) scoreA -= 10;
-      if (recentIds.contains(a.id)) scoreA -= 5;
-
-      int scoreB = 0;
-      if (splitIds.contains(b.id)) scoreB -= 10;
-      if (recentIds.contains(b.id)) scoreB -= 5;
-
-      if (scoreA != scoreB) {
-        return scoreA.compareTo(scoreB);
-      }
-      return a.name.compareTo(b.name);
-    });
-
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-
-    return AnimatedPadding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeOut,
-      child: SafeArea(
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.75,
-          ),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _controller,
-                focusNode: _searchFocusNode,
-                onChanged: (v) => setState(() => _query = v),
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Search exercises...',
-                  prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B7280), size: 18),
-                  filled: true,
-                  fillColor: const Color(0xFF13131F),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 8),
-              InkWell(
-                onTap: () async {
-                  final navigator = Navigator.of(context);
-                  final ex = await showCreateCustomExerciseSheet(context);
-                  if (!mounted || ex == null) return;
-                  navigator.pop(ex);
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: KColor.green.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: KColor.green.withValues(alpha: 0.3)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.add_rounded, color: KColor.green, size: 20),
-                      SizedBox(width: 10),
-                      Text(
-                        '+ Add Custom Exercise',
-                        style: TextStyle(color: KColor.green, fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Divider(height: 1, color: Color(0xFF2E2E3E)),
-              const SizedBox(height: 4),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: filtered.length,
-                  itemBuilder: (context, i) {
-                    final ex = filtered[i];
-                    final isSplit = splitIds.contains(ex.id);
-                    final isRecent = recentIds.contains(ex.id);
-                    
-                    String badge = '';
-                    Color badgeColor = Colors.transparent;
-                    if (isSplit && isRecent) {
-                      badge = 'Split • Recent';
-                      badgeColor = KColor.green;
-                    } else if (isSplit) {
-                      badge = 'Split';
-                      badgeColor = KColor.blue;
-                    } else if (isRecent) {
-                      badge = 'Recent';
-                      badgeColor = KColor.amber;
-                    }
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                      title: Row(
-                        children: [
-                          Expanded(child: Text(ex.name, style: const TextStyle(color: Colors.white, fontSize: 13))),
-                          if (badge.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: badgeColor.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.5),
-                              ),
-                              child: Text(
-                                badge,
-                                style: TextStyle(color: badgeColor, fontSize: 9, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      subtitle: Text('${ex.muscleGroup} • ${ex.repRangeLabel}', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
-                      trailing: const Icon(Icons.add_rounded, color: KColor.green, size: 20),
-                      onTap: () => Navigator.of(context).pop(ex),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ─── Single exercise history display sheet ──────────────────────────────────
 

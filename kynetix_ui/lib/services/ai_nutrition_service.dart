@@ -385,9 +385,6 @@ class AiNutritionService {
     }
   }
 
-  // Legacy single-line hint kept for backward compatibility (not used in prompt).
-  String _portionAnchorHint() => '';
-
   // ── System prompt ─────────────────────────────────────────────────────────
 
   String _systemPrompt() => '''

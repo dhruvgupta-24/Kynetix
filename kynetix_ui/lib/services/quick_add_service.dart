@@ -13,7 +13,6 @@ import 'meal_memory.dart';
 import 'persistence_service.dart';
 import 'nutrition_target_engine.dart';
 import 'user_nutrition_memory.dart';
-import 'item_parser.dart';
 
 class QuickAddService {
   QuickAddService._();
@@ -48,7 +47,6 @@ class QuickAddService {
     debugPrint('[QuickAddTap] ⏱️ QuickAddService entered: T+${tapTimeMs.toStringAsFixed(2)} ms');
 
     // 1. Hydration check
-    final t0 = sw.elapsedMicroseconds;
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
       final currentUserId = _supabase.auth.currentUser?.id ?? 'guest';
       NutritionHydrationGuard.instance.markComplete(currentUserId);
