@@ -131,17 +131,17 @@ void main() {
         id: 'test_session_id',
         date: DateTime(2026, 6, 6),
         splitDayName: 'Push Day',
-        entries: const [
+        entries: [
           ExerciseEntry(
-            exercise: Exercise(id: 'bench_press', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
-            sets: [
+            exercise: const Exercise(id: 'bench_press', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+            sets: const [
               SetEntry(weight: 60, reps: 8, rpe: 9, setType: SetType.normal),
             ],
             isSkipped: false,
           ),
           ExerciseEntry(
-            exercise: Exercise(id: 'incline_press', name: 'Incline Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
-            sets: [],
+            exercise: const Exercise(id: 'incline_press', name: 'Incline Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+            sets: const [],
             isSkipped: true,
             skipReason: 'Time Constraint',
           ),
@@ -175,10 +175,10 @@ void main() {
         id: 's1',
         date: DateTime(2026, 6, 1),
         splitDayName: 'Chest Day',
-        entries: const [
+        entries: [
           ExerciseEntry(
-            exercise: Exercise(id: 'bench', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
-            sets: [
+            exercise: const Exercise(id: 'bench', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+            sets: const [
               SetEntry(weight: 60, reps: 8),
               SetEntry(weight: 60, reps: 8),
               SetEntry(weight: 60, reps: 8),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
+import '../widgets/exercise_picker_sheet.dart';
 
 // ─── Training Onboarding Questionnaire Enums ────────────────────────────────
 
@@ -272,18 +273,11 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
   Future<void> _addExercise(int weekday) async {
     final current = _dayExercises[weekday] ?? [];
-    final available = WorkoutService.instance.allExercises
-        .where((e) => !current.any((c) => c.id == e.id))
-        .toList();
+    final excludeIds = current.map((c) => c.id).toSet();
 
-    final picked = await showModalBottomSheet<Exercise>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _ExercisePickerSheet(exercises: available),
+    final picked = await showExercisePickerSheet(
+      context,
+      excludeIds: excludeIds,
     );
 
     if (picked != null) {

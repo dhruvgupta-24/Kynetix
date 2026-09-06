@@ -2727,7 +2727,9 @@ class _EditSessionScreen extends StatefulWidget {
 class _EditSessionScreenState extends State<_EditSessionScreen> {
   late final TextEditingController _durationCtrl;
   late final TextEditingController _notesCtrl;
-  late List<ExerciseEntry> _entries;
+  late List<Exercise> _exercises;
+  late List<List<SetEntry>> _editableSets;
+  late List<String?> _exerciseNotes;
   late DateTime _date;
   bool _enableRpeTracking = false;
 
@@ -2739,14 +2741,9 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
     _date = widget.session.date;
     _loadRpeSetting();
 
-    // Deep copy entries list
-    _entries = widget.session.entries.map((e) {
-      return ExerciseEntry(
-        exercise: e.exercise,
-        sets: List<SetEntry>.from(e.sets),
-        notes: e.notes,
-      );
-    }).toList();
+    _exercises = widget.session.entries.map((e) => e.exercise).toList();
+    _exerciseNotes = widget.session.entries.map((e) => e.notes).toList();
+    _editableSets = widget.session.entries.map((e) => List<SetEntry>.from(e.sets)).toList();
   }
 
   void _loadRpeSetting() async {
@@ -2763,6 +2760,16 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
     _durationCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
+  }
+
+  List<ExerciseEntry> _buildEntries() {
+    return List.generate(_exercises.length, (i) {
+      return ExerciseEntry(
+        exercise: _exercises[i],
+        sets: _editableSets[i],
+        notes: _exerciseNotes[i],
+      );
+    });
   }
 
   @override
@@ -2858,8 +2865,9 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
           // Exercise Sets editor
           const Text('Sets Editor', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          ...List.generate(_entries.length, (exIdx) {
-            final entry = _entries[exIdx];
+          ...List.generate(_exercises.length, (exIdx) {
+            final exercise = _exercises[exIdx];
+            final setsList = _editableSets[exIdx];
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
@@ -2875,22 +2883,24 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
-                        child: Text(entry.exercise.name,
+                        child: Text(exercise.name,
                             style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.red, size: 16),
                         onPressed: () {
                           setState(() {
-                            _entries.removeAt(exIdx);
+                            _exercises.removeAt(exIdx);
+                            _editableSets.removeAt(exIdx);
+                            _exerciseNotes.removeAt(exIdx);
                           });
                         },
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  ...List.generate(entry.sets.length, (setIdx) {
-                    final set = entry.sets[setIdx];
+                  ...List.generate(setsList.length, (setIdx) {
+                    final set = setsList[setIdx];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 6.0),
                       child: Row(
@@ -2904,7 +2914,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                               initialValue: set.weight.toString(),
                               onChanged: (val) {
                                 final d = double.tryParse(val) ?? 0.0;
-                                entry.sets[setIdx] = SetEntry(weight: d, reps: set.reps, rpe: set.rpe, setType: set.setType);
+                                setsList[setIdx] = SetEntry(weight: d, reps: set.reps, rpe: set.rpe, setType: set.setType);
                               },
                             ),
                           ),
@@ -2916,7 +2926,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                               initialValue: set.reps.toString(),
                               onChanged: (val) {
                                 final r = int.tryParse(val) ?? 0;
-                                entry.sets[setIdx] = SetEntry(weight: set.weight, reps: r, rpe: set.rpe, setType: set.setType);
+                                setsList[setIdx] = SetEntry(weight: set.weight, reps: r, rpe: set.rpe, setType: set.setType);
                               },
                             ),
                           ),
@@ -2929,7 +2939,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                                 initialValue: set.rpe?.toString() ?? '',
                                 onChanged: (val) {
                                   final r = double.tryParse(val);
-                                  entry.sets[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: r, setType: set.setType);
+                                  setsList[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: r, setType: set.setType);
                                 },
                               ),
                             ),
@@ -2946,7 +2956,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                             onChanged: (newType) {
                               if (newType != null) {
                                 setState(() {
-                                  entry.sets[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: set.rpe, setType: newType);
+                                  setsList[setIdx] = SetEntry(weight: set.weight, reps: set.reps, rpe: set.rpe, setType: newType);
                                 });
                               }
                             },
@@ -2955,7 +2965,7 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                             icon: const Icon(Icons.remove_circle_outline, color: KColor.textMuted, size: 14),
                             onPressed: () {
                               setState(() {
-                                entry.sets.removeAt(setIdx);
+                                setsList.removeAt(setIdx);
                               });
                             },
                           ),
@@ -2969,8 +2979,8 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
                     label: const Text('Add Set', style: TextStyle(color: KColor.green, fontSize: 11)),
                     onPressed: () {
                       setState(() {
-                        final lastSet = entry.sets.isNotEmpty ? entry.sets.last : const SetEntry(weight: 20, reps: 10);
-                        entry.sets.add(SetEntry(weight: lastSet.weight, reps: lastSet.reps, setType: SetType.normal));
+                        final lastSet = setsList.isNotEmpty ? setsList.last : const SetEntry(weight: 20, reps: 10);
+                        setsList.add(SetEntry(weight: lastSet.weight, reps: lastSet.reps, setType: SetType.normal));
                       });
                     },
                   ),
@@ -3004,13 +3014,11 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
       },
     );
     if (d != null) {
-      setState(() {
-        _date = d;
-      });
+      setState(() => _date = d);
     }
   }
 
-  void _saveChanges() {
+  Future<void> _saveChanges() async {
     final dur = int.tryParse(_durationCtrl.text) ?? 45;
     final updated = WorkoutSession(
       id: widget.session.id,
@@ -3018,11 +3026,17 @@ class _EditSessionScreenState extends State<_EditSessionScreen> {
       splitDayName: widget.session.splitDayName,
       splitDayWeekday: widget.session.splitDayWeekday,
       wasManuallySelected: widget.session.wasManuallySelected,
-      entries: _entries,
-      notes: _notesCtrl.text.trim(),
+      entries: _buildEntries(),
+      notes: _notesCtrl.text.trim().isNotEmpty ? _notesCtrl.text.trim() : null,
       durationMinutes: dur,
+      status: widget.session.status,
+      plannedExercises: widget.session.plannedExercises,
     );
-    Navigator.of(context).pop(updated);
+
+    await WorkoutService.instance.saveSession(updated);
+    if (mounted) {
+      Navigator.pop(context, true);
+    }
   }
 }
 
@@ -3043,46 +3057,35 @@ class _EditTextField extends StatefulWidget {
 }
 
 class _EditTextFieldState extends State<_EditTextField> {
-  late final TextEditingController _controller;
+  late final TextEditingController _ctrl;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void didUpdateWidget(_EditTextField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.initialValue != oldWidget.initialValue && widget.initialValue != _controller.text) {
-      _controller.text = widget.initialValue;
-      _controller.selection = TextSelection.fromPosition(
-        TextPosition(offset: _controller.text.length),
-      );
-    }
+    _ctrl = TextEditingController(text: widget.initialValue);
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 32,
+      height: 34,
       child: TextField(
-        controller: _controller,
+        controller: _ctrl,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        style: const TextStyle(color: Colors.white, fontSize: 12),
         onChanged: widget.onChanged,
-        style: const TextStyle(color: Colors.white, fontSize: 11),
         decoration: InputDecoration(
-          labelText: widget.label,
-          labelStyle: const TextStyle(color: KColor.textMuted, fontSize: 9),
           filled: true,
           fillColor: KColor.bg,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          suffixText: widget.label,
+          suffixStyle: const TextStyle(color: KColor.textMuted, fontSize: 10),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
         ),
       ),
@@ -3192,7 +3195,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                         style: TextStyle(color: KColor.green, fontSize: 9, fontWeight: FontWeight.w700),
                       ),
                     ),
-                  if (!entry.isSkipped && entry.sets.isNotEmpty) ...[
+                  if (!entry.isSkipped && entry.logicalSets.isNotEmpty) ...[
                     Builder(
                       builder: (context) {
                         final isTrained = entry.isCompleted;
@@ -3238,36 +3241,83 @@ class _ExerciseDetailCard extends StatelessWidget {
               ),
             )
           else ...[
-            // Set list
-            for (final set in entry.sets) ...[
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: _setTypeColor(set.setType).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        set.setType.shortLabel,
-                        style: TextStyle(color: _setTypeColor(set.setType), fontSize: 8.5, fontWeight: FontWeight.w700),
-                      ),
+            // Hierarchical set list
+            for (int i = 0; i < entry.logicalSets.length; i++) ...[
+              Builder(
+                builder: (context) {
+                  final group = entry.logicalSets[i];
+                  final set = group.mainSet;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: _setTypeColor(set.setType).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                set.setType.shortLabel,
+                                style: TextStyle(color: _setTypeColor(set.setType), fontSize: 8.5, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${set.weight.toStringAsFixed(set.weight == set.weight.truncateToDouble() ? 0 : 1)} kg × ${set.reps} reps',
+                              style: const TextStyle(color: KColor.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            if (enableRpeTracking && set.rpe != null) ...[
+                              const SizedBox(width: 8),
+                              Text('RPE ${set.rpe!.toStringAsFixed(1)}', style: const TextStyle(color: KColor.textMuted, fontSize: 10)),
+                            ],
+                            const Spacer(),
+                            Text('${set.estimatedOneRepMax.toStringAsFixed(1)} e1RM', style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+                          ],
+                        ),
+                        if (group.subSets.isNotEmpty) ...[
+                          for (int d = 0; d < group.subSets.length; d++) ...[
+                            Builder(
+                              builder: (context) {
+                                final drop = group.subSets[d];
+                                return Padding(
+                                  padding: const EdgeInsets.only(left: 18, top: 3),
+                                  child: Row(
+                                    children: [
+                                      const Text('↳', style: TextStyle(color: KColor.amber, fontSize: 12, fontWeight: FontWeight.bold)),
+                                      const SizedBox(width: 5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: KColor.amber.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(3),
+                                        ),
+                                        child: Text(
+                                          group.subSets.length > 1 ? 'DROP ${d + 1}' : 'DROP',
+                                          style: const TextStyle(color: KColor.amber, fontSize: 7.5, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '${drop.weight.toStringAsFixed(drop.weight == drop.weight.truncateToDouble() ? 0 : 1)} kg × ${drop.reps} reps',
+                                        style: const TextStyle(color: Color(0xFFD1D5DB), fontSize: 11),
+                                      ),
+                                      const Spacer(),
+                                      Text('${drop.volume.toStringAsFixed(0)} kg', style: const TextStyle(color: KColor.textMuted, fontSize: 8.5)),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${set.weight.toStringAsFixed(set.weight == set.weight.truncateToDouble() ? 0 : 1)} kg × ${set.reps} reps',
-                      style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                    ),
-                    if (enableRpeTracking && set.rpe != null) ...[
-                      const SizedBox(width: 8),
-                      Text('RPE ${set.rpe!.toStringAsFixed(1)}', style: const TextStyle(color: KColor.textMuted, fontSize: 10)),
-                    ],
-                    const Spacer(),
-                    Text('${set.estimatedOneRepMax.toStringAsFixed(1)} e1RM', style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
-                  ],
-                ),
+                  );
+                },
               ),
             ],
             // Volume sparkline for this exercise

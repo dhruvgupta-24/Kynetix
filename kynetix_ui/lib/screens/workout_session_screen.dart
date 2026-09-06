@@ -10,6 +10,8 @@ import '../models/workout_session.dart';
 import '../models/day_log.dart';
 import '../services/workout_service.dart';
 import '../services/persistence_service.dart';
+import '../widgets/exercise_picker_sheet.dart';
+import 'exercise_detail_sheet.dart';
 import 'workout_setup_screen.dart' show showCreateCustomExerciseSheet;
 
 // ─── WorkoutSessionScreen ─────────────────────────────────────────────────────
@@ -559,18 +561,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   Future<void> _addExtraExercise(Exercise relativeTo, bool before) async {
     final currentIds = _sessionExercises.map((e) => e.id).toSet();
-    final available = _service.allExercises
-        .where((e) => !currentIds.contains(e.id))
-        .toList();
-    
-    final picked = await showModalBottomSheet<Exercise>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _SessionExercisePickerSheet(exercises: available),
+    final picked = await showExercisePickerSheet(
+      context,
+      excludeIds: currentIds,
     );
 
     if (!mounted || picked == null) return;
@@ -600,19 +593,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   Future<void> _showReplacementPicker(String originalId) async {
-    final currentIds = _sessionExercises.map((e) => e.id).toSet();
-    final available = _service.allExercises
-        .where((e) => !currentIds.contains(e.id))
-        .toList();
-
-    final picked = await showModalBottomSheet<Exercise>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _SessionExercisePickerSheet(exercises: available),
+    final currentIds = _sessionExercises.map((e) => e.id).toSet()..remove(originalId);
+    final picked = await showExercisePickerSheet(
+      context,
+      excludeIds: currentIds,
     );
 
     if (picked != null) {
@@ -1214,18 +1198,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   Future<void> _addExerciseToSession() async {
     final currentIds = _sessionExercises.map((e) => e.id).toSet();
-    final available = _service.allExercises
-        .where((e) => !currentIds.contains(e.id))
-        .toList();
-    
-    final picked = await showModalBottomSheet<Exercise>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _SessionExercisePickerSheet(exercises: available),
+    final picked = await showExercisePickerSheet(
+      context,
+      excludeIds: currentIds,
     );
 
     if (!mounted || picked == null) return;
@@ -2165,8 +2140,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   }
 
   Widget _buildLoggedSetsAndSessionNotesJournal() {
-    final setsList = widget.sets;
-    final totalVol = setsList.fold(0.0, (s, e) => s + e.volume);
+    final groups = groupLegacyFlatSets(widget.sets);
+    final workingSetsCount = groups.where((g) => g.isWorkingSet).length;
+    final totalVol = groups.fold(0.0, (s, g) => s + g.totalVolume);
+    final dropVol = groups.where((g) => g.isWorkingSet).fold(0.0, (s, g) => s + g.subSetsVolume);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2182,19 +2159,21 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'LOGGED SETS (${setsList.length})',
+                'LOGGED SETS ($workingSetsCount)',
                 style: const TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
               ),
-              if (setsList.isNotEmpty)
+              if (groups.isNotEmpty)
                 Text(
-                  'Volume: ${totalVol.toStringAsFixed(0)} kg',
+                  dropVol > 0
+                      ? 'Vol: ${totalVol.toStringAsFixed(0)} kg (Drop: ${dropVol.toStringAsFixed(0)} kg)'
+                      : 'Volume: ${totalVol.toStringAsFixed(0)} kg',
                   style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           
-          if (setsList.isEmpty)
+          if (groups.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 20),
               child: Center(
@@ -2208,117 +2187,177 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: setsList.length,
+              itemCount: groups.length,
               separatorBuilder: (context, index) => const Divider(color: KColor.border, height: 1),
-              itemBuilder: (context, i) {
-                final s = setsList[i];
+              itemBuilder: (context, groupIdx) {
+                final group = groups[groupIdx];
+                final mainSet = group.mainSet;
                 final previousBest = WorkoutService.instance.bestSetBefore(widget.exercise.id, DateTime.now());
-                final isPr = previousBest == null || s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+                final isPr = previousBest == null || mainSet.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+                final mainFlatIdx = widget.sets.indexOf(mainSet);
 
-                return TweenAnimationBuilder<double>(
-                  key: ValueKey(s.hashCode ^ i),
-                  tween: Tween<double>(begin: 0.0, end: 1.0),
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOutBack,
-                  builder: (context, value, child) {
-                    return Transform.scale(
-                      scale: 0.92 + (value * 0.08),
-                      child: Opacity(
-                        opacity: value.clamp(0.0, 1.0),
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
-                      children: [
-                        // Set number badge
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: isPr ? KColor.amber.withValues(alpha: 0.15) : const Color(0xFF13131F),
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            '${i + 1}',
-                            style: TextStyle(
-                              color: isPr ? KColor.amber : KColor.textSecondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          // Set number badge
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: isPr ? KColor.amber.withValues(alpha: 0.15) : const Color(0xFF13131F),
+                              shape: BoxShape.circle,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '${groupIdx + 1}',
+                              style: TextStyle(
+                                color: isPr ? KColor.amber : KColor.textSecondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Weight x Reps
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${s.reps} reps',
-                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                    decoration: BoxDecoration(
-                                      color: _setTypeColor(s.setType).withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(5),
-                                    ),
-                                    child: Text(
-                                      s.setType.shortLabel,
-                                      style: TextStyle(
-                                        color: _setTypeColor(s.setType),
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold,
+                          const SizedBox(width: 12),
+                          // Weight x Reps
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '${mainSet.weight.toStringAsFixed(mainSet.weight == mainSet.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${mainSet.reps} reps',
+                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                widget.enableRpeTracking && s.rpe != null
-                                    ? 'RPE ${s.rpe} • ${s.volume.toStringAsFixed(0)} kg volume'
-                                    : '${s.volume.toStringAsFixed(0)} kg volume',
-                                style: const TextStyle(color: KColor.textMuted, fontSize: 10),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isPr) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: KColor.amber.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: KColor.amber.withValues(alpha: 0.3), width: 0.5),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.workspace_premium_rounded, color: KColor.amber, size: 10),
-                                SizedBox(width: 3),
-                                Text('PR', style: TextStyle(color: KColor.amber, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: _setTypeColor(mainSet.setType).withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      child: Text(
+                                        mainSet.setType.shortLabel,
+                                        style: TextStyle(
+                                          color: _setTypeColor(mainSet.setType),
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.enableRpeTracking && mainSet.rpe != null
+                                      ? 'RPE ${mainSet.rpe} • ${mainSet.volume.toStringAsFixed(0)} kg volume'
+                                      : '${mainSet.volume.toStringAsFixed(0)} kg volume',
+                                  style: const TextStyle(color: KColor.textMuted, fontSize: 10),
+                                ),
                               ],
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          if (isPr) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: KColor.amber.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: KColor.amber.withValues(alpha: 0.3), width: 0.5),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.workspace_premium_rounded, color: KColor.amber, size: 10),
+                                  SizedBox(width: 3),
+                                  Text('PR', style: TextStyle(color: KColor.amber, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          GestureDetector(
+                            onTap: () {
+                              if (mainFlatIdx != -1) {
+                                widget.onRemoveSet(mainFlatIdx);
+                              }
+                            },
+                            child: const Icon(Icons.remove_circle_rounded, color: Color(0xFF3B3B4F), size: 18),
+                          ),
                         ],
-                        GestureDetector(
-                          onTap: () => widget.onRemoveSet(i),
-                          child: const Icon(Icons.remove_circle_rounded, color: Color(0xFF3B3B4F), size: 18),
-                        ),
+                      ),
+
+                      // Child Drop Sets Nested Under Parent Set
+                      if (group.subSets.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        for (int d = 0; d < group.subSets.length; d++) ...[
+                          Builder(
+                            builder: (context) {
+                              final drop = group.subSets[d];
+                              final dropFlatIdx = widget.sets.indexOf(drop);
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 20, top: 4, bottom: 4),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF191B2A),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: KColor.amber.withValues(alpha: 0.25), width: 0.5),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Text(
+                                        '↳',
+                                        style: TextStyle(color: KColor.amber, fontSize: 14, fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: KColor.amber.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          group.subSets.length > 1 ? 'DROP ${d + 1}' : 'DROP',
+                                          style: const TextStyle(
+                                            color: KColor.amber,
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          '${drop.weight.toStringAsFixed(drop.weight == drop.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${drop.reps} reps  (${drop.volume.toStringAsFixed(0)} kg)',
+                                          style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700),
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () {
+                                          if (dropFlatIdx != -1) {
+                                            widget.onRemoveSet(dropFlatIdx);
+                                          }
+                                        },
+                                        child: const Icon(Icons.close_rounded, color: Color(0xFF55556E), size: 16),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                       ],
-                    ),
+                    ],
                   ),
                 );
               },
