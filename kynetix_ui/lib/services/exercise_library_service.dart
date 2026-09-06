@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import '../models/exercise_definition.dart';
 import '../models/workout_split.dart';
+import 'exercise_search_engine.dart';
+import 'exercise_display_enhancer.dart';
 
 /// Singleton service managing the comprehensive 1,300+ exercise library,
 /// fast multi-token fuzzy search, dynamic categorical & equipment filters,
@@ -34,20 +36,46 @@ class ExerciseLibraryService extends ChangeNotifier {
     try {
       final jsonString = await rootBundle.loadString(_kAssetPath);
       final List<dynamic> parsed = jsonDecode(jsonString) as List<dynamic>;
-      _allDefinitions = parsed
-          .map((item) => ExerciseDefinition.fromJson(item as Map<String, dynamic>))
-          .toList();
+      _allDefinitions = parsed.map((item) {
+        final def = ExerciseDefinition.fromJson(item as Map<String, dynamic>);
+        final displayName = ExerciseDisplayEnhancer.deriveDisplayName(def.canonicalName, def.equipment);
+        final enhancedAliases = ExerciseDisplayEnhancer.buildEnhancedAliases(def);
+        return ExerciseDefinition(
+          id: def.id,
+          name: def.canonicalName,
+          canonicalName: def.canonicalName,
+          displayName: displayName,
+          category: def.category,
+          bodyPart: def.bodyPart,
+          equipment: def.equipment,
+          equipmentGroup: def.equipmentGroup,
+          targetMuscle: def.targetMuscle,
+          muscleGroup: def.muscleGroup,
+          secondaryMuscles: def.secondaryMuscles,
+          instructions: def.instructions,
+          aliases: enhancedAliases,
+          exerciseType: def.exerciseType,
+          imageRef: def.imageRef,
+          gifRef: def.gifRef,
+          notes: def.notes,
+          defaultTargetSets: def.defaultTargetSets,
+          defaultRepMin: def.defaultRepMin,
+          defaultRepMax: def.defaultRepMax,
+        );
+      }).toList();
 
       _byId.clear();
       for (final def in _allDefinitions) {
         _byId[def.id] = def;
       }
       _initialized = true;
+      ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
       notifyListeners();
     } catch (e) {
       debugPrint('ExerciseLibraryService asset load fallback: $e');
       _loadFallbackSync();
       _initialized = true;
+      ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
       notifyListeners();
     }
   }
@@ -55,13 +83,34 @@ class ExerciseLibraryService extends ChangeNotifier {
   /// Synchronous fallback when running in headless unit tests or before async initialization.
   void _loadFallbackSync() {
     if (_allDefinitions.isNotEmpty) return;
-    _allDefinitions = deduplicatedLibrary
-        .map((ex) => ExerciseDefinition.fromExercise(ex))
-        .toList();
+    _allDefinitions = deduplicatedLibrary.map((ex) {
+      final def = ExerciseDefinition.fromExercise(ex);
+      final displayName = ExerciseDisplayEnhancer.deriveDisplayName(def.canonicalName, def.equipment);
+      final enhancedAliases = ExerciseDisplayEnhancer.buildEnhancedAliases(def);
+      return ExerciseDefinition(
+        id: def.id,
+        name: def.canonicalName,
+        canonicalName: def.canonicalName,
+        displayName: displayName,
+        category: def.category,
+        bodyPart: def.bodyPart,
+        equipment: def.equipment,
+        equipmentGroup: def.equipmentGroup,
+        targetMuscle: def.targetMuscle,
+        muscleGroup: def.muscleGroup,
+        secondaryMuscles: def.secondaryMuscles,
+        instructions: def.instructions,
+        aliases: enhancedAliases,
+        exerciseType: def.exerciseType,
+        notes: def.notes,
+      );
+    }).toList();
+
     _byId.clear();
     for (final def in _allDefinitions) {
       _byId[def.id] = def;
     }
+    ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
   }
 
   /// Retrieve definition by ID, checking custom definitions first, then built-ins.
@@ -79,15 +128,35 @@ class ExerciseLibraryService extends ChangeNotifier {
   void registerCustomExercises(List<Exercise> customs) {
     _customDefinitions.clear();
     for (final ex in customs) {
-      _customDefinitions.add(ExerciseDefinition.fromExercise(ex));
+      final def = ExerciseDefinition.fromExercise(ex);
+      final displayName = ExerciseDisplayEnhancer.deriveDisplayName(def.canonicalName, def.equipment);
+      final enhancedAliases = ExerciseDisplayEnhancer.buildEnhancedAliases(def);
+      _customDefinitions.add(
+        ExerciseDefinition(
+          id: def.id,
+          name: def.canonicalName,
+          canonicalName: def.canonicalName,
+          displayName: displayName,
+          category: def.category,
+          bodyPart: def.bodyPart,
+          equipment: def.equipment,
+          equipmentGroup: def.equipmentGroup,
+          targetMuscle: def.targetMuscle,
+          muscleGroup: def.muscleGroup,
+          secondaryMuscles: def.secondaryMuscles,
+          instructions: def.instructions,
+          aliases: enhancedAliases,
+          exerciseType: def.exerciseType,
+          notes: def.notes,
+        ),
+      );
     }
+    ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
     notifyListeners();
   }
 
-  /// Intelligent Multi-Token Search with Dynamic Filtering & Relevance Ranking.
-  ///
-  /// Matches all tokens across name, aliases, equipment, and anatomical tags.
-  List<ExerciseDefinition> search({
+  /// Detailed relevance-ranked search returning scored results with match reasons.
+  List<ExerciseSearchResult> searchDetailed({
     String query = '',
     String? category,
     String? equipmentGroup,
@@ -99,153 +168,38 @@ class ExerciseLibraryService extends ChangeNotifier {
     if (!_initialized && _allDefinitions.isEmpty) {
       _loadFallbackSync();
     }
-
-    final cleanQuery = query.trim().toLowerCase();
-    final tokens = cleanQuery.isEmpty
-        ? <String>[]
-        : cleanQuery.split(RegExp(r'[\s,\-_]+')).where((t) => t.isNotEmpty).toList();
-
-    final selectedCat = (category == null || category == 'ALL') ? null : category.toLowerCase();
-    final selectedEq = (equipmentGroup == null || equipmentGroup == 'ALL') ? null : equipmentGroup.toLowerCase();
-
-    final all = [..._customDefinitions, ..._allDefinitions];
-    final scoredList = <_ScoredExercise>[];
-
-    for (final ex in all) {
-      if (excludeIds != null && excludeIds.contains(ex.id)) continue;
-
-      // Category filter
-      if (selectedCat != null && ex.category.toLowerCase() != selectedCat) {
-        continue;
-      }
-
-      // Equipment filter
-      if (selectedEq != null && ex.equipmentGroup.toLowerCase() != selectedEq) {
-        continue;
-      }
-
-      // If no query, score based on split/recent status + default order
-      if (tokens.isEmpty) {
-        int baseScore = 100;
-        if (splitExerciseIds != null && splitExerciseIds.contains(ex.id)) {
-          baseScore += 50;
-        }
-        if (recentExerciseIds != null && recentExerciseIds.contains(ex.id)) {
-          baseScore += 30;
-        }
-        scoredList.add(_ScoredExercise(ex, baseScore));
-        continue;
-      }
-
-      // Evaluate multi-token match
-      final score = _calculateRelevanceScore(
-        ex: ex,
-        query: cleanQuery,
-        tokens: tokens,
-        isSplit: splitExerciseIds?.contains(ex.id) ?? false,
-        isRecent: recentExerciseIds?.contains(ex.id) ?? false,
-      );
-
-      if (score > 0) {
-        scoredList.add(_ScoredExercise(ex, score));
-      }
-    }
-
-    scoredList.sort((a, b) {
-      if (b.score != a.score) {
-        return b.score.compareTo(a.score);
-      }
-      return a.definition.name.compareTo(b.definition.name);
-    });
-
-    return scoredList.take(limit).map((s) => s.definition).toList();
+    return ExerciseSearchEngine.instance.search(
+      allDefinitions: allDefinitions,
+      query: query,
+      category: category,
+      equipmentGroup: equipmentGroup,
+      excludeIds: excludeIds,
+      splitExerciseIds: splitExerciseIds,
+      recentExerciseIds: recentExerciseIds,
+      limit: limit,
+    );
   }
 
-  /// Calculates relevance score for multi-token fuzzy matching.
-  int _calculateRelevanceScore({
-    required ExerciseDefinition ex,
-    required String query,
-    required List<String> tokens,
-    required bool isSplit,
-    required bool isRecent,
+  /// Relevance-Ranked Multi-Token Search with Dynamic Filtering.
+  List<ExerciseDefinition> search({
+    String query = '',
+    String? category,
+    String? equipmentGroup,
+    Set<String>? excludeIds,
+    Set<String>? splitExerciseIds,
+    Set<String>? recentExerciseIds,
+    int limit = 100,
   }) {
-    final nameLower = ex.name.toLowerCase();
-    final idLower = ex.id.toLowerCase();
-    final catLower = ex.category.toLowerCase();
-    final targetLower = ex.targetMuscle.toLowerCase();
-    final eqLower = ex.equipment.toLowerCase();
-    final eqGLower = ex.equipmentGroup.toLowerCase();
-    final aliasesLower = ex.aliases.map((a) => a.toLowerCase()).toList();
-
-    // 1. Exact Name/ID match
-    if (nameLower == query || idLower == query) {
-      return 1000 + (isSplit ? 50 : 0) + (isRecent ? 30 : 0);
-    }
-
-    // 2. Exact start of name match
-    if (nameLower.startsWith(query)) {
-      return 600 + (isSplit ? 50 : 0) + (isRecent ? 30 : 0);
-    }
-
-    // 3. Multi-token check: every token MUST match somewhere
-    int matchedTokens = 0;
-    int tokenScore = 0;
-
-    for (final token in tokens) {
-      bool tokenMatched = false;
-
-      // Name match (highest weight)
-      if (nameLower.contains(token)) {
-        tokenMatched = true;
-        if (nameLower.startsWith(token) || nameLower.contains(' $token')) {
-          tokenScore += 120; // Word boundary match
-        } else {
-          tokenScore += 80;
-        }
-      }
-
-      // Alias match
-      if (!tokenMatched) {
-        for (final alias in aliasesLower) {
-          if (alias.contains(token)) {
-            tokenMatched = true;
-            tokenScore += 70;
-            break;
-          }
-        }
-      }
-
-      // Target muscle / Category match
-      if (!tokenMatched) {
-        if (targetLower.contains(token) || catLower.contains(token)) {
-          tokenMatched = true;
-          tokenScore += 50;
-        }
-      }
-
-      // Equipment match
-      if (!tokenMatched) {
-        if (eqLower.contains(token) || eqGLower.contains(token)) {
-          tokenMatched = true;
-          tokenScore += 40;
-        }
-      }
-
-      if (tokenMatched) {
-        matchedTokens++;
-      }
-    }
-
-    // All tokens must match for a valid hit
-    if (matchedTokens < tokens.length) {
-      return 0;
-    }
-
-    int totalScore = tokenScore;
-    if (isSplit) totalScore += 40;
-    if (isRecent) totalScore += 25;
-
-    return totalScore;
+    final results = searchDetailed(
+      query: query,
+      category: category,
+      equipmentGroup: equipmentGroup,
+      excludeIds: excludeIds,
+      splitExerciseIds: splitExerciseIds,
+      recentExerciseIds: recentExerciseIds,
+      limit: limit,
+    );
+    return results.map((r) => r.definition).toList();
   }
 
   /// Dynamic Category Counts based on current equipment filter and query
@@ -311,10 +265,4 @@ class ExerciseLibraryService extends ChangeNotifier {
 
     return counts;
   }
-}
-
-class _ScoredExercise {
-  final ExerciseDefinition definition;
-  final int score;
-  const _ScoredExercise(this.definition, this.score);
 }

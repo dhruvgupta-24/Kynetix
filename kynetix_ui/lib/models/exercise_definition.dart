@@ -5,7 +5,10 @@ import 'workout_split.dart';
 /// search aliases, and seamless conversion to Kynetix [Exercise] models.
 class ExerciseDefinition {
   final String id;
-  final String name;
+  final String canonicalName;
+  final String displayName;
+  String get name => displayName.isNotEmpty ? displayName : canonicalName;
+
   final String category; // Chest, Back, Shoulders, Arms, Legs, Core, Cardio, Other
   final String bodyPart; // Chest, Back, Shoulders, Upper Arms, Lower Arms, Waist, Upper Legs, Lower Legs, Cardio, Neck
   final String equipment; // Barbell, Dumbbell, Cable, Machine, Bodyweight, Band, Kettlebell, etc.
@@ -26,7 +29,9 @@ class ExerciseDefinition {
 
   const ExerciseDefinition({
     required this.id,
-    required this.name,
+    String? name,
+    String? canonicalName,
+    String? displayName,
     required this.category,
     required this.bodyPart,
     required this.equipment,
@@ -43,7 +48,8 @@ class ExerciseDefinition {
     this.defaultTargetSets = 3,
     this.defaultRepMin = 8,
     this.defaultRepMax = 12,
-  });
+  })  : canonicalName = canonicalName ?? name ?? '',
+        displayName = displayName ?? name ?? canonicalName ?? '';
 
   /// Seamlessly convert to Kynetix [Exercise] instance for active workouts and splits.
   Exercise toExercise({String? customNotes}) {
@@ -84,9 +90,15 @@ class ExerciseDefinition {
     final typeIdx = (json['exerciseType'] as num?)?.toInt() ?? 3;
     final exType = ExerciseType.values[typeIdx.clamp(0, ExerciseType.values.length - 1)];
 
+    final rawName = json['name'] as String? ?? '';
+    final rawCanonical = json['canonicalName'] as String? ?? rawName;
+    final rawDisplay = json['displayName'] as String? ?? rawName;
+
     return ExerciseDefinition(
       id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
+      name: rawName,
+      canonicalName: rawCanonical,
+      displayName: rawDisplay,
       category: json['category'] as String? ?? 'Other',
       bodyPart: json['bodyPart'] as String? ?? '',
       equipment: json['equipment'] as String? ?? 'Bodyweight',
@@ -117,6 +129,8 @@ class ExerciseDefinition {
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        'canonicalName': canonicalName,
+        'displayName': displayName,
         'category': category,
         'bodyPart': bodyPart,
         'equipment': equipment,

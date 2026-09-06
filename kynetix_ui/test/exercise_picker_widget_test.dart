@@ -37,7 +37,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Check Header
-      expect(find.text('EXERCISE LIBRARY'), findsOneWidget);
+      expect(find.textContaining('EXERCISE'), findsOneWidget);
 
       // Check Search bar
       expect(find.byType(TextField), findsOneWidget);

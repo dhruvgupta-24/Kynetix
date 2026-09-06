@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/workout_split.dart';
+import '../models/exercise_definition.dart';
 import '../services/exercise_library_service.dart';
+import '../services/exercise_search_engine.dart';
+import '../services/user_exercise_preferences_service.dart';
 import '../services/workout_service.dart';
 import '../screens/exercise_detail_sheet.dart';
 import '../screens/workout_setup_screen.dart' show showCreateCustomExerciseSheet;
 import '../config/app_theme.dart';
 
-/// Shows the premium Kynetix Exercise Picker with 1,300+ exercises,
-/// multi-token fuzzy search, dynamic categorical & equipment filters,
-/// and instant detail inspection.
+/// Shows the relevance-ranked Kynetix Exercise Discovery Picker.
+/// Features intelligent multi-signal ranking, alias resolution, instant favorites,
+/// recents prioritization, and clean display names across the 1,363+ catalog.
 Future<Exercise?> showExercisePickerSheet(
   BuildContext context, {
   List<Exercise>? initialAvailableExercises,
@@ -71,6 +74,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
     _searchController = TextEditingController();
     _searchFocusNode = FocusNode();
     ExerciseLibraryService.instance.initialize();
+    UserExercisePreferencesService.instance.initialize();
   }
 
   @override
@@ -78,6 +82,11 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _selectExercise(ExerciseDefinition def) {
+    UserExercisePreferencesService.instance.recordSelection(def.id);
+    Navigator.of(context).pop(def.toExercise());
   }
 
   @override
@@ -88,13 +97,9 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
         .expand((d) => d.exercises)
         .map((e) => e.id)
         .toSet();
-    final recentIds = WorkoutService.instance
-        .recentSessions(limit: 10)
-        .expand((s) => s.entries)
-        .map((e) => e.exercise.id)
-        .toSet();
+    final recentIds = UserExercisePreferencesService.instance.getRecentExerciseIds().toSet();
 
-    final results = ExerciseLibraryService.instance.search(
+    final results = ExerciseLibraryService.instance.searchDetailed(
       query: _query,
       category: _selectedCategory,
       equipmentGroup: _selectedEquipment,
@@ -115,6 +120,10 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
       category: _selectedCategory,
       excludeIds: widget.excludeIds,
     );
+
+    final isSearching = _query.trim().isNotEmpty;
+    final bestMatches = isSearching ? results.where((r) => r.isBestMatch).toList() : <ExerciseSearchResult>[];
+    final otherMatches = isSearching ? results.where((r) => !r.isBestMatch).toList() : results;
 
     return AnimatedPadding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -144,10 +153,10 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
               child: Row(
                 children: [
                   const Text(
-                    'EXERCISE LIBRARY',
+                    'EXERCISE DISCOVERY',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.8,
                     ),
@@ -161,7 +170,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
               ),
             ),
 
-            // 2. Multi-Token Search Bar
+            // 2. Multi-Token Relevance Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: TextField(
@@ -170,7 +179,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                 onChanged: (v) => setState(() => _query = v),
                 style: const TextStyle(color: Colors.white, fontSize: 14),
                 decoration: InputDecoration(
-                  hintText: 'Search 1,300+ exercises (e.g. "incline db", "pullup")...',
+                  hintText: 'Search 1,363+ exercises (e.g. "t bar", "db bench", "ohp")...',
                   hintStyle: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
                   prefixIcon: const Icon(Icons.search_rounded, color: KColor.green, size: 20),
                   suffixIcon: _query.isNotEmpty
@@ -312,7 +321,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                 },
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
                     color: KColor.green.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
@@ -320,18 +329,18 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.add_circle_outline_rounded, color: KColor.green, size: 18),
+                      Icon(Icons.add_circle_outline_rounded, color: KColor.green, size: 16),
                       SizedBox(width: 8),
                       Text(
                         '+ Create Custom Exercise',
                         style: TextStyle(
                           color: KColor.green,
-                          fontSize: 12.5,
+                          fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Spacer(),
-                      Icon(Icons.arrow_forward_ios_rounded, color: KColor.green, size: 12),
+                      Icon(Icons.arrow_forward_ios_rounded, color: KColor.green, size: 11),
                     ],
                   ),
                 ),
@@ -341,162 +350,255 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
             const SizedBox(height: 6),
             const Divider(height: 1, color: Color(0xFF1E1E2F)),
 
-            // 6. Filtered Exercise List View
+            // 6. Ranked Exercise List View
             Flexible(
               child: results.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.search_off_rounded, color: Color(0xFF4B5563), size: 48),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No exercises match "$_query"',
-                              style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Try a broader query or create a custom exercise above.',
-                              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
+                  ? _buildZeroResultsView(context)
+                  : ListView(
                       physics: const BouncingScrollPhysics(),
                       padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: results.length,
-                      itemBuilder: (context, i) {
-                        final def = results[i];
-                        final isSplit = splitIds.contains(def.id);
-                        final isRecent = recentIds.contains(def.id);
-
-                        String badge = '';
-                        Color badgeColor = Colors.transparent;
-                        if (isSplit && isRecent) {
-                          badge = 'SPLIT • RECENT';
-                          badgeColor = KColor.green;
-                        } else if (isSplit) {
-                          badge = 'SPLIT';
-                          badgeColor = KColor.blue;
-                        } else if (isRecent) {
-                          badge = 'RECENT';
-                          badgeColor = KColor.amber;
-                        }
-
-                        return InkWell(
-                          onTap: () {
-                            Navigator.of(context).pop(def.toExercise());
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: const BoxDecoration(
-                              border: Border(bottom: BorderSide(color: Color(0xFF161622), width: 0.8)),
+                      children: [
+                        // BEST MATCHES SECTION (when searching)
+                        if (isSearching && bestMatches.isNotEmpty) ...[
+                          _buildSectionHeader(
+                            'BEST MATCH${bestMatches.length > 1 ? 'ES' : ''}',
+                            KColor.green,
+                            Icons.verified_rounded,
+                          ),
+                          ...bestMatches.map((r) => _buildExerciseRow(r, isBest: true)),
+                          if (otherMatches.isNotEmpty)
+                            _buildSectionHeader(
+                              'OTHER MATCHES (${otherMatches.length})',
+                              const Color(0xFF9CA3AF),
+                              Icons.search_rounded,
                             ),
-                            child: Row(
-                              children: [
-                                // Exercise info
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              def.name,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          if (badge.isNotEmpty) ...[
-                                            const SizedBox(width: 8),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: badgeColor.withValues(alpha: 0.15),
-                                                borderRadius: BorderRadius.circular(4),
-                                                border: Border.all(color: badgeColor.withValues(alpha: 0.4), width: 0.5),
-                                              ),
-                                              child: Text(
-                                                badge,
-                                                style: TextStyle(
-                                                  color: badgeColor,
-                                                  fontSize: 8.5,
-                                                  fontWeight: FontWeight.bold,
-                                                  letterSpacing: 0.3,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            def.targetMuscle,
-                                            style: const TextStyle(
-                                              color: KColor.green,
-                                              fontSize: 11.5,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          const Text(
-                                            ' • ',
-                                            style: TextStyle(color: Color(0xFF4B5563), fontSize: 11),
-                                          ),
-                                          Text(
-                                            def.equipment,
-                                            style: const TextStyle(
-                                              color: Color(0xFF9CA3AF),
-                                              fontSize: 11.5,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                        ],
 
-                                // Info button
-                                IconButton(
-                                  icon: const Icon(Icons.info_outline_rounded, color: Color(0xFF6B7280), size: 20),
-                                  tooltip: 'View instructions & PR',
-                                  onPressed: () async {
-                                    final navigator = Navigator.of(context);
-                                    final picked = await showExerciseDetailSheet(
-                                      context,
-                                      definition: def,
-                                    );
-                                    if (picked != null) {
-                                      navigator.pop(picked);
-                                    }
-                                  },
-                                ),
+                        // OTHER MATCHES / ALL RESULTS
+                        ...otherMatches.map((r) => _buildExerciseRow(r, isBest: false)),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                                // Quick Add button
-                                IconButton(
-                                  icon: const Icon(Icons.add_circle_rounded, color: KColor.green, size: 24),
-                                  onPressed: () {
-                                    Navigator.of(context).pop(def.toExercise());
-                                  },
-                                ),
-                              ],
+  Widget _buildSectionHeader(String title, Color accentColor, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      color: const Color(0xFF0F0F1A),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: accentColor),
+          const SizedBox(width: 6),
+          Text(
+            title,
+            style: TextStyle(
+              color: accentColor,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.7,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExerciseRow(ExerciseSearchResult result, {required bool isBest}) {
+    final def = result.definition;
+    final isFav = UserExercisePreferencesService.instance.isFavorite(def.id);
+    final splitIds = WorkoutService.instance.split.days
+        .expand((d) => d.exercises)
+        .map((e) => e.id)
+        .toSet();
+    final isSplit = splitIds.contains(def.id);
+
+    return InkWell(
+      onTap: () => _selectExercise(def),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isBest ? KColor.green.withValues(alpha: 0.04) : Colors.transparent,
+          border: const Border(bottom: BorderSide(color: Color(0xFF161622), width: 0.8)),
+        ),
+        child: Row(
+          children: [
+            // Exercise info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          def.displayName,
+                          style: TextStyle(
+                            color: isBest ? Colors.white : const Color(0xFFE5E7EB),
+                            fontSize: 14,
+                            fontWeight: isBest ? FontWeight.w900 : FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isFav) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.favorite_rounded, color: Colors.redAccent, size: 14),
+                      ],
+                      if (isSplit) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: KColor.blue.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: KColor.blue.withValues(alpha: 0.4), width: 0.5),
+                          ),
+                          child: const Text(
+                            'SPLIT',
+                            style: TextStyle(
+                              color: KColor.blue,
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.3,
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Text(
+                        def.targetMuscle,
+                        style: const TextStyle(
+                          color: KColor.green,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Text(
+                        ' • ',
+                        style: TextStyle(color: Color(0xFF4B5563), fontSize: 11),
+                      ),
+                      Text(
+                        def.equipment,
+                        style: const TextStyle(
+                          color: Color(0xFF9CA3AF),
+                          fontSize: 11.5,
+                        ),
+                      ),
+                      if (result.matchReason.label.isNotEmpty &&
+                          result.matchReason.type != MatchReasonType.tokenMatch &&
+                          _query.isNotEmpty) ...[
+                        const Text(
+                          ' • ',
+                          style: TextStyle(color: Color(0xFF4B5563), fontSize: 11),
+                        ),
+                        Flexible(
+                          child: Text(
+                            result.matchReason.label,
+                            style: const TextStyle(
+                              color: KColor.amber,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Favorite Toggle
+            IconButton(
+              icon: Icon(
+                isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: isFav ? Colors.redAccent : const Color(0xFF4B5563),
+                size: 18,
+              ),
+              tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
+              onPressed: () async {
+                await UserExercisePreferencesService.instance.toggleFavorite(def.id);
+                if (mounted) setState(() {});
+              },
+            ),
+
+            // Info button
+            IconButton(
+              icon: const Icon(Icons.info_outline_rounded, color: Color(0xFF6B7280), size: 19),
+              tooltip: 'View instructions & PR',
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                final picked = await showExerciseDetailSheet(
+                  context,
+                  definition: def,
+                );
+                if (picked != null) {
+                  UserExercisePreferencesService.instance.recordSelection(def.id);
+                  navigator.pop(picked);
+                }
+              },
+            ),
+
+            // Quick Select / Add button
+            IconButton(
+              icon: const Icon(Icons.add_circle_rounded, color: KColor.green, size: 24),
+              onPressed: () => _selectExercise(def),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildZeroResultsView(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off_rounded, color: Color(0xFF4B5563), size: 48),
+            const SizedBox(height: 12),
+            Text(
+              'No exercises match "$_query"',
+              style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Try a shorthand like "db", "bb", or "ohp", or create a custom exercise.',
+              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                final ex = await showCreateCustomExerciseSheet(context);
+                if (!mounted || ex == null) return;
+                ExerciseLibraryService.instance.registerCustomExercises(
+                  WorkoutService.instance.customExercises,
+                );
+                navigator.pop(ex);
+              },
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Create Custom Exercise'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: KColor.green,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
             ),
           ],
         ),
