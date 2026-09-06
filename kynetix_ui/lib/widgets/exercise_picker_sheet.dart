@@ -486,11 +486,15 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                         ' • ',
                         style: TextStyle(color: Color(0xFF4B5563), fontSize: 11),
                       ),
-                      Text(
-                        def.equipment,
-                        style: const TextStyle(
-                          color: Color(0xFF9CA3AF),
-                          fontSize: 11.5,
+                      Flexible(
+                        child: Text(
+                          def.equipment,
+                          style: const TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 11.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (result.matchReason.label.isNotEmpty &&

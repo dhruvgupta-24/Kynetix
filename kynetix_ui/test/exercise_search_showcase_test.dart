@@ -9,7 +9,7 @@ import 'package:kynetix/services/exercise_display_enhancer.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('Showcase top results for required queries', () {
+  test('Showcase top results for 25+ real-world gym queries', () {
     final file = File('assets/data/exercises_library.json');
     final content = file.readAsStringSync();
     final List<dynamic> list = jsonDecode(content);
@@ -38,30 +38,52 @@ void main() {
     ExerciseSearchEngine.instance.setDefinitions(testCatalog);
 
     final queries = [
+      't bar row',
       't bar',
       't-bar',
       'tbar',
+      'bench press',
+      'barbell bench press',
       'db bench',
-      'ohp',
-      'rdl',
-      'lat pull',
+      'dumbbell bench press',
       'incline db press',
+      'row',
+      'cable row',
+      'seated cable row',
+      'chest supported row',
+      'rdl',
+      'romanian deadlift',
+      'dumbbell rdl',
+      'ohp',
+      'overhead press',
+      'shoulder press',
+      'lat pull',
+      'lat pulldown',
+      'bicep curl',
+      'dumbbell curl',
+      'preacher curl',
+      'lateral raise',
+      'dumbbell lateral raise',
+      'cable lateral raise',
+      'leg press',
+      'leg extension',
+      'leg curl',
     ];
 
-    print('\n================ EXERCISE DISCOVERY SHOWCASE ================');
+    print('\n================ 25+ REAL-WORLD EXERCISE DISCOVERY SHOWCASE ================');
     for (final q in queries) {
       final results = ExerciseSearchEngine.instance.search(
         allDefinitions: testCatalog,
         query: q,
-        limit: 5,
+        limit: 3,
       );
-      print('\nQUERY: "$q" (Found ${results.length} top matches)');
+      print('\nQUERY: "$q" (${results.length} results)');
       for (int i = 0; i < results.length; i++) {
         final r = results[i];
-        print('  ${i + 1}. ${r.definition.displayName} (Equip: ${r.definition.equipment}) [Score: ${r.score}] - Reason: ${r.matchReason.label}');
+        print('  #${i + 1}: ${r.definition.displayName} (Equip: ${r.definition.equipment}) [Score: ${r.score}] - Reason: ${r.matchReason.label}');
       }
       expect(results.isNotEmpty, isTrue);
     }
-    print('=============================================================\n');
+    print('============================================================================\n');
   });
 }

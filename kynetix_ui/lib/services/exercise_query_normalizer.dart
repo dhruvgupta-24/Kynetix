@@ -44,7 +44,8 @@ class ExerciseQueryNormalizer {
     'facepull': ['facepull', 'face pull'],
     'cable row': ['seated cable row', 'cable row'],
     'seated row': ['seated cable row', 'cable seated row', 'machine seated row', 'seated row'],
-    'chest press': ['bench press', 'chest press machine', 'dumbbell chest press', 'chest press'],
+    'pec deck': ['pec dec', 'pec deck', 'butterfly machine', 'chest fly machine', 'lever seated fly'],
+    'pec dec': ['pec deck', 'pec dec', 'butterfly machine', 'chest fly machine', 'lever seated fly'],
     'incline bench': ['incline barbell bench', 'incline dumbbell bench', 'incline db bench', 'incline bench press', 'incline bench'],
   };
 
@@ -124,29 +125,41 @@ class ExerciseQueryNormalizer {
     return variations;
   }
 
-  /// Computes Levenshtein distance between two strings for typo tolerance.
+  /// Computes Damerau-Levenshtein distance (including adjacent transpositions) for typo tolerance.
   static int levenshteinDistance(String s1, String s2) {
     if (s1 == s2) return 0;
     if (s1.isEmpty) return s2.length;
     if (s2.isEmpty) return s1.length;
 
-    List<int> v0 = List<int>.generate(s2.length + 1, (i) => i);
-    List<int> v1 = List<int>.filled(s2.length + 1, 0);
+    final d = List.generate(s1.length + 1, (_) => List<int>.filled(s2.length + 1, 0));
 
-    for (int i = 0; i < s1.length; i++) {
-      v1[0] = i + 1;
-      for (int j = 0; j < s2.length; j++) {
-        int cost = (s1[i] == s2[j]) ? 0 : 1;
-        v1[j + 1] = min(v1[j] + 1, min(v0[j + 1] + 1, v0[j] + cost));
-      }
-      for (int j = 0; j <= s2.length; j++) {
-        v0[j] = v1[j];
+    for (int i = 0; i <= s1.length; i++) {
+      d[i][0] = i;
+    }
+    for (int j = 0; j <= s2.length; j++) {
+      d[0][j] = j;
+    }
+
+    for (int i = 1; i <= s1.length; i++) {
+      for (int j = 1; j <= s2.length; j++) {
+        final cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+        d[i][j] = min(
+          d[i - 1][j] + 1, // deletion
+          min(
+            d[i][j - 1] + 1, // insertion
+            d[i - 1][j - 1] + cost, // substitution
+          ),
+        );
+        // Transposition of adjacent characters
+        if (i > 1 && j > 1 && s1[i - 1] == s2[j - 2] && s1[i - 2] == s2[j - 1]) {
+          d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1);
+        }
       }
     }
-    return v0[s2.length];
+    return d[s1.length][s2.length];
   }
 
-  /// Calculates normalized similarity (0.0 to 1.0) using Levenshtein distance.
+  /// Calculates normalized similarity (0.0 to 1.0) using Damerau-Levenshtein distance.
   static double similarity(String s1, String s2) {
     final maxLen = max(s1.length, s2.length);
     if (maxLen == 0) return 1.0;

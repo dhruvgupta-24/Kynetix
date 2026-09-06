@@ -9,7 +9,7 @@ class ExerciseDisplayEnhancer {
 
   /// Curated alias expansions for high-frequency exercise patterns.
   static const Map<String, List<String>> _knownPatternAliases = {
-    't bar': [
+    't bar row': [
       't-bar row',
       'tbar row',
       't bar',
@@ -18,7 +18,7 @@ class ExerciseDisplayEnhancer {
       'chest supported t bar',
       'machine t bar row',
     ],
-    't-bar': [
+    't-bar row': [
       't-bar row',
       'tbar row',
       't bar',
@@ -82,6 +82,7 @@ class ExerciseDisplayEnhancer {
       'military press',
       'barbell overhead press',
       'bb ohp',
+      'standing overhead press',
     ],
     'romanian deadlift': [
       'rdl',
@@ -118,6 +119,12 @@ class ExerciseDisplayEnhancer {
       'low cable row',
       'horizontal row',
     ],
+    'cable seated row': [
+      'cable row',
+      'seated cable row',
+      'seated row',
+      'low cable row',
+    ],
     'chest dip': [
       'dips',
       'chest dips',
@@ -151,6 +158,26 @@ class ExerciseDisplayEnhancer {
       'db curl',
       'arm curl',
     ],
+    'biceps curl': [
+      'bicep curl',
+      'barbell curl',
+      'bb curl',
+      'dumbbell curl',
+      'db curl',
+      'arm curl',
+    ],
+    'dumbbell bicep curl': [
+      'dumbbell curl',
+      'db curl',
+      'db bicep curl',
+      'dumbbell biceps curl',
+    ],
+    'dumbbell biceps curl': [
+      'dumbbell curl',
+      'db curl',
+      'db bicep curl',
+      'bicep curl',
+    ],
     'lateral raise': [
       'side lateral raise',
       'dumbbell lateral raise',
@@ -182,10 +209,30 @@ class ExerciseDisplayEnhancer {
       'seated calf raise',
       'calves',
     ],
+    'preacher curl': [
+      'ez bar preacher curl',
+      'barbell preacher curl',
+      'dumbbell preacher curl',
+    ],
     'skull crusher': [
       'skullcrusher',
       'lying triceps extension',
       'ez bar skull crusher',
+    ],
+    'pec deck': [
+      'pec dec',
+      'pec deck fly',
+      'machine fly',
+      'butterfly machine',
+      'chest fly machine',
+      'seated chest fly',
+    ],
+    'pec dec': [
+      'pec deck',
+      'pec deck fly',
+      'machine fly',
+      'butterfly machine',
+      'chest fly machine',
     ],
   };
 
@@ -195,16 +242,58 @@ class ExerciseDisplayEnhancer {
 
     var clean = rawName.trim();
 
-    // Clean Lever prefixes if raw
-    if (clean.toLowerCase().startsWith('lever t bar row') ||
-        clean.toLowerCase().startsWith('lever t-bar row')) {
+    // Specific cleanups for common verbose catalog entries
+    final lower = clean.toLowerCase();
+    if (lower == 't-bar row' || lower == 't bar row') {
+      return 'T-Bar Row';
+    }
+    if (lower.startsWith('lever t bar row') || lower.startsWith('lever t-bar row') || lower.startsWith('lever reverse t-bar row')) {
+      if (lower.contains('reverse')) {
+        return 'Machine Reverse T-Bar Row';
+      }
       return 'T-Bar Row (Machine)';
     }
-    if (clean.toLowerCase().startsWith('lever seated row')) {
+    if (lower.startsWith('lever seated row')) {
       return 'Chest-Supported Machine Row';
     }
-    if (clean.toLowerCase().startsWith('lever alternating narrow grip seated row')) {
+    if (lower.startsWith('lever alternating narrow grip seated row')) {
       return 'Single-Arm Machine Row';
+    }
+    if (lower == 'cable lat pulldown full range of motion') {
+      return 'Cable Lat Pulldown';
+    }
+    if (lower == 'cable seated row') {
+      return 'Seated Cable Row';
+    }
+    if (lower == 'dumbbell side lateral raise' || lower == 'side lateral raise') {
+      return 'Dumbbell Lateral Raise';
+    }
+    if (lower == 'barbell standing overhead press') {
+      return 'Standing Overhead Press';
+    }
+    if (lower == 'barbell bent over row reverse grip') {
+      return 'Reverse Grip Barbell Row';
+    }
+    if (lower == 'dumbbell incline bench press') {
+      return 'Incline Dumbbell Press';
+    }
+    if (lower == 'dumbbell biceps curl') {
+      return 'Dumbbell Bicep Curl';
+    }
+    if (lower == 'barbell biceps curl') {
+      return 'Barbell Bicep Curl';
+    }
+    if (lower.contains('bench press - medium grip') || lower.contains('bench press medium grip')) {
+      return 'Barbell Bench Press (Medium Grip)';
+    }
+    if (lower.contains('bench press - wide grip') || lower.contains('bench press wide grip')) {
+      return 'Barbell Bench Press (Wide Grip)';
+    }
+    if (lower.contains('twin handle parallel grip lat pulldown')) {
+      return 'Twin-Handle Lat Pulldown (Parallel Grip)';
+    }
+    if (lower == 'lever seated fly' || lower == 'lever seated fly (pec deck)' || lower == 'pec dec machine' || lower == 'pec deck fly') {
+      return 'Pec Deck Fly (Machine)';
     }
 
     // Capitalize properly
@@ -215,6 +304,7 @@ class ExerciseDisplayEnhancer {
       if (w.toLowerCase() == 'bb') return 'BB';
       if (w.toLowerCase() == 'ohp') return 'OHP';
       if (w.toLowerCase() == 'rdl') return 'RDL';
+      if (w.toLowerCase() == 't-bar' || w.toLowerCase() == 't-bar,') return 'T-Bar';
       if (w.startsWith('(') && w.endsWith(')')) {
         return '(${w.substring(1, 2).toUpperCase()}${w.substring(2, w.length - 1).toLowerCase()})';
       }
