@@ -51,6 +51,10 @@ class ExerciseQueryNormalizer {
     'hip thrust': ['hip thrust', 'barbell hip thrust', 'glute bridge'],
     'shrug': ['shrug', 'shrugs', 'barbell shrug', 'dumbbell shrug'],
     'fly': ['fly', 'flyes', 'chest fly', 'dumbbell fly', 'cable fly'],
+    'single arm': ['one arm', 'single arm', 'single-arm', '1-arm'],
+    'one arm': ['single arm', 'one arm', 'single-arm', '1-arm'],
+    'single leg': ['one leg', 'single leg', 'single-leg', '1-leg'],
+    'one leg': ['single leg', 'one leg', 'single-leg', '1-leg'],
   };
 
   /// Normalizes a raw string: converts to lower case, removes special characters,

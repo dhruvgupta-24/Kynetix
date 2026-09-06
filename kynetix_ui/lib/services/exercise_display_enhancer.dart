@@ -138,6 +138,18 @@ class ExerciseDisplayEnhancer {
       'seated row',
       'low cable row',
     ],
+    'cable one arm bent over row': [
+      'single arm cable row',
+      'one arm cable row',
+      'single-arm cable row',
+      'cable single arm row',
+    ],
+    'cable seated one arm alternate row': [
+      'single arm cable row',
+      'one arm cable row',
+      'seated single arm cable row',
+      'single-arm cable row',
+    ],
     'chest dip': [
       'dips',
       'chest dips',
@@ -322,6 +334,12 @@ class ExerciseDisplayEnhancer {
     }
     if (lower == 'cable seated row') {
       return 'Seated Cable Row';
+    }
+    if (lower == 'cable one arm bent over row') {
+      return 'Single-Arm Cable Bent Over Row';
+    }
+    if (lower == 'cable seated one arm alternate row') {
+      return 'Single-Arm Seated Cable Row';
     }
     if (lower == 'dumbbell side lateral raise' || lower == 'side lateral raise') {
       return 'Dumbbell Lateral Raise';

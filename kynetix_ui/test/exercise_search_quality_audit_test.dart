@@ -380,5 +380,39 @@ void main() {
       final res = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'zzzzqqqq123', limit: 5);
       expect(res.isEmpty, isTrue);
     });
+
+    test('25. Multi-word queries with mostly nonsense/unrelated tokens do not return false positive matches', () {
+      final noisyQueries = [
+        'purple elephant row',
+        'random bench thing',
+        'xyz cable row abc',
+        'some weird incline press',
+      ];
+
+      for (final q in noisyQueries) {
+        final res = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: q, limit: 5);
+        // Either empty, or if anything matches, it must not be marked as a high-confidence best match
+        expect(res.isEmpty || res.every((r) => !r.isBestMatch), isTrue,
+            reason: 'Query "$q" should not return false-positive best matches');
+      }
+    });
+
+    test('26. Legitimate natural-language multi-word queries resolve to #1', () {
+      final queries = {
+        'incline dumbbell bench press': 'incline dumbbell',
+        'single arm cable row': 'cable',
+        'reverse grip barbell row': 'reverse grip',
+        'standing dumbbell shoulder press': 'standing',
+      };
+
+      for (final entry in queries.entries) {
+        final res = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: entry.key, limit: 3);
+        expect(res.isNotEmpty, isTrue, reason: 'Query "${entry.key}" should return results');
+        expect(res.first.isBestMatch, isTrue, reason: 'Query "${entry.key}" should produce a high-confidence best match');
+        final topName = res.first.definition.displayName.toLowerCase();
+        expect(topName.contains(entry.value), isTrue,
+            reason: 'Top result "$topName" for query "${entry.key}" should contain "${entry.value}"');
+      }
+    });
   });
 }
