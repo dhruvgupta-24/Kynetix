@@ -89,7 +89,20 @@ class ExerciseDisplayEnhancer {
       'romanian dl',
       'barbell rdl',
       'dumbbell rdl',
+    ],
+    'straight leg deadlift': [
       'stiff leg deadlift',
+      'sldl',
+      'stiff legged deadlift',
+      'straight-leg deadlift',
+      'stiff-leg deadlift',
+    ],
+    'barbell straight leg deadlift': [
+      'barbell stiff leg deadlift',
+      'sldl',
+      'stiff leg deadlift',
+      'stiff legged deadlift',
+      'bb stiff leg deadlift',
     ],
     'deadlift': [
       'conventional deadlift',
@@ -234,6 +247,51 @@ class ExerciseDisplayEnhancer {
       'butterfly machine',
       'chest fly machine',
     ],
+    'close grip bench press': [
+      'cgbp',
+      'close grip barbell bench press',
+      'close-grip bench press',
+      'close grip bench',
+    ],
+    'close grip barbell bench press': [
+      'cgbp',
+      'close grip bench press',
+      'close-grip bench press',
+      'close grip bench',
+    ],
+    'stiff leg deadlift': [
+      'sldl',
+      'stiff legged deadlift',
+      'stiff-leg deadlift',
+    ],
+    'stiff-legged deadlift': [
+      'sldl',
+      'stiff leg deadlift',
+      'stiff-leg deadlift',
+    ],
+    'hip thrust': [
+      'barbell hip thrust',
+      'glute bridge',
+      'hip thrusts',
+    ],
+    'barbell glute bridge': [
+      'barbell hip thrust',
+      'hip thrust',
+      'hip thrusts',
+      'bb hip thrust',
+      'glute bridge',
+    ],
+    'glute bridge': [
+      'hip thrust',
+      'hip thrusts',
+      'glute bridge',
+    ],
+    'shrug': [
+      'barbell shrug',
+      'dumbbell shrug',
+      'shrugs',
+      'trap shrug',
+    ],
   };
 
   /// Derives a clean human-friendly display name.
@@ -294,6 +352,15 @@ class ExerciseDisplayEnhancer {
     }
     if (lower == 'lever seated fly' || lower == 'lever seated fly (pec deck)' || lower == 'pec dec machine' || lower == 'pec deck fly') {
       return 'Pec Deck Fly (Machine)';
+    }
+    if (lower == 'barbell straight leg deadlift') {
+      return 'Barbell Stiff-Leg Deadlift';
+    }
+    if (lower == 'dumbbell straight leg deadlift' || lower == 'dumbbell stiff leg deadlift') {
+      return 'Dumbbell Stiff-Leg Deadlift';
+    }
+    if (lower == 'barbell glute bridge') {
+      return 'Barbell Glute Bridge / Hip Thrust';
     }
 
     // Capitalize properly

@@ -534,10 +534,25 @@ class ExerciseSearchEngine {
       }
 
       final normDisplay = ExerciseQueryNormalizer.normalize(ex.displayName);
-      final sim = ExerciseQueryNormalizer.similarity(cleanQuery, normDisplay);
+      final candidatePhrases = <String>{
+        normDisplay,
+        ExerciseQueryNormalizer.normalize(ex.name),
+        ExerciseQueryNormalizer.normalize(ex.canonicalName),
+        ...ex.aliases.map(ExerciseQueryNormalizer.normalize),
+      };
 
-      if (sim >= 0.70) {
-        final score = (sim * 1000).toInt() + 1500;
+      double bestPhraseSim = 0.0;
+      for (final cp in candidatePhrases) {
+        if (cp.isNotEmpty) {
+          final s = ExerciseQueryNormalizer.similarity(cleanQuery, cp);
+          if (s > bestPhraseSim) {
+            bestPhraseSim = s;
+          }
+        }
+      }
+
+      if (bestPhraseSim >= 0.70) {
+        final score = (bestPhraseSim * 1000).toInt() + 1500;
         typoResults.add(
           ExerciseSearchResult(
             definition: ex,

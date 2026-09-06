@@ -41,12 +41,16 @@ class ExerciseQueryNormalizer {
     'skull crusher': ['skullcrusher', 'skull crusher', 'lying triceps extension', 'triceps extension'],
     'skullcrusher': ['skullcrusher', 'skull crusher', 'lying triceps extension', 'triceps extension'],
     'face pull': ['facepull', 'face pull'],
-    'facepull': ['facepull', 'face pull'],
     'cable row': ['seated cable row', 'cable row'],
     'seated row': ['seated cable row', 'cable seated row', 'machine seated row', 'seated row'],
     'pec deck': ['pec dec', 'pec deck', 'butterfly machine', 'chest fly machine', 'lever seated fly'],
     'pec dec': ['pec deck', 'pec dec', 'butterfly machine', 'chest fly machine', 'lever seated fly'],
     'incline bench': ['incline barbell bench', 'incline dumbbell bench', 'incline db bench', 'incline bench press', 'incline bench'],
+    'cgbp': ['close grip bench press', 'close grip barbell bench press', 'cgbp'],
+    'ez bar': ['ez bar', 'ez barbell', 'ez-bar'],
+    'hip thrust': ['hip thrust', 'barbell hip thrust', 'glute bridge'],
+    'shrug': ['shrug', 'shrugs', 'barbell shrug', 'dumbbell shrug'],
+    'fly': ['fly', 'flyes', 'chest fly', 'dumbbell fly', 'cable fly'],
   };
 
   /// Normalizes a raw string: converts to lower case, removes special characters,

@@ -272,5 +272,113 @@ void main() {
       expect(benchPressResults.first.definition.displayName.toLowerCase().contains('bench press'), isTrue);
       expect(benchPressResults.first.definition.displayName.toLowerCase().contains('squat'), isFalse);
     });
+
+    test('19. "cgbp" and "sldl" acronyms surface the exact targeted compound exercises', () {
+      final rCgbp = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'cgbp', limit: 3);
+      expect(rCgbp.isNotEmpty, isTrue);
+      final topCgbp = rCgbp.first.definition.displayName.toLowerCase();
+      expect(topCgbp.contains('close') && topCgbp.contains('bench'), isTrue,
+          reason: 'Expected close grip bench press, got: $topCgbp');
+
+      final rSldl = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'sldl', limit: 3);
+      expect(rSldl.isNotEmpty, isTrue);
+      final topSldl = rSldl.first.definition.displayName.toLowerCase();
+      expect(topSldl.contains('stiff') && topSldl.contains('deadlift'), isTrue,
+          reason: 'Expected stiff leg deadlift, got: $topSldl');
+    });
+
+    test('20. Short ambiguous single-word queries surface foundational movements cleanly', () {
+      // "lat" -> Lat Pulldown
+      final rLat = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'lat', limit: 3);
+      expect(rLat.isNotEmpty, isTrue);
+      expect(rLat.first.definition.displayName.toLowerCase().contains('lat pulldown'), isTrue);
+
+      // "squat" -> Squat / Back Squat
+      final rSquat = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'squat', limit: 3);
+      expect(rSquat.isNotEmpty, isTrue);
+      expect(rSquat.first.definition.displayName.toLowerCase().contains('squat'), isTrue);
+
+      // "deadlift" -> Deadlift
+      final rDeadlift = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'deadlift', limit: 3);
+      expect(rDeadlift.isNotEmpty, isTrue);
+      expect(rDeadlift.first.definition.displayName.toLowerCase().contains('deadlift'), isTrue);
+
+      // "shrug" -> Shrug
+      final rShrug = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'shrug', limit: 3);
+      expect(rShrug.isNotEmpty, isTrue);
+      expect(rShrug.first.definition.displayName.toLowerCase().contains('shrug'), isTrue);
+
+      // "hip thrust" -> Barbell Glute Bridge / Hip Thrust
+      final rHip = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'hip thrust', limit: 3);
+      expect(rHip.isNotEmpty, isTrue);
+      expect(rHip.first.definition.displayName.toLowerCase().contains('hip thrust'), isTrue);
+
+      // "pullup" and "chinup"
+      final rPullup = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'pullup', limit: 3);
+      expect(rPullup.isNotEmpty, isTrue);
+      expect(rPullup.first.definition.displayName.toLowerCase().contains('pull') || rPullup.first.definition.displayName.toLowerCase().contains('chin'), isTrue);
+
+      // "dips" -> Dip
+      final rDip = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'dips', limit: 3);
+      expect(rDip.isNotEmpty, isTrue);
+      expect(rDip.first.definition.displayName.toLowerCase().contains('dip'), isTrue);
+    });
+
+    test('21. Position and stance modifiers win when explicitly searched', () {
+      // "standing calf raise" -> Standing Calf Raise
+      final rStandingCalf = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'standing calf raise', limit: 3);
+      expect(rStandingCalf.isNotEmpty, isTrue);
+      expect(rStandingCalf.first.definition.displayName.toLowerCase().contains('standing'), isTrue);
+
+      // "seated calf raise" -> Seated Calf Raise
+      final rSeatedCalf = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'seated calf raise', limit: 3);
+      expect(rSeatedCalf.isNotEmpty, isTrue);
+      expect(rSeatedCalf.first.definition.displayName.toLowerCase().contains('seated'), isTrue);
+
+      // "seated leg curl" -> Seated Leg Curl
+      final rSeatedCurl = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'seated leg curl', limit: 3);
+      expect(rSeatedCurl.isNotEmpty, isTrue);
+      expect(rSeatedCurl.first.definition.displayName.toLowerCase().contains('seated'), isTrue);
+    });
+
+    test('22. Robust transposition and spelling typo tolerance', () {
+      final typoCases = {
+        'bench pres': 'bench press',
+        'sqaut': 'squat',
+        'shoudler press': 'shoulder press',
+        'rdll': 'romanian deadlift',
+        'lat puldown': 'lat pulldown',
+      };
+
+      for (final entry in typoCases.entries) {
+        final res = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: entry.key, limit: 3);
+        expect(res.isNotEmpty, isTrue, reason: 'Typo query "${entry.key}" should return results');
+        final top = res.first.definition.displayName.toLowerCase();
+        expect(
+          top.contains(entry.value) ||
+          (entry.value == 'shoulder press' && top.contains('overhead press')) ||
+          (entry.value == 'squat' && top.contains('squat')) ||
+          (entry.value == 'bench press' && top.contains('bench press')) ||
+          (entry.value == 'romanian deadlift' && top.contains('romanian deadlift')),
+          isTrue,
+          reason: 'Typo query "${entry.key}" top result was "$top", expected to match "${entry.value}"',
+        );
+      }
+    });
+
+    test('23. Catalog integrity: all 1,363+ exercises are valid and searchable', () {
+      expect(testCatalog.length, greaterThanOrEqualTo(1363));
+      for (final def in testCatalog) {
+        expect(def.id.isNotEmpty, isTrue);
+        expect(def.displayName.isNotEmpty, isTrue);
+        expect(def.category.isNotEmpty, isTrue);
+        expect(def.equipment.isNotEmpty, isTrue);
+      }
+    });
+
+    test('24. Pure gibberish returns empty list without error', () {
+      final res = ExerciseSearchEngine.instance.search(allDefinitions: testCatalog, query: 'zzzzqqqq123', limit: 5);
+      expect(res.isEmpty, isTrue);
+    });
   });
 }
