@@ -214,24 +214,24 @@ class ExerciseLibraryService extends ChangeNotifier {
     String? equipmentGroup,
     Set<String>? excludeIds,
   }) {
-    final all = [..._customDefinitions, ..._allDefinitions];
     final counts = <String, int>{'ALL': 0};
     final selectedEq = (equipmentGroup == null || equipmentGroup == 'ALL') ? null : equipmentGroup.toLowerCase();
 
-    for (final ex in all) {
+    final Iterable<ExerciseDefinition> candidates;
+    if (query.trim().isNotEmpty) {
+      candidates = search(
+        query: query,
+        equipmentGroup: equipmentGroup,
+        excludeIds: excludeIds,
+        limit: 1500,
+      );
+    } else {
+      candidates = [..._customDefinitions, ..._allDefinitions];
+    }
+
+    for (final ex in candidates) {
       if (excludeIds != null && excludeIds.contains(ex.id)) continue;
       if (selectedEq != null && ex.equipmentGroup.toLowerCase() != selectedEq) continue;
-
-      if (query.isNotEmpty) {
-        final matches = search(
-          query: query,
-          category: ex.category,
-          equipmentGroup: equipmentGroup,
-          excludeIds: excludeIds,
-          limit: 1,
-        );
-        if (matches.isEmpty) continue;
-      }
 
       counts['ALL'] = (counts['ALL'] ?? 0) + 1;
       counts[ex.category] = (counts[ex.category] ?? 0) + 1;
@@ -246,24 +246,24 @@ class ExerciseLibraryService extends ChangeNotifier {
     String? category,
     Set<String>? excludeIds,
   }) {
-    final all = [..._customDefinitions, ..._allDefinitions];
     final counts = <String, int>{'ALL': 0};
     final selectedCat = (category == null || category == 'ALL') ? null : category.toLowerCase();
 
-    for (final ex in all) {
+    final Iterable<ExerciseDefinition> candidates;
+    if (query.trim().isNotEmpty) {
+      candidates = search(
+        query: query,
+        category: category,
+        excludeIds: excludeIds,
+        limit: 1500,
+      );
+    } else {
+      candidates = [..._customDefinitions, ..._allDefinitions];
+    }
+
+    for (final ex in candidates) {
       if (excludeIds != null && excludeIds.contains(ex.id)) continue;
       if (selectedCat != null && ex.category.toLowerCase() != selectedCat) continue;
-
-      if (query.isNotEmpty) {
-        final matches = search(
-          query: query,
-          category: category,
-          equipmentGroup: ex.equipmentGroup,
-          excludeIds: excludeIds,
-          limit: 1,
-        );
-        if (matches.isEmpty) continue;
-      }
 
       counts['ALL'] = (counts['ALL'] ?? 0) + 1;
       counts[ex.equipmentGroup] = (counts[ex.equipmentGroup] ?? 0) + 1;
