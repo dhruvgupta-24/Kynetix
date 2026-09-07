@@ -3,17 +3,25 @@ import 'dart:io';
 
 void main() {
   final file = File('assets/data/exercises_library.json');
-  final list = jsonDecode(file.readAsStringSync()) as List;
-  int withImage = 0;
-  int withGif = 0;
-  int total = list.length;
+  final list = (jsonDecode(file.readAsStringSync()) as List).cast<Map<String, dynamic>>();
+  print('Total in json: ${list.length}');
 
-  for (final item in list) {
-    if (item['imageRef'] != null && (item['imageRef'] as String).isNotEmpty) withImage++;
-    if (item['gifRef'] != null && (item['gifRef'] as String).isNotEmpty) withGif++;
+  final faceItems = list.where((e) {
+    final n = (e['name'] as String? ?? '').toLowerCase();
+    final id = (e['id'] as String? ?? '').toLowerCase();
+    final aliases = (e['aliases'] as List? ?? []).map((a) => a.toString().toLowerCase()).toList();
+    return n.contains('face') || id.contains('face') || aliases.any((a) => a.contains('face'));
+  }).toList();
+  for (final e in faceItems) {
+    print('FACE: ${e["id"]} | ${e["name"]} | img: ${e["imageRef"]} | gif: ${e["gifRef"]} | aliases: ${e["aliases"]}');
   }
 
-  print('Total exercises: $total');
-  print('With imageRef: $withImage');
-  print('With gifRef: $withGif');
+  final triItems = list.where((e) {
+    final n = (e['name'] as String? ?? '').toLowerCase();
+    final id = (e['id'] as String? ?? '').toLowerCase();
+    return n.contains('overhead') && (n.contains('tricep') || n.contains('triceps') || id.contains('tricep') || id.contains('tri'));
+  }).toList();
+  for (final e in triItems) {
+    print('TRI: ${e["id"]} | ${e["name"]} | img: ${e["imageRef"]} | gif: ${e["gifRef"]}');
+  }
 }

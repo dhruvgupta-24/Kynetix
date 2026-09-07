@@ -1,14 +1,20 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/exercise_definition.dart';
+import '../models/workout_split.dart' show Exercise;
+import '../services/exercise_library_service.dart';
 import '../services/exercise_media_service.dart';
 import 'muscle_body_map.dart';
 
 /// Offline-safe, license-compliant Exercise Media & Demonstration Widget.
 /// Supports animated GIFs, thumbnail previews, GymVisual attribution,
-/// and graceful anatomical vector fallbacks when offline or media is absent.
-class ExerciseMediaWidget extends StatelessWidget {
+/// graceful anatomical vector fallbacks, and 2-loop completion callbacks
+/// for smooth progression reveals without frame-rate thrashing.
+class ExerciseMediaWidget extends StatefulWidget {
   final ExerciseDefinition? definition;
+  final Exercise? exercise;
+  final String? exerciseId;
   final String? exerciseName;
   final String? mediaUrl;
   final double height;
@@ -19,10 +25,14 @@ class ExerciseMediaWidget extends StatelessWidget {
   final bool preferAnimation;
   final bool showAttribution;
   final BoxFit fit;
+  final VoidCallback? onTwoLoopsCompleted;
+  final int targetLoops;
 
   const ExerciseMediaWidget({
     super.key,
     this.definition,
+    this.exercise,
+    this.exerciseId,
     this.exerciseName,
     this.mediaUrl,
     this.height = 180,
@@ -33,29 +43,172 @@ class ExerciseMediaWidget extends StatelessWidget {
     this.preferAnimation = true,
     this.showAttribution = true,
     this.fit = BoxFit.contain,
+    this.onTwoLoopsCompleted,
+    this.targetLoops = 2,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final effectiveRadius = borderRadius ?? BorderRadius.circular(16);
+  State<ExerciseMediaWidget> createState() => _ExerciseMediaWidgetState();
+}
 
-    final resolvedUrl = mediaUrl ??
-        (preferAnimation
-            ? ExerciseMediaService.instance.getAnimationUrl(definition)
-            : ExerciseMediaService.instance.getThumbnailUrl(definition)) ??
-        ExerciseMediaService.instance.getThumbnailUrl(definition);
+class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
+  Timer? _loopCountdownTimer;
+  Timer? _watchdogTimer;
+  bool _loopsCompleted = false;
+  bool _firstFrameRendered = false;
+  String? _resolvedUrl;
+  ExerciseDefinition? _resolvedDefinition;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveMedia();
+    _checkInitialTrigger();
+  }
+
+  @override
+  void didUpdateWidget(ExerciseMediaWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final exerciseChanged = oldWidget.exercise?.id != widget.exercise?.id ||
+        oldWidget.definition?.id != widget.definition?.id ||
+        oldWidget.exerciseId != widget.exerciseId ||
+        oldWidget.exerciseName != widget.exerciseName ||
+        oldWidget.mediaUrl != widget.mediaUrl;
+
+    if (exerciseChanged) {
+      _resetLoopTracking();
+      _resolveMedia();
+      _checkInitialTrigger();
+    }
+  }
+
+  @override
+  void dispose() {
+    _loopCountdownTimer?.cancel();
+    _watchdogTimer?.cancel();
+    super.dispose();
+  }
+
+  void _resetLoopTracking() {
+    _loopCountdownTimer?.cancel();
+    _loopCountdownTimer = null;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
+    _loopsCompleted = false;
+    _firstFrameRendered = false;
+  }
+
+  void _resolveMedia() {
+    _resolvedDefinition = widget.definition ??
+        (widget.exercise != null
+            ? ExerciseLibraryService.instance.getById(widget.exercise!.id)
+            : widget.exerciseId != null
+                ? ExerciseLibraryService.instance.getById(widget.exerciseId!)
+                : null);
+
+    if (widget.mediaUrl != null && widget.mediaUrl!.isNotEmpty) {
+      _resolvedUrl = widget.mediaUrl;
+      return;
+    }
+
+    final resolved = ExerciseMediaService.instance.resolveMedia(
+      definition: widget.definition,
+      exercise: widget.exercise,
+      id: widget.exerciseId,
+      name: widget.exerciseName,
+    );
+
+    if (widget.preferAnimation && resolved.gif != null && resolved.gif!.isNotEmpty) {
+      _resolvedUrl = '${ExerciseMediaService.cdnBaseVideos}/${resolved.gif}';
+    } else if (resolved.image != null && resolved.image!.isNotEmpty) {
+      _resolvedUrl = '${ExerciseMediaService.cdnBaseImages}/${resolved.image}';
+    } else if (resolved.gif != null && resolved.gif!.isNotEmpty) {
+      _resolvedUrl = '${ExerciseMediaService.cdnBaseVideos}/${resolved.gif}';
+    } else {
+      _resolvedUrl = null;
+    }
+  }
+
+  void _checkInitialTrigger() {
+    if (widget.onTwoLoopsCompleted == null) return;
+
+    // If there is genuinely no media URL, notify after brief graceful delay
+    // so progression UI is never locked out.
+    if (_resolvedUrl == null || _resolvedUrl!.isEmpty) {
+      _scheduleGracefulFallbackTrigger();
+      return;
+    }
+
+    // Safety watchdog: If network or frame decoding is delayed,
+    // trigger progression after timeout so the workout screen is never blocked.
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * 3000 + 1000), () {
+      if (mounted && !_loopsCompleted) {
+        _loopsCompleted = true;
+        widget.onTwoLoopsCompleted?.call();
+      }
+    });
+  }
+
+  void _scheduleGracefulFallbackTrigger() {
+    if (_loopsCompleted) return;
+    _loopCountdownTimer?.cancel();
+    _watchdogTimer?.cancel();
+    _loopCountdownTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted && !_loopsCompleted) {
+        _loopsCompleted = true;
+        widget.onTwoLoopsCompleted?.call();
+      }
+    });
+  }
+
+  void _onFirstFrameDecoded() {
+    if (_firstFrameRendered || _loopsCompleted) return;
+    _firstFrameRendered = true;
+    _watchdogTimer?.cancel();
+
+    if (widget.onTwoLoopsCompleted == null) return;
+
+    // A single GymVisual loop averages 3.0s (12 frames @ 250ms).
+    // Target 2 full loops = 6.0s duration.
+    final durationMs = widget.targetLoops * 3000;
+    _loopCountdownTimer?.cancel();
+    _loopCountdownTimer = Timer(Duration(milliseconds: durationMs), () {
+      if (mounted && !_loopsCompleted) {
+        _loopsCompleted = true;
+        widget.onTwoLoopsCompleted?.call();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(16);
 
     Widget content;
-    if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
+    if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
       content = Image.network(
-        resolvedUrl,
-        fit: fit,
+        _resolvedUrl!,
+        fit: widget.fit,
         gaplessPlayback: true,
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (frame != null && !_firstFrameRendered) {
+            _onFirstFrameDecoded();
+          }
+          return child;
+        },
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
           return _buildLoadingPlaceholder();
         },
         errorBuilder: (context, error, stackTrace) {
+          if (!_loopsCompleted && _loopCountdownTimer == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && !_loopsCompleted && _loopCountdownTimer == null) {
+                _scheduleGracefulFallbackTrigger();
+              }
+            });
+          }
           return _buildAnatomicalFallback();
         },
       );
@@ -64,8 +217,8 @@ class ExerciseMediaWidget extends StatelessWidget {
     }
 
     final mediaCard = Container(
-      width: width ?? double.infinity,
-      height: height,
+      width: widget.width ?? double.infinity,
+      height: widget.height,
       decoration: BoxDecoration(
         color: const Color(0xFF13131F),
         borderRadius: effectiveRadius,
@@ -75,7 +228,10 @@ class ExerciseMediaWidget extends StatelessWidget {
       child: Stack(
         children: [
           Positioned.fill(child: content),
-          if (showAttribution && resolvedUrl != null && resolvedUrl.isNotEmpty && height >= 100)
+          if (widget.showAttribution &&
+              _resolvedUrl != null &&
+              _resolvedUrl!.isNotEmpty &&
+              widget.height >= 100)
             Positioned(
               left: 8,
               bottom: 6,
@@ -99,9 +255,12 @@ class ExerciseMediaWidget extends StatelessWidget {
       ),
     );
 
-    if (interactiveZoom && resolvedUrl != null && resolvedUrl.isNotEmpty && height >= 100) {
+    if (widget.interactiveZoom &&
+        _resolvedUrl != null &&
+        _resolvedUrl!.isNotEmpty &&
+        widget.height >= 100) {
       return GestureDetector(
-        onTap: () => _openZoomDialog(context, resolvedUrl),
+        onTap: () => _openZoomDialog(context, _resolvedUrl!),
         child: Stack(
           children: [
             mediaCard,
@@ -130,7 +289,7 @@ class ExerciseMediaWidget extends StatelessWidget {
   }
 
   Widget _buildLoadingPlaceholder() {
-    if (height < 70) {
+    if (widget.height < 70) {
       return Container(
         color: const Color(0xFF161626),
         alignment: Alignment.center,
@@ -164,24 +323,24 @@ class ExerciseMediaWidget extends StatelessWidget {
   }
 
   Widget _buildAnatomicalFallback() {
-    if (!showMuscleMapFallback) {
+    if (!widget.showMuscleMapFallback) {
       return Center(
         child: Icon(
           Icons.fitness_center_rounded,
-          size: (height * 0.4).clamp(16.0, 40.0),
+          size: (widget.height * 0.4).clamp(16.0, 40.0),
           color: Colors.white.withValues(alpha: 0.15),
         ),
       );
     }
 
-    final primary = definition?.targetMuscle ?? '';
-    final secondary = definition?.secondaryMuscles ?? [];
+    final primary = _resolvedDefinition?.targetMuscle ?? widget.exercise?.muscleGroup ?? '';
+    final secondary = _resolvedDefinition?.secondaryMuscles ?? [];
     final targetMuscles = <String>{
       if (primary.isNotEmpty) primary,
       ...secondary,
     };
 
-    if (height < 70) {
+    if (widget.height < 70) {
       return Center(
         child: Icon(
           Icons.fitness_center_rounded,
@@ -203,7 +362,7 @@ class ExerciseMediaWidget extends StatelessWidget {
                 if (primary.isNotEmpty) primary: KColor.green,
                 for (final s in secondary) s: KColor.amber,
               },
-              height: height - 16,
+              height: widget.height - 16,
             ),
           ),
         ),
@@ -228,6 +387,11 @@ class ExerciseMediaWidget extends StatelessWidget {
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.9),
       builder: (ctx) {
+        final title = _resolvedDefinition?.displayName ??
+            widget.exercise?.name ??
+            widget.exerciseName ??
+            'Visual Demonstration';
+
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.all(16),
@@ -254,7 +418,7 @@ class ExerciseMediaWidget extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                definition?.displayName ?? exerciseName ?? 'Visual Demonstration',
+                                title,
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,

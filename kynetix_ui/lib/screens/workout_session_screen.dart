@@ -11,6 +11,7 @@ import '../models/day_log.dart';
 import '../services/workout_service.dart';
 import '../services/persistence_service.dart';
 import '../widgets/exercise_picker_sheet.dart';
+import '../widgets/exercise_media_widget.dart';
 import '../widgets/barbell_plate_calculator.dart';
 import '../services/wakelock_service.dart';
 import '../services/superset_flow_service.dart';
@@ -1432,6 +1433,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                             final reorderOrder = reorderRecs.isNotEmpty ? reorderRecs.first.newOrder : null;
 
                             return _ExerciseWorkoutPage(
+                              key: ValueKey(ex.id),
                               exercise: ex,
                               sets: setsList,
                               lastEntry: lastEntry,
@@ -1962,6 +1964,7 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onApplyReorder;
 
   const _ExerciseWorkoutPage({
+    super.key,
     required this.exercise,
     required this.sets,
     required this.lastEntry,
@@ -2022,6 +2025,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   late SetType _selectedSetType;
   bool _showGlowPulse = false;
   bool _showCues = false;
+  bool _progressionRevealed = false;
 
   // Cache dial options
   final List<double> _weightOptions = List.generate(701, (i) => i * 0.5); // 0.0 to 350.0 kg
@@ -2030,6 +2034,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   @override
   void initState() {
     super.initState();
+    _progressionRevealed = false;
     _selectedWeight = widget.initialWeight;
     _selectedReps = widget.initialReps;
     _selectedRpe = widget.initialRpe;
@@ -2064,6 +2069,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   void didUpdateWidget(_ExerciseWorkoutPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.exercise.id != widget.exercise.id) {
+      _progressionRevealed = false;
       _selectedWeight = widget.initialWeight;
       _selectedReps = widget.initialReps;
       _selectedRpe = widget.initialRpe;
@@ -2133,6 +2139,14 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     _notesController.dispose();
     _sessionNotesController.dispose();
     super.dispose();
+  }
+
+  void _onMediaTwoLoopsCompleted() {
+    if (mounted && !_progressionRevealed) {
+      setState(() {
+        _progressionRevealed = true;
+      });
+    }
   }
 
   void _onWeightScroll(int index) {
@@ -2719,6 +2733,17 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          // Exercise Demonstration Media (canonical GymVisual animated GIF)
+          ExerciseMediaWidget(
+            exercise: widget.exercise,
+            height: 180,
+            fit: BoxFit.contain,
+            preferAnimation: true,
+            showAttribution: true,
+            targetLoops: 2,
+            onTwoLoopsCompleted: _onMediaTwoLoopsCompleted,
+          ),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -2729,8 +2754,64 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             ],
           ),
           const SizedBox(height: 14),
-          
-          // Recommended Next Set Card
+          // Zero-jump reserved progression area: reveals after 2 completed GIF loops
+          Stack(
+            children: [
+              if (!_progressionRevealed)
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E2C).withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF2D2D3E).withValues(alpha: 0.5), width: 1.0),
+                    ),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 13,
+                            height: 13,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.8,
+                              valueColor: AlwaysStoppedAnimation<Color>(KColor.amber.withValues(alpha: 0.7)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Analyzing Progression...',
+                            style: TextStyle(
+                              color: KColor.textMuted.withValues(alpha: 0.8),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              AnimatedOpacity(
+                opacity: _progressionRevealed ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOutCubic,
+                child: IgnorePointer(
+                  ignoring: !_progressionRevealed,
+                  child: _buildProgressionSection(sparkData),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressionSection(List<double> sparkData) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Recommended Next Set Card
           Builder(
             builder: (context) {
               final rec = WorkoutService.instance.getPersonalizedRecommendation(widget.exercise.id, widget.splitDayName);
@@ -3051,10 +3132,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                 painter: _SparklinePainter(sparkData),
               ),
             ),
-          ]
+          ],
         ],
-      ),
-    );
+      );
   }
 
   Widget _buildHeroStatCol(String title, String val, Color highlight) {
