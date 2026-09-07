@@ -12,6 +12,7 @@ import '../services/eating_pattern_service.dart';
 import '../services/item_parser.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
+import '../widgets/barcode_scan_sheet.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -463,6 +464,25 @@ class _AddMealScreenState extends State<AddMealScreen>
     }
   }
 
+  /// Scan a packaged product and load it into this screen for editing.
+  ///
+  /// The sheet returns label-measured figures, but they land in the same rows
+  /// as an estimated meal so the person still has the last word — a pack states
+  /// what is in it, not how much of it was actually eaten.
+  Future<void> _scanBarcode() async {
+    final scanned = await showBarcodeScanSheet(context);
+    if (scanned == null || !mounted) return;
+
+    setState(() {
+      _result = scanned;
+      _controller.text = scanned.canonicalMeal;
+      _initRowsFromResult(scanned);
+      _error = null;
+      _spellingSuggestion = null;
+      _showSpellingBanner = false;
+    });
+  }
+
   Future<void> _saveMeal() async {
     if (_result == null) return;
     
@@ -816,6 +836,11 @@ class _AddMealScreenState extends State<AddMealScreen>
         ),
         centerTitle: false,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+            tooltip: 'Scan barcode',
+            onPressed: _scanBarcode,
+          ),
           if (isEditing)
             IconButton(
               icon: const Icon(
