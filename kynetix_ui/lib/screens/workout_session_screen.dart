@@ -2669,6 +2669,11 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       }
     }
 
+    final rec = WorkoutService.instance.getPersonalizedRecommendation(
+      widget.exercise.id,
+      widget.splitDayName,
+    );
+
     String exTypeLabel = switch (widget.exercise.type) {
       ExerciseType.barbellCompound => 'Barbell Compound',
       ExerciseType.dumbbell => 'Dumbbell',
@@ -2733,18 +2738,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          // Single Bounded Slot (~195px): Demonstration GIF (2 loops) -> Auto-slides into Progression Card
+          _buildSharedMediaAndProgressionSlot(rec, sparkData),
           const SizedBox(height: 12),
-          // Exercise Demonstration Media (canonical GymVisual animated GIF)
-          ExerciseMediaWidget(
-            exercise: widget.exercise,
-            height: 180,
-            fit: BoxFit.contain,
-            preferAnimation: true,
-            showAttribution: true,
-            targetLoops: 2,
-            onTwoLoopsCompleted: _onMediaTwoLoopsCompleted,
-          ),
-          const SizedBox(height: 14),
           Row(
             children: [
               _buildHeroStatCol('Last Session', lastStr, KColor.textSecondary),
@@ -2753,388 +2750,431 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               _buildHeroStatCol('Current Session', currentStr, KColor.green),
             ],
           ),
-          const SizedBox(height: 14),
-          // Zero-jump reserved progression area: reveals after 2 completed GIF loops
-          Stack(
-            children: [
-              if (!_progressionRevealed)
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E2C).withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF2D2D3E).withValues(alpha: 0.5), width: 1.0),
-                    ),
-                    child: Center(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 13,
-                            height: 13,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.8,
-                              valueColor: AlwaysStoppedAnimation<Color>(KColor.amber.withValues(alpha: 0.7)),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Analyzing Progression...',
-                            style: TextStyle(
-                              color: KColor.textMuted.withValues(alpha: 0.8),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              AnimatedOpacity(
-                opacity: _progressionRevealed ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutCubic,
-                child: IgnorePointer(
-                  ignoring: !_progressionRevealed,
-                  child: _buildProgressionSection(sparkData),
-                ),
-              ),
-            ],
-          ),
+          if (_hasContextualPrompts) ...[
+            const SizedBox(height: 8),
+            _buildContextualPrompts(),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildProgressionSection(List<double> sparkData) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Recommended Next Set Card
-          Builder(
-            builder: (context) {
-              final rec = WorkoutService.instance.getPersonalizedRecommendation(widget.exercise.id, widget.splitDayName);
-              final hasStyle = rec.style != null && !rec.isDeload && rec.confidence >= 0.50;
-              final isDeloadOrSafety = rec.isDeload || rec.style == null;
-              final cardColor = isDeloadOrSafety 
-                  ? KColor.danger.withValues(alpha: 0.08) 
-                  : const Color(0xFF1E1E2C).withValues(alpha: 0.8);
-              final borderColor = isDeloadOrSafety 
-                  ? KColor.danger.withValues(alpha: 0.25) 
-                  : const Color(0xFFFFB347).withValues(alpha: 0.3);
-              final iconColor = isDeloadOrSafety 
-                  ? KColor.danger 
-                  : const Color(0xFFFFB347);
+  bool get _hasContextualPrompts =>
+      (widget.isRecurringAddition && widget.isTemporaryAddition) ||
+      widget.recurringSubstitutionReplacement != null ||
+      widget.isRecurringSkip ||
+      (widget.reorderRecommendation != null && widget.exercise.id == widget.reorderRecommendation!.first.id);
 
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  Widget _buildSharedMediaAndProgressionSlot(ProgressionRecommendation rec, List<double> sparkData) {
+    const double slotHeight = 195.0;
+
+    return SizedBox(
+      height: slotHeight,
+      width: double.infinity,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 450),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          layoutBuilder: (currentChild, previousChildren) {
+            return Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                ...previousChildren,
+                ?currentChild,
+              ],
+            );
+          },
+          transitionBuilder: (child, animation) {
+            final isProgression = child.key == const ValueKey('progression_view');
+            final inOffset = isProgression
+                ? const Offset(0.25, 0.0)
+                : const Offset(-0.25, 0.0);
+            final slideAnim = Tween<Offset>(
+              begin: inOffset,
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+
+            return SlideTransition(
+              position: slideAnim,
+              child: FadeTransition(
+                opacity: animation,
+                child: child,
+              ),
+            );
+          },
+          child: _progressionRevealed
+              ? KeyedSubtree(
+                  key: const ValueKey('progression_view'),
+                  child: _buildCompactProgressionCard(rec, sparkData, slotHeight),
+                )
+              : KeyedSubtree(
+                  key: const ValueKey('demo_view'),
+                  child: ExerciseMediaWidget(
+                    exercise: widget.exercise,
+                    height: slotHeight,
+                    fit: BoxFit.contain,
+                    preferAnimation: true,
+                    showAttribution: false,
+                    interactiveZoom: false,
+                    targetLoops: 2,
+                    onTwoLoopsCompleted: _onMediaTwoLoopsCompleted,
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactProgressionCard(ProgressionRecommendation rec, List<double> sparkData, double height) {
+    final isDeloadOrSafety = rec.isDeload || rec.style == null;
+    final cardColor = isDeloadOrSafety
+        ? KColor.danger.withValues(alpha: 0.08)
+        : const Color(0xFF13131F);
+    final borderColor = isDeloadOrSafety
+        ? KColor.danger.withValues(alpha: 0.3)
+        : const Color(0xFFFFB347).withValues(alpha: 0.25);
+    final iconColor = isDeloadOrSafety ? KColor.danger : const Color(0xFFFFB347);
+    final headerTitle = isDeloadOrSafety ? 'TRAINING ADVICE' : 'PROGRESSION RECOMMENDATION';
+    final styleBadge = rec.style?.label ?? (isDeloadOrSafety ? 'DELOAD' : 'ADAPTIVE');
+
+    return Container(
+      width: double.infinity,
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Header Row
+          Row(
+            children: [
+              Icon(
+                isDeloadOrSafety ? Icons.warning_amber_rounded : Icons.offline_bolt_rounded,
+                color: iconColor,
+                size: 14,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  headerTitle,
+                  style: TextStyle(
+                    color: iconColor,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor, width: 1.0),
-                  boxShadow: [
-                    BoxShadow(
-                      color: iconColor.withValues(alpha: 0.08),
-                      blurRadius: 10,
-                      spreadRadius: 1,
-                    )
-                  ],
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          isDeloadOrSafety ? Icons.warning_amber_rounded : Icons.offline_bolt_rounded, 
-                          color: iconColor, 
-                          size: 14,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            isDeloadOrSafety ? 'TRAINING ADVICE' : 'PROGRESSION RECOMMENDATION',
-                            style: TextStyle(color: iconColor, fontSize: 10.5, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    if (hasStyle) ...[
-                      Text(
-                        'Style: ${rec.style!.label}',
-                        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Builder(
-                        builder: (context) {
-                          final history = WorkoutService.instance.historyFor(widget.exercise.id, limit: 4);
-                          final sessionLines = <String>[];
-                          for (final h in history) {
-                            final workingSets = h.entry.sets.where((s) => s.isMainWorkingSet).toList();
-                            if (workingSets.isNotEmpty) {
-                              final setString = workingSets
-                                  .map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}×${s.reps}')
-                                  .join(', ');
-                              sessionLines.add(setString);
-                            }
-                          }
-                          final evidenceText = sessionLines.isNotEmpty
-                              ? 'Last ${sessionLines.length} sessions:\n${sessionLines.map((line) => '• $line').join('\n')}'
-                              : rec.reasoning;
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Evidence:',
-                                style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                evidenceText,
-                                style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10.5, fontStyle: FontStyle.italic, height: 1.35),
-                              ),
-                            ],
-                          );
-                        }
-                      ),
-                      const Divider(color: Color(0xFF374151), height: 12, thickness: 0.5),
-                    ],
-                    Text(
-                      rec.recommendation,
-                      style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35, fontWeight: FontWeight.w500),
-                    ),
-                  ],
+                child: Text(
+                  styleBadge.toUpperCase(),
+                  style: TextStyle(
+                    color: iconColor,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              );
-            }
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _progressionRevealed = false;
+                  });
+                },
+                child: Tooltip(
+                  message: 'Replay Demonstration',
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 14,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
 
-          // Temporary Exercise Permanent addition recommendation
-          if (widget.isRecurringAddition && widget.isTemporaryAddition) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: KColor.green.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: KColor.green.withValues(alpha: 0.15), width: 1.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: KColor.green.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    spreadRadius: 1,
-                  )
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, color: KColor.green, size: 14),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'RECURRING TEMPORARY ADDITION',
-                        style: TextStyle(color: KColor.green, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'You added ${widget.exercise.name} in several recent ${widget.splitDayName} sessions. Add it permanently to this split program?',
-                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: widget.onAddPermanently,
-                    style: TextButton.styleFrom(
-                      backgroundColor: KColor.green.withValues(alpha: 0.12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text('Add Permanently', style: TextStyle(color: KColor.green, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
+          // Recommendation Text
+          Text(
+            rec.recommendation,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
             ),
-          ],
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
 
-          // Recurring Substitution recommendation card
-          if (widget.recurringSubstitutionReplacement != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: KColor.blue.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: KColor.blue.withValues(alpha: 0.15), width: 1.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: KColor.blue.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    spreadRadius: 1,
-                  )
-                ],
+          // Concise Evidence / Reasoning
+          if (rec.reasoning.isNotEmpty)
+            Text(
+              rec.reasoning,
+              style: const TextStyle(
+                color: Color(0xFF9CA3AF),
+                fontSize: 10.5,
+                fontStyle: FontStyle.italic,
+                height: 1.2,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, color: KColor.blue, size: 14),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'RECURRING SUBSTITUTION DETECTED',
-                        style: TextStyle(color: KColor.blue, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Replace ${widget.exercise.name} with ${widget.recurringSubstitutionReplacement!.name} in your split?',
-                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: widget.onReplacePermanently,
-                    style: TextButton.styleFrom(
-                      backgroundColor: KColor.blue.withValues(alpha: 0.12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text('Replace Permanently', style: TextStyle(color: KColor.blue, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
 
-          // Recurring Skip recommendation card
-          if (widget.isRecurringSkip) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: KColor.danger.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: KColor.danger.withValues(alpha: 0.15), width: 1.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: KColor.danger.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    spreadRadius: 1,
-                  )
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, color: KColor.danger, size: 14),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'FREQUENT SKIP DETECTED',
-                        style: TextStyle(color: KColor.danger, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'You frequently skip ${widget.exercise.name}. Remove it from this split?',
-                    style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: widget.onRemovePermanently,
-                    style: TextButton.styleFrom(
-                      backgroundColor: KColor.danger.withValues(alpha: 0.12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text('Remove Permanently', style: TextStyle(color: KColor.danger, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          // Reorder recommendation card
-          if (widget.reorderRecommendation != null && widget.exercise.id == widget.reorderRecommendation!.first.id) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFB347).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.15), width: 1.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFFB347).withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    spreadRadius: 1,
-                  )
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFB347), size: 14),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'REORDER SEQUENCING DETECTED',
-                        style: TextStyle(color: Color(0xFFFFB347), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Update exercise order to match your actual training sequence?',
-                    style: TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: widget.onApplyReorder,
-                    style: TextButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFB347).withValues(alpha: 0.12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text('Update Order', style: TextStyle(color: Color(0xFFFFB347), fontSize: 11.5, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
+          // 1RM Trend Sparkline
           if (sparkData.length >= 2) ...[
-            const SizedBox(height: 14),
-            const Divider(color: KColor.border, height: 1),
-            const SizedBox(height: 12),
-            const Text('PROGRESSION TREND (1RM)', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text(
+                  '1RM PROGRESSION TREND',
+                  style: TextStyle(
+                    color: KColor.textMuted,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${sparkData.last.toStringAsFixed(1)} kg',
+                  style: const TextStyle(
+                    color: KColor.green,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
             SizedBox(
-              height: 48,
+              height: 42,
               width: double.infinity,
               child: CustomPaint(
                 painter: _SparklinePainter(sparkData),
               ),
             ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E2C).withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.trending_up_rounded, size: 13, color: KColor.textMuted),
+                  SizedBox(width: 6),
+                  Text(
+                    'Complete more sessions to plot dynamic 1RM trend',
+                    style: TextStyle(color: KColor.textMuted, fontSize: 9.5),
+                  ),
+                ],
+              ),
+            ),
           ],
         ],
-      );
+      ),
+    );
+  }
+
+  Widget _buildContextualPrompts() {
+    return Column(
+      children: [
+        if (widget.isRecurringAddition && widget.isTemporaryAddition) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: KColor.green.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: KColor.green.withValues(alpha: 0.15), width: 1.0),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: KColor.green, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      'RECURRING TEMPORARY ADDITION',
+                      style: TextStyle(color: KColor.green, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'You added ${widget.exercise.name} in several recent ${widget.splitDayName} sessions. Add it permanently to this split program?',
+                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: widget.onAddPermanently,
+                  style: TextButton.styleFrom(
+                    backgroundColor: KColor.green.withValues(alpha: 0.12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Add Permanently', style: TextStyle(color: KColor.green, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        if (widget.recurringSubstitutionReplacement != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: KColor.blue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: KColor.blue.withValues(alpha: 0.15), width: 1.0),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: KColor.blue, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      'RECURRING SUBSTITUTION DETECTED',
+                      style: TextStyle(color: KColor.blue, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Replace ${widget.exercise.name} with ${widget.recurringSubstitutionReplacement!.name} in your split?',
+                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: widget.onReplacePermanently,
+                  style: TextButton.styleFrom(
+                    backgroundColor: KColor.blue.withValues(alpha: 0.12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Replace Permanently', style: TextStyle(color: KColor.blue, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        if (widget.isRecurringSkip) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: KColor.danger.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: KColor.danger.withValues(alpha: 0.15), width: 1.0),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: KColor.danger, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      'FREQUENT SKIP DETECTED',
+                      style: TextStyle(color: KColor.danger, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'You frequently skip ${widget.exercise.name}. Remove it from this split?',
+                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: widget.onRemovePermanently,
+                  style: TextButton.styleFrom(
+                    backgroundColor: KColor.danger.withValues(alpha: 0.12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Remove Permanently', style: TextStyle(color: KColor.danger, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        if (widget.reorderRecommendation != null && widget.exercise.id == widget.reorderRecommendation!.first.id) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFB347).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.15), width: 1.0),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFB347), size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      'REORDER SEQUENCING DETECTED',
+                      style: TextStyle(color: Color(0xFFFFB347), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Update exercise order to match your actual training sequence?',
+                  style: TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: widget.onApplyReorder,
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFB347).withValues(alpha: 0.12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Update Order', style: TextStyle(color: Color(0xFFFFB347), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   Widget _buildHeroStatCol(String title, String val, Color highlight) {
