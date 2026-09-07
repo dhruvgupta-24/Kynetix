@@ -27,6 +27,8 @@ class ExerciseMediaWidget extends StatefulWidget {
   final BoxFit fit;
   final VoidCallback? onTwoLoopsCompleted;
   final int targetLoops;
+  final Duration? singleLoopDuration;
+  final bool disableNetwork;
 
   const ExerciseMediaWidget({
     super.key,
@@ -45,6 +47,8 @@ class ExerciseMediaWidget extends StatefulWidget {
     this.fit = BoxFit.contain,
     this.onTwoLoopsCompleted,
     this.targetLoops = 2,
+    this.singleLoopDuration,
+    this.disableNetwork = false,
   });
 
   @override
@@ -132,6 +136,13 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   void _checkInitialTrigger() {
     if (widget.onTwoLoopsCompleted == null) return;
 
+    if (widget.disableNetwork) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onFirstFrameDecoded();
+      });
+      return;
+    }
+
     // If there is genuinely no media URL, notify after brief graceful delay
     // so progression UI is never locked out.
     if (_resolvedUrl == null || _resolvedUrl!.isEmpty) {
@@ -141,8 +152,9 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     // Safety watchdog: If network or frame decoding is delayed,
     // trigger progression after timeout so the workout screen is never blocked.
+    final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
     _watchdogTimer?.cancel();
-    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * 3000 + 1000), () {
+    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + 1000), () {
       if (mounted && !_loopsCompleted) {
         _loopsCompleted = true;
         widget.onTwoLoopsCompleted?.call();
@@ -154,7 +166,10 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     if (_loopsCompleted) return;
     _loopCountdownTimer?.cancel();
     _watchdogTimer?.cancel();
-    _loopCountdownTimer = Timer(const Duration(milliseconds: 600), () {
+    final delay = widget.singleLoopDuration != null
+        ? const Duration(milliseconds: 50)
+        : const Duration(milliseconds: 600);
+    _loopCountdownTimer = Timer(delay, () {
       if (mounted && !_loopsCompleted) {
         _loopsCompleted = true;
         widget.onTwoLoopsCompleted?.call();
@@ -170,8 +185,9 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     if (widget.onTwoLoopsCompleted == null) return;
 
     // A single GymVisual loop averages 3.0s (12 frames @ 250ms).
-    // Target 2 full loops = 6.0s duration.
-    final durationMs = widget.targetLoops * 3000;
+    // Target 2 full loops = 6.0s duration (or custom singleLoopDuration for tests).
+    final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
+    final durationMs = widget.targetLoops * loopMs;
     _loopCountdownTimer?.cancel();
     _loopCountdownTimer = Timer(Duration(milliseconds: durationMs), () {
       if (mounted && !_loopsCompleted) {
@@ -186,7 +202,9 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(16);
 
     Widget content;
-    if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
+    if (widget.disableNetwork) {
+      content = _buildAnatomicalFallback();
+    } else if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
       content = Image.network(
         _resolvedUrl!,
         fit: widget.fit,
@@ -323,7 +341,7 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   }
 
   Widget _buildAnatomicalFallback() {
-    if (!widget.showMuscleMapFallback) {
+    if (!widget.showMuscleMapFallback || widget.disableNetwork) {
       return Center(
         child: Icon(
           Icons.fitness_center_rounded,
