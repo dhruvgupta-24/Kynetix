@@ -29,10 +29,16 @@ class ExerciseLibraryService extends ChangeNotifier {
     return List.unmodifiable([..._customDefinitions, ..._allDefinitions]);
   }
 
-  /// Initialize and load the 1,300+ exercise database into memory.
-  Future<void> initialize() async {
-    if (_initialized) return;
+  Future<void>? _initFuture;
 
+  /// Initialize and load the 1,300+ exercise database into memory.
+  Future<void> initialize() {
+    if (_initialized) return Future.value();
+    _initFuture ??= _doInitialize();
+    return _initFuture!;
+  }
+
+  Future<void> _doInitialize() async {
     try {
       final jsonString = await rootBundle.loadString(_kAssetPath);
       final List<dynamic> parsed = jsonDecode(jsonString) as List<dynamic>;

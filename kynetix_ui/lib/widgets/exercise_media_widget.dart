@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/exercise_definition.dart';
+import '../services/exercise_media_service.dart';
 import 'muscle_body_map.dart';
 
 /// Offline-safe, license-compliant Exercise Media & Demonstration Widget.
-/// Supports local assets, network URLs, smooth shimmer caching, and
-/// graceful anatomical vector fallbacks when offline or media is absent.
+/// Supports animated GIFs, thumbnail previews, GymVisual attribution,
+/// and graceful anatomical vector fallbacks when offline or media is absent.
 class ExerciseMediaWidget extends StatelessWidget {
   final ExerciseDefinition? definition;
   final String? exerciseName;
@@ -15,6 +16,9 @@ class ExerciseMediaWidget extends StatelessWidget {
   final BorderRadius? borderRadius;
   final bool showMuscleMapFallback;
   final bool interactiveZoom;
+  final bool preferAnimation;
+  final bool showAttribution;
+  final BoxFit fit;
 
   const ExerciseMediaWidget({
     super.key,
@@ -26,18 +30,27 @@ class ExerciseMediaWidget extends StatelessWidget {
     this.borderRadius,
     this.showMuscleMapFallback = true,
     this.interactiveZoom = true,
+    this.preferAnimation = true,
+    this.showAttribution = true,
+    this.fit = BoxFit.contain,
   });
 
   @override
   Widget build(BuildContext context) {
     final effectiveRadius = borderRadius ?? BorderRadius.circular(16);
-    final url = mediaUrl ?? definition?.gifRef ?? definition?.imageRef;
+
+    final resolvedUrl = mediaUrl ??
+        (preferAnimation
+            ? ExerciseMediaService.instance.getAnimationUrl(definition)
+            : ExerciseMediaService.instance.getThumbnailUrl(definition)) ??
+        ExerciseMediaService.instance.getThumbnailUrl(definition);
 
     Widget content;
-    if (url != null && url.isNotEmpty) {
+    if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
       content = Image.network(
-        url,
-        fit: BoxFit.contain,
+        resolvedUrl,
+        fit: fit,
+        gaplessPlayback: true,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
           return _buildLoadingPlaceholder();
@@ -50,7 +63,7 @@ class ExerciseMediaWidget extends StatelessWidget {
       content = _buildAnatomicalFallback();
     }
 
-    final container = Container(
+    final mediaCard = Container(
       width: width ?? double.infinity,
       height: height,
       decoration: BoxDecoration(
@@ -59,15 +72,39 @@ class ExerciseMediaWidget extends StatelessWidget {
         border: Border.all(color: const Color(0xFF222234)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: content,
+      child: Stack(
+        children: [
+          Positioned.fill(child: content),
+          if (showAttribution && resolvedUrl != null && resolvedUrl.isNotEmpty && height >= 100)
+            Positioned(
+              left: 8,
+              bottom: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  ExerciseMediaService.attribution,
+                  style: TextStyle(
+                    color: Color(0xFF9CA3AF),
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
 
-    if (interactiveZoom && url != null && url.isNotEmpty) {
+    if (interactiveZoom && resolvedUrl != null && resolvedUrl.isNotEmpty && height >= 100) {
       return GestureDetector(
-        onTap: () => _openZoomDialog(context, url),
+        onTap: () => _openZoomDialog(context, resolvedUrl),
         child: Stack(
           children: [
-            container,
+            mediaCard,
             Positioned(
               right: 8,
               top: 8,
@@ -89,10 +126,21 @@ class ExerciseMediaWidget extends StatelessWidget {
       );
     }
 
-    return container;
+    return mediaCard;
   }
 
   Widget _buildLoadingPlaceholder() {
+    if (height < 70) {
+      return Container(
+        color: const Color(0xFF161626),
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.fitness_center_rounded,
+          size: 16,
+          color: Colors.white.withValues(alpha: 0.18),
+        ),
+      );
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -120,7 +168,7 @@ class ExerciseMediaWidget extends StatelessWidget {
       return Center(
         child: Icon(
           Icons.fitness_center_rounded,
-          size: 40,
+          size: (height * 0.4).clamp(16.0, 40.0),
           color: Colors.white.withValues(alpha: 0.15),
         ),
       );
@@ -132,6 +180,16 @@ class ExerciseMediaWidget extends StatelessWidget {
       if (primary.isNotEmpty) primary,
       ...secondary,
     };
+
+    if (height < 70) {
+      return Center(
+        child: Icon(
+          Icons.fitness_center_rounded,
+          size: 20,
+          color: Colors.white.withValues(alpha: 0.25),
+        ),
+      );
+    }
 
     return Stack(
       children: [
@@ -150,37 +208,14 @@ class ExerciseMediaWidget extends StatelessWidget {
           ),
         ),
         Positioned(
-          left: 10,
-          top: 10,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    color: KColor.green,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  primary.isNotEmpty ? primary.toUpperCase() : 'TARGET ANATOMY',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white70,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
+          bottom: 6,
+          right: 8,
+          child: Text(
+            'Target Anatomy',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.3),
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
@@ -191,36 +226,84 @@ class ExerciseMediaWidget extends StatelessWidget {
   void _openZoomDialog(BuildContext context, String url) {
     showDialog(
       context: context,
-      barrierColor: Colors.black87,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white),
-                onPressed: () => Navigator.of(ctx).pop(),
-              ),
-            ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: InteractiveViewer(
+      barrierColor: Colors.black.withValues(alpha: 0.9),
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(16),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              InteractiveViewer(
                 minScale: 0.8,
                 maxScale: 3.5,
-                child: Image.network(
-                  url,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) =>
-                      _buildAnatomicalFallback(),
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 450, maxHeight: 450),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0C0C14),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF2E2E3E)),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                definition?.displayName ?? exerciseName ?? 'Visual Demonstration',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1, color: Color(0xFF1E1E2F)),
+                      Flexible(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Image.network(
+                            url,
+                            fit: BoxFit.contain,
+                            gaplessPlayback: true,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(Icons.broken_image_rounded, color: Colors.white30, size: 60),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          ExerciseMediaService.attribution,
+                          style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

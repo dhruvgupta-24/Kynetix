@@ -11,8 +11,7 @@ import 'services/meal_memory.dart';
 import 'services/personal_nutrition_memory.dart';
 import 'services/persistence_service.dart';
 import 'services/workout_service.dart';
-import 'services/insights_report_service.dart';
-import 'models/day_log.dart';
+import 'services/exercise_library_service.dart';
 import 'config/supabase_secrets.dart';
 
 Future<void> main() async {
@@ -51,6 +50,7 @@ Future<void> main() async {
     PersonalNutritionMemory.instance.init(),
     PersistenceService.load(),
     WorkoutService.instance.init(),
+    ExerciseLibraryService.instance.initialize(),
   ]);
 
   final servicesTime = stopwatch.elapsedMilliseconds - serviceStart;
