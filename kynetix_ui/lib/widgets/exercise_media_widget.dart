@@ -7,6 +7,47 @@ import '../services/exercise_library_service.dart';
 import '../services/exercise_media_service.dart';
 import 'muscle_body_map.dart';
 
+/// Controller governing exercise demonstration loop playback and observation.
+///
+/// Decouples loop completion detection from arbitrary asynchronous GIF timers.
+/// In production, GIF frame decoders or the media player report loops to this controller.
+/// In tests, this controller allows deterministic, instantaneous loop simulation.
+class ExerciseDemoPlaybackController extends ChangeNotifier {
+  final int targetLoops;
+  int _completedLoops = 0;
+  bool _isCompleted = false;
+
+  ExerciseDemoPlaybackController({this.targetLoops = 2});
+
+  int get completedLoops => _completedLoops;
+  bool get isCompleted => _isCompleted;
+
+  /// Simulates or reports that 1 loop finished.
+  void recordLoop() {
+    if (_isCompleted) return;
+    _completedLoops++;
+    if (_completedLoops >= targetLoops) {
+      _isCompleted = true;
+    }
+    notifyListeners();
+  }
+
+  /// Instantly completes all target loops.
+  void completeLoops() {
+    if (_isCompleted) return;
+    _completedLoops = targetLoops;
+    _isCompleted = true;
+    notifyListeners();
+  }
+
+  /// Resets loop count back to 0.
+  void reset() {
+    _completedLoops = 0;
+    _isCompleted = false;
+    notifyListeners();
+  }
+}
+
 /// Offline-safe, license-compliant Exercise Media & Demonstration Widget.
 /// Supports animated GIFs, thumbnail previews, GymVisual attribution,
 /// graceful anatomical vector fallbacks, and 2-loop completion callbacks
@@ -32,6 +73,7 @@ class ExerciseMediaWidget extends StatefulWidget {
   final int targetLoops;
   final Duration? singleLoopDuration;
   final bool disableNetwork;
+  final ExerciseDemoPlaybackController? playbackController;
 
   const ExerciseMediaWidget({
     super.key,
@@ -52,6 +94,7 @@ class ExerciseMediaWidget extends StatefulWidget {
     this.targetLoops = 2,
     this.singleLoopDuration,
     this.disableNetwork = false,
+    this.playbackController,
   });
 
   @override
@@ -69,6 +112,7 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   @override
   void initState() {
     super.initState();
+    _attachPlaybackController(widget.playbackController);
     _resolveMedia();
     _checkInitialTrigger();
   }
@@ -76,6 +120,10 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   @override
   void didUpdateWidget(ExerciseMediaWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.playbackController != widget.playbackController) {
+      _detachPlaybackController(oldWidget.playbackController);
+      _attachPlaybackController(widget.playbackController);
+    }
     final exerciseChanged = oldWidget.exercise?.id != widget.exercise?.id ||
         oldWidget.definition?.id != widget.definition?.id ||
         oldWidget.exerciseId != widget.exerciseId ||
@@ -91,9 +139,31 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
   @override
   void dispose() {
+    _detachPlaybackController(widget.playbackController);
     _loopCountdownTimer?.cancel();
     _watchdogTimer?.cancel();
     super.dispose();
+  }
+
+  void _attachPlaybackController(ExerciseDemoPlaybackController? controller) {
+    controller?.addListener(_onPlaybackControllerChanged);
+    if (controller != null && controller.isCompleted && !_loopsCompleted) {
+      _loopsCompleted = true;
+      widget.onTwoLoopsCompleted?.call();
+    }
+  }
+
+  void _detachPlaybackController(ExerciseDemoPlaybackController? controller) {
+    controller?.removeListener(_onPlaybackControllerChanged);
+  }
+
+  void _onPlaybackControllerChanged() {
+    if (!mounted) return;
+    final controller = widget.playbackController;
+    if (controller != null && controller.isCompleted && !_loopsCompleted) {
+      _loopsCompleted = true;
+      widget.onTwoLoopsCompleted?.call();
+    }
   }
 
   void _resetLoopTracking() {
@@ -137,21 +207,27 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   }
 
   void _checkInitialTrigger() {
-    if (widget.onTwoLoopsCompleted == null) return;
-
-    if (widget.disableNetwork) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _onFirstFrameDecoded();
-      });
+    if (widget.playbackController != null) {
+      // Loop completion is controlled deterministically via playbackController.
       return;
     }
 
+    if (widget.onTwoLoopsCompleted == null) return;
+
     if (ExerciseMediaWidget.disableNetworkForTesting) {
+      // In testing without a controller, avoid uncollected background timers.
       if (widget.singleLoopDuration != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _onFirstFrameDecoded();
         });
       }
+      return;
+    }
+
+    if (widget.disableNetwork) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onFirstFrameDecoded();
+      });
       return;
     }
 
@@ -164,10 +240,9 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     // Safety watchdog: If network or frame decoding is delayed,
     // trigger progression after timeout so the workout screen is never blocked.
-    final loopMs = widget.singleLoopDuration?.inMilliseconds ??
-        (ExerciseMediaWidget.disableNetworkForTesting ? 20 : 3000);
+    final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
     _watchdogTimer?.cancel();
-    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + (ExerciseMediaWidget.disableNetworkForTesting ? 50 : 1000)), () {
+    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + 1000), () {
       if (mounted && !_loopsCompleted) {
         _loopsCompleted = true;
         widget.onTwoLoopsCompleted?.call();
@@ -356,7 +431,9 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   }
 
   Widget _buildAnatomicalFallback() {
-    if (!widget.showMuscleMapFallback || widget.disableNetwork) {
+    if (!widget.showMuscleMapFallback ||
+        widget.disableNetwork ||
+        ExerciseMediaWidget.disableNetworkForTesting) {
       return Center(
         child: Icon(
           Icons.fitness_center_rounded,

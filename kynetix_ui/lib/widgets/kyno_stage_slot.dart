@@ -16,6 +16,7 @@ class KynoStageSlot extends StatefulWidget {
   final KynoProgressionAdvice advice;
   final double height;
   final VoidCallback? onDemoTapped;
+  final ExerciseDemoPlaybackController? playbackController;
 
   const KynoStageSlot({
     super.key,
@@ -23,6 +24,7 @@ class KynoStageSlot extends StatefulWidget {
     required this.advice,
     this.height = 195.0,
     this.onDemoTapped,
+    this.playbackController,
   });
 
   @override
@@ -34,12 +36,50 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
   bool _showWhyDetails = false;
 
   @override
+  void initState() {
+    super.initState();
+    _attachController(widget.playbackController);
+  }
+
+  @override
   void didUpdateWidget(KynoStageSlot oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.playbackController != widget.playbackController) {
+      _detachController(oldWidget.playbackController);
+      _attachController(widget.playbackController);
+    }
     if (oldWidget.exercise.id != widget.exercise.id) {
+      widget.playbackController?.reset();
       setState(() {
         _progressionRevealed = false;
         _showWhyDetails = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _detachController(widget.playbackController);
+    super.dispose();
+  }
+
+  void _attachController(ExerciseDemoPlaybackController? controller) {
+    controller?.addListener(_onPlaybackChanged);
+    if (controller != null && controller.isCompleted && !_progressionRevealed) {
+      _progressionRevealed = true;
+    }
+  }
+
+  void _detachController(ExerciseDemoPlaybackController? controller) {
+    controller?.removeListener(_onPlaybackChanged);
+  }
+
+  void _onPlaybackChanged() {
+    if (!mounted) return;
+    final controller = widget.playbackController;
+    if (controller != null && controller.isCompleted && !_progressionRevealed) {
+      setState(() {
+        _progressionRevealed = true;
       });
     }
   }
@@ -53,6 +93,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
   }
 
   void _replayDemo() {
+    widget.playbackController?.reset();
     setState(() {
       _progressionRevealed = false;
       _showWhyDetails = false;
@@ -113,6 +154,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
                     showAttribution: false,
                     interactiveZoom: false,
                     targetLoops: 2,
+                    playbackController: widget.playbackController,
                     onTwoLoopsCompleted: _onMediaTwoLoopsCompleted,
                   ),
                 ),

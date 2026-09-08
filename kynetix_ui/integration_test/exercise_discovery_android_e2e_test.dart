@@ -11,6 +11,7 @@ import 'package:kynetix/screens/exercise_detail_sheet.dart';
 import 'package:kynetix/services/exercise_library_service.dart';
 import 'package:kynetix/services/exercise_media_service.dart';
 import 'package:kynetix/widgets/exercise_media_widget.dart';
+import 'package:kynetix/widgets/kyno_stage_slot.dart';
 import 'package:kynetix/widgets/exercise_picker_sheet.dart';
 import 'package:kynetix/widgets/muscle_body_map.dart';
 import 'package:kynetix/screens/workout_session_screen.dart';
@@ -449,14 +450,15 @@ void main() {
         );
         await step(tester, 500);
 
-        // 1. Verify media widget is mounted directly under header
-        expect(find.byType(ExerciseMediaWidget), findsOneWidget);
+        // 1. Verify single bounded Kyno stage is mounted directly under header
+        expect(find.byType(KynoStageSlot), findsOneWidget);
+        expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
         expect(find.text('Barbell Bench Press'), findsOneWidget);
-        debugPrint('✓ [Step 5] ExerciseMediaWidget mounted directly under active exercise header');
+        debugPrint('✓ [Step 5] KynoStageSlot mounted directly under active exercise header');
 
-        // 2. Verify progression layout is reserved with placeholder (zero layout jump)
-        expect(find.text('Analyzing Progression...'), findsOneWidget);
-        debugPrint('✓ [Step 5] Reserved progression layout displayed without layout jump');
+        // 2. Verify NO "Analyzing Progression..." area exists (zero loading delay)
+        expect(find.text('Analyzing Progression...'), findsNothing);
+        debugPrint('✓ [Step 5] Zero loading delay - no Analyzing Progression placeholder');
 
         // 3. Verify dials and CTA are fully interactive immediately
         expect(find.textContaining('LOG SET'), findsOneWidget);
@@ -476,11 +478,11 @@ void main() {
           await step(tester, 500);
         }
 
-        // 6. Verify progression UI is revealed smoothly
-        final recCard = find.textContaining('RECOMMENDATION');
-        final adviceCard = find.textContaining('TRAINING ADVICE');
-        expect(recCard.evaluate().isNotEmpty || adviceCard.evaluate().isNotEmpty, isTrue);
-        debugPrint('✓ [Step 5] Progression recommendation revealed after 2 loops');
+        // 6. Verify progression UI is revealed smoothly in the exact same slot
+        expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
+        expect(find.text('PROGRESSION RECOMMENDATION'), findsOneWidget);
+        expect(find.text('Demo'), findsOneWidget);
+        debugPrint('✓ [Step 5] Progression recommendation revealed in bounded stage after 2 loops');
 
         // 7. Test exercise navigation / switching
         debugPrint('--> [Step 5] Switching to exercise 2 (Cable Face Pull)');
