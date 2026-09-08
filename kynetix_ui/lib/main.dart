@@ -13,6 +13,8 @@ import 'services/persistence_service.dart';
 import 'services/workout_service.dart';
 import 'services/exercise_library_service.dart';
 import 'config/supabase_secrets.dart';
+import 'services/user_session_coordinator.dart';
+import 'services/global_food_service.dart';
 
 Future<void> main() async {
   final stopwatch = Stopwatch()..start();
@@ -40,21 +42,28 @@ Future<void> main() async {
   final supabaseInitTime = stopwatch.elapsedMilliseconds - setupBindingTime;
   debugPrint('[Startup Profile] Supabase client initialization took: ${supabaseInitTime} ms');
 
-  final startupSession = Supabase.instance.client.auth.currentSession;
-  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
-
+  // 1. Concurrently initialize global, user-independent services
   final serviceStart = stopwatch.elapsedMilliseconds;
   await Future.wait([
     Health().configure(),
-    MealMemory.instance.init(),
-    PersonalNutritionMemory.instance.init(),
-    PersistenceService.load(),
-    WorkoutService.instance.init(),
     ExerciseLibraryService.instance.initialize(),
+    GlobalFoodService.instance.init(),
   ]);
-
   final servicesTime = stopwatch.elapsedMilliseconds - serviceStart;
-  debugPrint('[Startup Profile] Concurrently loaded independent services (Health, Memory, Local cache, Workouts) in: ${servicesTime} ms');
+  debugPrint('[Startup Profile] Concurrently loaded global services (Health, Exercise Library, Global Foods) in: ${servicesTime} ms');
+
+  // 2. AUTH-FIRST LIFECYCLE:
+  // Check if an authenticated user session already exists.
+  final startupSession = Supabase.instance.client.auth.currentSession;
+  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
+
+  if (startupSession != null) {
+    debugPrint('[main] 🔐 Restoring authenticated user (${startupSession.user.id}). Initializing scoped services...');
+    await UserSessionCoordinator.instance.initializeForUser(startupSession.user.id);
+  } else {
+    debugPrint('[main] 🛑 No authenticated session at boot — user-specific data load deferred until sign-in.');
+  }
+
   debugPrint('[Startup Profile] Total main initialization took: ${stopwatch.elapsedMilliseconds} ms');
 
 

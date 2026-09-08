@@ -3,6 +3,7 @@ import '../models/nutrition_result.dart';
 import '../services/meal_memory.dart';
 import '../services/personal_nutrition_memory.dart';
 import '../services/user_nutrition_memory.dart';
+import '../services/global_food_service.dart';
 import '../services/ai_nutrition_service.dart';
 import '../services/meal_classifier.dart';
 import '../services/nutrition_guardrails.dart';
@@ -175,6 +176,21 @@ class NutritionPipeline {
         }
       }
       debugPrint('[Pipeline]     No match in MealMemory');
+
+      // ── GLOBAL FOOD DEFAULTS (KYNETIX CURATED) ──────────────────────────────────
+      debugPrint('[Pipeline]   Checking GlobalFoodService...');
+      final globalResult = GlobalFoodService.instance.lookup(name, quantity: normParsed.quantity);
+      if (globalResult != null) {
+        final candidate = _pullBestItem(globalResult, normParsed);
+        if (_isSane(candidate, name)) {
+          debugPrint('[Pipeline]     ✅ Match in GlobalFoodService: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          finalItems.add(candidate.withScalar(1.0));
+          matchesUsed.add('global_default: $name');
+          priorityLevels.add('Global Default');
+          continue;
+        }
+      }
+      debugPrint('[Pipeline]     No match in GlobalFoodService');
 
       // ── FOOD LIBRARY (LOCAL DATABASE) ───────────────────────────────────────────
       debugPrint('[Pipeline]   [4/5] Checking Food Library (local database)...');

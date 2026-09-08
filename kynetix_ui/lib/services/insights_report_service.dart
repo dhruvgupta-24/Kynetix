@@ -31,6 +31,9 @@ class InsightsReportService extends ChangeNotifier {
   static const _maxMonthly = 24;
   static const _maxYearly  = 5;
 
+  String? _currentUserId;
+  String _scopedKey(String base) => _currentUserId != null ? '${base}_$_currentUserId' : base;
+
   Map<String, WeeklyReport>    _weekly       = {};
   Map<String, MonthlyReport>   _monthly      = {};
   Map<String, YearlyReport>    _yearly       = {};
@@ -39,12 +42,31 @@ class InsightsReportService extends ChangeNotifier {
   Map<String, InsightsSummary> _aiSummaries  = {};
   DateTime?                    _lastComputed;
 
-  // ── Init (called in PersistenceService.load()) ─────────────────────────────
-  Future<void> init() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _currentUserId = userId;
+    clearMemory();
+    await init(prefsOverride: prefsOverride);
+  }
 
-      final weeklyRaw = prefs.getString(_kWeekly);
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _weekly.clear();
+    _monthly.clear();
+    _yearly.clear();
+    _personalBests = null;
+    _achievements.clear();
+    _aiSummaries.clear();
+    _lastComputed = null;
+    notifyListeners();
+  }
+
+  // ── Init (called in PersistenceService.load()) ─────────────────────────────
+  Future<void> init({SharedPreferences? prefsOverride}) async {
+    try {
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+
+      final weeklyRaw = prefs.getString(_scopedKey(_kWeekly)) ?? prefs.getString(_kWeekly);
       if (weeklyRaw != null) {
         try {
           final map = jsonDecode(weeklyRaw) as Map<String, dynamic>;

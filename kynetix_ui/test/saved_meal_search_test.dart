@@ -56,5 +56,42 @@ void main() {
       expect(results3.isNotEmpty, isTrue);
       expect(results3.first.title, contains('Yogabar'));
     });
+
+    test('SavedMealType classification and exact macro preservation', () {
+      final custom = NutritionResult.createCustom(
+        canonicalMeal: 'Whey Isolate Shake',
+        calories: 140,
+        protein: 30,
+        source: 'user_override',
+      );
+
+      final entry = MealEntry(
+        rawInput: 'Whey Isolate Shake',
+        result: custom,
+        addedAt: DateTime.now(),
+        section: MealSection.eveningSnack,
+        dayOfWeek: 1,
+        parsedFoods: const ['Whey Protein'],
+        finalSavedInput: 'Whey Isolate Shake',
+      );
+
+      final log = logFor(DateTime.now());
+      log.add(MealSection.eveningSnack, entry);
+
+      final matches = SavedMealService.instance.search('whey');
+      expect(matches, isNotEmpty);
+
+      final item = matches.first;
+      expect(item.title, equals('Whey Isolate Shake'));
+      expect(item.protein, equals(30.0));
+      expect(item.calories, equals(140.0));
+
+      // Test conversion back to NutritionResult without AI regeneration
+      final restored = item.toNutritionResult();
+      expect(restored.canonicalMeal, equals('Whey Isolate Shake'));
+      expect(restored.calories.mid, equals(140.0));
+      expect(restored.protein.mid, equals(30.0));
+      expect(restored.source, equals('user_override'));
+    });
   });
 }

@@ -202,10 +202,32 @@ class EatingPatternService {
   static const _minSamples = 3;
   static const _maxRecordsPerKey = 50; // rolling window cap
 
+  String? _currentUserId;
+  String get _currentPatternsKey => _currentUserId != null ? '${_kPatterns}_$_currentUserId' : _kPatterns;
+  String get _currentContextKey => _currentUserId != null ? '${_kContext}_$_currentUserId' : _kContext;
+  String get _currentSeededKey => _currentUserId != null ? '${_kSeeded}_$_currentUserId' : _kSeeded;
+
   final Map<PatternKey, List<_CorrectionRecord>> _records = {};
   final List<_MealContextRecord> _contextRecords = [];
   bool _dirty = false;
   PortionAnchor? _seededAnchor; // tracks which anchor was last seeded
+
+  /// Load for specific authenticated user
+  Future<void> loadForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _currentUserId = userId;
+    _records.clear();
+    _contextRecords.clear();
+    await load(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _records.clear();
+    _contextRecords.clear();
+    _seededAnchor = null;
+    _dirty = false;
+    _currentUserId = null;
+  }
 
   // ── Recording ───────────────────────────────────────────────────────────────
 
@@ -635,12 +657,12 @@ class EatingPatternService {
 
   // ── Persistence ──────────────────────────────────────────────────────────────
 
-  Future<void> load() async {
+  Future<void> load({SharedPreferences? prefsOverride}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
 
       // Load correction records
-      final patternsRaw = prefs.getString(_kPatterns);
+      final patternsRaw = prefs.getString(_currentPatternsKey) ?? prefs.getString(_kPatterns);
       if (patternsRaw != null) {
         final list = jsonDecode(patternsRaw) as List<dynamic>;
         for (final item in list) {
@@ -650,7 +672,7 @@ class EatingPatternService {
       }
 
       // Load context records
-      final ctxRaw = prefs.getString(_kContext);
+      final ctxRaw = prefs.getString(_currentContextKey) ?? prefs.getString(_kContext);
       if (ctxRaw != null) {
         final list = jsonDecode(ctxRaw) as List<dynamic>;
         for (final item in list) {
@@ -660,7 +682,7 @@ class EatingPatternService {
       }
 
       // Restore seeded anchor sentinel
-      final seededRaw = prefs.getString(_kSeeded);
+      final seededRaw = prefs.getString(_currentSeededKey) ?? prefs.getString(_kSeeded);
       if (seededRaw != null) {
         _seededAnchor = PortionAnchor.values.firstWhere(
           (e) => e.name == seededRaw,
@@ -671,7 +693,7 @@ class EatingPatternService {
       _dirty = false;
       debugPrint('[EatingPatternService] ✅ Loaded '
           '${_records.length} pattern keys, '
-          '${_contextRecords.length} context records');
+          '${_contextRecords.length} context records (key: $_currentPatternsKey)');
     } catch (e) {
       debugPrint('[EatingPatternService] ⚠️  Load failed: $e');
     }
@@ -684,20 +706,30 @@ class EatingPatternService {
 
       // Flatten all records to a JSON list
       final allRecords = _records.values.expand((list) => list).toList();
-      await prefs.setString(
-          _kPatterns, jsonEncode(allRecords.map((r) => r.toJson()).toList()));
+      final patternsJson = jsonEncode(allRecords.map((r) => r.toJson()).toList());
+      await prefs.setString(_currentPatternsKey, patternsJson);
+      if (_currentUserId == null) {
+        await prefs.setString(_kPatterns, patternsJson);
+      }
 
       // Trim context records (keep last 200)
       final trimmed = _contextRecords.length > 200
           ? _contextRecords.sublist(_contextRecords.length - 200)
           : _contextRecords;
-      await prefs.setString(
-          _kContext, jsonEncode(trimmed.map((r) => r.toJson()).toList()));
+      final ctxJson = jsonEncode(trimmed.map((r) => r.toJson()).toList());
+      await prefs.setString(_currentContextKey, ctxJson);
+      if (_currentUserId == null) {
+        await prefs.setString(_kContext, ctxJson);
+      }
 
       // Persist seeded anchor sentinel
       if (_seededAnchor != null) {
-        await prefs.setString(_kSeeded, _seededAnchor!.name);
+        await prefs.setString(_currentSeededKey, _seededAnchor!.name);
+        if (_currentUserId == null) {
+          await prefs.setString(_kSeeded, _seededAnchor!.name);
+        }
       } else {
+        await prefs.remove(_currentSeededKey);
         await prefs.remove(_kSeeded);
       }
 

@@ -15,6 +15,8 @@ import 'widget_service.dart';
 import 'workout_service.dart';
 import 'insights_report_service.dart';
 import 'nutrition_target_engine.dart';
+import 'user_session_coordinator.dart';
+import 'kyno_context_service.dart';
 
 // ─── PersistenceService ───────────────────────────────────────────────────────
 //
@@ -57,6 +59,41 @@ class PersistenceService {
   static bool get isOnboardingDone => _onboardingDone;
 
   // ── Startup load ─────────────────────────────────────────────────────────
+
+  /// Restore persisted state for a specific authenticated user.
+  static Future<void> loadForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    try {
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      _cachedOwnerId = userId;
+      _onboardingDone = prefs.getBool('${_kOnboarding}_$userId') ?? prefs.getBool(_kOnboarding) ?? false;
+
+      // Hook hydration complete callback to save user ID
+      NutritionHydrationGuard.instance.onHydrationComplete = (id) {
+        setCachedOwnerId(id).ignore();
+      };
+
+      final profileKey = '${_kProfile}_$userId';
+      final profileRaw = prefs.getString(profileKey) ?? prefs.getString(_kProfile);
+      if (profileRaw != null) {
+        ProfileService.instance.currentUserProfile = UserProfile.fromJson(
+            jsonDecode(profileRaw) as Map<String, dynamic>);
+      }
+
+      final dayLogsKey = '${_kDayLogs}_$userId';
+      final logsRaw = prefs.getString(dayLogsKey) ?? prefs.getString(_kDayLogs);
+      dayLogStore.clear();
+      if (logsRaw != null) {
+        final map = jsonDecode(logsRaw) as Map<String, dynamic>;
+        for (final e in map.entries) {
+          dayLogStore[e.key] =
+              DayLog.fromJson(e.value as Map<String, dynamic>);
+        }
+      }
+      debugPrint('[PersistenceService] Loaded ${dayLogStore.length} day logs for user: $userId');
+    } catch (e) {
+      debugPrint('[PersistenceService] Error loading user-scoped data: $e');
+    }
+  }
 
   /// Restore all persisted state. Must be awaited before runApp().
   static Future<void> load() async {
@@ -140,8 +177,10 @@ class PersistenceService {
   static Future<void> saveProfile(UserProfile p) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final userId = UserSessionCoordinator.instance.currentUserId ?? _cachedOwnerId;
+      final key = userId != null ? '${_kProfile}_$userId' : _kProfile;
 
-      final oldRaw = prefs.getString(_kProfile);
+      final oldRaw = prefs.getString(key) ?? prefs.getString(_kProfile);
       UserProfile? oldProfile;
       if (oldRaw != null) {
         try {
@@ -176,7 +215,10 @@ class PersistenceService {
         ProfileService.instance.currentUserProfile = finalProfile;
       }
 
-      await prefs.setString(_kProfile, jsonEncode(finalProfile.toJson()));
+      await prefs.setString(key, jsonEncode(finalProfile.toJson()));
+      if (userId == null) {
+        await prefs.setString(_kProfile, jsonEncode(finalProfile.toJson()));
+      }
       WidgetService.updateWidgetData().ignore();
     } catch (_) {}
   }
@@ -185,6 +227,10 @@ class PersistenceService {
     _onboardingDone = true;
     try {
       final prefs = await SharedPreferences.getInstance();
+      final userId = UserSessionCoordinator.instance.currentUserId ?? _cachedOwnerId;
+      if (userId != null) {
+        await prefs.setBool('${_kOnboarding}_$userId', true);
+      }
       await prefs.setBool(_kOnboarding, true);
     } catch (_) {}
   }
@@ -192,16 +238,17 @@ class PersistenceService {
   static Future<void> saveDayLogs() async {
     lastLogsChangedAt = DateTime.now();
     try {
-      final cutoff = DateTime.now().subtract(const Duration(days: 90));
-      final pruned = <String, dynamic>{};
+      final data = <String, dynamic>{};
       for (final e in dayLogStore.entries) {
-        final d = DateTime.tryParse(e.key);
-        if (d != null && d.isAfter(cutoff)) {
-          pruned[e.key] = e.value.toJson();
-        }
+        data[e.key] = e.value.toJson();
       }
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kDayLogs, jsonEncode(pruned));
+      final userId = UserSessionCoordinator.instance.currentUserId ?? _cachedOwnerId;
+      if (userId != null) {
+        await prefs.setString('${_kDayLogs}_$userId', jsonEncode(data));
+      } else {
+        await prefs.setString(_kDayLogs, jsonEncode(data));
+      }
     } catch (_) {}
   }
 
@@ -345,6 +392,7 @@ class PersistenceService {
     await QuickAddService.instance.resetAll();
     await WorkoutService.instance.clearAll();
     await InsightsReportService.instance.reset();
+    KynoContextService.instance.reset();
     await WidgetService.updateWidgetData();
 
     // Step 8: explicit SharedPreferences cleanup (belt-and-suspenders over

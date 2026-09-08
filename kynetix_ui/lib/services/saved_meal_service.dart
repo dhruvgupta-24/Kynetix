@@ -2,6 +2,19 @@ import '../models/nutrition_result.dart';
 import '../models/day_log.dart';
 import 'meal_memory.dart';
 
+import '../services/mock_estimation_service.dart' show NutrientRange;
+import 'user_nutrition_memory.dart';
+import 'global_food_service.dart';
+
+/// Categories of locally discoverable meals and foods.
+enum SavedMealType {
+  savedMeal,
+  recurringMeal,
+  rememberedFood,
+  globalDefault,
+  oneOffMeal,
+}
+
 /// Represents a matched saved meal ready for 1-tap reuse.
 class SavedMealMatch {
   final String title;
@@ -16,6 +29,7 @@ class SavedMealMatch {
   final NutritionResult result;
   final String emoji;
   final double matchScore;
+  final SavedMealType mealType;
 
   const SavedMealMatch({
     required this.title,
@@ -30,11 +44,20 @@ class SavedMealMatch {
     required this.result,
     required this.emoji,
     required this.matchScore,
+    this.mealType = SavedMealType.savedMeal,
   });
+
+  /// Restores the exact underlying NutritionResult for zero-AI logging.
+  NutritionResult toNutritionResult() => result;
 }
 
 /// Instant, local, offline fuzzy/token matching service for saved meals.
 /// Zero network calls, runs synchronously in <5ms.
+/// Strict local hierarchy:
+///   1. Local Saved Meal / MealMemory
+///   2. UserNutritionMemory (remembered foods / overrides)
+///   3. dayLogStore (previously logged meals)
+///   4. Food Library (default catalog)
 class SavedMealService {
   SavedMealService._();
   static final SavedMealService instance = SavedMealService._();
@@ -54,7 +77,7 @@ class SavedMealService {
     return norm.split(' ').where((t) => t.isNotEmpty && (t.length > 1 || RegExp(r'\d').hasMatch(t))).toList();
   }
 
-  /// Searches all saved meals, memory items, and logged meals for [query].
+  /// Searches all saved meals, memory items, user overrides, and logged meals for [query].
   /// Ranked by relevance score and usage frequency.
   List<SavedMealMatch> search(String query, {int limit = 5}) {
     final cleanQuery = normalize(query);
@@ -65,7 +88,7 @@ class SavedMealService {
 
     final Map<String, SavedMealMatch> candidateMap = {};
 
-    // 1. Gather all sources from MealMemory.instance.allEntries
+    // 1. Local Saved Meals: MealMemory.instance.allEntries (Priority 1)
     try {
       final memoryEntries = MealMemory.instance.allEntries;
       for (final entry in memoryEntries) {
@@ -80,8 +103,9 @@ class SavedMealService {
         final fib = entry.result.fiber?.mid ?? 0.0;
         final items = entry.result.items.map((i) => i.name).toList();
 
-        final score = _calculateScore(cleanQuery, queryTokens, title, entry.rawInput, items, entry.timesUsed);
-        if (score > 25.0) {
+        final baseScore = _calculateScore(cleanQuery, queryTokens, title, entry.rawInput, items, entry.timesUsed);
+        if (baseScore > 25.0) {
+          final score = baseScore + 60.0; // Priority bonus for saved meals
           final existing = candidateMap[key];
           if (existing == null || existing.matchScore < score) {
             candidateMap[key] = SavedMealMatch(
@@ -97,13 +121,119 @@ class SavedMealService {
               result: entry.result,
               emoji: _detectEmoji(title),
               matchScore: score,
+              mealType: entry.timesUsed >= 3 ? SavedMealType.recurringMeal : SavedMealType.savedMeal,
             );
           }
         }
       }
     } catch (_) {}
 
-    // 2. Gather from unique MealEntry objects logged in dayLogStore
+    // 2. Remembered Food Overrides: UserNutritionMemory.instance.allOverrides (Priority 2)
+    try {
+      final overrides = UserNutritionMemory.instance.allOverrides;
+      for (final override in overrides) {
+        final title = override.canonicalMeal;
+        final key = normalize(title);
+        if (key.isEmpty) continue;
+
+        final qty = override.referenceQuantity > 0 ? override.referenceQuantity : 1.0;
+        final cal = override.caloriesPerUnit * qty;
+        final pro = override.proteinPerUnit * qty;
+        final carb = (override.carbohydratesPerUnit ?? 0.0) * qty;
+        final fat = (override.fatPerUnit ?? 0.0) * qty;
+        final fib = (override.fiberPerUnit ?? 0.0) * qty;
+
+        final baseScore = _calculateScore(cleanQuery, queryTokens, title, title, [title], override.correctionCount);
+        if (baseScore > 25.0) {
+          final score = baseScore + 40.0; // Priority bonus for remembered user edits
+          final existing = candidateMap[key];
+          if (existing == null || existing.matchScore < score) {
+            candidateMap[key] = SavedMealMatch(
+              title: title,
+              rawInput: title,
+              calories: cal,
+              protein: pro,
+              carbohydrates: carb,
+              fat: fat,
+              fiber: fib,
+              ingredientNames: [title],
+              timesUsed: override.correctionCount,
+              result: NutritionResult(
+                canonicalMeal: title,
+                items: [
+                  NutritionItem(
+                    name: title,
+                    quantity: qty,
+                    unit: override.referenceUnit,
+                    estimated: false,
+                    mode: EstimationMode.directQuantity,
+                    calories: NutrientRange(min: cal, max: cal),
+                    protein: NutrientRange(min: pro, max: pro),
+                    carbohydrates: NutrientRange(min: carb, max: carb),
+                    fat: NutrientRange(min: fat, max: fat),
+                    fiber: NutrientRange(min: fib, max: fib),
+                  ),
+                ],
+                calories: NutrientRange(min: cal, max: cal),
+                protein: NutrientRange(min: pro, max: pro),
+                carbohydrates: NutrientRange(min: carb, max: carb),
+                fat: NutrientRange(min: fat, max: fat),
+                fiber: NutrientRange(min: fib, max: fib),
+                confidence: 1.0,
+                warnings: const [],
+                source: 'user_nutrition_memory',
+                createdAt: override.savedAt,
+                macrosLockedByUser: true,
+                userCorrected: true,
+              ),
+              emoji: _detectEmoji(title),
+              matchScore: score,
+              mealType: SavedMealType.rememberedFood,
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2.5 Global Food Defaults: GlobalFoodService.instance.allDefaults (Priority 2)
+    try {
+      final globalItems = GlobalFoodService.instance.allDefaults;
+      for (final g in globalItems) {
+        final title = g.canonicalName;
+        final key = normalize(title);
+        if (key.isEmpty) continue;
+
+        // User overrides or personal saved meals always take precedence
+        if (candidateMap.containsKey(key)) continue;
+
+        final aliases = g.aliases;
+        final allNames = [title, ...aliases];
+        final baseScore = _calculateScore(cleanQuery, queryTokens, title, title, allNames, 5);
+        if (baseScore > 25.0) {
+          final score = baseScore + 30.0; // Tier 2 priority: below user override, above raw one-off history
+          final existing = candidateMap[key];
+          if (existing == null || existing.matchScore < score) {
+            candidateMap[key] = SavedMealMatch(
+              title: title,
+              rawInput: title,
+              calories: g.caloriesMid,
+              protein: g.proteinMid,
+              carbohydrates: g.carbsMid ?? 0.0,
+              fat: g.fatMid ?? 0.0,
+              fiber: g.fiberMid ?? 0.0,
+              ingredientNames: [title],
+              timesUsed: 10,
+              result: g.toNutritionResult(),
+              emoji: _detectEmoji(title),
+              matchScore: score,
+              mealType: SavedMealType.globalDefault,
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Gather from unique MealEntry objects logged in dayLogStore (Priority 3)
     try {
       for (final dayLog in dayLogStore.values) {
         for (final entry in dayLog.allEntries) {
@@ -118,10 +248,12 @@ class SavedMealService {
           final fib = entry.result.fiber?.mid ?? 0.0;
           final items = entry.result.items.map((i) => i.name).toList();
 
-          final score = _calculateScore(cleanQuery, queryTokens, title, entry.rawInput, items, 1);
-          if (score > 25.0) {
+          final baseScore = _calculateScore(cleanQuery, queryTokens, title, entry.rawInput, items, 1);
+          if (baseScore > 25.0) {
+            final score = baseScore + 20.0;
             final existing = candidateMap[key];
             if (existing == null || existing.matchScore < score) {
+              final newTimesUsed = (existing?.timesUsed ?? 0) + 1;
               candidateMap[key] = SavedMealMatch(
                 title: title,
                 rawInput: entry.rawInput.isNotEmpty ? entry.rawInput : title,
@@ -131,10 +263,11 @@ class SavedMealService {
                 fat: fat,
                 fiber: fib,
                 ingredientNames: items,
-                timesUsed: (existing?.timesUsed ?? 0) + 1,
+                timesUsed: newTimesUsed,
                 result: entry.result,
                 emoji: _detectEmoji(title),
                 matchScore: score,
+                mealType: newTimesUsed >= 3 ? SavedMealType.recurringMeal : SavedMealType.oneOffMeal,
               );
             }
           }
@@ -142,7 +275,7 @@ class SavedMealService {
       }
     } catch (_) {}
 
-    // 3. Gather from MealMemory.instance.allKnownFoods defaults
+    // 4. Gather from MealMemory.instance.allKnownFoods defaults (Priority 4)
     try {
       final knownFoods = MealMemory.instance.allKnownFoods;
       for (final entry in knownFoods.entries) {
@@ -174,6 +307,7 @@ class SavedMealService {
               result: entry.value,
               emoji: _detectEmoji(title),
               matchScore: score,
+              mealType: SavedMealType.savedMeal,
             );
           }
         }

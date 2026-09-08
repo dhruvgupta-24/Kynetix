@@ -21,10 +21,26 @@ class QuickAddService {
   static const _prefsKey = 'quick_add_custom_items_v2';
   static const _legacyPrefsKey = 'quick_add_custom_items';
 
+  String? _currentUserId;
+  String get _currentPrefsKey => _currentUserId != null ? '${_prefsKey}_$_currentUserId' : _prefsKey;
+
   List<QuickAddItem> _customItems = [];
   List<QuickAddItem> get customItems => List.unmodifiable(_customItems);
 
   SupabaseClient get _supabase => supabase;
+
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _currentUserId = userId;
+    _customItems.clear();
+    await init(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _customItems.clear();
+    _currentUserId = null;
+  }
 
   /// Public service method to execute a Quick Add operation cleanly:
   ///   1. Ensures hydration guard is ready for current user.
@@ -119,12 +135,12 @@ class QuickAddService {
     return entry;
   }
 
-  Future<void> init() async {
+  Future<void> init({SharedPreferences? prefsOverride}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
       
       // Load current schema items
-      final raw = prefs.getStringList(_prefsKey);
+      final raw = prefs.getStringList(_currentPrefsKey) ?? prefs.getStringList(_prefsKey);
       if (raw != null) {
         _customItems = raw.map((s) {
           try {
@@ -192,8 +208,10 @@ class QuickAddService {
   Future<void> resetAll() async {
     final prefs = await SharedPreferences.getInstance();
     _customItems.clear();
+    await prefs.remove(_currentPrefsKey);
     await prefs.remove(_prefsKey);
     await prefs.remove(_legacyPrefsKey);
+    _currentUserId = null;
   }
 
   Future<void> syncWithCloud() async {
@@ -246,10 +264,11 @@ class QuickAddService {
   }
 
   Future<void> _saveLocally(SharedPreferences prefs) async {
-    await prefs.setStringList(
-      _prefsKey,
-      _customItems.map((i) => jsonEncode(i.toJson())).toList(),
-    );
+    final list = _customItems.map((i) => jsonEncode(i.toJson())).toList();
+    await prefs.setStringList(_currentPrefsKey, list);
+    if (_currentUserId == null) {
+      await prefs.setStringList(_prefsKey, list);
+    }
   }
 
   Future<void> _syncQuickAddBackground(QuickAddItem item) async {

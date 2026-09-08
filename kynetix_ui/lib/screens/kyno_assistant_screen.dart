@@ -269,6 +269,7 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       child: TextField(
                         controller: _controller,
+                        textInputAction: TextInputAction.send,
                         style: const TextStyle(color: Colors.white, fontSize: 14),
                         decoration: const InputDecoration(
                           hintText: 'Ask Kyno anything...',

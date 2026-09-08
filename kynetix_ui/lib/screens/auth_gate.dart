@@ -11,6 +11,7 @@ import 'auth_screen.dart';
 import 'app_shell.dart';
 import 'onboarding_screen.dart';
 import '../services/insights_report_service.dart';
+import '../services/user_session_coordinator.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -84,17 +85,10 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       return;
     }
 
-    // Cached owner mismatch check
-    final prefs = await SharedPreferences.getInstance();
-    final cachedOwnerId = prefs.getString('cached_owner_user_id_v1');
-    if (cachedOwnerId != null && cachedOwnerId != session.user.id) {
-      debugPrint('[_LoggedInGate] 🚨 CACHED OWNER MISMATCH: '
-          'cache owned by $cachedOwnerId, current user is ${session.user.id}. '
-          'Wiping local cache.');
-      await PersistenceService.reset();
-    } else if (cachedOwnerId == null) {
-      debugPrint('[_LoggedInGate] cachedOwnerId missing — assuming same account, writing owner ID.');
-      await PersistenceService.setCachedOwnerId(session.user.id);
+    // Initialize or switch user session via UserSessionCoordinator
+    if (UserSessionCoordinator.instance.currentUserId != session.user.id) {
+      debugPrint('[_LoggedInGate] Initializing user session for: ${session.user.id}');
+      await UserSessionCoordinator.instance.initializeForUser(session.user.id);
     }
 
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately

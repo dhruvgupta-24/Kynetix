@@ -13,6 +13,7 @@ import '../services/item_parser.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/saved_meal_service.dart';
+import '../services/kyno_context_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -246,7 +247,26 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   void _initRowsFromResult(NutritionResult result) {
     _clearRows();
-    for (final item in result.items) {
+    final effectiveItems = result.items.isNotEmpty
+        ? result.items
+        : [
+            NutritionItem(
+              name: result.canonicalMeal.isNotEmpty
+                  ? result.canonicalMeal
+                  : (_controller.text.trim().isNotEmpty ? _controller.text.trim() : 'Meal'),
+              quantity: 1.0,
+              unit: 'serving',
+              estimated: false,
+              mode: EstimationMode.directQuantity,
+              calories: result.calories,
+              protein: result.protein,
+              carbohydrates: result.carbohydrates,
+              fat: result.fat,
+              fiber: result.fiber,
+            ),
+          ];
+
+    for (final item in effectiveItems) {
       final rawText = _constructItemString(ParsedFoodItem(
         rawChunk: item.name,
         normalizedName: item.name,
@@ -622,6 +642,7 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
     
     await PersistenceService.saveDay(widget.date);
+    KynoContextService.instance.invalidate();
     if (!mounted) return;
     Navigator.of(context).pop(entry);
   }
@@ -661,6 +682,7 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
     if (confirmed == true && mounted) {
       HapticFeedback.heavyImpact();
+      KynoContextService.instance.invalidate();
       Navigator.of(context).pop(const DeleteSentinel());
     }
   }
@@ -824,6 +846,33 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
   }
 
+  Widget _buildMealTypeBadge(SavedMealType type) {
+    final (label, col) = switch (type) {
+      SavedMealType.recurringMeal => ('RECURRING', const Color(0xFF10B981)),
+      SavedMealType.savedMeal => ('SAVED', const Color(0xFF60A5FA)),
+      SavedMealType.rememberedFood => ('REMEMBERED', const Color(0xFFF59E0B)),
+      SavedMealType.oneOffMeal => ('RECENT', const Color(0xFFA78BFA)),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: col.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: col.withValues(alpha: 0.35), width: 0.5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: col,
+          fontSize: 8,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSavedMealsAutocompleteSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -871,15 +920,23 @@ class _AddMealScreenState extends State<AddMealScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        match.title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              match.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          _buildMealTypeBadge(match.mealType),
+                        ],
                       ),
                       const SizedBox(height: 3),
                       Text(

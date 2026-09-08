@@ -156,14 +156,35 @@ class MealMemory {
   bool _initialized = false;
   String? _ownerUserId;
 
+  String get _currentPrefKey => _ownerUserId != null ? '${_prefKey}_$_ownerUserId' : _prefKey;
+  String get _currentCandidatePrefKey => _ownerUserId != null ? '${_candidatePrefKey}_$_ownerUserId' : _candidatePrefKey;
+  String get _currentKnownFoodPrefKey => _ownerUserId != null ? '${_knownFoodPrefKey}_$_ownerUserId' : _knownFoodPrefKey;
+
   // ── Init ─────────────────────────────────────────────────────────────────
 
-  Future<void> init() async {
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _ownerUserId = userId;
+    _initialized = false;
+    await init(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _store.clear();
+    _candidates.clear();
+    _knownFoods.clear();
+    _initialized = false;
+    _ownerUserId = null;
+    _bootstrapDefaultKnownFoods();
+  }
+
+  Future<void> init({SharedPreferences? prefsOverride}) async {
     if (_initialized) return;
     _initialized = true;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw   = prefs.getString(_prefKey);
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      final raw   = prefs.getString(_currentPrefKey) ?? prefs.getString(_prefKey);
       if (raw != null) {
         final list  = jsonDecode(raw) as List<dynamic>;
         for (final item in list) {
@@ -172,7 +193,7 @@ class MealMemory {
         }
       }
 
-      final candidateRaw = prefs.getString(_candidatePrefKey);
+      final candidateRaw = prefs.getString(_currentCandidatePrefKey) ?? prefs.getString(_candidatePrefKey);
       if (candidateRaw != null) {
         final list = jsonDecode(candidateRaw) as List<dynamic>;
         for (final item in list) {
@@ -181,7 +202,7 @@ class MealMemory {
         }
       }
 
-      final knownRaw = prefs.getString(_knownFoodPrefKey);
+      final knownRaw = prefs.getString(_currentKnownFoodPrefKey) ?? prefs.getString(_knownFoodPrefKey);
       if (knownRaw != null) {
         final map = jsonDecode(knownRaw) as Map<String, dynamic>;
         for (final entry in map.entries) {
@@ -192,7 +213,7 @@ class MealMemory {
       }
 
       _bootstrapDefaultKnownFoods();
-      _ownerUserId = prefs.getString('cached_owner_user_id_v1');
+      _ownerUserId ??= prefs.getString('cached_owner_user_id_v1');
     } catch (_) {
       // Corrupt prefs — start fresh; next store() will rebuild.
       _store.clear();
@@ -402,12 +423,30 @@ class MealMemory {
   }
 
   /// All entries sorted by most-recently-used.
-  List<MealMemoryEntry> get allEntries =>
-      _store.values.toList()
-        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  /// FAIL CLOSED: returns empty list if hydration guard is not ready for current user.
+  List<MealMemoryEntry> get allEntries {
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) return const [];
+    return _store.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  }
+
+  /// Meals that have been confirmed and logged repeatedly (timesUsed >= 2).
+  /// FAIL CLOSED: returns empty list if hydration guard is not ready for current user.
+  List<MealMemoryEntry> get recurringMeals {
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) return const [];
+    return _store.values.where((e) => e.timesUsed >= 2).toList();
+  }
 
   /// All known foods defaults/learned templates.
-  Map<String, NutritionResult> get allKnownFoods => Map.unmodifiable(_knownFoods);
+  Map<String, NutritionResult> get allKnownFoods {
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      // Safe to serve only compiled-in bootstrap keys when guard is not ready
+      return Map.unmodifiable(
+        Map.fromEntries(_knownFoods.entries.where((e) => _bootstrapKeys.contains(e.key))),
+      );
+    }
+    return Map.unmodifiable(_knownFoods);
+  }
 
   // ── Internals ─────────────────────────────────────────────────────────────
 
@@ -423,7 +462,10 @@ class MealMemory {
       final prefs = await SharedPreferences.getInstance();
       final data  = jsonEncode(
           _store.values.map((e) => e.toJson()).toList());
-      await prefs.setString(_prefKey, data);
+      await prefs.setString(_currentPrefKey, data);
+      if (_ownerUserId == null) {
+        await prefs.setString(_prefKey, data);
+      }
     } catch (_) {
       // Persistence failure is non-fatal.
     }
@@ -435,7 +477,10 @@ class MealMemory {
       final data = <String, dynamic>{
         for (final e in _knownFoods.entries) e.key: e.value.toJson(),
       };
-      await prefs.setString(_knownFoodPrefKey, jsonEncode(data));
+      await prefs.setString(_currentKnownFoodPrefKey, jsonEncode(data));
+      if (_ownerUserId == null) {
+        await prefs.setString(_knownFoodPrefKey, jsonEncode(data));
+      }
     } catch (_) {}
   }
 
@@ -445,7 +490,10 @@ class MealMemory {
       final data = jsonEncode(
         _candidates.values.map((e) => e.toJson()).toList(),
       );
-      await prefs.setString(_candidatePrefKey, data);
+      await prefs.setString(_currentCandidatePrefKey, data);
+      if (_ownerUserId == null) {
+        await prefs.setString(_candidatePrefKey, data);
+      }
     } catch (_) {}
   }
 
@@ -459,15 +507,18 @@ class MealMemory {
     _candidates.clear();
     _knownFoods.clear();
     _initialized = false;
-    _ownerUserId = null;
     // Immediately restore compiled-in defaults (safe for all users)
     _bootstrapDefaultKnownFoods();
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_currentPrefKey);
+      await prefs.remove(_currentCandidatePrefKey);
+      await prefs.remove(_currentKnownFoodPrefKey);
       await prefs.remove(_prefKey);
       await prefs.remove(_candidatePrefKey);
       await prefs.remove(_knownFoodPrefKey);
     } catch (_) {}
+    _ownerUserId = null;
     debugPrint('[MealMemory] 🗑️  clearAll() complete — recurring/candidates/user-foods wiped, defaults restored');
   }
 

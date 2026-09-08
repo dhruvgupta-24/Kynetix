@@ -42,14 +42,30 @@ class PersonalNutritionMemory {
   bool _initialized = false;
   String? _ownerUserId;
 
+  String get _currentPrefKey => _ownerUserId != null ? '${_prefKey}_$_ownerUserId' : _prefKey;
+
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  Future<void> init() async {
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _ownerUserId = userId;
+    _initialized = false;
+    await init(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _userOverrides.clear();
+    _initialized = false;
+    _ownerUserId = null;
+  }
+
+  Future<void> init({SharedPreferences? prefsOverride}) async {
     if (_initialized) return;
     _initialized = true;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw   = prefs.getString(_prefKey);
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      final raw   = prefs.getString(_currentPrefKey) ?? prefs.getString(_prefKey);
       if (raw != null) {
         final map = jsonDecode(raw) as Map<String, dynamic>;
         for (final e in map.entries) {
@@ -57,14 +73,14 @@ class PersonalNutritionMemory {
               e.value as Map<String, dynamic>);
         }
       }
-      _ownerUserId = prefs.getString('cached_owner_user_id_v1');
+      _ownerUserId ??= prefs.getString('cached_owner_user_id_v1');
     } catch (_) {
       _userOverrides.clear();
       _ownerUserId = null;
     }
     debugPrint('[PersonalMemory] initialized — '
                '${_userOverrides.length} user overrides + '
-               '${_defaultTemplates.length} built-in templates (owner: $_ownerUserId)');
+               '${_defaultTemplates.length} built-in templates (owner: $_ownerUserId, key: $_currentPrefKey)');
   }
 
   /// Internal ownership synchronization method called only by PersistenceService.
@@ -239,11 +255,12 @@ class PersonalNutritionMemory {
   Future<void> clearAll() async {
     _userOverrides.clear();
     _initialized = false;
-    _ownerUserId = null;
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_currentPrefKey);
       await prefs.remove(_prefKey);
     } catch (_) {}
+    _ownerUserId = null;
     debugPrint('[PersonalMemory] 🗑️  clearAll() complete — user overrides wiped');
   }
 
@@ -255,7 +272,10 @@ class PersonalNutritionMemory {
       final data = <String, dynamic>{
         for (final e in _userOverrides.entries) e.key: e.value.toJson(),
       };
-      await prefs.setString(_prefKey, jsonEncode(data));
+      await prefs.setString(_currentPrefKey, jsonEncode(data));
+      if (_ownerUserId == null) {
+        await prefs.setString(_prefKey, jsonEncode(data));
+      }
     } catch (_) {}
   }
 

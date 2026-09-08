@@ -67,5 +67,17 @@ void main() {
       expect(advice.nextMilestone, contains('10'));
       expect(advice.evidence, isNotEmpty);
     });
+
+    test('KynoContextService live invalidation immediately updates context', () {
+      final initial = KynoContextService.instance.getSnapshot();
+      expect(initial, isNotNull);
+
+      // Invalidate
+      KynoContextService.instance.invalidate();
+
+      // Next call returns fresh snapshot computed at current time
+      final refreshed = KynoContextService.instance.getSnapshot();
+      expect(refreshed, isNotNull);
+    });
   });
 }

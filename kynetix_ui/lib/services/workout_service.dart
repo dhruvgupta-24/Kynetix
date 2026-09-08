@@ -106,6 +106,9 @@ class WorkoutService extends ChangeNotifier {
   static const _kData = 'workout_data_v2';
   static const _maxSessions = 200;
 
+  String? _currentUserId;
+  String get _currentPrefKey => _currentUserId != null ? '${_kData}_$_currentUserId' : _kData;
+
   WorkoutSplit? _split;
   List<WorkoutSession> _sessions = [];
   List<Exercise> _customExercises = [];
@@ -1423,11 +1426,37 @@ class WorkoutService extends ChangeNotifier {
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
-  Future<void> init() async {
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _currentUserId = userId;
+    _ready = false;
+    await init(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _split = null;
+    _sessions = [];
+    _customExercises = [];
+    _draftSession = null;
+    _draftStartedAt = null;
+    _setupDone = false;
+    _ready = false;
+    _currentUserId = null;
+    _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _additionAcceptedCounts.clear();
+    _additionIgnoredCounts.clear();
+    _sleepHours = null;
+    _hrvRmssd = null;
+    _hrvBaseline = null;
+    notifyListeners();
+  }
+
+  Future<void> init({SharedPreferences? prefsOverride}) async {
     if (_ready) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_kData);
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      final raw = prefs.getString(_currentPrefKey) ?? prefs.getString(_kData);
       if (raw != null) {
         final data = jsonDecode(raw) as Map<String, dynamic>;
         // Load each field independently so a corrupted session list doesn't
@@ -1539,6 +1568,7 @@ class WorkoutService extends ChangeNotifier {
     _hrvBaseline = null;
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_currentPrefKey);
       await prefs.remove(_kData);
       await prefs.remove('kynetix_sleep_hours_v1');
       await prefs.remove('kynetix_hrv_rmssd_v1');
@@ -1547,6 +1577,7 @@ class WorkoutService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[WorkoutService] Clear data failed: $e');
     }
+    _currentUserId = null;
     _ready = true;
     notifyListeners();
   }
@@ -1570,21 +1601,22 @@ class WorkoutService extends ChangeNotifier {
     _persisting = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _kData,
-        jsonEncode({
-          'setupDone': _setupDone,
-          'split': split.toJson(),
-          'splitUpdatedAt': _splitUpdatedAt.toIso8601String(),
-          'sessions': _sessions.map((s) => s.toJson()).toList(),
-          'customExercises': _customExercises.map((e) => e.toJson()).toList(),
-          if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
-          if (_draftStartedAt != null)
-            'draftStartedAt': _draftStartedAt!.toIso8601String(),
-          'additionAcceptedCounts': _additionAcceptedCounts,
-          'additionIgnoredCounts': _additionIgnoredCounts,
-        }),
-      );
+      final jsonStr = jsonEncode({
+        'setupDone': _setupDone,
+        'split': split.toJson(),
+        'splitUpdatedAt': _splitUpdatedAt.toIso8601String(),
+        'sessions': _sessions.map((s) => s.toJson()).toList(),
+        'customExercises': _customExercises.map((e) => e.toJson()).toList(),
+        if (_draftSession != null) 'draftSession': _draftSession!.toJson(),
+        if (_draftStartedAt != null)
+          'draftStartedAt': _draftStartedAt!.toIso8601String(),
+        'additionAcceptedCounts': _additionAcceptedCounts,
+        'additionIgnoredCounts': _additionIgnoredCounts,
+      });
+      await prefs.setString(_currentPrefKey, jsonStr);
+      if (_currentUserId == null) {
+        await prefs.setString(_kData, jsonStr);
+      }
     } catch (e) {
       debugPrint('[WorkoutService] persist error: $e');
     } finally {

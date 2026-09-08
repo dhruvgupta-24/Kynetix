@@ -187,13 +187,29 @@ class UserNutritionMemory {
   bool _ready = false;
   String? _ownerUserId;
 
+  String get _currentPrefKey => _ownerUserId != null ? '${_kOverrides}_$_ownerUserId' : _kOverrides;
+
   // ── Startup ────────────────────────────────────────────────────────────────
 
-  /// Load from SharedPreferences.  Called in PersistenceService.load() before
+  /// Load for specific authenticated user
+  Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _ownerUserId = userId;
+    _ready = false;
+    await init(prefsOverride: prefsOverride);
+  }
+
+  /// Flush in-memory state without deleting persisted disk stores
+  void clearMemory() {
+    _overrides.clear();
+    _ready = false;
+    _ownerUserId = null;
+  }
+
+  /// Load from SharedPreferences. Called in PersistenceService.load() before
   /// cloud hydration, so memory is immediately available even offline.
-  Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list  = prefs.getStringList(_kOverrides) ?? [];
+  Future<void> init({SharedPreferences? prefsOverride}) async {
+    final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+    final list  = prefs.getStringList(_currentPrefKey) ?? prefs.getStringList(_kOverrides) ?? [];
     _overrides.clear();
     for (final s in list) {
       try {
@@ -203,9 +219,9 @@ class UserNutritionMemory {
         debugPrint('[UserNutritionMemory] parse error: $e');
       }
     }
-    _ownerUserId = prefs.getString('cached_owner_user_id_v1');
+    _ownerUserId ??= prefs.getString('cached_owner_user_id_v1');
     _ready = true;
-    debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId)');
+    debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId, key: $_currentPrefKey)');
   }
 
   /// Internal ownership synchronization method called only by PersistenceService.
@@ -364,7 +380,13 @@ class UserNutritionMemory {
   }
 
   /// All stored overrides — exposed for the Nutrition Intelligence screen.
-  List<UserMealOverride> get allOverrides => List.unmodifiable(_overrides);
+  /// FAIL CLOSED: returns empty list if hydration guard is not ready for current user.
+  List<UserMealOverride> get allOverrides {
+    if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
+      return const [];
+    }
+    return List.unmodifiable(_overrides);
+  }
 
   /// Look up a memory match for [rawInput] (food name only, no quantity/unit).
   ///
@@ -506,9 +528,10 @@ class UserNutritionMemory {
   Future<void> clearAll() async {
     _overrides.clear();
     _ready = false; // force re-init on next login so init() re-reads clean prefs
-    _ownerUserId = null;
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_currentPrefKey);
     await prefs.remove(_kOverrides);
+    _ownerUserId = null;
     debugPrint('[UserNutritionMemory] 🗑️  clearAll() complete — overrides wiped');
   }
 
@@ -517,6 +540,10 @@ class UserNutritionMemory {
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
     final list  = _overrides.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList(_kOverrides, list);
+    await prefs.setStringList(_currentPrefKey, list);
+    // Keep unscoped key in sync if owner not set yet
+    if (_ownerUserId == null) {
+      await prefs.setStringList(_kOverrides, list);
+    }
   }
 }

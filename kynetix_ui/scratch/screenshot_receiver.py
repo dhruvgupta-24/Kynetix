@@ -9,13 +9,13 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(('0.0.0.0', 9876))
 server.listen(5)
-server.settimeout(180.0)
+server.settimeout(600.0)
 
-print("[RECEIVER] Listening on port 9876...")
+print("[RECEIVER] Listening on port 9876...", flush=True)
 received_count = 0
 
 try:
-    while received_count < 6:
+    while received_count < 5:
         conn, addr = server.accept()
         with conn:
             # Read header line
@@ -44,9 +44,9 @@ try:
                 f.write(data)
             
             received_count += 1
-            print(f"[RECEIVER] ({received_count}/6) Saved {filepath} ({len(data)} bytes)")
+            print(f"[RECEIVER] ({received_count}/5) Saved {filepath} ({len(data)} bytes)", flush=True)
 except socket.timeout:
-    print("[RECEIVER] Timeout waiting for screenshots.")
+    print("[RECEIVER] Timeout waiting for screenshots.", flush=True)
 finally:
     server.close()
-    print(f"[RECEIVER] Done. Total screenshots captured: {received_count}")
+    print(f"[RECEIVER] Done. Total screenshots captured: {received_count}", flush=True)
