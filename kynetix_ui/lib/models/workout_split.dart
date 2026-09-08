@@ -79,6 +79,33 @@ class Exercise {
 
   String get repRangeLabel => '$targetRepMin–$targetRepMax reps';
 
+  /// Resolves the runtime execution mode, falling back to smart exercise inference
+  /// if executionMode is at its default weightReps value.
+  ExerciseExecutionMode get effectiveExecutionMode {
+    if (executionMode != ExerciseExecutionMode.weightReps) return executionMode;
+    final n = name.toLowerCase();
+    final mg = muscleGroup.toLowerCase();
+    if (n.contains('plank') ||
+        n.contains('dead hang') ||
+        n.contains('wall sit') ||
+        n.contains('hollow hold') ||
+        n.contains('hollow body')) {
+      return ExerciseExecutionMode.timed;
+    }
+    if (mg == 'cardio' ||
+        n.contains('cardio') ||
+        n.contains('running') ||
+        n.contains('treadmill') ||
+        n.contains('cycling') ||
+        n.contains('rowing')) {
+      return ExerciseExecutionMode.cardio;
+    }
+    if (type == ExerciseType.bodyweight) {
+      return ExerciseExecutionMode.bodyweightReps;
+    }
+    return ExerciseExecutionMode.weightReps;
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -103,7 +130,12 @@ class Exercise {
     defaultRepMax: _parseInt(j['defaultRepMax']),
     defaultTargetSets: _parseInt(j['defaultTargetSets'] ?? j['target_sets']) ?? 3,
     notes: j['notes'] as String?,
-    executionMode: _parseExecutionMode(j['executionMode'] as String?),
+    executionMode: _parseExecutionMode(
+      j['executionMode'] as String?,
+      name: j['name'] as String?,
+      type: _parseExerciseType(j['type']),
+      muscleGroup: j['muscleGroup'] as String?,
+    ),
     supersetGroupId: j['supersetGroupId'] as String?,
   );
 
@@ -131,13 +163,38 @@ class Exercise {
     return null;
   }
 
-  static ExerciseExecutionMode _parseExecutionMode(String? raw) {
-    if (raw == null) return ExerciseExecutionMode.weightReps;
-    try {
-      return ExerciseExecutionMode.values.byName(raw);
-    } catch (_) {
-      return ExerciseExecutionMode.weightReps;
+  static ExerciseExecutionMode _parseExecutionMode(
+    String? raw, {
+    String? name,
+    ExerciseType? type,
+    String? muscleGroup,
+  }) {
+    if (raw != null) {
+      try {
+        return ExerciseExecutionMode.values.byName(raw);
+      } catch (_) {}
     }
+    final n = (name ?? '').toLowerCase();
+    final mg = (muscleGroup ?? '').toLowerCase();
+    if (n.contains('plank') ||
+        n.contains('dead hang') ||
+        n.contains('wall sit') ||
+        n.contains('hollow hold') ||
+        n.contains('hollow body')) {
+      return ExerciseExecutionMode.timed;
+    }
+    if (mg == 'cardio' ||
+        n.contains('cardio') ||
+        n.contains('running') ||
+        n.contains('treadmill') ||
+        n.contains('cycling') ||
+        n.contains('rowing')) {
+      return ExerciseExecutionMode.cardio;
+    }
+    if (type == ExerciseType.bodyweight) {
+      return ExerciseExecutionMode.bodyweightReps;
+    }
+    return ExerciseExecutionMode.weightReps;
   }
 
   @override
@@ -146,6 +203,7 @@ class Exercise {
   int get hashCode => id.hashCode;
 
   Exercise copyWith({
+    String? id,
     String? name,
     String? muscleGroup,
     ExerciseType? type,
@@ -156,7 +214,7 @@ class Exercise {
     ExerciseExecutionMode? executionMode,
     String? supersetGroupId,
   }) => Exercise(
-    id: id,
+    id: id ?? this.id,
     name: name ?? this.name,
     muscleGroup: muscleGroup ?? this.muscleGroup,
     type: type ?? this.type,

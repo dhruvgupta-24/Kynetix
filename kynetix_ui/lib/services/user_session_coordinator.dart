@@ -14,6 +14,7 @@ import 'profile_service.dart';
 import 'quick_add_service.dart';
 import 'user_nutrition_memory.dart';
 import 'workout_service.dart';
+import 'wakelock_service.dart';
 
 class DataPreservationException implements Exception {
   final String message;
@@ -185,6 +186,7 @@ class UserSessionCoordinator {
     QuickAddService.instance.clearMemory();
     InsightsReportService.instance.clearMemory();
     KynoContextService.instance.reset();
+    WakelockService.instance.disable().ignore();
 
     _currentUserId = null;
     debugPrint('[UserSessionCoordinator] ✅ In-memory flush complete — zero cross-user leakage');

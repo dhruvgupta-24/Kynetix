@@ -13,6 +13,7 @@ import '../services/persistence_service.dart';
 import '../widgets/exercise_picker_sheet.dart';
 import '../widgets/kyno_stage_slot.dart';
 import '../widgets/barbell_plate_calculator.dart';
+import '../widgets/exercise_execution_input_view.dart';
 import '../services/wakelock_service.dart';
 import '../services/superset_flow_service.dart';
 import '../services/kyno_progression_engine.dart';
@@ -74,6 +75,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   final Map<String, SetType> _setTypeSelections = {};
   final Map<String, String> _exerciseNotes = {};
   final Map<String, double> _scrollOffsets = {};
+  final Map<String, double?> _externalLoadSelections = {};
+  final Map<String, int?> _durationSelections = {};
+  final Map<String, double?> _distanceSelections = {};
   String _sessionNotes = '';
 
   // Execution tracking maps
@@ -101,9 +105,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   int _restSecondsRemaining = 0;
   Timer? _restTimer;
   bool _isRestTimerActive = false;
+  int? _lastCountdownHapticSec;
 
   void _startRestTimer({int durationSeconds = 90}) {
     _restTimer?.cancel();
+    _lastCountdownHapticSec = null;
     setState(() {
       _restSecondsRemaining = durationSeconds;
       _isRestTimerActive = true;
@@ -115,6 +121,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
       if (_restSecondsRemaining <= 1) {
         timer.cancel();
+        _restTimer = null;
         setState(() {
           _restSecondsRemaining = 0;
           _isRestTimerActive = false;
@@ -124,6 +131,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         setState(() {
           _restSecondsRemaining--;
         });
+        if (_restSecondsRemaining <= 3 &&
+            _restSecondsRemaining >= 1 &&
+            _lastCountdownHapticSec != _restSecondsRemaining) {
+          _lastCountdownHapticSec = _restSecondsRemaining;
+          HapticFeedback.selectionClick();
+        }
       }
     });
   }
@@ -137,12 +150,20 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _skipRestTimer() {
-    _restTimer?.cancel();
-    setState(() {
-      _restSecondsRemaining = 0;
-      _isRestTimerActive = false;
-    });
+    _cancelRestTimer();
     HapticFeedback.lightImpact();
+  }
+
+  void _cancelRestTimer() {
+    _restTimer?.cancel();
+    _restTimer = null;
+    _lastCountdownHapticSec = null;
+    if (_isRestTimerActive) {
+      setState(() {
+        _restSecondsRemaining = 0;
+        _isRestTimerActive = false;
+      });
+    }
   }
 
   // PR Celebration State (Non-blocking)
@@ -314,6 +335,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       'substitutedForNames': _substitutedForNames,
       'replacedOriginalExercises': _replacedOriginalExercises.map((k, v) => MapEntry(k, v.toJson())),
       'temporaryAdditions': _temporaryAdditions,
+      'externalLoadSelections': _externalLoadSelections,
+      'durationSelections': _durationSelections,
+      'distanceSelections': _distanceSelections,
     };
     await prefs.setString('kynetix_workout_recovery', jsonEncode(recoveryData));
     _saveDraftSessionState();
@@ -420,6 +444,27 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           final tempAdditions = data['temporaryAdditions'] as Map<String, dynamic>?;
           if (tempAdditions != null) {
             tempAdditions.forEach((k, v) => _temporaryAdditions[k] = v as bool);
+          }
+
+          final extMap = data['externalLoadSelections'] as Map<String, dynamic>?;
+          if (extMap != null) {
+            extMap.forEach((k, v) {
+              if (v != null) _externalLoadSelections[k] = (v as num).toDouble();
+            });
+          }
+
+          final durMap = data['durationSelections'] as Map<String, dynamic>?;
+          if (durMap != null) {
+            durMap.forEach((k, v) {
+              if (v != null) _durationSelections[k] = (v as num).toInt();
+            });
+          }
+
+          final distMap = data['distanceSelections'] as Map<String, dynamic>?;
+          if (distMap != null) {
+            distMap.forEach((k, v) {
+              if (v != null) _distanceSelections[k] = (v as num).toDouble();
+            });
           }
 
           final timerStartedAt = data['timerStartedAt'] as String?;
@@ -968,12 +1013,46 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   Future<void> _logSet() async {
     final ex = _currentExercise;
-    final w = _weightSelections[ex.id] ?? 40.0;
-    final r = _repsSelections[ex.id] ?? 10;
+    final mode = ex.effectiveExecutionMode;
+    final w = _weightSelections[ex.id] ?? (mode == ExerciseExecutionMode.bodyweightReps ? 0.0 : 40.0);
+    final r = _repsSelections[ex.id] ?? (mode == ExerciseExecutionMode.timed ? 1 : 10);
     final rpe = _rpeSelections[ex.id];
     final type = _setTypeSelections[ex.id] ?? SetType.normal;
+    final externalLoad = _externalLoadSelections[ex.id];
+    final duration = _durationSelections[ex.id] ?? (mode == ExerciseExecutionMode.timed ? 60 : null);
+    final distance = _distanceSelections[ex.id] ?? (mode == ExerciseExecutionMode.cardio ? 1000.0 : null);
 
-    final newSet = SetEntry(weight: w, reps: r, rpe: rpe, setType: type);
+    // Explicit validation for timed, bodyweight, cardio and weight sets
+    final validationError = ExecutionModeValidator.validate(
+      mode: mode,
+      weight: w,
+      reps: r,
+      externalLoadKg: externalLoad,
+      durationSeconds: duration,
+      distanceMeters: distance,
+    );
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(validationError),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final newSet = SetEntry(
+      weight: (mode == ExerciseExecutionMode.bodyweightReps && (externalLoad == null || externalLoad == 0.0)) ? 0.0 : w,
+      reps: r,
+      rpe: rpe,
+      setType: type,
+      externalLoadKg: (mode == ExerciseExecutionMode.bodyweightReps || mode == ExerciseExecutionMode.weightedBodyweight)
+          ? externalLoad
+          : null,
+      durationSeconds: (mode == ExerciseExecutionMode.timed || mode == ExerciseExecutionMode.cardio) ? duration : null,
+      distanceMeters: mode == ExerciseExecutionMode.cardio ? distance : null,
+    );
 
     // Check for PR milestone
     final previousBest = _service.bestSetBefore(ex.id, widget.date);
@@ -986,7 +1065,24 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _updateLiveScore();
     await _saveRecoveryState();
 
-    _spawnFloatingText('+1 Set\n+${(w * r).toStringAsFixed(0)} kg');
+    String floatMsg;
+    if (mode == ExerciseExecutionMode.timed) {
+      floatMsg = '+1 Set\n${duration ?? 0}s hold';
+    } else if (mode == ExerciseExecutionMode.cardio) {
+      final distStr = (distance ?? 0) >= 1000
+          ? '${((distance ?? 0) / 1000).toStringAsFixed(1)}km'
+          : '${(distance ?? 0).toStringAsFixed(0)}m';
+      floatMsg = '+1 Set\n$distStr';
+    } else if (mode == ExerciseExecutionMode.bodyweightReps || mode == ExerciseExecutionMode.weightedBodyweight) {
+      final ext = externalLoad ?? 0.0;
+      floatMsg = ext > 0
+          ? '+1 Set\nBW + ${ext.toStringAsFixed(1)}kg × $r'
+          : '+1 Set\nBW × $r';
+    } else {
+      floatMsg = '+1 Set\n+${(w * r).toStringAsFixed(0)} kg';
+    }
+
+    _spawnFloatingText(floatMsg);
     HapticFeedback.mediumImpact();
 
     if (isPr) {
@@ -1064,11 +1160,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     });
   }
 
-  void _adjustInputValue(String exId, double weight, int reps, double? rpe, SetType setType) {
+  void _adjustInputValue(
+    String exId,
+    double weight,
+    int reps,
+    double? rpe,
+    SetType setType, {
+    double? externalLoadKg,
+    int? durationSeconds,
+    double? distanceMeters,
+  }) {
     _weightSelections[exId] = weight;
     _repsSelections[exId] = reps;
     _rpeSelections[exId] = rpe;
     _setTypeSelections[exId] = setType;
+    if (externalLoadKg != null) _externalLoadSelections[exId] = externalLoadKg;
+    if (durationSeconds != null) _durationSelections[exId] = durationSeconds;
+    if (distanceMeters != null) _distanceSelections[exId] = distanceMeters;
     _saveRecoveryState();
   }
 
@@ -1200,6 +1308,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('kynetix_workout_recovery');
 
+    _cancelRestTimer();
+    WakelockService.instance.disable();
+
     setState(() {
       _isSaving = false;
       _completedSessionSummary = session;
@@ -1210,6 +1321,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   Future<void> _confirmDiscard() async {
     if (_totalSets == 0) {
+      _cancelRestTimer();
+      WakelockService.instance.disable();
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('kynetix_workout_recovery');
       await _service.clearDraftSession();
@@ -1246,12 +1359,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (!mounted || result == null || result == 'cancel') return;
 
     if (result == 'discard') {
+      _cancelRestTimer();
+      WakelockService.instance.disable();
       _isDiscarding = true;
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('kynetix_workout_recovery');
       await _service.clearDraftSession();
       if (mounted) Navigator.of(context).pop();
     } else if (result == 'save') {
+      _cancelRestTimer();
+      WakelockService.instance.disable();
       _saveRecoveryState();
       Navigator.of(context).pop();
     }
@@ -1411,8 +1528,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                           controller: _pageController,
                           itemCount: _sessionExercises.length,
                           onPageChanged: (index) {
-                            print('PageView onPageChanged called with index: $index');
-                            print(StackTrace.current.toString().split('\n').take(60).join('\n'));
+                            if (_selectedIndex != index) {
+                              _cancelRestTimer();
+                            }
                             HapticFeedback.selectionClick();
                             setState(() => _selectedIndex = index);
                             _saveRecoveryState();
@@ -1443,6 +1561,21 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               initialReps: _repsSelections[ex.id] ?? 10,
                               initialRpe: _rpeSelections[ex.id],
                               initialSetType: _setTypeSelections[ex.id] ?? SetType.normal,
+                              initialExternalLoad: _externalLoadSelections[ex.id],
+                              initialDurationSeconds: _durationSelections[ex.id],
+                              initialDistanceMeters: _distanceSelections[ex.id],
+                              onExternalLoadChange: (load) {
+                                _externalLoadSelections[ex.id] = load;
+                                _saveRecoveryState();
+                              },
+                              onDurationChange: (dur) {
+                                _durationSelections[ex.id] = dur;
+                                _saveRecoveryState();
+                              },
+                              onDistanceChange: (dist) {
+                                _distanceSelections[ex.id] = dist;
+                                _saveRecoveryState();
+                              },
                               isWideLayout: isWide,
                               initialNotes: _exerciseNotes[ex.id] ?? '',
                               onNotesChange: (notes) {
@@ -1536,6 +1669,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 onAddExercise: _addExerciseToSession,
                 onRemoveExercise: () => _removeExerciseFromSession(_selectedIndex),
                 onSelectExercise: (index) {
+                  if (_selectedIndex != index) {
+                    _cancelRestTimer();
+                  }
                   setState(() => _selectedIndex = index);
                   _pageController.jumpToPage(index);
                 },
@@ -1938,6 +2074,12 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onDuplicateSets;
   final VoidCallback onOpenHistory;
   final double dockHeight;
+  final double? initialExternalLoad;
+  final int? initialDurationSeconds;
+  final double? initialDistanceMeters;
+  final ValueChanged<double>? onExternalLoadChange;
+  final ValueChanged<int>? onDurationChange;
+  final ValueChanged<double>? onDistanceChange;
 
   // Execution tracking properties
   final bool isSkipped;
@@ -1986,6 +2128,12 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.onDuplicateSets,
     required this.onOpenHistory,
     required this.dockHeight,
+    this.initialExternalLoad,
+    this.initialDurationSeconds,
+    this.initialDistanceMeters,
+    this.onExternalLoadChange,
+    this.onDurationChange,
+    this.onDistanceChange,
     required this.isSkipped,
     required this.skipReason,
     required this.isSubstitution,
@@ -2014,8 +2162,6 @@ class _ExerciseWorkoutPage extends StatefulWidget {
 }
 
 class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
-  late FixedExtentScrollController _weightScrollController;
-  late FixedExtentScrollController _repsScrollController;
   late ScrollController _scrollController;
   late TextEditingController _notesController;
   late TextEditingController _sessionNotesController;
@@ -2027,10 +2173,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   bool _showGlowPulse = false;
   bool _showCues = false;
   late KynoProgressionAdvice _progressionAdvice;
-
-  // Cache dial options
-  final List<double> _weightOptions = List.generate(701, (i) => i * 0.5); // 0.0 to 350.0 kg
-  final List<int> _repsOptions = List.generate(100, (i) => i + 1); // 1 to 100 reps
 
   void _loadProgressionAdvice() {
     _progressionAdvice = KynoProgressionEngine.instance.computeAdvice(
@@ -2047,13 +2189,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     _selectedReps = widget.initialReps;
     _selectedRpe = widget.initialRpe;
     _selectedSetType = widget.initialSetType;
-
-    // Calculate item indices
-    final wIndex = (_selectedWeight / 0.5).round().clamp(0, 700);
-    final rIndex = (_selectedReps - 1).clamp(0, 99);
-
-    _weightScrollController = FixedExtentScrollController(initialItem: wIndex);
-    _repsScrollController = FixedExtentScrollController(initialItem: rIndex);
 
     _scrollController = ScrollController(initialScrollOffset: widget.initialScrollOffset);
     _scrollController.addListener(() {
@@ -2083,16 +2218,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       _selectedRpe = widget.initialRpe;
       _selectedSetType = widget.initialSetType;
 
-      final wIndex = (_selectedWeight / 0.5).round().clamp(0, 700);
-      final rIndex = (_selectedReps - 1).clamp(0, 99);
-
-      if (_weightScrollController.hasClients) {
-        _weightScrollController.jumpToItem(wIndex);
-      }
-      if (_repsScrollController.hasClients) {
-        _repsScrollController.jumpToItem(rIndex);
-      }
-
       _notesController.text = widget.initialNotes;
       _sessionNotesController.text = widget.sessionNotes;
       if (_scrollController.hasClients) {
@@ -2102,17 +2227,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       // Exercise is the same, but values might have restored asynchronously
       if (_selectedWeight != widget.initialWeight) {
         _selectedWeight = widget.initialWeight;
-        final wIndex = (_selectedWeight / 0.5).round().clamp(0, 700);
-        if (_weightScrollController.hasClients) {
-          _weightScrollController.jumpToItem(wIndex);
-        }
       }
       if (_selectedReps != widget.initialReps) {
         _selectedReps = widget.initialReps;
-        final rIndex = (_selectedReps - 1).clamp(0, 99);
-        if (_repsScrollController.hasClients) {
-          _repsScrollController.jumpToItem(rIndex);
-        }
       }
       if (_selectedRpe != widget.initialRpe) {
         _selectedRpe = widget.initialRpe;
@@ -2141,46 +2258,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   @override
   void dispose() {
-    _weightScrollController.dispose();
-    _repsScrollController.dispose();
     _scrollController.dispose();
     _notesController.dispose();
     _sessionNotesController.dispose();
     super.dispose();
-  }
-
-  void _onWeightScroll(int index) {
-    final w = _weightOptions[index];
-    setState(() {
-      _selectedWeight = w;
-    });
-    HapticFeedback.selectionClick();
-    widget.onInputChange(w, _selectedReps, _selectedRpe, _selectedSetType);
-  }
-
-  void _onRepsScroll(int index) {
-    final r = _repsOptions[index];
-    setState(() {
-      _selectedReps = r;
-    });
-    HapticFeedback.selectionClick();
-    widget.onInputChange(_selectedWeight, r, _selectedRpe, _selectedSetType);
-  }
-
-  void _adjustWeight(double delta) {
-    final newW = (_selectedWeight + delta).clamp(0.0, 350.0);
-    final index = (newW / 0.5).round();
-    if (_weightScrollController.hasClients) {
-      _weightScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
-    }
-  }
-
-  void _adjustReps(int delta) {
-    final newR = (_selectedReps + delta).clamp(1, 100);
-    final index = newR - 1;
-    if (_repsScrollController.hasClients) {
-      _repsScrollController.animateToItem(index, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
-    }
   }
 
   void _showActionsMenu() {
@@ -3060,127 +3141,31 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           ),
           const SizedBox(height: 14),
 
-          // Double vertical selector wheels
-          Row(
-            children: [
-              // Weight Dial wheel
-              Expanded(
-                child: Column(
-                  children: [
-                    const Text('WEIGHT SELECTOR', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _DialAdjusterBtn(label: '-5', onTap: () => _adjustWeight(-5)),
-                        const SizedBox(width: 4),
-                        _DialAdjusterBtn(label: '-2.5', onTap: () => _adjustWeight(-2.5)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF141624),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: KColor.border, width: 0.5),
-                      ),
-                      child: ListWheelScrollView.useDelegate(
-                        controller: _weightScrollController,
-                        itemExtent: 32,
-                        physics: const FixedExtentScrollPhysics(),
-                        onSelectedItemChanged: _onWeightScroll,
-                        childDelegate: ListWheelChildBuilderDelegate(
-                          builder: (context, index) {
-                            final w = _weightOptions[index];
-                            final isSel = _selectedWeight == w;
-                            return Center(
-                              child: Text(
-                                '${w.toStringAsFixed(1)} kg',
-                                style: TextStyle(
-                                  color: isSel ? KColor.green : KColor.textMuted,
-                                  fontSize: isSel ? 15 : 12,
-                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                            );
-                          },
-                          childCount: 701,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _DialAdjusterBtn(label: '+2.5', onTap: () => _adjustWeight(2.5)),
-                        const SizedBox(width: 4),
-                        _DialAdjusterBtn(label: '+5', onTap: () => _adjustWeight(5)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 14),
-              // Reps Dial wheel
-              Expanded(
-                child: Column(
-                  children: [
-                    const Text('REPS SELECTOR', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _DialAdjusterBtn(label: '-5', onTap: () => _adjustReps(-5)),
-                        const SizedBox(width: 4),
-                        _DialAdjusterBtn(label: '-1', onTap: () => _adjustReps(-1)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF141624),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: KColor.border, width: 0.5),
-                      ),
-                      child: ListWheelScrollView.useDelegate(
-                        controller: _repsScrollController,
-                        itemExtent: 32,
-                        physics: const FixedExtentScrollPhysics(),
-                        onSelectedItemChanged: _onRepsScroll,
-                        childDelegate: ListWheelChildBuilderDelegate(
-                          builder: (context, index) {
-                            final r = _repsOptions[index];
-                            final isSel = _selectedReps == r;
-                            return Center(
-                              child: Text(
-                                '$r reps',
-                                style: TextStyle(
-                                  color: isSel ? Colors.white : KColor.textMuted,
-                                  fontSize: isSel ? 15 : 12,
-                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                            );
-                          },
-                          childCount: 100,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _DialAdjusterBtn(label: '+1', onTap: () => _adjustReps(1)),
-                        const SizedBox(width: 4),
-                        _DialAdjusterBtn(label: '+5', onTap: () => _adjustReps(5)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          // Execution Mode Input View (Standard, Bodyweight, Timed, Cardio)
+          ExerciseExecutionInputView(
+            exercise: widget.exercise,
+            selectedWeight: _selectedWeight,
+            selectedReps: _selectedReps,
+            externalLoadKg: widget.initialExternalLoad,
+            durationSeconds: widget.initialDurationSeconds,
+            distanceMeters: widget.initialDistanceMeters,
+            onWeightChanged: (w) {
+              setState(() => _selectedWeight = w);
+              widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, _selectedSetType);
+            },
+            onRepsChanged: (r) {
+              setState(() => _selectedReps = r);
+              widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, _selectedSetType);
+            },
+            onExternalLoadChanged: (load) {
+              widget.onExternalLoadChange?.call(load);
+            },
+            onDurationChanged: (dur) {
+              widget.onDurationChange?.call(dur);
+            },
+            onDistanceChanged: (dist) {
+              widget.onDistanceChange?.call(dist);
+            },
           ),
 
           const SizedBox(height: 16),
@@ -3361,36 +3346,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     SetType.warmUp => KColor.textMuted,
     SetType.dropSet => KColor.amber,
   };
-}
-
-// ─── Dial Adjuster Large Pill Button ────────────────────────────────────────
-
-class _DialAdjusterBtn extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _DialAdjusterBtn({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 54,
-        height: 48,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-        ),
-      ),
-    );
-  }
 }
 
 // ─── Set Type Selector segmented chips ──────────────────────────────────────

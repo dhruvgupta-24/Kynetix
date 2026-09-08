@@ -52,7 +52,31 @@ class ExerciseDefinition {
         displayName = displayName ?? name ?? canonicalName ?? '';
 
   /// Seamlessly convert to Kynetix [Exercise] instance for active workouts and splits.
-  Exercise toExercise({String? customNotes}) {
+  ExerciseExecutionMode inferExecutionMode() {
+    final cat = category.toLowerCase();
+    final bp = bodyPart.toLowerCase();
+    final nameLower = canonicalName.toLowerCase();
+    final eq = equipment.toLowerCase();
+
+    if (cat == 'cardio' || bp == 'cardio') {
+      return ExerciseExecutionMode.cardio;
+    }
+    if (nameLower.contains('plank') ||
+        nameLower.contains('dead hang') ||
+        nameLower.contains('wall sit') ||
+        nameLower.contains('hold') ||
+        nameLower.contains('hollow body')) {
+      return ExerciseExecutionMode.timed;
+    }
+    if (eq.contains('body weight') ||
+        eq.contains('bodyweight') ||
+        exerciseType == ExerciseType.bodyweight) {
+      return ExerciseExecutionMode.bodyweightReps;
+    }
+    return ExerciseExecutionMode.weightReps;
+  }
+
+  Exercise toExercise({String? customNotes, ExerciseExecutionMode? modeOverride}) {
     return Exercise(
       id: id,
       name: name,
@@ -62,6 +86,7 @@ class ExerciseDefinition {
       defaultRepMax: defaultRepMax,
       defaultTargetSets: defaultTargetSets,
       notes: customNotes,
+      executionMode: modeOverride ?? inferExecutionMode(),
     );
   }
 

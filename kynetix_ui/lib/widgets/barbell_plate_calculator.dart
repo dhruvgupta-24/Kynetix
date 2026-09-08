@@ -20,7 +20,10 @@ class PlateCalculationResult {
   });
 
   String get summaryText {
-    if (targetWeight <= barWeight) {
+    if (targetWeight < barWeight) {
+      return 'Below bar (${barWeight.toStringAsFixed(0)} kg)';
+    }
+    if (targetWeight == barWeight) {
       return '${barWeight.toStringAsFixed(0)} kg bar only';
     }
     if (platesPerSide.isEmpty) {
@@ -45,12 +48,25 @@ class BarbellPlateCalculator {
   static const List<double> standardPlates = [25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25, 0.5];
 
   /// Calculate required plates per side for [targetWeightKg] using [barWeightKg].
+  /// Optionally constrained by available plates or specific plate inventory counts per side.
   static PlateCalculationResult calculate({
     required double targetWeightKg,
     double barWeightKg = 20.0,
     List<double> availablePlates = standardPlates,
+    Map<double, int>? plateInventoryPerSide,
   }) {
-    if (targetWeightKg <= barWeightKg) {
+    if (targetWeightKg < barWeightKg) {
+      return PlateCalculationResult(
+        targetWeight: targetWeightKg,
+        barWeight: barWeightKg,
+        weightPerSide: 0,
+        platesPerSide: const [],
+        remainder: targetWeightKg - barWeightKg,
+        isExact: false,
+      );
+    }
+
+    if (targetWeightKg == barWeightKg) {
       return PlateCalculationResult(
         targetWeight: targetWeightKg,
         barWeight: barWeightKg,
@@ -65,10 +81,24 @@ class BarbellPlateCalculator {
     double currentRemaining = (neededPerSide * 100).round() / 100.0;
     final List<double> chosenPlates = [];
 
-    final sortedPlates = List<double>.from(availablePlates)..sort((a, b) => b.compareTo(a));
+    // Working inventory copy if inventory constraint is active
+    final Map<double, int>? remainingInventory = plateInventoryPerSide != null
+        ? Map<double, int>.from(plateInventoryPerSide)
+        : null;
+
+    final candidatePlates = (remainingInventory != null
+        ? remainingInventory.keys.toList()
+        : availablePlates);
+
+    final sortedPlates = List<double>.from(candidatePlates)..sort((a, b) => b.compareTo(a));
 
     for (final plate in sortedPlates) {
       while (currentRemaining >= plate - 0.001) {
+        if (remainingInventory != null) {
+          final count = remainingInventory[plate] ?? 0;
+          if (count <= 0) break; // Plate exhausted in inventory
+          remainingInventory[plate] = count - 1;
+        }
         chosenPlates.add(plate);
         currentRemaining = ((currentRemaining - plate) * 100).round() / 100.0;
       }

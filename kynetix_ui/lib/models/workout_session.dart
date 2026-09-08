@@ -36,6 +36,7 @@ class SetEntry {
   final SetType setType;
   final int?    durationSeconds; // Optional for timed exercises / cardio
   final double? distanceMeters;  // Optional for cardio
+  final double? externalLoadKg;  // Explicit external added load for bodyweight movements (e.g. BW + 8kg)
 
   const SetEntry({
     required this.weight,
@@ -44,6 +45,7 @@ class SetEntry {
     this.setType = SetType.normal,
     this.durationSeconds,
     this.distanceMeters,
+    this.externalLoadKg,
   });
 
   SetEntry copyWith({
@@ -53,6 +55,7 @@ class SetEntry {
     SetType? setType,
     int? durationSeconds,
     double? distanceMeters,
+    double? externalLoadKg,
   }) {
     return SetEntry(
       weight: weight ?? this.weight,
@@ -61,6 +64,7 @@ class SetEntry {
       setType: setType ?? this.setType,
       durationSeconds: durationSeconds ?? this.durationSeconds,
       distanceMeters: distanceMeters ?? this.distanceMeters,
+      externalLoadKg: externalLoadKg ?? this.externalLoadKg,
     );
   }
 
@@ -72,10 +76,16 @@ class SetEntry {
   bool get countsAsVolume => setType != SetType.warmUp;
 
   /// Epley one-rep max estimate: weight × (1 + reps / 30)
-  double get estimatedOneRepMax => weight * (1 + reps / 30.0);
+  /// For bodyweight with external load, external load drives progression delta.
+  double get estimatedOneRepMax => externalLoadKg != null
+      ? externalLoadKg! * (1 + reps / 30.0)
+      : weight * (1 + reps / 30.0);
 
-  /// Volume for this set
-  double get volume => weight * reps;
+  /// Volume for this set.
+  /// For bodyweight sets, externalLoadKg represents the loadable volume (or 0 if unweighted).
+  double get volume => externalLoadKg != null
+      ? (externalLoadKg! > 0 ? externalLoadKg! : 0.0) * reps
+      : weight * reps;
 
   Map<String, dynamic> toJson() => {
         'weight':  weight,
@@ -84,6 +94,7 @@ class SetEntry {
         if (rpe != null) 'rpe': rpe,
         if (durationSeconds != null) 'durationSeconds': durationSeconds,
         if (distanceMeters != null) 'distanceMeters': distanceMeters,
+        if (externalLoadKg != null) 'externalLoadKg': externalLoadKg,
       };
 
   factory SetEntry.fromJson(Map<String, dynamic> j) => SetEntry(
@@ -93,6 +104,7 @@ class SetEntry {
         setType: _parseSetType(j['setType'] as String?),
         durationSeconds: (j['durationSeconds'] as num?)?.toInt(),
         distanceMeters:  (j['distanceMeters'] as num?)?.toDouble(),
+        externalLoadKg:  (j['externalLoadKg'] as num?)?.toDouble(),
       );
 
   static SetType _parseSetType(String? raw) {
@@ -110,7 +122,18 @@ class SetEntry {
       final mins = durationSeconds! ~/ 60;
       final secs = durationSeconds! % 60;
       final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
-      return '$timeStr ${weight > 0 ? "($weight kg)" : ""}'
+      final distStr = distanceMeters != null
+          ? ' (${(distanceMeters! >= 1000 ? (distanceMeters! / 1000).toStringAsFixed(2) : distanceMeters!.toStringAsFixed(0))} ${distanceMeters! >= 1000 ? "km" : "m"})'
+          : '';
+      return '$timeStr$distStr${weight > 0 ? " ($weight kg)" : ""}'
+          '${rpe != null ? " @ RPE $rpe" : ""}'
+          ' [${setType.label}]';
+    }
+    if (externalLoadKg != null) {
+      final loadStr = externalLoadKg! > 0
+          ? 'BW + ${externalLoadKg!.toStringAsFixed(1)} kg'
+          : 'BW';
+      return '$loadStr × $reps'
           '${rpe != null ? " @ RPE $rpe" : ""}'
           ' [${setType.label}]';
     }

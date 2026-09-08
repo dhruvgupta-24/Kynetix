@@ -183,6 +183,25 @@ class GlobalFoodService {
     }
   }
 
+  @visibleForTesting
+  void registerForTesting({
+    required String canonicalName,
+    required double caloriesPerUnit,
+    required double proteinPerUnit,
+    String referenceUnit = 'piece',
+    double referenceQuantity = 1.0,
+  }) {
+    _register(GlobalFoodItem(
+      id: 'test_$canonicalName',
+      canonicalName: canonicalName,
+      aliases: const [],
+      caloriesMid: caloriesPerUnit,
+      proteinMid: proteinPerUnit,
+      referenceQuantity: referenceQuantity,
+      referenceUnit: referenceUnit,
+    ));
+  }
+
   /// Get item definition if present
   GlobalFoodItem? getItem(String rawInput) {
     final norm = normalize(rawInput);

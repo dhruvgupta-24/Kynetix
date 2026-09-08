@@ -59,6 +59,22 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kynetix.app/wakelock").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "enable" -> {
+                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    result.success(true)
+                }
+                "disable" -> {
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    result.success(true)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
         sendActionToFlutter()
     }
 

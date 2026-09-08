@@ -13,8 +13,9 @@ class WakelockService {
 
   bool get isEnabled => _isEnabled;
 
-  /// Enable wakelock (keep screen on during workout)
+  /// Enable wakelock (keep screen on during workout) - idempotent
   Future<void> enable() async {
+    if (_isEnabled) return;
     _isEnabled = true;
     try {
       if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
@@ -26,8 +27,9 @@ class WakelockService {
     }
   }
 
-  /// Disable wakelock (restore normal screen timeout)
+  /// Disable wakelock (restore normal screen timeout) - idempotent
   Future<void> disable() async {
+    if (!_isEnabled) return;
     _isEnabled = false;
     try {
       if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
