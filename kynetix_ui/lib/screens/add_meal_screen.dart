@@ -12,6 +12,7 @@ import '../services/eating_pattern_service.dart';
 import '../services/item_parser.dart';
 import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
+import '../services/saved_meal_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -112,6 +113,7 @@ class _AddMealScreenState extends State<AddMealScreen>
   double? _spellingConfidence;
   Timer? _spellingDebounce;
   bool _showSpellingBanner = true;
+  List<SavedMealMatch> _savedMealMatches = const [];
 
   @override
   void initState() {
@@ -138,10 +140,25 @@ class _AddMealScreenState extends State<AddMealScreen>
   }
 
   void _onTextChanged() {
+    final text = _controller.text.trim();
+    if (text.length >= 2) {
+      final matches = SavedMealService.instance.search(text, limit: 3);
+      if (matches.isNotEmpty || _savedMealMatches.isNotEmpty) {
+        setState(() {
+          _savedMealMatches = matches;
+        });
+      }
+    } else {
+      if (_savedMealMatches.isNotEmpty) {
+        setState(() {
+          _savedMealMatches = const [];
+        });
+      }
+    }
+
     _spellingDebounce?.cancel();
     _spellingDebounce = Timer(const Duration(milliseconds: 300), () {
       if (!mounted) return;
-      final text = _controller.text.trim();
       if (text.isEmpty) {
         setState(() {
           _spellingSuggestion = null;
@@ -164,6 +181,21 @@ class _AddMealScreenState extends State<AddMealScreen>
           _showSpellingBanner = false;
         });
       }
+    });
+  }
+
+  void _useSavedMeal(SavedMealMatch match) {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _controller.text = match.rawInput;
+      _controller.selection = TextSelection.fromPosition(
+        TextPosition(offset: _controller.text.length),
+      );
+      _savedMealMatches = const [];
+      _spellingSuggestion = null;
+      _showSpellingBanner = false;
+      _result = match.result;
+      _initRowsFromResult(match.result);
     });
   }
 
@@ -792,6 +824,121 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
   }
 
+  Widget _buildSavedMealsAutocompleteSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'SAVED MEALS',
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w800,
+            color: KColor.textMuted,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(height: 6),
+        ..._savedMealMatches.map((match) {
+          final calStr = match.calories.toStringAsFixed(0);
+          final proVal = match.protein;
+          final proStr = proVal == proVal.truncateToDouble()
+              ? proVal.toStringAsFixed(0)
+              : proVal.toStringAsFixed(1);
+          final carbVal = match.carbohydrates;
+          final carbStr = carbVal > 0
+              ? ' • ${carbVal.toStringAsFixed(carbVal == carbVal.truncateToDouble() ? 0 : 1)}g C'
+              : '';
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E2C),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: KColor.blue.withValues(alpha: 0.25),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  match.emoji,
+                  style: const TextStyle(fontSize: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        match.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '$calStr kcal • ${proStr}g protein$carbStr',
+                        style: const TextStyle(
+                          color: KColor.textSecondary,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () => _useSavedMeal(match),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: KColor.green.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: KColor.green.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'USE',
+                          style: TextStyle(
+                            color: KColor.green,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        SizedBox(width: 3),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 13,
+                          color: KColor.green,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialEntry != null;
@@ -891,6 +1038,10 @@ class _AddMealScreenState extends State<AddMealScreen>
                     if (_spellingSuggestion != null && _showSpellingBanner) ...[
                       const SizedBox(height: 8),
                       _buildSpellingSuggestionBanner(),
+                    ],
+                    if (_savedMealMatches.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      _buildSavedMealsAutocompleteSection(),
                     ],
                     const SizedBox(height: 10),
 

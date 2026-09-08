@@ -325,6 +325,19 @@ class ExerciseMediaService {
         .trim();
   }
 
+  /// Resolves the canonical ID for any exercise name, ID, or alias.
+  String getCanonicalId(String nameOrId) {
+    final res = resolveMedia(id: nameOrId, name: nameOrId);
+    if (res.canonicalId != null && res.canonicalId!.isNotEmpty) {
+      return res.canonicalId!;
+    }
+    final norm = _normalize(nameOrId);
+    final mapped = _canonicalAliasMap[nameOrId.toLowerCase()] ??
+        _canonicalAliasMap[norm];
+    if (mapped != null) return mapped;
+    return nameOrId;
+  }
+
   /// Resolves the canonical media filenames for any exercise input.
   /// Resolution priority:
   /// 1. Explicit openGym media on [definition] or catalog item

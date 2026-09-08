@@ -9,6 +9,7 @@ import '../services/workout_service.dart';
 import 'dashboard_screen.dart';
 import 'workout_screen.dart';
 import 'workout_session_screen.dart';
+import 'kyno_assistant_screen.dart';
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
@@ -345,6 +346,7 @@ class AppShellState extends State<AppShell> {
   static const _pages = [
     DashboardScreen(),
     WorkoutScreen(),
+    KynoAssistantScreen(),
   ];
 
   @override
@@ -374,6 +376,7 @@ class _AnimatedBottomNav extends StatelessWidget {
   static const _items = [
     _NavItemData(icon: Icons.restaurant_rounded,    label: 'Nutrition'),
     _NavItemData(icon: Icons.fitness_center_rounded, label: 'Train'),
+    _NavItemData(icon: Icons.auto_awesome_rounded,  label: 'Kyno'),
   ];
 
   @override

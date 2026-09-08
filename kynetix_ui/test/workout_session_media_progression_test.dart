@@ -1,121 +1,264 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/models/workout_split.dart';
-import 'package:kynetix/models/workout_session.dart';
+import 'package:kynetix/services/kyno_progression_engine.dart';
 import 'package:kynetix/widgets/exercise_media_widget.dart';
-import 'package:kynetix/screens/workout_session_screen.dart';
+import 'package:kynetix/widgets/kyno_stage_slot.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('WorkoutSessionScreen Single Shared Slot & Progression Reveal Tests', () {
-    final splitDay = SplitDay(
-      name: 'Push Day',
-      weekday: 1,
-      exercises: [
-        const Exercise(
-          id: 'bench_press',
-          name: 'Barbell Bench Press',
-          muscleGroup: 'Chest',
-          type: ExerciseType.barbellCompound,
-          defaultTargetSets: 3,
-        ),
-        const Exercise(
-          id: 'face_pull',
-          name: 'Face Pull',
-          muscleGroup: 'Shoulders',
-          type: ExerciseType.cableMachine,
-          defaultTargetSets: 3,
-        ),
-      ],
-    );
+  setUpAll(() {
+    SharedPreferences.setMockInitialValues({});
+  });
 
-    testWidgets('Initial state: Renders compact media demo in shared slot, no Analyzing placeholder, no GymVisual URL', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ThemeData.dark(),
-          home: WorkoutSessionScreen(
-            splitDay: splitDay,
-            date: DateTime.now(),
-          ),
-        ),
-      );
-
-      // Deterministic initial frame
-      await tester.pump(const Duration(milliseconds: 100));
-
-      // 1. Media Demo view is mounted in the shared slot
-      expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
-      final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
-      expect(mediaWidget.showAttribution, isFalse, reason: 'Attribution/branding overlay must not be visible on workout screen');
-      expect(mediaWidget.interactiveZoom, isFalse, reason: 'Interactive zoom overlay should be disabled in workout view');
-      expect(mediaWidget.targetLoops, equals(2), reason: 'Must be configured for exactly 2 loops');
-
-      // 2. No giant "Analyzing Progression..." area exists
-      expect(find.text('Analyzing Progression...'), findsNothing);
-
-      // 3. Primary set logging UI is visible immediately above the fold
-      expect(find.text('Barbell Bench Press'), findsOneWidget);
-      expect(find.textContaining('LOG SET'), findsOneWidget);
-
-      // 4. Exercise header and actions are present
-      expect(find.byIcon(Icons.insights_rounded), findsOneWidget);
-      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
-
-      // Clean unmount
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(milliseconds: 100));
+  group('KynoStageSlot Single Bounded Stage & Progression Reveal Tests', () {
+    setUp(() {
+      ExerciseMediaWidget.disableNetworkForTesting = true;
     });
 
-    testWidgets('Loop completion triggers transition to compact progression card with replay ability', (tester) async {
+    tearDown(() {
+      ExerciseMediaWidget.disableNetworkForTesting = false;
+    });
+
+    const benchPress = Exercise(
+      id: 'bench_press',
+      name: 'Barbell Bench Press',
+      muscleGroup: 'Chest',
+      type: ExerciseType.barbellCompound,
+      defaultTargetSets: 3,
+    );
+
+    final mockAdvice = KynoProgressionAdvice(
+      action: '+2.5 kg next session',
+      summary: 'Solid ceiling hit: 3 sets completed across consecutive exposures. Advance load safely.',
+      evidence: [
+        'Completed 3/3 target working sets at 80.0 kg for 8 reps',
+        'Multi-session ceiling met without failure indicators',
+      ],
+      todayTarget: '82.5 kg × 8 reps',
+      nextMilestone: 'Establish 82.5 kg across 3 working sets',
+      confidence: 'High Confidence',
+      spark1RmTrend: [95.0, 97.5, 100.0, 102.5],
+      styleLabel: 'Double Progression',
+    );
+
+    testWidgets('1. Initial state: Renders compact media demo in ~195px slot, no attribution, targetLoops=2', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: ThemeData.dark(),
-          home: WorkoutSessionScreen(
-            splitDay: splitDay,
-            date: DateTime.now(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: benchPress,
+              advice: mockAdvice,
+              height: 195.0,
+            ),
           ),
         ),
       );
 
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 50));
 
-      // Initially demo view is active
+      // 1. Media Demo view is active
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
       expect(find.byKey(const ValueKey('progression_view')), findsNothing);
 
-      // Trigger 2-loops completion via ExerciseMediaWidget callback
+      // 2. ExerciseMediaWidget properties
+      final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
+      expect(mediaWidget.showAttribution, isFalse, reason: 'No GymVisual URL or overlay should be shown');
+      expect(mediaWidget.interactiveZoom, isFalse, reason: 'Zoom overlay disabled in workout slot');
+      expect(mediaWidget.targetLoops, equals(2), reason: 'Must loop exactly 2 times');
+
+      // 3. Slot size is strictly bounded
+      final slotBox = tester.renderObject<RenderBox>(find.byType(KynoStageSlot));
+      expect(slotBox.size.height, equals(195.0));
+
+      // 4. No loading spinner or "Analyzing Progression..."
+      expect(find.text('Analyzing Progression...'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('2. Loop completion: Smoothly switches to Progression card with zero loading delay', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: benchPress,
+              advice: mockAdvice,
+              height: 195.0,
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Initially demo_view is mounted
+      expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
+      expect(find.byKey(const ValueKey('progression_view')), findsNothing);
+
+      // Trigger 2-loops completed callback
       final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
       expect(mediaWidget.onTwoLoopsCompleted, isNotNull);
       mediaWidget.onTwoLoopsCompleted!();
 
-      // Pump animation frame
+      // Pump AnimatedSwitcher animation (600ms)
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500)); // complete AnimatedSwitcher transition
+      await tester.pump(const Duration(milliseconds: 650));
 
       // Progression card is now mounted in the exact same slot
       expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
-      expect(
-        find.text('PROGRESSION RECOMMENDATION').evaluate().isNotEmpty ||
-            find.text('TRAINING ADVICE').evaluate().isNotEmpty,
-        isTrue,
+      expect(find.text('PROGRESSION RECOMMENDATION'), findsOneWidget);
+      expect(find.text('+2.5 kg next session'), findsOneWidget);
+      expect(find.text('DOUBLE PROGRESSION'), findsOneWidget);
+      expect(find.textContaining('Today\'s target: 82.5 kg × 8 reps'), findsOneWidget);
+      expect(find.textContaining('Solid ceiling hit'), findsOneWidget);
+      expect(find.text('1RM: 102.5 kg'), findsOneWidget);
+      expect(find.text('Demo'), findsOneWidget);
+    });
+
+    testWidgets('3. Demo replay button switches back to demonstration view', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: benchPress,
+              advice: mockAdvice,
+              height: 195.0,
+            ),
+          ),
+        ),
       );
 
-      // Replay button is present
-      final replayFinder = find.byIcon(Icons.play_arrow_rounded);
-      expect(replayFinder, findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 50));
 
-      // Tap replay button to return to demo view
+      // Trigger loop completion to show progression
+      final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
+      mediaWidget.onTwoLoopsCompleted!();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 650));
+
+      expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
+
+      // Tap the [Demo] replay button
+      final replayFinder = find.text('Demo');
+      expect(replayFinder, findsOneWidget);
       await tester.tap(replayFinder);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 650));
 
       // Successfully switched back to demo view
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
+      expect(find.byKey(const ValueKey('progression_view')), findsNothing);
+    });
 
-      // Clean unmount
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(milliseconds: 100));
+    testWidgets('4. Expandable "Why?" drawer reveals evidence and next milestone', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: benchPress,
+              advice: mockAdvice,
+              height: 195.0,
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Transition to progression card
+      final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
+      mediaWidget.onTwoLoopsCompleted!();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 650));
+
+      // Tap "Why?" button
+      final whyFinder = find.text('Why?');
+      expect(whyFinder, findsOneWidget);
+      await tester.tap(whyFinder);
+      await tester.pump();
+
+      // Expanded evidence view is visible
+      expect(find.text('EVIDENCE & NEXT MILESTONE'), findsOneWidget);
+      expect(find.textContaining('Completed 3/3 target working sets'), findsOneWidget);
+      expect(find.textContaining('NEXT: Establish 82.5 kg'), findsOneWidget);
+      expect(find.text('Close'), findsOneWidget);
+
+      // Tap Close button
+      await tester.tap(find.text('Close'));
+      await tester.pump();
+
+      // Collapsed back to compact card view
+      expect(find.text('PROGRESSION RECOMMENDATION'), findsOneWidget);
+      expect(find.text('Why?'), findsOneWidget);
+    });
+
+    testWidgets('5. Exercise change resets slot back to demonstration view', (tester) async {
+      const inclinePress = Exercise(
+        id: 'incline_dumbbell_press',
+        name: 'Incline Dumbbell Press',
+        muscleGroup: 'Chest',
+        type: ExerciseType.dumbbell,
+        defaultTargetSets: 3,
+      );
+
+      final otherAdvice = KynoProgressionAdvice(
+        action: 'Maintain & solidify',
+        summary: 'Volume accumulation phase.',
+        evidence: ['First exposure recorded'],
+        todayTarget: '24.0 kg × 10 reps',
+        nextMilestone: 'Reach 12 reps on all sets',
+        confidence: 'Baseline Calibration',
+        spark1RmTrend: [28.0],
+        styleLabel: 'Linear Reps',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: benchPress,
+              advice: mockAdvice,
+              height: 195.0,
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Advance to progression
+      final mediaWidget = tester.widget<ExerciseMediaWidget>(find.byType(ExerciseMediaWidget));
+      mediaWidget.onTwoLoopsCompleted!();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 650));
+      expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
+
+      // Now update widget with a different exercise
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: KynoStageSlot(
+              exercise: inclinePress,
+              advice: otherAdvice,
+              height: 195.0,
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+
+      // Automatically reset back to demo_view for new exercise
+      expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
+      expect(find.byKey(const ValueKey('progression_view')), findsNothing);
     });
   });
 }

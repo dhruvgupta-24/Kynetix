@@ -454,6 +454,8 @@ class DayLog {
   List<MealEntry> get _all =>
       _sections.values.expand((e) => e).toList();
 
+  List<MealEntry> get allEntries => List.unmodifiable(_all);
+
   bool get isEmpty => _all.isEmpty;
 
   // ── JSON serialization ────────────────────────────────────────────────────

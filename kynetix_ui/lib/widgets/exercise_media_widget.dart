@@ -12,6 +12,9 @@ import 'muscle_body_map.dart';
 /// graceful anatomical vector fallbacks, and 2-loop completion callbacks
 /// for smooth progression reveals without frame-rate thrashing.
 class ExerciseMediaWidget extends StatefulWidget {
+  /// Static testing flag to disable network GIF downloads in widget tests.
+  static bool disableNetworkForTesting = false;
+
   final ExerciseDefinition? definition;
   final Exercise? exercise;
   final String? exerciseId;
@@ -143,6 +146,15 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
       return;
     }
 
+    if (ExerciseMediaWidget.disableNetworkForTesting) {
+      if (widget.singleLoopDuration != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _onFirstFrameDecoded();
+        });
+      }
+      return;
+    }
+
     // If there is genuinely no media URL, notify after brief graceful delay
     // so progression UI is never locked out.
     if (_resolvedUrl == null || _resolvedUrl!.isEmpty) {
@@ -152,9 +164,10 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     // Safety watchdog: If network or frame decoding is delayed,
     // trigger progression after timeout so the workout screen is never blocked.
-    final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
+    final loopMs = widget.singleLoopDuration?.inMilliseconds ??
+        (ExerciseMediaWidget.disableNetworkForTesting ? 20 : 3000);
     _watchdogTimer?.cancel();
-    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + 1000), () {
+    _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + (ExerciseMediaWidget.disableNetworkForTesting ? 50 : 1000)), () {
       if (mounted && !_loopsCompleted) {
         _loopsCompleted = true;
         widget.onTwoLoopsCompleted?.call();
@@ -166,8 +179,8 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     if (_loopsCompleted) return;
     _loopCountdownTimer?.cancel();
     _watchdogTimer?.cancel();
-    final delay = widget.singleLoopDuration != null
-        ? const Duration(milliseconds: 50)
+    final delay = widget.singleLoopDuration != null || ExerciseMediaWidget.disableNetworkForTesting
+        ? const Duration(milliseconds: 20)
         : const Duration(milliseconds: 600);
     _loopCountdownTimer = Timer(delay, () {
       if (mounted && !_loopsCompleted) {
@@ -186,7 +199,8 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     // A single GymVisual loop averages 3.0s (12 frames @ 250ms).
     // Target 2 full loops = 6.0s duration (or custom singleLoopDuration for tests).
-    final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
+    final loopMs = widget.singleLoopDuration?.inMilliseconds ??
+        (ExerciseMediaWidget.disableNetworkForTesting ? 20 : 3000);
     final durationMs = widget.targetLoops * loopMs;
     _loopCountdownTimer?.cancel();
     _loopCountdownTimer = Timer(Duration(milliseconds: durationMs), () {
@@ -197,12 +211,13 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     });
   }
 
+
   @override
   Widget build(BuildContext context) {
     final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(16);
 
     Widget content;
-    if (widget.disableNetwork) {
+    if (widget.disableNetwork || ExerciseMediaWidget.disableNetworkForTesting) {
       content = _buildAnatomicalFallback();
     } else if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
       content = Image.network(

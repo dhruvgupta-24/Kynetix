@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 /// Manages keeping the device screen on during active workout sessions.
 /// Safe across all platforms and test environments.
@@ -16,7 +17,7 @@ class WakelockService {
   Future<void> enable() async {
     _isEnabled = true;
     try {
-      if (!kIsWeb) {
+      if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
         await _channel.invokeMethod('enable');
       }
     } catch (e) {
@@ -29,7 +30,7 @@ class WakelockService {
   Future<void> disable() async {
     _isEnabled = false;
     try {
-      if (!kIsWeb) {
+      if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
         await _channel.invokeMethod('disable');
       }
     } catch (e) {
