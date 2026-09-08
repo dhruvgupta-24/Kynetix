@@ -109,11 +109,13 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   String? _resolvedUrl;
   ExerciseDefinition? _resolvedDefinition;
 
+  int _currentLoop = 1;
+
   @override
   void initState() {
     super.initState();
-    _attachPlaybackController(widget.playbackController);
     _resolveMedia();
+    _attachPlaybackController(widget.playbackController);
     _checkInitialTrigger();
   }
 
@@ -124,13 +126,11 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
       _detachPlaybackController(oldWidget.playbackController);
       _attachPlaybackController(widget.playbackController);
     }
-    final exerciseChanged = oldWidget.exercise?.id != widget.exercise?.id ||
+    if (oldWidget.exercise?.id != widget.exercise?.id ||
         oldWidget.definition?.id != widget.definition?.id ||
         oldWidget.exerciseId != widget.exerciseId ||
         oldWidget.exerciseName != widget.exerciseName ||
-        oldWidget.mediaUrl != widget.mediaUrl;
-
-    if (exerciseChanged) {
+        oldWidget.mediaUrl != widget.mediaUrl) {
       _resetLoopTracking();
       _resolveMedia();
       _checkInitialTrigger();
@@ -173,6 +173,7 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     _watchdogTimer = null;
     _loopsCompleted = false;
     _firstFrameRendered = false;
+    _currentLoop = 1;
   }
 
   void _resolveMedia() {
@@ -208,14 +209,12 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
   void _checkInitialTrigger() {
     if (widget.playbackController != null) {
-      // Loop completion is controlled deterministically via playbackController.
       return;
     }
 
     if (widget.onTwoLoopsCompleted == null) return;
 
     if (ExerciseMediaWidget.disableNetworkForTesting) {
-      // In testing without a controller, avoid uncollected background timers.
       if (widget.singleLoopDuration != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _onFirstFrameDecoded();
@@ -231,15 +230,11 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
       return;
     }
 
-    // If there is genuinely no media URL, notify after brief graceful delay
-    // so progression UI is never locked out.
     if (_resolvedUrl == null || _resolvedUrl!.isEmpty) {
       _scheduleGracefulFallbackTrigger();
       return;
     }
 
-    // Safety watchdog: If network or frame decoding is delayed,
-    // trigger progression after timeout so the workout screen is never blocked.
     final loopMs = widget.singleLoopDuration?.inMilliseconds ?? 3000;
     _watchdogTimer?.cancel();
     _watchdogTimer = Timer(Duration(milliseconds: widget.targetLoops * loopMs + 1000), () {
@@ -272,10 +267,17 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     if (widget.onTwoLoopsCompleted == null) return;
 
-    // A single GymVisual loop averages 3.0s (12 frames @ 250ms).
-    // Target 2 full loops = 6.0s duration (or custom singleLoopDuration for tests).
     final loopMs = widget.singleLoopDuration?.inMilliseconds ??
         (ExerciseMediaWidget.disableNetworkForTesting ? 20 : 3000);
+    
+    if (!ExerciseMediaWidget.disableNetworkForTesting && widget.targetLoops > 1) {
+      Timer(Duration(milliseconds: loopMs), () {
+        if (mounted && !_loopsCompleted) {
+          setState(() => _currentLoop = 2);
+        }
+      });
+    }
+
     final durationMs = widget.targetLoops * loopMs;
     _loopCountdownTimer?.cancel();
     _loopCountdownTimer = Timer(Duration(milliseconds: durationMs), () {
@@ -290,18 +292,26 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   @override
   Widget build(BuildContext context) {
     final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(16);
+    final isStageMode = widget.height >= 120;
 
-    Widget content;
+    Widget mediaContent;
     if (widget.disableNetwork || ExerciseMediaWidget.disableNetworkForTesting) {
-      content = _buildAnatomicalFallback();
+      mediaContent = _buildAnatomicalFallback();
     } else if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
-      content = Image.network(
+      final image = Image.network(
         _resolvedUrl!,
         fit: widget.fit,
         gaplessPlayback: true,
         frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
           if (frame != null && !_firstFrameRendered) {
             _onFirstFrameDecoded();
+          }
+          if (frame != null && frame >= 12 && _currentLoop == 1) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _currentLoop == 1) {
+                setState(() => _currentLoop = 2);
+              }
+            });
           }
           return child;
         },
@@ -320,8 +330,34 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
           return _buildAnatomicalFallback();
         },
       );
+
+      if (isStageMode) {
+        final frameSize = (widget.height - 20).clamp(60.0, 300.0);
+        mediaContent = Center(
+          child: Container(
+            width: frameSize,
+            height: frameSize,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8E9E9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF2A2A3E), width: 1.0),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: image,
+          ),
+        );
+      } else {
+        mediaContent = image;
+      }
     } else {
-      content = _buildAnatomicalFallback();
+      mediaContent = _buildAnatomicalFallback();
     }
 
     final mediaCard = Container(
@@ -335,7 +371,31 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          Positioned.fill(child: content),
+          Positioned.fill(child: mediaContent),
+
+          if (isStageMode) ...[
+            Positioned(
+              right: 12,
+              top: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white12, width: 0.5),
+                ),
+                child: Text(
+                  _currentLoop <= 1 ? 'Loop 1 of 2' : 'Loop 2 of 2',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
           if (widget.showAttribution &&
               _resolvedUrl != null &&
               _resolvedUrl!.isNotEmpty &&

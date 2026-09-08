@@ -227,7 +227,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
             GestureDetector(
               onTap: _replayDemo,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
@@ -253,7 +253,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
           ],
         ),
 
-        // Action + Style Badge Row
+        // Action + Style Badge Row (No ellipsis on action)
         Row(
           children: [
             Expanded(
@@ -261,12 +261,10 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
                 advice.action,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 13,
+                  fontSize: 15,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 0.3,
+                  letterSpacing: 0.4,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
             Container(
@@ -289,30 +287,28 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
 
         // Today's Target
         Text(
-          'Today\'s target: ${advice.todayTarget}',
+          advice.todayTarget.startsWith("Today's target:")
+              ? advice.todayTarget
+              : "Today's target: ${advice.todayTarget}",
           style: const TextStyle(
             color: Color(0xFF60A5FA),
-            fontSize: 11,
+            fontSize: 11.5,
             fontWeight: FontWeight.w700,
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
         ),
 
-        // Recommendation Summary (Properly wrapped, no arbitrary text clipping)
+        // Recommendation Summary (Strictly non-truncated, complete instruction)
         Text(
           advice.summary,
           style: const TextStyle(
-            color: Colors.white,
+            color: Color(0xFFE5E7EB),
             fontSize: 11.5,
             fontWeight: FontWeight.w500,
             height: 1.25,
           ),
-          maxLines: 3,
-          overflow: TextOverflow.fade,
         ),
 
-        // Footer Row: Why Button + 1RM Trend indicator
+        // Footer Row: Why Button + Evidence preview + 1RM indicator
         Row(
           children: [
             GestureDetector(
@@ -341,25 +337,29 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
                 ),
               ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                advice.evidence.isNotEmpty ? advice.evidence.first : '',
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (advice.spark1RmTrend.length >= 2) ...[
+              const SizedBox(width: 6),
               const Icon(Icons.trending_up_rounded, size: 12, color: KColor.green),
-              const SizedBox(width: 4),
+              const SizedBox(width: 3),
               Text(
                 '1RM: ${advice.spark1RmTrend.last.toStringAsFixed(1)} kg',
                 style: const TextStyle(
                   color: KColor.green,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
-                ),
-              ),
-            ] else ...[
-              const Text(
-                'Kyno Intelligence',
-                style: TextStyle(
-                  color: KColor.textMuted,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],

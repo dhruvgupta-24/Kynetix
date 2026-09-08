@@ -149,7 +149,6 @@ class KynoProgressionEngine {
 
     // 6. Active Progression Logic
     final currentWeight = workingSetsLast.first.weight;
-    final topReps = workingSetsLast.first.reps;
     final minReps = exercise.targetRepMin;
     final maxReps = exercise.targetRepMax;
 
@@ -164,12 +163,12 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'INCREASE TO ${KynoProgressionAdvice.fmtWeight(nextWeight).toUpperCase()}',
         styleLabel: styleLabel,
-        todayTarget: '${KynoProgressionAdvice.fmtWeight(nextWeight)} • $typicalSets sets • $minReps–$maxReps reps',
-        summary: 'Target ceiling reached! You achieved $maxReps reps across all $typicalSets working sets at ${KynoProgressionAdvice.fmtWeight(currentWeight)}. Increase load by ${KynoProgressionAdvice.fmtWeight(increment)} today.',
+        todayTarget: '$typicalSets × $minReps–$maxReps (${KynoProgressionAdvice.fmtWeight(nextWeight)})',
+        summary: 'Target ceiling reached across all working sets! Increase load by ${KynoProgressionAdvice.fmtWeight(increment)} today.',
         evidence: [
-          'All ${workingSetsLast.length} working sets hit or exceeded target ceiling ($maxReps reps).',
-          'Recent sets: ${recentSetsFormatted.join(", ")}.',
-          if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}.',
+          'Recent: ${recentSetsFormatted.join(", ")}',
+          'Target ceiling: $maxReps reps achieved on all $typicalSets sets',
+          if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}',
         ],
         nextMilestone: 'Achieve at least $minReps reps across all sets at ${KynoProgressionAdvice.fmtWeight(nextWeight)}.',
         confidence: 'High',
@@ -181,13 +180,12 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'KEEP ${KynoProgressionAdvice.fmtWeight(currentWeight).toUpperCase()}',
         styleLabel: styleLabel,
-        todayTarget: '${KynoProgressionAdvice.fmtWeight(currentWeight)} • $typicalSets sets • $minReps–$maxReps reps',
-        summary: 'Stay at ${KynoProgressionAdvice.fmtWeight(currentWeight)} today. Your recent sessions show you are handling this load well. Focus on bringing later sets up to $maxReps reps before increasing weight.',
+        todayTarget: '$typicalSets × $minReps–$maxReps (${KynoProgressionAdvice.fmtWeight(currentWeight)})',
+        summary: 'You are still below the rep ceiling on recent sets. Keep the load and try to add reps before increasing weight.',
         evidence: [
-          'Recent performance: ${recentSetsFormatted.join(", ")}.',
-          'Top set was $topReps reps, but later sets haven\'t yet reached $maxReps reps.',
-          if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}.',
-          'Target ceiling ($maxReps reps across all sets) has not yet been completed.',
+          'Recent: ${recentSetsFormatted.join(", ")}',
+          'Target ceiling: $maxReps reps',
+          if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}',
         ],
         nextMilestone: 'Complete all $typicalSets sets at $maxReps reps at ${KynoProgressionAdvice.fmtWeight(currentWeight)} → then increase load.',
         confidence: analysis.confidence >= 0.70 ? 'High' : 'Moderate',
