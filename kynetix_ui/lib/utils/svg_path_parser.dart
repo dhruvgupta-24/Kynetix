@@ -30,6 +30,7 @@ class SvgPathParser {
 
     int i = 0;
     while (i < tokens.length) {
+      final prevI = i;
       final token = tokens[i];
       if (_isCommand(token)) {
         lastCmd = token;
@@ -48,6 +49,8 @@ class SvgPathParser {
             startX = curX;
             startY = curY;
             path.moveTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'm':
@@ -57,6 +60,8 @@ class SvgPathParser {
             startX = curX;
             startY = curY;
             path.moveTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'L':
@@ -64,6 +69,8 @@ class SvgPathParser {
             curX = double.tryParse(tokens[i++]) ?? curX;
             curY = double.tryParse(tokens[i++]) ?? curY;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'l':
@@ -71,30 +78,40 @@ class SvgPathParser {
             curX += double.tryParse(tokens[i++]) ?? 0;
             curY += double.tryParse(tokens[i++]) ?? 0;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'H':
           if (i < tokens.length) {
             curX = double.tryParse(tokens[i++]) ?? curX;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'h':
           if (i < tokens.length) {
             curX += double.tryParse(tokens[i++]) ?? 0;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'V':
           if (i < tokens.length) {
             curY = double.tryParse(tokens[i++]) ?? curY;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'v':
           if (i < tokens.length) {
             curY += double.tryParse(tokens[i++]) ?? 0;
             path.lineTo(curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'C':
@@ -108,6 +125,8 @@ class SvgPathParser {
             lastCpX = cp2x;
             lastCpY = cp2y;
             path.cubicTo(cp1x, cp1y, cp2x, cp2y, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'c':
@@ -121,6 +140,8 @@ class SvgPathParser {
             lastCpX = cp2x;
             lastCpY = cp2y;
             path.cubicTo(cp1x, cp1y, cp2x, cp2y, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'S':
@@ -138,6 +159,8 @@ class SvgPathParser {
             lastCpX = cp2x;
             lastCpY = cp2y;
             path.cubicTo(cp1x, cp1y, cp2x, cp2y, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 's':
@@ -155,6 +178,8 @@ class SvgPathParser {
             lastCpX = cp2x;
             lastCpY = cp2y;
             path.cubicTo(cp1x, cp1y, cp2x, cp2y, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'Q':
@@ -166,6 +191,8 @@ class SvgPathParser {
             lastCpX = cpx;
             lastCpY = cpy;
             path.quadraticBezierTo(cpx, cpy, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'q':
@@ -177,6 +204,8 @@ class SvgPathParser {
             lastCpX = cpx;
             lastCpY = cpy;
             path.quadraticBezierTo(cpx, cpy, curX, curY);
+          } else {
+            i = tokens.length;
           }
           break;
         case 'A':
@@ -196,6 +225,8 @@ class SvgPathParser {
             _addArc(path, curX, curY, endX, endY, rx, ry, angle, largeArc, sweep);
             curX = endX;
             curY = endY;
+          } else {
+            i = tokens.length;
           }
           break;
         case 'Z':
@@ -206,6 +237,11 @@ class SvgPathParser {
           break;
         default:
           i++;
+      }
+
+      // Safeguard: guarantee loop progress
+      if (i <= prevI) {
+        i = prevI + 1;
       }
     }
 

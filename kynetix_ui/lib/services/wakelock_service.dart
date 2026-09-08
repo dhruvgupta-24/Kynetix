@@ -13,13 +13,17 @@ class WakelockService {
 
   bool get isEnabled => _isEnabled;
 
+  static bool get _isTestEnvironment {
+    return WidgetsBinding.instance.runtimeType.toString().contains('Test');
+  }
+
   /// Enable wakelock (keep screen on during workout) - idempotent
   Future<void> enable() async {
     if (_isEnabled) return;
     _isEnabled = true;
     try {
-      if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
-        await _channel.invokeMethod('enable');
+      if (!kIsWeb && !_isTestEnvironment) {
+        await _channel.invokeMethod('enable').timeout(const Duration(seconds: 2));
       }
     } catch (e) {
       // Graceful fallback if native channel is unattached (e.g. tests/desktop)
@@ -32,8 +36,8 @@ class WakelockService {
     if (!_isEnabled) return;
     _isEnabled = false;
     try {
-      if (!kIsWeb && WidgetsBinding.instance.runtimeType.toString() != 'TestWidgetsFlutterBinding') {
-        await _channel.invokeMethod('disable');
+      if (!kIsWeb && !_isTestEnvironment) {
+        await _channel.invokeMethod('disable').timeout(const Duration(seconds: 2));
       }
     } catch (e) {
       debugPrint('[WakelockService] Native disable not available: $e');

@@ -93,6 +93,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     75, 90, 105, 120, 150, 180, 240, 300, 360, 420, 480, 600,
   ];
 
+  bool _isInternalUpdating = false;
+
   @override
   void initState() {
     super.initState();
@@ -112,11 +114,19 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedWeight != widget.selectedWeight && _weightController.hasClients) {
       final wIdx = (widget.selectedWeight / 0.5).round().clamp(0, 700);
-      _weightController.jumpToItem(wIdx);
+      if (_weightController.selectedItem != wIdx) {
+        _isInternalUpdating = true;
+        _weightController.jumpToItem(wIdx);
+        _isInternalUpdating = false;
+      }
     }
     if (oldWidget.selectedReps != widget.selectedReps && _repsController.hasClients) {
       final rIdx = (widget.selectedReps - 1).clamp(0, 99);
-      _repsController.jumpToItem(rIdx);
+      if (_repsController.selectedItem != rIdx) {
+        _isInternalUpdating = true;
+        _repsController.jumpToItem(rIdx);
+        _isInternalUpdating = false;
+      }
     }
   }
 
@@ -218,6 +228,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                       itemExtent: 32,
                       physics: const FixedExtentScrollPhysics(),
                       onSelectedItemChanged: (idx) {
+                        if (_isInternalUpdating) return;
                         widget.onWeightChanged(_weightOptions[idx]);
                         HapticFeedback.selectionClick();
                       },
@@ -284,6 +295,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                       itemExtent: 32,
                       physics: const FixedExtentScrollPhysics(),
                       onSelectedItemChanged: (idx) {
+                        if (_isInternalUpdating) return;
                         widget.onRepsChanged(_repsOptions[idx]);
                         HapticFeedback.selectionClick();
                       },
@@ -451,6 +463,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                       itemExtent: 32,
                       physics: const FixedExtentScrollPhysics(),
                       onSelectedItemChanged: (idx) {
+                        if (_isInternalUpdating) return;
                         widget.onRepsChanged(_repsOptions[idx]);
                         HapticFeedback.selectionClick();
                       },

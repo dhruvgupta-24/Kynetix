@@ -13,7 +13,7 @@ import 'exercise_media_widget.dart';
 /// allows replaying the demonstration anytime.
 class KynoStageSlot extends StatefulWidget {
   final Exercise exercise;
-  final KynoProgressionAdvice advice;
+  final KynoProgressionAdvice? advice;
   final double height;
   final VoidCallback? onDemoTapped;
   final ExerciseDemoPlaybackController? playbackController;
@@ -21,11 +21,30 @@ class KynoStageSlot extends StatefulWidget {
   const KynoStageSlot({
     super.key,
     required this.exercise,
-    required this.advice,
+    this.advice,
     this.height = 195.0,
     this.onDemoTapped,
     this.playbackController,
   });
+
+  /// Deterministic neutral fallback progression recommendation when engine returns null
+  /// or when there is no historical progression data yet.
+  static KynoProgressionAdvice getNeutralAdvice(Exercise exercise) {
+    return KynoProgressionAdvice(
+      action: 'ESTABLISH BASELINE',
+      styleLabel: 'Standard Progression',
+      todayTarget: "Target: ${exercise.defaultTargetSets} sets • ${exercise.targetRepMin}–${exercise.targetRepMax} reps",
+      summary: 'Focus on strict technique and controlled tempo today. Log your sets to build your personalized progression curve.',
+      evidence: [
+        'No prior session data logged yet.',
+        'Target rep range is ${exercise.targetRepMin}–${exercise.targetRepMax} reps.',
+      ],
+      nextMilestone: 'Complete ${exercise.defaultTargetSets} working sets leaving 1–2 reps in reserve to trigger progression.',
+      confidence: 'Baseline',
+      isDeload: false,
+      spark1RmTrend: const [],
+    );
+  }
 
   @override
   State<KynoStageSlot> createState() => _KynoStageSlotState();
@@ -142,7 +161,10 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
           child: _progressionRevealed
               ? KeyedSubtree(
                   key: const ValueKey('progression_view'),
-                  child: _buildKynoProgressionCard(widget.advice, widget.height),
+                  child: _buildKynoProgressionCard(
+                    widget.advice ?? KynoStageSlot.getNeutralAdvice(widget.exercise),
+                    widget.height,
+                  ),
                 )
               : KeyedSubtree(
                   key: const ValueKey('demo_view'),

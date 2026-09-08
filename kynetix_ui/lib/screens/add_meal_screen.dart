@@ -851,6 +851,7 @@ class _AddMealScreenState extends State<AddMealScreen>
       SavedMealType.recurringMeal => ('RECURRING', const Color(0xFF10B981)),
       SavedMealType.savedMeal => ('SAVED', const Color(0xFF60A5FA)),
       SavedMealType.rememberedFood => ('REMEMBERED', const Color(0xFFF59E0B)),
+      SavedMealType.globalDefault => ('DEFAULT', const Color(0xFF34D399)),
       SavedMealType.oneOffMeal => ('RECENT', const Color(0xFFA78BFA)),
     };
 
@@ -921,6 +922,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Text(
@@ -930,8 +932,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.bold,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              softWrap: true,
                             ),
                           ),
                           const SizedBox(width: 6),

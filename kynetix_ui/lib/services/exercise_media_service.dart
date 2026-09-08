@@ -27,7 +27,6 @@ class ExerciseMediaService {
   static const Map<String, ({String image, String gif})> _foundationalMediaMap = {
     'bench_press': (image: '0025-EIeI8Vf.jpg', gif: '0025-EIeI8Vf.gif'),
     'incline_db_press': (image: '0314-ns0SIbU.jpg', gif: '0314-ns0SIbU.gif'),
-    'close_grip_bench': (image: '0025-EIeI8Vf.jpg', gif: '0025-EIeI8Vf.gif'),
     'pec_dec': (image: '0596-v3xmPAR.jpg', gif: '0596-v3xmPAR.gif'),
     'cable_chest_fly': (image: '0188-xLYSdtg.jpg', gif: '0188-xLYSdtg.gif'),
     'chest_dip': (image: '0251-9WTm7dq.jpg', gif: '0251-9WTm7dq.gif'),
@@ -363,7 +362,13 @@ class ExerciseMediaService {
     final effectiveId = id ?? exercise?.id ?? definition?.id ?? '';
     final effectiveName = name ?? exercise?.name ?? definition?.name ?? '';
 
-    // Check catalog definition for explicit openGym media by ID
+    // 1a. Explicit canonical ID in foundational map
+    if (effectiveId.isNotEmpty && _foundationalMediaMap.containsKey(effectiveId)) {
+      final mapped = _foundationalMediaMap[effectiveId]!;
+      return (image: mapped.image, gif: mapped.gif, canonicalId: effectiveId);
+    }
+
+    // 1b. Explicit canonical ID in catalog definitions
     if (effectiveId.isNotEmpty) {
       final catDef = ExerciseLibraryService.instance.getById(effectiveId);
       if (catDef != null &&
@@ -375,13 +380,7 @@ class ExerciseMediaService {
       }
     }
 
-    // 2. Canonical exercise ID in foundational map
-    if (effectiveId.isNotEmpty && _foundationalMediaMap.containsKey(effectiveId)) {
-      final mapped = _foundationalMediaMap[effectiveId]!;
-      return (image: mapped.image, gif: mapped.gif, canonicalId: effectiveId);
-    }
-
-    // 3. Normalized alias / synonym dictionary match
+    // 2. Strict verified 1:1 alias in _canonicalAliasMap -> foundational or catalog ID
     final normId = _normalize(effectiveId);
     final normName = _normalize(effectiveName);
 
@@ -389,36 +388,44 @@ class ExerciseMediaService {
         _canonicalAliasMap[normId] ??
         _canonicalAliasMap[normName];
 
-    if (mappedId != null && _foundationalMediaMap.containsKey(mappedId)) {
-      final mapped = _foundationalMediaMap[mappedId]!;
-      return (image: mapped.image, gif: mapped.gif, canonicalId: mappedId);
+    if (mappedId != null) {
+      if (_foundationalMediaMap.containsKey(mappedId)) {
+        final mapped = _foundationalMediaMap[mappedId]!;
+        return (image: mapped.image, gif: mapped.gif, canonicalId: mappedId);
+      }
+      final catDef = ExerciseLibraryService.instance.getById(mappedId);
+      if (catDef != null &&
+          catDef.imageRef != null &&
+          catDef.imageRef!.isNotEmpty &&
+          catDef.gifRef != null &&
+          catDef.gifRef!.isNotEmpty) {
+        return (image: catDef.imageRef, gif: catDef.gifRef, canonicalId: catDef.id);
+      }
     }
 
-    // 4. Normalized exercise name matching against catalog definitions
+    // 3. Strict 1:1 exact name match against catalog definitions
+    // (Only if exactly 1 definition matches on canonicalName or displayName; NEVER match against ambiguous aliases)
     if (normName.isNotEmpty) {
-      for (final def in ExerciseLibraryService.instance.allDefinitions) {
-        if (_normalize(def.canonicalName) == normName ||
-            _normalize(def.displayName) == normName ||
-            def.aliases.any((a) => _normalize(a) == normName)) {
-          if (def.imageRef != null &&
-              def.imageRef!.isNotEmpty &&
-              def.gifRef != null &&
-              def.gifRef!.isNotEmpty) {
-            return (image: def.imageRef, gif: def.gifRef, canonicalId: def.id);
-          }
-          if (_foundationalMediaMap.containsKey(def.id)) {
-            final mapped = _foundationalMediaMap[def.id]!;
-            return (image: mapped.image, gif: mapped.gif, canonicalId: def.id);
-          }
+      final matches = ExerciseLibraryService.instance.allDefinitions.where((def) =>
+          _normalize(def.canonicalName) == normName ||
+          _normalize(def.displayName) == normName).toList();
+
+      if (matches.length == 1) {
+        final def = matches.first;
+        if (def.imageRef != null &&
+            def.imageRef!.isNotEmpty &&
+            def.gifRef != null &&
+            def.gifRef!.isNotEmpty) {
+          return (image: def.imageRef, gif: def.gifRef, canonicalId: def.id);
+        }
+        if (_foundationalMediaMap.containsKey(def.id)) {
+          final mapped = _foundationalMediaMap[def.id]!;
+          return (image: mapped.image, gif: mapped.gif, canonicalId: def.id);
         }
       }
     }
 
-    // 5. Fallback: Check if definition had only an image or only a gif
-    if (definition != null) {
-      return (image: definition.imageRef, gif: definition.gifRef, canonicalId: definition.id);
-    }
-
+    // 4. Otherwise: Fail closed. If identity is not sufficiently certain, return no media.
     return (image: null, gif: null, canonicalId: null);
   }
 

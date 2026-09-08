@@ -86,6 +86,12 @@ void main() {
         expect(find.text('Analyzing Progression...'), findsNothing);
         expect(find.byType(CircularProgressIndicator), findsNothing);
 
+        // 5. Loop counter strings are completely absent from production UI
+        expect(find.textContaining('Loop 1 of 2'), findsNothing);
+        expect(find.textContaining('Loop 2 of 2'), findsNothing);
+        expect(find.textContaining('Loop '), findsNothing);
+        expect(find.textContaining('of 2'), findsNothing);
+
         debugPrint('[MEDIA_TEST] test cleanup started');
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(milliseconds: 20));
@@ -335,5 +341,53 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 10)),
     );
+
+    testWidgets(
+      '6. Null progression advice falls back to deterministic 195pt neutral baseline card',
+      (tester) async {
+        final controller = ExerciseDemoPlaybackController(targetLoops: 2);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData.dark(),
+            home: Scaffold(
+              body: KynoStageSlot(
+                exercise: benchPress,
+                advice: null, // Null advice input
+                height: 195.0,
+                playbackController: controller,
+              ),
+            ),
+          ),
+        );
+
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // In demo view initially
+        expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
+        expect(find.byKey(const ValueKey('progression_view')), findsNothing);
+
+        // Advance loops to reveal progression
+        controller.completeLoops();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 650));
+
+        // Progression card is shown with neutral baseline fallback
+        expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
+        expect(find.text('ESTABLISH BASELINE'), findsOneWidget);
+        expect(find.text('STANDARD PROGRESSION'), findsOneWidget);
+
+        // Verify slot height remains exactly 195pt
+        final slotSize = tester.getSize(find.byType(KynoStageSlot));
+        expect(slotSize.height, equals(195.0));
+
+        debugPrint('[MEDIA_TEST] test cleanup started');
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 20));
+        debugPrint('[MEDIA_TEST] test cleanup completed');
+      },
+      timeout: const Timeout(Duration(seconds: 10)),
+    );
   });
 }
+

@@ -109,24 +109,9 @@ void main() {
   Future<void> saveScreenshot(String name) async {
     try {
       final bytes = await binding.takeScreenshot(name);
-      // Stream directly to host machine via Android emulator gateway (10.0.2.2)
-      try {
-        final socket = await Socket.connect('10.0.2.2', 9876, timeout: const Duration(seconds: 3));
-        final header = utf8.encode('$name:${bytes.length}\n');
-        socket.add(header);
-        socket.add(bytes);
-        await socket.flush();
-        await socket.close();
-        debugPrint('[SCREENSHOT_STREAMED] $name -> host:9876 (${bytes.length} bytes)');
-      } catch (tcpErr) {
-        debugPrint('[SCREENSHOT_TCP_WARN] Could not connect to host receiver: $tcpErr');
-      }
-
-      // Also backup to systemTemp
-      try {
-        final file = File('${Directory.systemTemp.path}/$name.png');
-        await file.writeAsBytes(bytes);
-      } catch (_) {}
+      final file = File('/sdcard/$name.png');
+      await file.writeAsBytes(bytes);
+      debugPrint('[SCREENSHOT_SAVED] /sdcard/$name.png (${bytes.length} bytes)');
     } catch (e) {
       debugPrint('[SCREENSHOT_ERROR] $name: $e');
     }
@@ -226,7 +211,7 @@ void main() {
       expect(find.text('Flat Bench Press'), findsOneWidget);
       expect(find.byType(KynoStageSlot), findsOneWidget);
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
-      expect(find.text('Loop 1 of 2'), findsOneWidget);
+      expect(find.textContaining('Loop'), findsNothing);
       expect(find.textContaining('LOG SET 1'), findsOneWidget);
 
       await saveScreenshot('state1_opening_gif');
@@ -276,10 +261,10 @@ void main() {
       }
       expect(find.text('Incline Dumbbell Press'), findsOneWidget);
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
-      expect(find.text('Loop 1 of 2'), findsOneWidget);
+      expect(find.textContaining('Loop'), findsNothing);
 
       await saveScreenshot('state5_exercise_switch');
-      debugPrint('✓ [AUDIT] State 5 captured: Incline DB Press mounted, loop counter reset to 0, demo_view active');
+      debugPrint('✓ [AUDIT] State 5 captured: Incline DB Press mounted, loop counter eliminated, demo_view active');
 
       // Switch to Cable Face Pull (legacy alias test)
       if (nextPageButton.evaluate().isNotEmpty) {
@@ -288,6 +273,7 @@ void main() {
       }
       expect(find.text('Cable Face Pull'), findsOneWidget);
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
+      expect(find.textContaining('Loop'), findsNothing);
       debugPrint('✓ [AUDIT] Cable Face Pull mounted cleanly with canonical resolution');
 
       // ─── STATE 6: After replaying the demonstration ────────────────────────
@@ -314,7 +300,7 @@ void main() {
 
       // Verify smooth transition back to demonstration view in the exact same slot
       expect(find.byKey(const ValueKey('demo_view')), findsOneWidget);
-      expect(find.text('Loop 1 of 2'), findsOneWidget);
+      expect(find.textContaining('Loop'), findsNothing);
       expect(find.textContaining('LOG SET 1'), findsOneWidget);
 
       await saveScreenshot('state6_demo_replay');

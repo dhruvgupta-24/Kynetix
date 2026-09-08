@@ -56,7 +56,9 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
     if (_cachedGeometry != null) return;
     _isLoading = true;
     try {
-      final jsonStr = await rootBundle.loadString('assets/data/body_paths.json');
+      final jsonStr = await rootBundle
+          .loadString('assets/data/body_paths.json')
+          .timeout(const Duration(milliseconds: 300));
       _cachedGeometry = jsonDecode(jsonStr) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('Error preloading body_paths.json: $e');
@@ -86,14 +88,11 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
       return SizedBox(
         width: widget.width ?? 140,
         height: widget.height ?? 220,
-        child: const Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(KColor.green),
-            ),
+        child: Center(
+          child: Icon(
+            Icons.accessibility_new_rounded,
+            size: 28,
+            color: Colors.white.withValues(alpha: 0.15),
           ),
         ),
       );

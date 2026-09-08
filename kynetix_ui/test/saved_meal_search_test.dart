@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/models/day_log.dart';
 import 'package:kynetix/models/nutrition_result.dart';
@@ -92,6 +93,89 @@ void main() {
       expect(restored.calories.mid, equals(140.0));
       expect(restored.protein.mid, equals(30.0));
       expect(restored.source, equals('user_override'));
+    });
+
+    testWidgets('Saved meal title displays complete text with soft wrapping and no ellipsis', (tester) async {
+      const longMealName1 = '2 normal roti with 1.2 ladle rice with dal dhaba';
+      const longMealName2 =
+          '2 normal roti with 1.2 ladle rice with dal dhaba and extra paneer bhurji with roasted papad and green salad';
+
+      for (final mealTitle in [longMealName1, longMealName2]) {
+        final match = SavedMealMatch(
+          title: mealTitle,
+          rawInput: mealTitle,
+          calories: 550,
+          protein: 28,
+          carbohydrates: 75,
+          fat: 14,
+          fiber: 5,
+          ingredientNames: const ['Roti', 'Rice', 'Dal'],
+          timesUsed: 5,
+          result: NutritionResult.createCustom(
+            canonicalMeal: mealTitle,
+            calories: 550,
+            protein: 28,
+            source: 'saved_meal',
+          ),
+          emoji: '🍛',
+          matchScore: 1.0,
+          mealType: SavedMealType.savedMeal,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 360,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(match.emoji, style: const TextStyle(fontSize: 22)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              match.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              softWrap: true,
+                            ),
+                            const SizedBox(height: 3),
+                            Text('${match.calories.toInt()} kcal • ${match.protein.toInt()}g protein'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('USE'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.pumpAndSettle();
+
+        // 1. Complete text is rendered and found
+        expect(find.text(mealTitle), findsOneWidget);
+
+        // 2. Text widget has no maxLines: 1 and has softWrap: true
+        final textWidget = tester.widget<Text>(find.text(mealTitle));
+        expect(textWidget.maxLines, isNull);
+        expect(textWidget.overflow, isNot(equals(TextOverflow.ellipsis)));
+        expect(textWidget.softWrap, isTrue);
+
+        // 3. USE button is present and visible
+        expect(find.text('USE'), findsOneWidget);
+      }
     });
   });
 }

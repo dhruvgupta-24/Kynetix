@@ -277,7 +277,7 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       // Verify UI displays "LOGGED SETS (3)"
       expect(find.text('LOGGED SETS (3)'), findsOneWidget);

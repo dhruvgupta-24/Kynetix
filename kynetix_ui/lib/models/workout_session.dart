@@ -528,6 +528,7 @@ class WorkoutSession {
   final int?                 durationMinutes;
   final WorkoutStatus        status;
   final List<Exercise>?      plannedExercises;
+  final int                  lastExerciseIndex;
 
   const WorkoutSession({
     required this.id,
@@ -540,6 +541,7 @@ class WorkoutSession {
     this.durationMinutes,
     this.status = WorkoutStatus.completed,
     this.plannedExercises,
+    this.lastExerciseIndex = 0,
   });
 
   // ── Computed stats ──────────────────────────────────────────────────────────
@@ -591,6 +593,34 @@ class WorkoutSession {
         (a, b) => a.estimatedOneRepMax >= b.estimatedOneRepMax ? a : b);
   }
 
+  WorkoutSession copyWith({
+    String? id,
+    DateTime? date,
+    String? splitDayName,
+    int? splitDayWeekday,
+    bool? wasManuallySelected,
+    List<ExerciseEntry>? entries,
+    String? notes,
+    int? durationMinutes,
+    WorkoutStatus? status,
+    List<Exercise>? plannedExercises,
+    int? lastExerciseIndex,
+  }) {
+    return WorkoutSession(
+      id: id ?? this.id,
+      date: date ?? this.date,
+      splitDayName: splitDayName ?? this.splitDayName,
+      splitDayWeekday: splitDayWeekday ?? this.splitDayWeekday,
+      wasManuallySelected: wasManuallySelected ?? this.wasManuallySelected,
+      entries: entries ?? this.entries,
+      notes: notes ?? this.notes,
+      durationMinutes: durationMinutes ?? this.durationMinutes,
+      status: status ?? this.status,
+      plannedExercises: plannedExercises ?? this.plannedExercises,
+      lastExerciseIndex: lastExerciseIndex ?? this.lastExerciseIndex,
+    );
+  }
+
   // ── Serialization ───────────────────────────────────────────────────────────
 
   Map<String, dynamic> toJson() => {
@@ -605,6 +635,7 @@ class WorkoutSession {
         'status':               status.name,
         if (plannedExercises != null)
           'plannedExercises':   plannedExercises!.map((e) => e.toJson()).toList(),
+        if (lastExerciseIndex != 0) 'lastExerciseIndex': lastExerciseIndex,
       };
 
   factory WorkoutSession.fromJson(Map<String, dynamic> j) => WorkoutSession(
@@ -622,6 +653,7 @@ class WorkoutSession {
         plannedExercises: (j['plannedExercises'] as List<dynamic>?)
             ?.map((e) => Exercise.fromJson(e as Map<String, dynamic>))
             .toList(),
+        lastExerciseIndex: (j['lastExerciseIndex'] as num?)?.toInt() ?? 0,
       );
 
   static WorkoutStatus _parseStatus(String? name) {
