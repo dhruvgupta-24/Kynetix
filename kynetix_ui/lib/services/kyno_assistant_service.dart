@@ -68,20 +68,42 @@ class KynoAssistantService {
     final buffer = StringBuffer();
     String responseSource = 'Unified KynoContextSnapshot';
 
-    // ── 0. Longitudinal Historical Analysis ─────────────────────────────────
-    // e.g. "Why is my strength not increasing?", "Am I training consistently?", "What am I doing wrong?"
-    final isTodaySpecific = q.contains('today') || q.contains('tonight') || (q.contains('recover') && (q.contains('train') || q.contains('chest') || q.contains('leg')));
-    final historicalIntent = isTodaySpecific ? KynoAnalysisIntent.general : KynoHistoricalAnalysisService.instance.classifyIntent(query);
-    final isLongitudinal = !isTodaySpecific && (historicalIntent == KynoAnalysisIntent.strengthPlateau ||
-        historicalIntent == KynoAnalysisIntent.trainingConsistency ||
-        historicalIntent == KynoAnalysisIntent.muscleBuilding ||
-        historicalIntent == KynoAnalysisIntent.overtraining ||
-        historicalIntent == KynoAnalysisIntent.broadAudit ||
-        (historicalIntent == KynoAnalysisIntent.proteinAdherence && (q.contains('history') || q.contains('trend') || q.contains('usually') || q.contains('consistently') || q.contains('enough'))) ||
-        (historicalIntent == KynoAnalysisIntent.weightProgression && (q.contains('why') || q.contains('stuck') || q.contains('plateau'))));
+    // ── 0. Longitudinal Historical Analysis & Meal Drill-Down ────────────────
+    // e.g. "Why were my calories high yesterday?", "Why am I not hitting protein?",
+    // "Did I eat anything late last night?", "What did I eat yesterday?",
+    // "Why am I gaining weight?", "How was my nutrition yesterday?"
+    final isTodaySpecific = (q.contains('today') || q.contains('tonight')) &&
+        !q.contains('yesterday') &&
+        !q.contains('last night');
+    final historicalIntent = isTodaySpecific
+        ? KynoAnalysisIntent.general
+        : KynoHistoricalAnalysisService.instance.classifyIntent(query);
 
-    if (isLongitudinal) {
-      responseSource = 'Longitudinal Analysis: KynoHistoricalAnalysisService (Intent: ${historicalIntent.name})';
+    final isLongitudinalOrDrilldown = !isTodaySpecific &&
+        (historicalIntent == KynoAnalysisIntent.strengthPlateau ||
+            historicalIntent == KynoAnalysisIntent.trainingConsistency ||
+            historicalIntent == KynoAnalysisIntent.muscleBuilding ||
+            historicalIntent == KynoAnalysisIntent.overtraining ||
+            historicalIntent == KynoAnalysisIntent.broadAudit ||
+            historicalIntent == KynoAnalysisIntent.yesterdayNutrition ||
+            historicalIntent == KynoAnalysisIntent.historicalMealQuery ||
+            historicalIntent == KynoAnalysisIntent.lateNightEating ||
+            historicalIntent == KynoAnalysisIntent.weightGain ||
+            (historicalIntent == KynoAnalysisIntent.proteinAdherence &&
+                (q.contains('why') ||
+                    q.contains('not') ||
+                    q.contains('miss') ||
+                    q.contains('history') ||
+                    q.contains('trend') ||
+                    q.contains('usually') ||
+                    q.contains('consistently') ||
+                    q.contains('enough'))) ||
+            (historicalIntent == KynoAnalysisIntent.weightProgression &&
+                (q.contains('why') || q.contains('stuck') || q.contains('plateau'))));
+
+    if (isLongitudinalOrDrilldown) {
+      responseSource =
+          'Longitudinal & Historical Meal Drilldown: KynoHistoricalAnalysisService (Intent: ${historicalIntent.name})';
       print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       final analysis = KynoHistoricalAnalysisService.instance.analyzeQuery(query);

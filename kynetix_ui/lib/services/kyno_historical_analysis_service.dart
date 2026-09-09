@@ -8,6 +8,7 @@ import 'profile_service.dart';
 import 'user_session_coordinator.dart';
 import 'kyno_context_service.dart';
 import 'meal_memory.dart';
+import 'kyno_meal_drilldown_service.dart';
 
 enum KynoAnalysisIntent {
   strengthPlateau,
@@ -18,6 +19,10 @@ enum KynoAnalysisIntent {
   weightProgression,
   overtraining,
   broadAudit,
+  yesterdayNutrition,
+  historicalMealQuery,
+  lateNightEating,
+  weightGain,
   general,
 }
 
@@ -66,6 +71,42 @@ class KynoHistoricalAnalysisService {
   KynoAnalysisIntent classifyIntent(String query) {
     final q = query.toLowerCase().trim();
 
+    // 1. Late Night Eating (e.g. "Did I eat anything late last night?", "late snack")
+    if ((q.contains('late') && (q.contains('night') || q.contains('eat') || q.contains('ate') || q.contains('food') || q.contains('snack'))) ||
+        q.contains('late night') ||
+        q.contains('midnight snack')) {
+      return KynoAnalysisIntent.lateNightEating;
+    }
+
+    // 2. Historical Meal Query (e.g. "What did I eat yesterday?", "list what I ate")
+    if (q.contains('what did i eat') ||
+        q.contains('what i ate') ||
+        q.contains('list my meals') ||
+        q.contains('meals yesterday') ||
+        (q.contains('what') && (q.contains('eat') || q.contains('ate')) && q.contains('yesterday'))) {
+      return KynoAnalysisIntent.historicalMealQuery;
+    }
+
+    // 3. Yesterday Nutrition / Calorie breakdown (e.g. "Why were my calories high yesterday?", "How was my nutrition yesterday?")
+    if (q.contains('yesterday') &&
+        (q.contains('nutrition') || q.contains('calorie') || q.contains('calories') || q.contains('food') || q.contains('diet') || q.contains('macro') || q.contains('macros'))) {
+      return KynoAnalysisIntent.yesterdayNutrition;
+    }
+
+    // 4. Weight Gain (e.g. "Why am I gaining weight?")
+    if ((q.contains('gain') || q.contains('gaining') || q.contains('heavier') || q.contains('put on')) &&
+        (q.contains('weight') || q.contains('fat') || q.contains('scale') || q.contains('mass')) &&
+        (q.contains('why') || q.contains('reason') || q.contains('am i'))) {
+      return KynoAnalysisIntent.weightGain;
+    }
+
+    // 5. Protein Adherence (e.g. "Why am I not hitting protein?", "Am I eating enough protein?")
+    if (q.contains('protein') &&
+        (q.contains('enough') || q.contains('hit') || q.contains('trend') || q.contains('intake') || q.contains('target') || q.contains('not') || q.contains('miss') || q.contains('low') || q.contains('why'))) {
+      return KynoAnalysisIntent.proteinAdherence;
+    }
+
+    // 6. Strength Plateau & Performance
     if (q.contains('strength') && (q.contains('not') || q.contains('stuck') || q.contains('plateau') || q.contains('increase') || q.contains('flat') || q.contains('stall') || q.contains('why'))) {
       return KynoAnalysisIntent.strengthPlateau;
     }
@@ -77,9 +118,6 @@ class KynoHistoricalAnalysisService {
     }
     if ((q.contains('muscle') || q.contains('mass') || q.contains('gains') || q.contains('hypertrophy')) && (q.contains('not') || q.contains('why') || q.contains('gain') || q.contains('build'))) {
       return KynoAnalysisIntent.muscleBuilding;
-    }
-    if (q.contains('protein') && (q.contains('enough') || q.contains('hit') || q.contains('trend') || q.contains('intake') || q.contains('target'))) {
-      return KynoAnalysisIntent.proteinAdherence;
     }
     if ((q.contains('bad') || q.contains('weak') || q.contains('poor') || q.contains('terrible') || q.contains('heavy')) && (q.contains('workout') || q.contains('today') || q.contains('session'))) {
       return KynoAnalysisIntent.badWorkout;
@@ -251,7 +289,13 @@ class KynoHistoricalAnalysisService {
     }
 
     // ── 2. Authoritative Nutrition Analysis ────────────────────────────────
-    final d7 = now.subtract(const Duration(days: 7));
+    // Strict date-window contract: Longitudinal multi-day metrics evaluate completed
+    // calendar days ending yesterday midnight [todayMidnight - 14 days, todayMidnight).
+    // Today's partial day data is intentionally excluded from multi-day rolling averages
+    // to prevent incomplete day logging from skewing 14-day daily averages.
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+    final windowStart14 = todayMidnight.subtract(const Duration(days: 14));
+    final windowStart7 = todayMidnight.subtract(const Duration(days: 7));
 
     final logsLast7 = <DayLog>[];
     final logsLast14 = <DayLog>[];
@@ -281,7 +325,8 @@ class KynoHistoricalAnalysisService {
         final pro = l.totalProteinMid;
         final dayTargetPro = l.targetProtein ?? targetProtein;
 
-        if (date.isAfter(d14)) {
+        // Completed days window: [todayMidnight - 14 days, todayMidnight)
+        if (!date.isBefore(windowStart14) && date.isBefore(todayMidnight)) {
           logsLast14.add(l);
           calSum14 += cal;
           proSum14 += pro;
@@ -289,13 +334,38 @@ class KynoHistoricalAnalysisService {
             lowProDays14++;
           }
 
-          if (date.isAfter(d7)) {
+          if (!date.isBefore(windowStart7)) {
             logsLast7.add(l);
             calSum7 += cal;
             proSum7 += pro;
             if (pro < dayTargetPro * 0.75) {
               lowProDays7++;
             }
+          }
+        }
+      }
+    }
+
+    // Fallback: If user has 0 completed days (e.g. Day 1 user logging today),
+    // evaluate available logs so they are not left with an empty snapshot.
+    if (logsLast14.isEmpty && dayLogStore.isNotEmpty) {
+      for (final item in dayLogStore.entries) {
+        final date = DateTime.tryParse(item.key);
+        if (date == null) continue;
+        final l = item.value;
+        if (l.allEntries.isNotEmpty || l.totalCaloriesMid > 0) {
+          final cal = l.totalCaloriesMid;
+          final pro = l.totalProteinMid;
+          final dayTargetPro = l.targetProtein ?? targetProtein;
+          logsLast14.add(l);
+          calSum14 += cal;
+          proSum14 += pro;
+          if (pro < dayTargetPro * 0.75) lowProDays14++;
+          if (date.isAfter(now.subtract(const Duration(days: 7)))) {
+            logsLast7.add(l);
+            calSum7 += cal;
+            proSum7 += pro;
+            if (pro < dayTargetPro * 0.75) lowProDays7++;
           }
         }
       }
@@ -336,6 +406,7 @@ class KynoHistoricalAnalysisService {
       detectedPlateaus: detectedPlateaus,
       detectedImprovements: detectedImprovements,
       totalDaysWithMealsLogged: totalLoggedDays,
+      nutritionDaysIn14DayWindow: logsLast14.length,
       avgCaloriesLast7Days: avgCal7,
       avgCaloriesLast14Days: avgCal14,
       avgProteinLast7Days: avgPro7,
@@ -388,7 +459,26 @@ class KynoHistoricalAnalysisService {
       case KynoAnalysisIntent.muscleBuilding:
         return _analyzeMuscleBuilding(snapshot);
       case KynoAnalysisIntent.proteinAdherence:
+        if (query.toLowerCase().contains('why') ||
+            query.toLowerCase().contains('not') ||
+            query.toLowerCase().contains('miss') ||
+            query.toLowerCase().contains('meal')) {
+          return KynoMealDrilldownService.instance.analyzeProteinDeficitAndMeals(snapshot);
+        }
         return _analyzeProteinAdherence(snapshot);
+      case KynoAnalysisIntent.yesterdayNutrition:
+        if (query.toLowerCase().contains('calorie') ||
+            query.toLowerCase().contains('high') ||
+            query.toLowerCase().contains('why')) {
+          return KynoMealDrilldownService.instance.analyzeYesterdayCalories(snapshot);
+        }
+        return KynoMealDrilldownService.instance.analyzeYesterdaySummary(snapshot);
+      case KynoAnalysisIntent.historicalMealQuery:
+        return KynoMealDrilldownService.instance.analyzeChronologicalMeals();
+      case KynoAnalysisIntent.lateNightEating:
+        return KynoMealDrilldownService.instance.analyzeLateNightEating();
+      case KynoAnalysisIntent.weightGain:
+        return KynoMealDrilldownService.instance.analyzeWeightGain(snapshot);
       case KynoAnalysisIntent.badWorkout:
         return _analyzeBadWorkout(snapshot);
       case KynoAnalysisIntent.weightProgression:
@@ -469,69 +559,95 @@ class KynoHistoricalAnalysisService {
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
       title: 'Exercise Performance ($exName)',
-      detail: 'Recorded ${targetSummary.totalSessions} sessions.\n'
-          'Recent logged working sets: ${recentSets.take(4).join(" | ")}.',
+      detail: 'Recorded ${targetSummary.totalSessions} comparable sessions.\n'
+          'Logged working sets: ${recentSets.take(4).join(" | ")}.',
     ));
 
-    // 2. FACT: Nutrition history
+    // 2. CALCULATION: Performance progression
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.calculation,
+      title: 'Load & Rep Progression',
+      detail: isStalled
+          ? 'No increase in load or reps was recorded across those comparable sessions (${recentSets.first} repeatedly).'
+          : 'Progression recorded: recent working sets advanced to ${recentSets.first}.',
+    ));
+
+    // 3. INFERENCE: Performance Plateau
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.inference,
+      title: 'Performance Status',
+      detail: isStalled
+          ? 'Your $exName appears stalled; this repeated performance without load or rep increase is consistent with a performance plateau.'
+          : 'Performance on $exName is progressing along expected overload progression.',
+    ));
+
+    // 4. FACT: Nutrition history
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
       title: 'Nutrition Record (14-Day Average)',
-      detail: 'Averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g protein and ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day across ${snapshot.totalDaysWithMealsLogged} logged days.',
+      detail: 'Averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g protein and ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day across ${snapshot.nutritionDaysIn14DayWindow} logged days against your configured ${snapshot.targetDailyProtein.toStringAsFixed(0)}g/day target.',
     ));
 
-    // 3. CALCULATION: Performance & Nutrition Deltas
+    // 5. CALCULATION: Performance & Nutrition Deltas
     final proDeficit = (snapshot.targetDailyProtein - snapshot.avgProteinLast14Days).clamp(0.0, 999.0);
     final proPct = (snapshot.proteinAdherencePct14Days * 100).toInt();
 
+    final calcLines = <String>[
+      '• Average protein intake was $proPct% of configured target (${proDeficit.toStringAsFixed(0)}g below daily ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target on average).',
+      '• Days below 75% protein target: ${snapshot.lowProteinDaysLast14Days} of last ${snapshot.nutritionDaysIn14DayWindow} logged days.',
+      '• Training frequency: ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week (vs ${snapshot.workoutsPerWeekBaseline.toStringAsFixed(1)} baseline).',
+    ];
+    if (snapshot.calorieDelta14Days < -200.0) {
+      calcLines.add('• Logged intake averaged approximately ${snapshot.calorieDelta14Days.abs().toStringAsFixed(0)} kcal below your configured daily target (${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal logged vs ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal target).');
+    }
+
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Longitudinal Math',
-      detail: '• Protein adherence: $proPct% (${proDeficit.toStringAsFixed(0)}g below daily ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target on average).\n'
-          '• Days below 75% protein target: ${snapshot.lowProteinDaysLast14Days} of last 14 days.\n'
-          '• Training frequency: ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week (vs ${snapshot.workoutsPerWeekBaseline.toStringAsFixed(1)} baseline).',
+      title: 'Nutrition Adherence Math',
+      detail: calcLines.join('\n'),
     ));
 
-    // 4. INFERENCE: Root Cause Attribution
+    // 6. INFERENCE: Plausible Contributors (Evidence-calibrated, no medical/biological causation)
     final inferences = <String>[];
     if (isStalled) {
-      inferences.add('Performance on $exName has stalled: you have hit the identical load and reps without advancing reps or load.');
-      contributors.add('No progressive overload stimulus applied (hitting identical reps/load repeatedly).');
+      inferences.add('The clearest issue in your data is that the lift has not progressed while your protein intake has also been consistently below target.');
+      contributors.add('No progressive overload recorded (hitting identical reps and load across consecutive sessions).');
     }
 
     if (proDeficit > 20.0) {
-      inferences.add('Consistently low protein intake ($proPct% of target) is likely restricting myofibrillar protein synthesis and neuromuscular recovery.');
-      contributors.add('Consistent protein deficit averaging ${proDeficit.toStringAsFixed(0)}g/day below target.');
+      inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+      contributors.add('Consistent protein intake below configured target (averaging ${proDeficit.toStringAsFixed(0)}g/day below target).');
     }
 
     if (snapshot.calorieDelta14Days < -350.0) {
-      inferences.add('You are running a substantial calorie deficit (~${snapshot.calorieDelta14Days.abs().toStringAsFixed(0)} kcal below maintenance target), which significantly suppresses strength gain.');
-      contributors.add('Steep calorie deficit suppressing maximal strength output.');
+      inferences.add('Your logged calorie intake is substantially below your configured daily target (~${snapshot.calorieDelta14Days.abs().toStringAsFixed(0)} kcal gap), which may make strength and weight-gain progress harder.');
+      contributors.add('Substantial calorie deficit relative to configured daily target.');
     }
 
     if (snapshot.workoutsPerWeekLast14Days < 2.0) {
-      inferences.add('Training frequency has dropped to ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week, causing training stimuli to decay before supercompensation occurs.');
-      contributors.add('Insufficient session frequency to maintain neuromuscular adaptation.');
+      inferences.add('Training frequency has averaged ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week, which provides fewer weekly progressive overload opportunities.');
+      contributors.add('Low workout frequency providing fewer weekly progression stimuli.');
     }
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Longitudinal Diagnostic',
+      title: 'Plausible Contributors',
       detail: inferences.join('\n\n'),
     ));
 
-    // 5. RECOMMENDATIONS: Actionable Concrete Adjustments
+    // 7. RECOMMENDATIONS: Actionable Concrete Adjustments derived from user config
     if (isStalled) {
       final topWeight = targetSummary.recentWeights.isNotEmpty ? targetSummary.recentWeights.first : 20.0;
       final topReps = targetSummary.recentReps.isNotEmpty ? targetSummary.recentReps.first : 8;
-      recommendations.add('Rep Progression Rule: In your next session, keep ${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)}kg and aim for ${topReps + 1} to ${topReps + 2} reps on your first working set before attempting to increase the load.');
+      recommendations.add('Rep Progression: In your next session, keep ${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)}kg and aim for ${topReps + 1} to ${topReps + 2} reps on your first working set before attempting to increase the load.');
+      recommendations.add('Micro-Loading: If reps are capped, use small increments (0.5kg or 1kg) rather than forcing a 2.5kg jump.');
     }
 
     if (proDeficit > 15.0) {
-      recommendations.add('Protein Consistency: Raise daily intake to at least ${(snapshot.targetDailyProtein * 0.9).toStringAsFixed(0)}g consistently for the next 2-3 weeks to support recovery.');
+      recommendations.add('Protein Target: Bring daily protein intake consistently closer to your configured target of ${snapshot.targetDailyProtein.toStringAsFixed(0)}g/day (currently averaging ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day).');
     }
 
-    recommendations.add('Micro-Loading: If reps are capped, use 0.5kg or 1kg increments rather than forcing a 2.5kg jump.');
+    recommendations.add('Reassess: Evaluate progression after the next 2–3 comparable sessions.');
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
@@ -539,18 +655,18 @@ class KynoHistoricalAnalysisService {
       detail: recommendations.map((r) => '• $r').join('\n'),
     ));
 
-    // 6. UNKNOWN: Explicitly State Untracked Parameters
+    // 8. UNKNOWN: Explicitly State Untracked Parameters
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
       title: 'Untracked Variables',
-      detail: 'I do not have sleep data, subjective stress scores, or video lifting technique, so I cannot determine if CNS fatigue or form breakdown are contributing.',
+      detail: 'I don\'t currently track sleep duration or recovery quality, subjective life stress, or lifting biomechanics/technique, so I cannot determine whether any of those unmeasured factors are contributing.',
     ));
 
     watchItems.add('Track reps on set 1 of $exName next session.');
     watchItems.add('Track 7-day average protein adherence.');
 
     final headline = isStalled
-        ? 'Your strength appears to have plateaued on $exName over recent sessions.'
+        ? 'Your $exName does look stalled right now.'
         : 'Analysis of your strength trends and recovery balance:';
 
     return KynoAnalysisResult(
@@ -595,7 +711,7 @@ class KynoHistoricalAnalysisService {
       title: 'Consistency Impact',
       detail: snapshot.workoutsPerWeekLast14Days >= 3.0
           ? 'Consistency is sufficient for progressive athletic adaptation.'
-          : 'Low workout frequency (< 3 days/week) causes neuromuscular adaptations to detrain between workouts.',
+          : 'A training frequency below 3 days/week provides fewer weekly progressive overload stimuli.',
     ));
 
     insights.add(KynoInsightItem(
@@ -607,7 +723,7 @@ class KynoHistoricalAnalysisService {
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
       title: 'Untracked Life Factors',
-      detail: 'Travel, work schedules, and physical fatigue are not recorded in Kynetix.',
+      detail: 'Travel, work schedules, and outside physical fatigue are not recorded in Kynetix.',
     ));
 
     return KynoAnalysisResult(
@@ -641,15 +757,15 @@ class KynoHistoricalAnalysisService {
       title: 'Deficit Analysis',
       detail: deficit <= 5.0
           ? 'Protein target is met consistently ($pct% adherence).'
-          : 'Averaging a ${deficit.toStringAsFixed(0)}g deficit ($pct% adherence). Below target on ${snapshot.lowProteinDaysLast14Days} of the last 14 logged days.',
+          : 'Averaging a ${deficit.toStringAsFixed(0)}g gap below target ($pct% adherence). Below target on ${snapshot.lowProteinDaysLast14Days} of the last 14 logged days.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Physiological Implication',
+      title: 'Plausible Recovery Impact',
       detail: deficit <= 10.0
-          ? 'Optimal nitrogen balance for muscle tissue repair and hypertrophy.'
-          : 'Chronic protein shortfall limits fractional synthetic rate of muscle tissue and delays inter-session recovery.',
+          ? 'Your logged protein intake consistently aligns with your configured target, supporting ongoing workout recovery.'
+          : 'Your consistently low protein intake ($pct% of target) is a plausible contributor to slower recovery and adaptation between workouts.',
     ));
 
     insights.add(KynoInsightItem(
@@ -657,13 +773,13 @@ class KynoHistoricalAnalysisService {
       title: 'Nutrition Strategy',
       detail: deficit <= 10.0
           ? 'Maintain your current daily routine.'
-          : 'Anchor 30-40g protein into your first meal of the day, and utilize a convenient source (whey, Greek yogurt, chicken) to close the ${deficit.toStringAsFixed(0)}g gap.',
+          : 'Bring daily intake closer to your configured ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target. Anchor 30–40g of protein into your primary meals to close the ${deficit.toStringAsFixed(0)}g gap.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Protein Quality & Timing',
-      detail: 'Bioavailability and precise leucine threshold timing per meal are not explicitly tracked.',
+      title: 'Untracked Nutrition Factors',
+      detail: 'Protein distribution across meals, micronutrient quality, and digestive absorption are not tracked.',
     ));
 
     return KynoAnalysisResult(
@@ -701,7 +817,7 @@ class KynoHistoricalAnalysisService {
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
       title: 'Contextual Assessment',
-      detail: 'Day-to-day performance fluctuations of ±5-10% are standard neuromuscular variance. An isolated low-energy session is normal and does not represent an athletic plateau.',
+      detail: 'Day-to-day performance fluctuations of ±5-10% are standard training variance. An isolated low-energy session is normal and does not represent an athletic plateau.',
     ));
 
     insights.add(KynoInsightItem(
@@ -747,16 +863,16 @@ class KynoHistoricalAnalysisService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Overtraining vs Under-Recovery',
+      title: 'Training Load Assessment',
       detail: snapshot.workoutsPerWeekLast14Days < 4.0
-          ? 'At ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week, true systemic overtraining is rare. Feeling exhausted is more often caused by inadequate calories, low protein, or poor sleep.'
-          : 'High training density with inadequate recovery days may cause systemic fatigue accumulation.',
+          ? 'At ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week, your logged workout frequency is well within standard recovery capacity. Feeling fatigued is often more closely correlated with calorie deficits, low protein, or untracked sleep and stress.'
+          : 'High training frequency with fewer rest days may increase cumulative fatigue.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Systemic Fatigue Markers',
-      detail: 'Resting heart rate, HRV (heart rate variability), sleep duration, and subjective soreness are untracked.',
+      title: 'Untracked Recovery Markers',
+      detail: 'Sleep duration and quality, non-gym physical activity, and subjective life stress are untracked.',
     ));
 
     insights.add(KynoInsightItem(
@@ -802,7 +918,7 @@ class KynoHistoricalAnalysisService {
       type: KynoInformationType.inference,
       title: 'Highest-Leverage Opportunities',
       detail: proDeficit > 20.0
-          ? 'Your primary bottleneck is protein consistency (${proDeficit.toStringAsFixed(0)}g below target on average). Addressing nutrition will unlock greater return on your training volume.'
+          ? 'Your primary logged bottleneck is protein consistency (${proDeficit.toStringAsFixed(0)}g below configured target on average). Bringing protein closer to your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target is a plausible opportunity to support your training.'
           : 'Your nutrition adherence is solid. Focus on progressive overload and hitting top rep targets on primary lifts.',
     ));
 
@@ -815,7 +931,7 @@ class KynoHistoricalAnalysisService {
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
       title: 'Prioritized Action Plan',
-      detail: '1. Close the daily protein gap to >= 85% adherence.\n2. Ensure double progression is applied (add reps before adding weight).\n3. Maintain consistent 3-4 sessions/week frequency.',
+      detail: '1. Close the daily protein gap toward your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target.\n2. Ensure double progression is applied (add reps before adding weight).\n3. Maintain consistent 3-4 sessions/week frequency.',
     ));
 
     return KynoAnalysisResult(

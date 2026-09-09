@@ -55,6 +55,7 @@ class KynoUserFitnessSnapshot {
 
   // Nutrition Longitudinal Metrics
   final int totalDaysWithMealsLogged;
+  final int nutritionDaysIn14DayWindow;
   final double avgCaloriesLast7Days;
   final double avgCaloriesLast14Days;
   final double avgProteinLast7Days;
@@ -85,6 +86,7 @@ class KynoUserFitnessSnapshot {
     required this.detectedPlateaus,
     required this.detectedImprovements,
     required this.totalDaysWithMealsLogged,
+    this.nutritionDaysIn14DayWindow = 14,
     required this.avgCaloriesLast7Days,
     required this.avgCaloriesLast14Days,
     required this.avgProteinLast7Days,

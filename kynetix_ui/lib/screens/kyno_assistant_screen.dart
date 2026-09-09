@@ -360,7 +360,11 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
                       KynoCoachingInsightService.instance.dismissInsight(top.id);
                     });
                   },
-                  child: const Icon(Icons.close_rounded, size: 14, color: KColor.textMuted),
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 18, color: KColor.textMuted),
+                  ),
                 ),
               ],
             ),

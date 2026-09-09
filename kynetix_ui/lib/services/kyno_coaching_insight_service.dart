@@ -70,7 +70,7 @@ class KynoCoachingInsightService {
     final userId = UserSessionCoordinator.instance.currentUserId ?? 'local_user';
 
     if (forceEvaluate || !_userInsights.containsKey(userId)) {
-      evaluateInsightsForCurrentUser();
+      evaluateInsightsForCurrentUser(ignoreCooldown: forceEvaluate);
     }
 
     final list = _userInsights[userId] ?? [];
@@ -78,7 +78,7 @@ class KynoCoachingInsightService {
   }
 
   /// Evaluates proactive coaching rules against the user's fitness snapshot.
-  List<KynoCoachingInsight> evaluateInsightsForCurrentUser() {
+  List<KynoCoachingInsight> evaluateInsightsForCurrentUser({bool ignoreCooldown = false}) {
     final userId = UserSessionCoordinator.instance.currentUserId ?? 'local_user';
     final snapshot = KynoHistoricalAnalysisService.instance.getFitnessSnapshot();
     final now = DateTime.now();
@@ -101,7 +101,7 @@ class KynoCoachingInsightService {
         snapshot.targetDailyProtein > 0;
 
     if (isYesterdayLow || hasChronicLowProtein) {
-      if (_canTrigger(proDeficitKey, now)) {
+      if (ignoreCooldown || _canTrigger(proDeficitKey, now)) {
         if (isYesterdayLow) {
           final yProtein = yLog!.totalProteinMid;
           final yCal = yLog.totalCaloriesMid;
@@ -112,10 +112,10 @@ class KynoCoachingInsightService {
             deduplicationKey: proDeficitKey,
             severity: KynoInsightSeverity.needsAttention,
             title: 'Yesterday Protein Deficit Check-in',
-            evidence: 'YESTERDAY: Protein: ${yProtein.toStringAsFixed(0)}g (Target: ${yTargetProtein.toStringAsFixed(0)}g, Deficit: -${yDeficit.toStringAsFixed(0)}g). Calories: ${yCal.toStringAsFixed(0)} kcal.\n'
+            evidence: 'Yesterday you logged ${yProtein.toStringAsFixed(0)}g protein against your ${yTargetProtein.toStringAsFixed(0)}g target (deficit: -${yDeficit.toStringAsFixed(0)}g). Calories: ${yCal.toStringAsFixed(0)} kcal.\n'
                 'PATTERN: Below target on ${snapshot.lowProteinDaysLast7Days} of last 7 logged days (7-day avg: ${snapshot.avgProteinLast7Days.toStringAsFixed(0)}g).',
-            explanation: 'Protein was significantly below your target yesterday, and this has happened repeatedly this week. Don\'t let it become your normal pattern.',
-            recommendation: 'Aim for ~30–40g protein in your next two meals today to restart positive nitrogen balance.',
+            explanation: 'This is becoming a pattern. Consistently missing your protein target may slow your recovery and training progress.',
+            recommendation: 'Today, aim to get closer to your configured protein target of ${yTargetProtein.toStringAsFixed(0)}g by including a protein source in each meal.',
             datePeriod: 'Yesterday ($yKey)',
             createdAt: now,
           );
@@ -127,8 +127,8 @@ class KynoCoachingInsightService {
             severity: KynoInsightSeverity.needsAttention,
             title: 'Protein Intake Below Target',
             evidence: 'Your protein intake averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g against your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g daily target. Below target on ${snapshot.lowProteinDaysLast7Days} of the last 7 logged days.',
-            explanation: 'This is the most consistent recovery gap in your recent logs. Consistent low protein intake reduces muscle protein synthesis and limits strength adaptation.',
-            recommendation: 'Anchor 30-40g protein into your first two meals today and add a protein-dense snack if needed.',
+            explanation: 'This is the most consistent nutrition gap in your recent logs. Consistently low protein intake is a plausible contributor to slower recovery and strength progress.',
+            recommendation: 'Aim to get closer to your configured ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target by including 30–40g protein in your main meals.',
             datePeriod: 'Last 7–14 days',
             createdAt: now,
           );
@@ -149,7 +149,7 @@ class KynoCoachingInsightService {
             severity: KynoInsightSeverity.resolved,
             title: 'Protein Adherence Recovered',
             evidence: 'Your protein adherence improved to ${(snapshot.proteinAdherencePct14Days * 100).toInt()}% (${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day) over the last 14 days.',
-            explanation: 'You successfully closed your protein deficit. This provides the amino acid pool needed for optimal muscular recovery.',
+            explanation: 'Consistently hitting your protein target supports ongoing workout recovery.',
             recommendation: 'Maintain your current meal routine into next week.',
             datePeriod: 'Recent 14 days',
             createdAt: now,
@@ -216,7 +216,7 @@ class KynoCoachingInsightService {
           severity: KynoInsightSeverity.needsAttention,
           title: 'Training Consistency Gap',
           evidence: '${snapshot.daysSinceLastWorkout} days have elapsed since your last recorded workout.',
-          explanation: 'Gaps longer than 5-7 days between sessions of the same muscle groups allow neuromuscular adaptations to regress.',
+          explanation: 'Extended gaps between sessions can make returning to your previous training weights feel more challenging.',
           recommendation: 'Get back into your split today with a standard session. Keep working loads moderate to ease back in.',
           datePeriod: '${snapshot.daysSinceLastWorkout} days',
           createdAt: now,
@@ -228,10 +228,15 @@ class KynoCoachingInsightService {
 
     // Merge existing non-duplicates with newly generated
     final Set<String> existingKeys = existing.map((i) => i.deduplicationKey).toSet();
+    final Set<String> dismissedKeys = existing.where((i) => i.isDismissed).map((i) => i.deduplicationKey).toSet();
     final combined = List<KynoCoachingInsight>.from(existing);
 
     for (final n in newlyGenerated) {
-      if (!existingKeys.contains(n.deduplicationKey)) {
+      if (dismissedKeys.contains(n.deduplicationKey)) continue;
+      if (ignoreCooldown) {
+        combined.removeWhere((i) => i.deduplicationKey == n.deduplicationKey);
+        combined.insert(0, n);
+      } else if (!existingKeys.contains(n.deduplicationKey)) {
         combined.insert(0, n);
       }
     }
