@@ -56,6 +56,14 @@ class PersistenceService {
     } catch (_) {}
   }
 
+  static Future<void> clearCachedOwnerId() async {
+    _cachedOwnerId = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('cached_owner_user_id_v1');
+    } catch (_) {}
+  }
+
   static bool get isOnboardingDone => _onboardingDone;
 
   // ── Startup load ─────────────────────────────────────────────────────────

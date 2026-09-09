@@ -192,6 +192,7 @@ class UserSessionCoordinator {
     KynoCoachingInsightService.instance.clearMemory();
     WakelockService.instance.disable().ignore();
 
+    await PersistenceService.clearCachedOwnerId();
     _currentUserId = null;
     debugPrint('[UserSessionCoordinator] ✅ In-memory flush complete — zero cross-user leakage');
   }

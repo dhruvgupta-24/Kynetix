@@ -720,35 +720,161 @@ class _AuthScreenState extends State<AuthScreen> {
                             await WorkoutService.instance.saveSession(s2);
                             await WorkoutService.instance.saveSession(s3);
 
-                            // 14 days of nutrition history (averaging 72g protein, 1850 kcal vs 150g target)
+                            // 14 days of nutrition history (averaging 73g protein, 882 kcal vs 150g target)
                             for (int i = 1; i <= 14; i++) {
                               final d = now.subtract(Duration(days: i));
                               final dLog = DayLog()
                                 ..targetProtein = 150.0
                                 ..targetCalories = 2300.0
                                 ..gymDay = GymDay(didGym: i % 2 == 0);
-                              final pro = i == 1 ? 62.0 : 72.0; // yesterday protein: 62g
-                              dLog.add(
-                                MealSection.lunch,
-                                MealEntry(
-                                  rawInput: 'Chicken Rice Bowl',
-                                  result: NutritionResult(
-                                    canonicalMeal: 'Chicken Rice Bowl',
-                                    items: [],
-                                    calories: NutrientRange(min: 750, max: 750),
-                                    protein: NutrientRange(min: pro, max: pro),
-                                    confidence: 1.0,
-                                    warnings: [],
-                                    source: 'dev_seed',
-                                    createdAt: d,
+
+                              if (i == 1) {
+                                // Deterministic multi-meal test fixture day for yesterday
+                                // Test Data: 5 realistic meals across the day including late-night calorie-dense item
+                                final bDate = DateTime(d.year, d.month, d.day, 8, 15);
+                                final lDate = DateTime(d.year, d.month, d.day, 13, 15);
+                                final sDate = DateTime(d.year, d.month, d.day, 17, 30);
+                                final dinDate = DateTime(d.year, d.month, d.day, 20, 15);
+                                final lnDate = DateTime(d.year, d.month, d.day, 22, 45);
+
+                                dLog.add(
+                                  MealSection.breakfast,
+                                  MealEntry(
+                                    rawInput: 'Oatmeal with Blueberries & Honey',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Oatmeal with Blueberries & Honey',
+                                      items: [],
+                                      calories: NutrientRange(min: 420, max: 420),
+                                      protein: NutrientRange(min: 8, max: 8),
+                                      carbohydrates: NutrientRange(min: 78, max: 78),
+                                      fat: NutrientRange(min: 6, max: 6),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'test_fixture_multimeal',
+                                      createdAt: bDate,
+                                    ),
+                                    addedAt: bDate,
+                                    section: MealSection.breakfast,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['oats', 'blueberries', 'honey'],
+                                    finalSavedInput: 'Oatmeal with Blueberries & Honey',
                                   ),
-                                  addedAt: d,
-                                  section: MealSection.lunch,
-                                  dayOfWeek: d.weekday,
-                                  parsedFoods: ['chicken', 'rice'],
-                                  finalSavedInput: 'Chicken Rice Bowl',
-                                ),
-                              );
+                                );
+                                dLog.add(
+                                  MealSection.lunch,
+                                  MealEntry(
+                                    rawInput: 'Grilled Chicken Breast with Jasmine Rice',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Grilled Chicken Breast with Jasmine Rice',
+                                      items: [],
+                                      calories: NutrientRange(min: 680, max: 680),
+                                      protein: NutrientRange(min: 52, max: 52),
+                                      carbohydrates: NutrientRange(min: 65, max: 65),
+                                      fat: NutrientRange(min: 14, max: 14),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'test_fixture_multimeal',
+                                      createdAt: lDate,
+                                    ),
+                                    addedAt: lDate,
+                                    section: MealSection.lunch,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['chicken breast', 'rice'],
+                                    finalSavedInput: 'Grilled Chicken Breast with Jasmine Rice',
+                                  ),
+                                );
+                                dLog.add(
+                                  MealSection.eveningSnack,
+                                  MealEntry(
+                                    rawInput: 'Salted Pretzels & Iced Latte',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Salted Pretzels & Iced Latte',
+                                      items: [],
+                                      calories: NutrientRange(min: 310, max: 310),
+                                      protein: NutrientRange(min: 4, max: 4),
+                                      carbohydrates: NutrientRange(min: 56, max: 56),
+                                      fat: NutrientRange(min: 6, max: 6),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'test_fixture_multimeal',
+                                      createdAt: sDate,
+                                    ),
+                                    addedAt: sDate,
+                                    section: MealSection.eveningSnack,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['pretzels', 'latte'],
+                                    finalSavedInput: 'Salted Pretzels & Iced Latte',
+                                  ),
+                                );
+                                dLog.add(
+                                  MealSection.dinner,
+                                  MealEntry(
+                                    rawInput: 'Vegetable Stir-Fry with Tofu',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Vegetable Stir-Fry with Tofu',
+                                      items: [],
+                                      calories: NutrientRange(min: 650, max: 650),
+                                      protein: NutrientRange(min: 16, max: 16),
+                                      carbohydrates: NutrientRange(min: 85, max: 85),
+                                      fat: NutrientRange(min: 22, max: 22),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'test_fixture_multimeal',
+                                      createdAt: dinDate,
+                                    ),
+                                    addedAt: dinDate,
+                                    section: MealSection.dinner,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['tofu', 'vegetables', 'rice'],
+                                    finalSavedInput: 'Vegetable Stir-Fry with Tofu',
+                                  ),
+                                );
+                                dLog.add(
+                                  MealSection.lateNight,
+                                  MealEntry(
+                                    rawInput: 'Ben & Jerry\'s Half Baked Ice Cream',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Ben & Jerry\'s Half Baked Ice Cream',
+                                      items: [],
+                                      calories: NutrientRange(min: 540, max: 540),
+                                      protein: NutrientRange(min: 6, max: 6),
+                                      carbohydrates: NutrientRange(min: 66, max: 66),
+                                      fat: NutrientRange(min: 28, max: 28),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'test_fixture_multimeal',
+                                      createdAt: lnDate,
+                                    ),
+                                    addedAt: lnDate,
+                                    section: MealSection.lateNight,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['ice cream', 'fudge', 'cookie dough'],
+                                    finalSavedInput: 'Ben & Jerry\'s Half Baked Ice Cream',
+                                  ),
+                                );
+                              } else {
+                                dLog.add(
+                                  MealSection.lunch,
+                                  MealEntry(
+                                    rawInput: 'Chicken Rice Bowl',
+                                    result: NutritionResult(
+                                      canonicalMeal: 'Chicken Rice Bowl',
+                                      items: [],
+                                      calories: NutrientRange(min: 750, max: 750),
+                                      protein: NutrientRange(min: 72, max: 72),
+                                      confidence: 1.0,
+                                      warnings: [],
+                                      source: 'dev_seed',
+                                      createdAt: d,
+                                    ),
+                                    addedAt: d,
+                                    section: MealSection.lunch,
+                                    dayOfWeek: d.weekday,
+                                    parsedFoods: ['chicken', 'rice'],
+                                    finalSavedInput: 'Chicken Rice Bowl',
+                                  ),
+                                );
+                              }
                               final dKey = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
                               dayLogStore[dKey] = dLog;
                             }

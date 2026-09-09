@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../config/supabase_secrets.dart';
 import '../config/supabase_client.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/persistence_service.dart';
 import '../services/nutrition_hydration_guard.dart';
 import '../services/user_session_coordinator.dart';
@@ -57,6 +58,10 @@ class AuthService {
       // Step 1: Flush all user-specific in-memory states (Hard Boundary)
       // Closes hydration gate and wipes in-memory caches without deleting disk stores.
       await UserSessionCoordinator.instance.clearAllUserServices();
+
+      // Clear dev auto login if present
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dev_auto_login_user_id');
 
       // Clear native Google Sign-In cache to show account picker next time
       try {

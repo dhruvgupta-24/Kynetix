@@ -87,9 +87,9 @@ class KynoHistoricalAnalysisService {
       return KynoAnalysisIntent.historicalMealQuery;
     }
 
-    // 3. Yesterday Nutrition / Calorie breakdown (e.g. "Why were my calories high yesterday?", "How was my nutrition yesterday?")
+    // 3. Yesterday Nutrition / Calorie breakdown (e.g. "Why were my calories high yesterday?", "How was my nutrition yesterday?", "Why was my diet bad yesterday?")
     if (q.contains('yesterday') &&
-        (q.contains('nutrition') || q.contains('calorie') || q.contains('calories') || q.contains('food') || q.contains('diet') || q.contains('macro') || q.contains('macros'))) {
+        (q.contains('nutrition') || q.contains('calorie') || q.contains('calories') || q.contains('food') || q.contains('diet') || q.contains('macro') || q.contains('macros') || q.contains('bad') || q.contains('eating'))) {
       return KynoAnalysisIntent.yesterdayNutrition;
     }
 
@@ -128,7 +128,7 @@ class KynoHistoricalAnalysisService {
     if (q.contains('overtrain') || q.contains('too much') || q.contains('burnout') || q.contains('fried')) {
       return KynoAnalysisIntent.overtraining;
     }
-    if (q.contains('what am i doing wrong') || q.contains('audit') || q.contains('what should i change') || q.contains('review my progress')) {
+    if (q.contains('what am i doing wrong') || q.contains('audit') || q.contains('what should i change') || q.contains('review my progress') || q.contains('hurting my progress') || q.contains('holding me back')) {
       return KynoAnalysisIntent.broadAudit;
     }
 
@@ -601,6 +601,15 @@ class KynoHistoricalAnalysisService {
       calcLines.add('• Logged intake averaged approximately ${snapshot.calorieDelta14Days.abs().toStringAsFixed(0)} kcal below your configured daily target (${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal logged vs ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal target).');
     }
 
+    // Contextual meal drill-down evidence: check if recent meal choices explain the nutrient deficit
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final recentMeals = KynoMealDrilldownService.instance.getMealsForDate(yesterday);
+    if (recentMeals.isNotEmpty && (proDeficit > 15.0 || snapshot.calorieDelta14Days < -200.0)) {
+      final lowPro = recentMeals.where((m) => m.protein < 15.0).toList();
+      final anchors = recentMeals.where((m) => m.protein >= 30.0).toList();
+      calcLines.add('• Recent meal evidence (${yesterday.month}/${yesterday.day}): ${recentMeals.length} logged meals (${anchors.length} anchor meal ≥30g, ${lowPro.length} low-protein selections <15g).');
+    }
+
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
       title: 'Nutrition Adherence Math',
@@ -615,7 +624,16 @@ class KynoHistoricalAnalysisService {
     }
 
     if (proDeficit > 20.0) {
-      inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+      if (recentMeals.isNotEmpty) {
+        final lowPro = recentMeals.where((m) => m.protein < 15.0).toList();
+        if (lowPro.isNotEmpty) {
+          inferences.add('Your multi-day protein shortfall ($proPct% of target) is reflected in your logged meal distribution: on your most recent completed day, ${lowPro.length} of ${recentMeals.length} meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}" [${m.formattedTime}] with ${m.protein.toStringAsFixed(0)}g P').join(', ')}) contained minimal protein, contributing to a daily intake below target.');
+        } else {
+          inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+        }
+      } else {
+        inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+      }
       contributors.add('Consistent protein intake below configured target (averaging ${proDeficit.toStringAsFixed(0)}g/day below target).');
     }
 
@@ -921,6 +939,19 @@ class KynoHistoricalAnalysisService {
           ? 'Your primary logged bottleneck is protein consistency (${proDeficit.toStringAsFixed(0)}g below configured target on average). Bringing protein closer to your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target is a plausible opportunity to support your training.'
           : 'Your nutrition adherence is solid. Focus on progressive overload and hitting top rep targets on primary lifts.',
     ));
+
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final recentMeals = KynoMealDrilldownService.instance.getMealsForDate(yesterday);
+    if (recentMeals.isNotEmpty && proDeficit > 15.0) {
+      final lowPro = recentMeals.where((m) => m.protein < 15.0).toList();
+      if (lowPro.isNotEmpty) {
+        insights.add(KynoInsightItem(
+          type: KynoInformationType.inference,
+          title: 'Meal-Level Bottleneck',
+          detail: 'Recent meal logs show low-protein density across ${lowPro.length} of ${recentMeals.length} logged meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}"').join(', ')}), directly contributing to the ${proDeficit.toStringAsFixed(0)}g average shortfall.',
+        ));
+      }
+    }
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,

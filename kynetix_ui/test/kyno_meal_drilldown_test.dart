@@ -529,4 +529,213 @@ void main() {
       expect(allText, isNot(contains('PM')));
     });
   });
+
+  group('Part 3: Multi-Meal Deterministic Fixture & Contextual Reasoning Tests', () {
+    final now = DateTime.now();
+    final yesterday = now.subtract(const Duration(days: 1));
+    final yesterdayKey = '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+
+    setUp(() async {
+      ProfileService.instance.currentUserProfile = const UserProfile(
+        name: 'Dev Tester',
+        age: 26,
+        gender: 'male',
+        height: 180,
+        weight: 75,
+        workoutDaysMin: 4,
+        workoutDaysMax: 6,
+        goal: 'muscle_gain',
+      );
+
+      // Seed 3 stalled shoulder press sessions
+      await WorkoutService.instance.saveSession(_createSession(now.subtract(const Duration(days: 9)), 25.0, 8));
+      await WorkoutService.instance.saveSession(_createSession(now.subtract(const Duration(days: 5)), 25.0, 8));
+      await WorkoutService.instance.saveSession(_createSession(now.subtract(const Duration(days: 2)), 25.0, 8));
+
+      // Seed 13 days of baseline low protein (72g / 750 kcal)
+      for (int i = 2; i <= 14; i++) {
+        final d = now.subtract(Duration(days: i));
+        final dKey = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+        final dLog = DayLog()
+          ..targetProtein = 150.0
+          ..targetCalories = 2300.0
+          ..gymDay = GymDay(didGym: i % 2 == 0);
+        dLog.add(
+          MealSection.lunch,
+          _createMeal(
+            name: 'Chicken Rice Bowl',
+            time: DateTime(d.year, d.month, d.day, 12, 30),
+            section: MealSection.lunch,
+            calories: 750,
+            protein: 72,
+          ),
+        );
+        dayLogStore[dKey] = dLog;
+      }
+
+      // Seed Day 1 (yesterday) with deterministic 5-meal test fixture
+      final yLog = DayLog()
+        ..targetProtein = 150.0
+        ..targetCalories = 2300.0
+        ..gymDay = const GymDay(didGym: true);
+
+      // Meal 1: Breakfast at 8:15 AM
+      yLog.add(
+        MealSection.breakfast,
+        _createMeal(
+          name: 'Oatmeal with Blueberries & Honey',
+          time: DateTime(yesterday.year, yesterday.month, yesterday.day, 8, 15),
+          section: MealSection.breakfast,
+          calories: 420,
+          protein: 8,
+          carbs: 78,
+          fat: 6,
+        ),
+      );
+      // Meal 2: Lunch at 1:15 PM (High protein anchor)
+      yLog.add(
+        MealSection.lunch,
+        _createMeal(
+          name: 'Grilled Chicken Breast with Jasmine Rice',
+          time: DateTime(yesterday.year, yesterday.month, yesterday.day, 13, 15),
+          section: MealSection.lunch,
+          calories: 680,
+          protein: 52,
+          carbs: 65,
+          fat: 14,
+        ),
+      );
+      // Meal 3: Evening snack at 5:30 PM
+      yLog.add(
+        MealSection.eveningSnack,
+        _createMeal(
+          name: 'Salted Pretzels & Iced Latte',
+          time: DateTime(yesterday.year, yesterday.month, yesterday.day, 17, 30),
+          section: MealSection.eveningSnack,
+          calories: 310,
+          protein: 4,
+          carbs: 56,
+          fat: 6,
+        ),
+      );
+      // Meal 4: Dinner at 8:15 PM (after 8 PM, low protein)
+      yLog.add(
+        MealSection.dinner,
+        _createMeal(
+          name: 'Vegetable Stir-Fry with Tofu',
+          time: DateTime(yesterday.year, yesterday.month, yesterday.day, 20, 15),
+          section: MealSection.dinner,
+          calories: 650,
+          protein: 16,
+          carbs: 85,
+          fat: 22,
+        ),
+      );
+      // Meal 5: Late-night snack at 10:45 PM (Calorie-dense, low protein)
+      yLog.add(
+        MealSection.lateNight,
+        _createMeal(
+          name: "Ben & Jerry's Half Baked Ice Cream",
+          time: DateTime(yesterday.year, yesterday.month, yesterday.day, 22, 45),
+          section: MealSection.lateNight,
+          calories: 540,
+          protein: 6,
+          carbs: 66,
+          fat: 28,
+        ),
+      );
+
+      dayLogStore[yesterdayKey] = yLog;
+    });
+
+    test('1. "What did I eat yesterday?" returns chronological exact meal names, times, and sections', () async {
+      final msg = await KynoAssistantService.instance.processQuery('What did I eat yesterday?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final fact = msg.structuredInsights!.firstWhere((i) => i.type == KynoInformationType.fact);
+      expect(fact.detail, contains('8:15 AM [BREAKFAST]: "Oatmeal with Blueberries & Honey"'));
+      expect(fact.detail, contains('1:15 PM [LUNCH]: "Grilled Chicken Breast with Jasmine Rice"'));
+      expect(fact.detail, contains('5:30 PM [EVENINGSNACK]: "Salted Pretzels & Iced Latte"'));
+      expect(fact.detail, contains('8:15 PM [DINNER]: "Vegetable Stir-Fry with Tofu"'));
+      expect(fact.detail, contains('10:45 PM [LATENIGHT]: "Ben & Jerry\'s Half Baked Ice Cream"'));
+
+      // Chronological order verification
+      final bPos = fact.detail.indexOf('Oatmeal with Blueberries & Honey');
+      final lPos = fact.detail.indexOf('Grilled Chicken Breast with Jasmine Rice');
+      final sPos = fact.detail.indexOf('Salted Pretzels & Iced Latte');
+      final dPos = fact.detail.indexOf('Vegetable Stir-Fry with Tofu');
+      final lnPos = fact.detail.indexOf('Ben & Jerry\'s Half Baked Ice Cream');
+      expect(bPos < lPos && lPos < sPos && sPos < dPos && dPos < lnPos, isTrue);
+    });
+
+    test('2. "Did I eat anything late last night?" identifies exact late-night items with timestamps', () async {
+      final msg = await KynoAssistantService.instance.processQuery('Did I eat anything late last night?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
+      expect(allText, contains('Logged Late-Night Meals'));
+      expect(allText, contains('"Ben & Jerry\'s Half Baked Ice Cream" at 10:45 PM [LATENIGHT]'));
+      expect(allText, contains('"Vegetable Stir-Fry with Tofu" at 8:15 PM [DINNER]'));
+      expect(allText, contains('1190 kcal')); // 650 + 540 = 1190 kcal
+    });
+
+    test('3. "Why were my calories high yesterday?" identifies major contributors and surplus math', () async {
+      final msg = await KynoAssistantService.instance.processQuery('Why were my calories high yesterday?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final calc = msg.structuredInsights!.firstWhere((i) => i.type == KynoInformationType.calculation);
+      // Highest contributor: Grilled Chicken Breast (680 kcal)
+      expect(calc.detail, contains('Highest contributor: "Grilled Chicken Breast with Jasmine Rice"'));
+      expect(calc.detail, contains('680 kcal'));
+      // Second highest: Vegetable Stir-Fry (650 kcal)
+      expect(calc.detail, contains('Second highest contributor: "Vegetable Stir-Fry with Tofu"'));
+      expect(calc.detail, contains('650 kcal'));
+      // Delta: 2600 - 2400 = 200 kcal exceeded
+      expect(calc.detail, contains('exceeded your configured target of 2400 kcal by 200 kcal'));
+    });
+
+    test('4. "Why am I not hitting protein?" identifies specific low-protein meals contributing to shortfall', () async {
+      final msg = await KynoAssistantService.instance.processQuery('Why am I not hitting protein?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
+      // Identifies anchor vs low-protein count
+      expect(allText, contains('High-protein anchor meals (≥30g): 1 logged'));
+      expect(allText, contains('Low-protein meals (<15g): 3 of 5 meals'));
+      // Contextual inference cites specific low-protein meals
+      expect(allText, contains('Oatmeal with Blueberries & Honey'));
+      expect(allText, contains('Salted Pretzels & Iced Latte'));
+      expect(allText, contains('Ben & Jerry\'s Half Baked Ice Cream'));
+    });
+
+    test('5. "Why is my strength not increasing?" contextually integrates meal-level evidence with training plateau', () async {
+      final msg = await KynoAssistantService.instance.processQuery('Why is my strength not increasing?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
+      // Longitudinal training plateau
+      expect(allText, contains('DB Shoulder Press'));
+      expect(allText, contains('25kg'));
+      // Longitudinal nutrition math
+      expect(allText, contains('Nutrition Record (14-Day Average)'));
+      // Contextual recent meal evidence
+      expect(allText, contains('Recent meal evidence'));
+      expect(allText, contains('5 logged meals'));
+      expect(allText, contains('1 anchor meal ≥30g, 3 low-protein selections <15g'));
+      // Contextual inference mentions specific meal selections
+      expect(allText, contains('multi-day protein shortfall'));
+      expect(allText, contains('Oatmeal with Blueberries & Honey'));
+    });
+
+    test('6. "What is hurting my progress?" broad audit cites longitudinal plateau and meal-level bottleneck', () async {
+      final msg = await KynoAssistantService.instance.processQuery('What is hurting my progress?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
+      expect(allText, contains('Longitudinal Overview'));
+      expect(allText, contains('Adherence Audit'));
+      expect(allText, contains('Meal-Level Bottleneck'));
+      expect(allText, contains('low-protein density across 3 of 5 logged meals'));
+    });
+  });
 }
