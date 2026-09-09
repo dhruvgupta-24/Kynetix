@@ -89,6 +89,10 @@ class KynoAssistantService {
             historicalIntent == KynoAnalysisIntent.historicalMealQuery ||
             historicalIntent == KynoAnalysisIntent.lateNightEating ||
             historicalIntent == KynoAnalysisIntent.weightGain ||
+            historicalIntent == KynoAnalysisIntent.bodyComposition ||
+            historicalIntent == KynoAnalysisIntent.fatLossPlateau ||
+            historicalIntent == KynoAnalysisIntent.recoveryAssessment ||
+            historicalIntent == KynoAnalysisIntent.dietAdjustment ||
             (historicalIntent == KynoAnalysisIntent.proteinAdherence &&
                 (q.contains('why') ||
                     q.contains('not') ||

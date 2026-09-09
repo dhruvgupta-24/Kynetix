@@ -78,11 +78,23 @@ class SavedMealService {
     return norm.split(' ').where((t) => t.isNotEmpty && (t.length > 1 || RegExp(r'\d').hasMatch(t))).toList();
   }
 
+  final Map<String, List<SavedMealMatch>> _queryCache = {};
+
+  /// Clears the internal search query cache when new meals are saved.
+  void clearCache() {
+    _queryCache.clear();
+  }
+
   /// Searches all saved meals, memory items, user overrides, and logged meals for [query].
   /// Ranked by relevance score and usage frequency.
   List<SavedMealMatch> search(String query, {int limit = 5}) {
     final cleanQuery = normalize(query);
     if (cleanQuery.isEmpty || cleanQuery.length < 2) return const [];
+
+    final cacheKey = '$cleanQuery:$limit';
+    if (_queryCache.containsKey(cacheKey)) {
+      return _queryCache[cacheKey]!;
+    }
 
     final queryTokens = tokenize(query);
     if (queryTokens.isEmpty) return const [];
@@ -323,7 +335,12 @@ class SavedMealService {
       return b.timesUsed.compareTo(a.timesUsed);
     });
 
-    return results.take(limit).toList();
+    final sorted = results.take(limit).toList();
+    if (_queryCache.length > 50) {
+      _queryCache.remove(_queryCache.keys.first);
+    }
+    _queryCache[cacheKey] = sorted;
+    return sorted;
   }
 
   static double _calculateScore(

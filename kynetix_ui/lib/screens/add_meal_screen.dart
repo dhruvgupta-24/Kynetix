@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
@@ -110,6 +111,7 @@ class _AddMealScreenState extends State<AddMealScreen>
   String? _validationWarning;
 
   List<SavedMealMatch> _savedMealMatches = const [];
+  Timer? _searchDebounceTimer;
 
   @override
   void initState() {
@@ -137,20 +139,41 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   void _onTextChanged() {
     final text = _controller.text.trim();
-    if (text.length >= 2) {
-      final matches = SavedMealService.instance.search(text, limit: 3);
-      if (matches.isNotEmpty || _savedMealMatches.isNotEmpty) {
-        setState(() {
-          _savedMealMatches = matches;
-        });
-      }
-    } else {
+    if (text.length < 2) {
+      _searchDebounceTimer?.cancel();
       if (_savedMealMatches.isNotEmpty) {
         setState(() {
           _savedMealMatches = const [];
         });
       }
+      return;
     }
+
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      final currentText = _controller.text.trim();
+      if (currentText.length >= 2) {
+        final matches = SavedMealService.instance.search(currentText, limit: 3);
+        if (!_areMatchListsEqual(_savedMealMatches, matches)) {
+          setState(() {
+            _savedMealMatches = matches;
+          });
+        }
+      } else if (_savedMealMatches.isNotEmpty) {
+        setState(() {
+          _savedMealMatches = const [];
+        });
+      }
+    });
+  }
+
+  bool _areMatchListsEqual(List<SavedMealMatch> a, List<SavedMealMatch> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].title != b[i].title || a[i].matchScore != b[i].matchScore) return false;
+    }
+    return true;
   }
 
   void _useSavedMeal(SavedMealMatch match) {
@@ -168,6 +191,7 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   @override
   void dispose() {
+    _searchDebounceTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();

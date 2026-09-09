@@ -23,6 +23,10 @@ enum KynoAnalysisIntent {
   historicalMealQuery,
   lateNightEating,
   weightGain,
+  bodyComposition,
+  fatLossPlateau,
+  recoveryAssessment,
+  dietAdjustment,
   general,
 }
 
@@ -72,7 +76,9 @@ class KynoHistoricalAnalysisService {
     final q = query.toLowerCase().trim();
 
     // 1. Late Night Eating (e.g. "Did I eat anything late last night?", "late snack")
-    if ((q.contains('late') && (q.contains('night') || q.contains('eat') || q.contains('ate') || q.contains('food') || q.contains('snack'))) ||
+    final hasLateWord = RegExp(r'\blate\b').hasMatch(q);
+    final hasEatWord = RegExp(r'\b(eat|ate|eating|food|snack)\b').hasMatch(q);
+    if ((hasLateWord && (q.contains('night') || hasEatWord)) ||
         q.contains('late night') ||
         q.contains('midnight snack')) {
       return KynoAnalysisIntent.lateNightEating;
@@ -83,7 +89,7 @@ class KynoHistoricalAnalysisService {
         q.contains('what i ate') ||
         q.contains('list my meals') ||
         q.contains('meals yesterday') ||
-        (q.contains('what') && (q.contains('eat') || q.contains('ate')) && q.contains('yesterday'))) {
+        (q.contains('what') && hasEatWord && q.contains('yesterday'))) {
       return KynoAnalysisIntent.historicalMealQuery;
     }
 
@@ -93,21 +99,75 @@ class KynoHistoricalAnalysisService {
       return KynoAnalysisIntent.yesterdayNutrition;
     }
 
-    // 4. Weight Gain (e.g. "Why am I gaining weight?")
+    // 4. Body Composition / Belly Fat / Spot Reduction
+    // e.g. "Why is my belly not reducing?", "How to lose belly fat?", "Why is my stomach not shrinking?"
+    if (q.contains('belly') ||
+        q.contains('stomach') ||
+        q.contains('waist') ||
+        q.contains('love handle') ||
+        q.contains('midsection') ||
+        q.contains('visceral fat') ||
+        q.contains('spot reduc') ||
+        q.contains('abs') ||
+        q.contains('abdominal') ||
+        q.contains('crunches') ||
+        ((q.contains('lose') || q.contains('burn') || q.contains('shed') || q.contains('drop') || q.contains('cut') || q.contains('reduce')) &&
+            (q.contains('fat') || q.contains('body fat')) &&
+            !q.contains('weight'))) {
+      return KynoAnalysisIntent.bodyComposition;
+    }
+
+    // 5. Weight Loss Plateau / Stall (e.g. "Why am I not losing weight?", "Why is the scale not moving?", "Why is my weight plateauing?")
+    final isLiftingExercise = q.contains('bench') ||
+        q.contains('press') ||
+        q.contains('squat') ||
+        q.contains('deadlift') ||
+        q.contains('curl') ||
+        q.contains('lift') ||
+        q.contains('strength') ||
+        q.contains('dumbbell') ||
+        q.contains('barbell') ||
+        q.contains('overhead');
+
+    if ((q.contains('not') || q.contains('cant') || q.contains("can't") || q.contains('stuck') || q.contains('plateau') || q.contains('stall') || q.contains('why') || q.contains('stop')) &&
+        (q.contains('losing weight') ||
+            q.contains('lose weight') ||
+            q.contains('dropping weight') ||
+            q.contains('drop weight') ||
+            q.contains('shedding weight') ||
+            (q.contains('weight') && (q.contains('plateau') || q.contains('stuck') || q.contains('stall')) && !isLiftingExercise) ||
+            (q.contains('scale') && (q.contains('move') || q.contains('drop') || q.contains('budge') || q.contains('down') || q.contains('stuck') || q.contains('plateau'))))) {
+      return KynoAnalysisIntent.fatLossPlateau;
+    }
+
+    // 6. Weight Gain (e.g. "Why am I gaining weight?")
     if ((q.contains('gain') || q.contains('gaining') || q.contains('heavier') || q.contains('put on')) &&
-        (q.contains('weight') || q.contains('fat') || q.contains('scale') || q.contains('mass')) &&
+        (q.contains('weight') || q.contains('scale') || q.contains('mass')) &&
         (q.contains('why') || q.contains('reason') || q.contains('am i'))) {
       return KynoAnalysisIntent.weightGain;
     }
 
-    // 5. Protein Adherence (e.g. "Why am I not hitting protein?", "Am I eating enough protein?")
+    // 7. Protein Adherence (e.g. "Why am I not hitting protein?", "Am I eating enough protein?")
     if (q.contains('protein') &&
         (q.contains('enough') || q.contains('hit') || q.contains('trend') || q.contains('intake') || q.contains('target') || q.contains('not') || q.contains('miss') || q.contains('low') || q.contains('why'))) {
       return KynoAnalysisIntent.proteinAdherence;
     }
 
-    // 6. Strength Plateau & Performance
-    if (q.contains('strength') && (q.contains('not') || q.contains('stuck') || q.contains('plateau') || q.contains('increase') || q.contains('flat') || q.contains('stall') || q.contains('why'))) {
+    // 8. Recovery Assessment (e.g. "How is my recovery?", "Am I recovered?", "How is my fatigue?")
+    if ((q.contains('recover') || q.contains('readiness') || q.contains('fatigue') || q.contains('soreness') || q.contains('sore')) &&
+        (q.contains('how') || q.contains('my') || q.contains('status') || q.contains('am i') || q.contains('ready') || q.contains('rest') || q.contains('state') || q.contains('check'))) {
+      return KynoAnalysisIntent.recoveryAssessment;
+    }
+
+    // 9. Diet Adjustment (e.g. "What should I change about my diet?", "How can I improve my nutrition?", "How can I fix my food intake?")
+    if ((q.contains('what should i change') || q.contains('what to change') || q.contains('how should i change') || q.contains('how can i improve') || q.contains('fix my') || q.contains('adjust my') || q.contains('fix') || q.contains('adjust') || q.contains('change')) &&
+        (q.contains('diet') || q.contains('nutrition') || q.contains('eating') || q.contains('food') || q.contains('macros') || q.contains('food intake') || q.contains('meal plan') || q.contains('intake'))) {
+      return KynoAnalysisIntent.dietAdjustment;
+    }
+
+    // 10. Strength Plateau & Performance (e.g. "Why am I not getting stronger?", "Why is my bench stuck?", "Why am I plateauing on bench press?")
+    if ((q.contains('strength') || q.contains('stronger') || q.contains('strong')) &&
+        (q.contains('not') || q.contains('why') || q.contains('stuck') || q.contains('plateau') || q.contains('stall') || q.contains('increase') || q.contains('flat') || q.contains('gain') || q.contains('cant') || q.contains("can't"))) {
       return KynoAnalysisIntent.strengthPlateau;
     }
     if ((q.contains('stuck') || q.contains('plateau') || q.contains('stalled')) && (q.contains('weight') || q.contains('lift') || q.contains('bench') || q.contains('press') || q.contains('squat') || q.contains('curl'))) {
@@ -479,6 +539,14 @@ class KynoHistoricalAnalysisService {
         return KynoMealDrilldownService.instance.analyzeLateNightEating();
       case KynoAnalysisIntent.weightGain:
         return KynoMealDrilldownService.instance.analyzeWeightGain(snapshot);
+      case KynoAnalysisIntent.bodyComposition:
+        return _analyzeBodyComposition(snapshot, query);
+      case KynoAnalysisIntent.fatLossPlateau:
+        return _analyzeFatLossPlateau(snapshot, query);
+      case KynoAnalysisIntent.recoveryAssessment:
+        return _analyzeRecoveryAssessment(snapshot, query);
+      case KynoAnalysisIntent.dietAdjustment:
+        return _analyzeDietAdjustment(snapshot, query);
       case KynoAnalysisIntent.badWorkout:
         return _analyzeBadWorkout(snapshot);
       case KynoAnalysisIntent.weightProgression:
@@ -971,4 +1039,240 @@ class KynoHistoricalAnalysisService {
       insights: insights,
     );
   }
+
+  KynoAnalysisResult _analyzeBodyComposition(KynoUserFitnessSnapshot snapshot, String query) {
+    final insights = <KynoInsightItem>[];
+    final diff = snapshot.avgCaloriesLast14Days - snapshot.targetDailyCalories;
+    final diffStr = diff >= 0 ? '+${diff.toStringAsFixed(0)}' : diff.toStringAsFixed(0);
+
+    final headline = 'Your logged nutrition shows an average intake of ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day '
+        'relative to your configured target of ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal/day ($diffStr kcal/day difference). '
+        'However, Kynetix does not track waist or body composition measurements, and localized fat loss ("spot reduction") '
+        'cannot be specifically targeted through diet or abdominal training.';
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.fact,
+      title: 'Logged Nutrition & Training Baseline',
+      detail: '• 14-Day Average Intake: ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day across ${snapshot.nutritionDaysIn14DayWindow} logged days.\n'
+          '• Configured Calorie Target: ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal/day.\n'
+          '• 14-Day Average Protein: ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day (Target: ${snapshot.targetDailyProtein.toStringAsFixed(0)}g/day).\n'
+          '• Training Frequency: ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} workouts/week across ${snapshot.totalWorkoutsLogged} lifetime sessions.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.calculation,
+      title: 'Energy Intake Relative to Configured Target',
+      detail: 'Logged average intake is $diffStr kcal/day relative to your configured daily target. '
+          'Over a 14-day window, this represents a cumulative delta of ${(diff * 14).toStringAsFixed(0)} kcal compared to target planning.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.inference,
+      title: 'Physiological Fat Mobilization Principle',
+      detail: 'Adipose tissue reduction occurs systemically across the entire body when an energy deficit is sustained over time. '
+          'The sequence and rate at which specific fat stores (such as subcutaneous abdominal or visceral fat) are mobilized '
+          'is determined by individual genetics, hormonal profile, and receptor distribution. '
+          'Abdominal exercises strengthen underlying muscle tissue but do not preferentially burn overlying abdominal fat.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.recommendation,
+      title: 'Recommended Strategy',
+      detail: '1. Adhere consistently to your configured caloric target for 3–4 continuous weeks.\n'
+          '2. Maintain progressive overload in resistance training to preserve lean skeletal muscle mass.\n'
+          '3. Measure waist circumference once per week at the navel under identical conditions (fasted upon waking).',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.unknown,
+      title: 'Untracked Composition Variables',
+      detail: 'Kynetix tracks logged food intake and workout sets, but does not record waist circumference, skinfold caliper measurements, DEXA body composition, or visceral fat indices. Localized tissue changes cannot be measured from logging data alone.',
+    ));
+
+    return KynoAnalysisResult(
+      intent: KynoAnalysisIntent.bodyComposition,
+      headline: headline,
+      insights: insights,
+      recommendedChanges: [
+        'Maintain consistent caloric intake relative to your daily target.',
+        'Take weekly waist circumference measurements to objectively monitor midsection changes.',
+      ],
+      watchItems: [
+        'Avoid crash dieting or excessive ab workouts expecting localized fat reduction.',
+      ],
+    );
+  }
+
+  KynoAnalysisResult _analyzeFatLossPlateau(KynoUserFitnessSnapshot snapshot, String query) {
+    final insights = <KynoInsightItem>[];
+    final diff = snapshot.avgCaloriesLast14Days - snapshot.targetDailyCalories;
+    final diffStr = diff >= 0 ? '+${diff.toStringAsFixed(0)}' : diff.toStringAsFixed(0);
+
+    final headline = 'Your logged intake over the last 14 days has averaged ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day '
+        'against your configured target of ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal/day ($diffStr kcal/day). '
+        'If your scale weight has remained unchanged across multiple consecutive weeks, your actual total energy intake currently matches your real-world expenditure.';
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.fact,
+      title: 'Logged Intake History',
+      detail: '• 14-Day Average Intake: ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day.\n'
+          '• Configured Caloric Target: ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal/day.\n'
+          '• Logged Days in 14-Day Window: ${snapshot.nutritionDaysIn14DayWindow} of 14 days.\n'
+          '• Average Protein Intake: ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.calculation,
+      title: 'Intake vs Configured Target Delta',
+      detail: 'Intake differs from configured target by $diffStr kcal/day. '
+          'A configured target is an initial mathematical estimate; real-world weight plateau indicates current energy equilibrium regardless of planned targets.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.inference,
+      title: 'Energy Balance & Plateau Analysis',
+      detail: 'When body weight remains static over 2–3 weeks, true metabolic expenditure and caloric intake are in balance. '
+          'Plateaus commonly result from unrecorded cooking oils/condiments, weekend intake fluctuations, or reduced non-exercise activity (NEAT) as the body defends energy reserves.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.recommendation,
+      title: 'Plateau Breaking Protocol',
+      detail: '1. Weigh all foods with a digital kitchen scale for 7 consecutive days to verify accuracy.\n'
+          '2. If strict logging confirms zero weight movement over 3 consecutive weeks, reduce your configured daily intake by 150–200 kcal.\n'
+          '3. Keep daily step counts and resistance training volume consistent.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.unknown,
+      title: 'Unmeasured Physiological Factors',
+      detail: 'Fluctuations in daily water retention (due to sodium intake, glycogen storage, or training-induced muscle inflammation), unlogged foods or beverages, and true daily metabolic expenditure are not tracked by Kynetix.',
+    ));
+
+    return KynoAnalysisResult(
+      intent: KynoAnalysisIntent.fatLossPlateau,
+      headline: headline,
+      insights: insights,
+      recommendedChanges: [
+        'Strictly weigh portion sizes and condiments for 7 days.',
+        'If weight remains flat for another 2 weeks, adjust daily calorie target downward by 150-200 kcal.',
+      ],
+    );
+  }
+
+  KynoAnalysisResult _analyzeRecoveryAssessment(KynoUserFitnessSnapshot snapshot, String query) {
+    final insights = <KynoInsightItem>[];
+    final proRatio = snapshot.targetDailyProtein > 0
+        ? (snapshot.avgProteinLast7Days / snapshot.targetDailyProtein * 100).round()
+        : 100;
+
+    final headline = 'Over the last 7 days, you logged ${snapshot.totalWorkoutsLogged} workouts '
+        'with an average protein intake of ${snapshot.avgProteinLast7Days.toStringAsFixed(0)}g/day ($proRatio% of your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g configured target). '
+        'Note that sleep duration, sleep quality, and biometric recovery markers are not tracked in Kynetix.';
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.fact,
+      title: 'Tracked Workload & Nutrition Baseline',
+      detail: '• Logged Workouts (Last 14 Days): ${snapshot.workoutsPerWeekLast14Days.toStringAsFixed(1)} sessions/week.\n'
+          '• Days Since Last Workout: ${snapshot.daysSinceLastWorkout == 999 ? "None logged recently" : "${snapshot.daysSinceLastWorkout} day(s)"}.\n'
+          '• 7-Day Average Protein Intake: ${snapshot.avgProteinLast7Days.toStringAsFixed(0)}g/day (Target: ${snapshot.targetDailyProtein.toStringAsFixed(0)}g/day).\n'
+          '• Low Protein Days (<75% target): ${snapshot.lowProteinDaysLast7Days} of the last 7 days.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.calculation,
+      title: 'Tracked Recovery Substrate Availability',
+      detail: 'Protein target adherence is at $proRatio% over the last 7 days. '
+          '${snapshot.lowProteinDaysLast7Days > 0 ? "You experienced ${snapshot.lowProteinDaysLast7Days} days with significant protein deficits that can impair muscle protein synthesis." : "Daily protein availability has met configured recovery requirements."}',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.inference,
+      title: 'Training Load Assessment',
+      detail: 'Based on tracked workout frequency and set volume, structural recovery is supported when rest days are scheduled between high-intensity sessions and protein requirements are met.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.recommendation,
+      title: 'Recovery Guidance',
+      detail: snapshot.lowProteinDaysLast7Days > 0
+          ? 'Focus on closing your daily protein deficit (${(snapshot.targetDailyProtein - snapshot.avgProteinLast7Days).clamp(0, 200).toStringAsFixed(0)}g remaining to target) to support muscle tissue remodeling.'
+          : 'Maintain your current training-to-rest cadence and continue hitting your daily protein target.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.unknown,
+      title: 'Untracked Recovery Biometrics',
+      detail: 'Sleep duration, sleep architecture (deep/REM sleep), heart rate variability (HRV), resting heart rate, and subjective central nervous system fatigue are NOT tracked in Kynetix and cannot be evaluated.',
+    ));
+
+    return KynoAnalysisResult(
+      intent: KynoAnalysisIntent.recoveryAssessment,
+      headline: headline,
+      insights: insights,
+      recommendedChanges: [
+        if (snapshot.lowProteinDaysLast7Days > 0) 'Hit your protein target consistently on both training and rest days.',
+        'Ensure at least 1-2 dedicated recovery days each week between heavy sessions.',
+      ],
+    );
+  }
+
+  KynoAnalysisResult _analyzeDietAdjustment(KynoUserFitnessSnapshot snapshot, String query) {
+    final insights = <KynoInsightItem>[];
+    final calDiff = snapshot.avgCaloriesLast14Days - snapshot.targetDailyCalories;
+    final proDiff = snapshot.targetDailyProtein - snapshot.avgProteinLast14Days;
+
+    final headline = 'Based on your logged nutrition history, your primary dietary adjustments are '
+        '${proDiff > 10 ? "closing your ${proDiff.toStringAsFixed(0)}g daily protein gap" : "maintaining protein consistency"} and '
+        'aligning daily calories with your ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal target.';
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.fact,
+      title: '14-Day Logged Nutrition Baseline',
+      detail: '• Average Calories: ${snapshot.avgCaloriesLast14Days.toStringAsFixed(0)} kcal/day (Target: ${snapshot.targetDailyCalories.toStringAsFixed(0)} kcal).\n'
+          '• Average Protein: ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day (Target: ${snapshot.targetDailyProtein.toStringAsFixed(0)}g).\n'
+          '• Logged Days: ${snapshot.nutritionDaysIn14DayWindow} of 14 calendar days.\n'
+          '• Days Below 75% Protein Target: ${snapshot.lowProteinDaysLast14Days} days.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.calculation,
+      title: 'Target Variance',
+      detail: '• Caloric variance: ${calDiff >= 0 ? "+" : ""}${calDiff.toStringAsFixed(0)} kcal/day vs target.\n'
+          '• Protein variance: ${proDiff <= 0 ? "Target met" : "-${proDiff.toStringAsFixed(0)}g/day below target"}.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.inference,
+      title: 'Nutritional Bottleneck Assessment',
+      detail: proDiff > 15
+          ? 'Sub-optimal daily protein intake is the most impactful nutritional variable limiting your muscular recovery and body composition progress.'
+          : 'Caloric consistency across consecutive days is your main variable to regulate.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.recommendation,
+      title: 'Actionable Dietary Changes',
+      detail: '1. Anchor each meal with 30–45g of protein (e.g. chicken breast, Greek yogurt, eggs/whites, whey).\n'
+          '2. Plan your protein sources at the beginning of the day before filling remaining calories with complex carbs and healthy fats.\n'
+          '3. Keep intake consistent across weekends to avoid weekly calorie spikes.',
+    ));
+
+    insights.add(KynoInsightItem(
+      type: KynoInformationType.unknown,
+      title: 'Untracked Variables',
+      detail: 'Micronutrient levels (vitamins/minerals), dietary fiber breakdown, hydration/water intake, and food quality or GI response are not tracked in Kynetix.',
+    ));
+
+    return KynoAnalysisResult(
+      intent: KynoAnalysisIntent.dietAdjustment,
+      headline: headline,
+      insights: insights,
+      recommendedChanges: [
+        'Anchor each meal with 30-45g of protein.',
+        'Align daily calorie intake within ±100 kcal of your configured target.',
+      ],
+    );
+  }
 }
+

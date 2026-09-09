@@ -14,6 +14,7 @@ import '../widgets/exercise_picker_sheet.dart';
 import '../widgets/kyno_stage_slot.dart';
 import '../widgets/barbell_plate_calculator.dart';
 import '../widgets/exercise_execution_input_view.dart';
+import '../widgets/exercise_progression_chart.dart';
 import '../services/wakelock_service.dart';
 import '../services/superset_flow_service.dart';
 import '../services/kyno_progression_engine.dart';
@@ -1603,7 +1604,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                             final ex = _sessionExercises[index];
                             final setsList = _sets[ex.id] ?? [];
                             final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
-                            final history = _service.historyFor(ex.id, limit: 5);
+                            final history = _service.historyFor(ex.id, limit: 15);
 
                             final recurringSubs = _service.getRecurringSubstitutions(widget.splitDay.name);
                             final subMatch = recurringSubs.where((s) => s.original.id == ex.id).firstOrNull;
@@ -2932,6 +2933,11 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               _buildHeroStatCol('Lifetime Best', bestStr, KColor.amber),
               _buildHeroStatCol('Current Session', currentStr, KColor.green),
             ],
+          ),
+          const SizedBox(height: 10),
+          ExerciseProgressionChart(
+            history: widget.history,
+            exerciseName: widget.exercise.name,
           ),
           if (_hasContextualPrompts) ...[
             const SizedBox(height: 8),
