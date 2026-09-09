@@ -177,7 +177,7 @@ class KynoMealDrilldownService {
       type: KynoInformationType.inference,
       title: 'Energy Context',
       detail: delta > 0
-          ? 'The higher calorie total was primarily driven by the energy density of "${highestCal.mealName}" at ${highestCal.formattedTime}. In the context of your ${snapshot.userGoal} goal, single-day calorie fluctuations are normal and do not compromise long-term adaptation.'
+          ? 'The higher calorie total was primarily driven by the energy density of "${highestCal.mealName}" at ${highestCal.formattedTime}. In the context of your configured daily calorie target, single-day calorie fluctuations are normal and do not compromise long-term adaptation.'
           : 'Yesterday\'s calorie distribution was anchored across your logged meals without an overall surplus.',
     ));
 
@@ -512,7 +512,7 @@ class KynoMealDrilldownService {
       type: KynoInformationType.inference,
       title: 'Weight Assessment',
       detail: delta > 150
-          ? 'Your logged records show an average daily surplus of +${delta.toStringAsFixed(0)} kcal over the past fortnight. Weight gain is consistent with sustained positive energy balance. In the context of your ${snapshot.userGoal} goal, a moderate surplus supports muscle hypertrophy when paired with progressive resistance training.'
+          ? 'Your logged records show an average daily surplus of +${delta.toStringAsFixed(0)} kcal over the past fortnight. Weight gain is consistent with sustained positive energy balance. In the context of your configured daily calorie target, a moderate surplus supports muscle hypertrophy when paired with progressive resistance training.'
           : 'If your logged intake shows a deficit but scale weight is increasing, short-term scale fluctuations are frequently driven by water retention, sodium intake, glycogen storage, or unlogged energy intake rather than structural fat gain.',
     ));
 
@@ -520,7 +520,7 @@ class KynoMealDrilldownService {
       type: KynoInformationType.recommendation,
       title: 'Target Alignment',
       detail: delta > 0
-          ? 'If weight gain exceeds your target rate, reduce daily intake by 200–300 kcal toward maintenance, keeping protein high at ${snapshot.targetDailyProtein.toStringAsFixed(0)}g.'
+          ? 'If weight gain exceeds your target rate, reduce daily intake by 200–300 kcal toward your configured daily calorie target, keeping protein high at ${snapshot.targetDailyProtein.toStringAsFixed(0)}g.'
           : 'Track body weight consistently under identical morning conditions and monitor weekly rolling averages.',
     ));
 
@@ -603,7 +603,7 @@ class KynoMealDrilldownService {
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
       title: 'Nutritional Assessment',
-      detail: 'Your day was anchored by "${topPro.mealName}" at ${topPro.formattedTime}, which contributed ${topPro.protein.toStringAsFixed(0)}g protein. The largest energy contributor was "${topCal.mealName}" at ${topCal.formattedTime} (${topCal.calories.toStringAsFixed(0)} kcal). In the context of your ${snapshot.userGoal} goal, yesterday was ${proPct >= 85 ? "well-aligned with" : "below"} your protein target.',
+      detail: 'Your day was anchored by "${topPro.mealName}" at ${topPro.formattedTime}, which contributed ${topPro.protein.toStringAsFixed(0)}g protein. The largest energy contributor was "${topCal.mealName}" at ${topCal.formattedTime} (${topCal.calories.toStringAsFixed(0)} kcal). In the context of your configured daily calorie target, yesterday was ${proPct >= 85 ? "well-aligned with" : "below"} your protein target.',
     ));
 
     insights.add(KynoInsightItem(

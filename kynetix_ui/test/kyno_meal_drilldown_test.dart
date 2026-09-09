@@ -737,5 +737,69 @@ void main() {
       expect(allText, contains('Meal-Level Bottleneck'));
       expect(allText, contains('low-protein density across 3 of 5 logged meals'));
     });
+
+    test('7. 14-Day nutrition math reconciliation contract (exact dates, numerators, denominators, and averages)', () async {
+      // 1. Inspect actual stored records across the 14-day historical window
+      final now = DateTime.now();
+      double proteinSum = 0;
+      double calorieSum = 0;
+      int daysCount = 0;
+
+      final inspectedDates = <String>[];
+
+      for (int i = 1; i <= 14; i++) {
+        final d = now.subtract(Duration(days: i));
+        final dKey = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+        final log = dayLogStore[dKey];
+        expect(log, isNotNull, reason: 'Expected DayLog for date $dKey in 14-day window');
+        inspectedDates.add(dKey);
+
+        final p = log!.totalProteinMid;
+        final c = log.totalCaloriesMid;
+
+        if (i == 1) {
+          // Yesterday's multi-meal fixture: 86g protein, 2600 kcal
+          expect(p, equals(86.0));
+          expect(c, equals(2600.0));
+        } else {
+          // Baseline historical days (i = 2..14): 72g protein, 750 kcal
+          expect(p, equals(72.0));
+          expect(c, equals(750.0));
+        }
+
+        proteinSum += p;
+        calorieSum += c;
+        daysCount++;
+      }
+
+      expect(daysCount, equals(14));
+      expect(proteinSum, equals(1022.0)); // 86 + (13 * 72) = 1022
+      expect(calorieSum, equals(12350.0)); // 2600 + (13 * 750) = 12350
+
+      final expectedAvgProtein = proteinSum / daysCount; // 73.0
+      final expectedAvgCalories = calorieSum / daysCount; // 882.14...
+
+      expect(expectedAvgProtein, equals(73.0));
+      expect(expectedAvgCalories.round(), equals(882));
+
+      // 2. Query live Kyno service and verify exact matching
+      final msg = await KynoAssistantService.instance.processQuery('Why is my strength not increasing?');
+      expect(msg.structuredInsights, isNotNull);
+
+      final nutFact = msg.structuredInsights!.firstWhere(
+        (i) => i.type == KynoInformationType.fact && i.title.contains('Nutrition Record'),
+      );
+
+      // Verify the live Kyno response exactly contains the reconciled 73g and 882 kcal values
+      expect(nutFact.detail, contains('73g protein and 882 kcal/day across 14 logged days'));
+
+      // Also verify calculation section matches the exact math
+      final calcMath = msg.structuredInsights!.firstWhere(
+        (i) => i.type == KynoInformationType.calculation && i.title.contains('Nutrition Adherence Math'),
+      );
+      expect(calcMath.detail, contains('Average protein intake was 48% of configured target (77g below daily 150g target on average).'));
+      expect(calcMath.detail, contains('14 of last 14 logged days'));
+    });
   });
 }
+

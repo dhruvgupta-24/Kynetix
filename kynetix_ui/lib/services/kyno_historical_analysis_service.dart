@@ -619,7 +619,7 @@ class KynoHistoricalAnalysisService {
     // 6. INFERENCE: Plausible Contributors (Evidence-calibrated, no medical/biological causation)
     final inferences = <String>[];
     if (isStalled) {
-      inferences.add('The clearest issue in your data is that the lift has not progressed while your protein intake has also been consistently below target.');
+      inferences.add('The clearest pattern in your data is that the lift has repeated without progression while your protein intake has also been consistently below configured target.');
       contributors.add('No progressive overload recorded (hitting identical reps and load across consecutive sessions).');
     }
 
@@ -627,12 +627,12 @@ class KynoHistoricalAnalysisService {
       if (recentMeals.isNotEmpty) {
         final lowPro = recentMeals.where((m) => m.protein < 15.0).toList();
         if (lowPro.isNotEmpty) {
-          inferences.add('Your multi-day protein shortfall ($proPct% of target) is reflected in your logged meal distribution: on your most recent completed day, ${lowPro.length} of ${recentMeals.length} meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}" [${m.formattedTime}] with ${m.protein.toStringAsFixed(0)}g P').join(', ')}) contained minimal protein, contributing to a daily intake below target.');
+          inferences.add('Your multi-day protein shortfall ($proPct% of target) is reflected in your logged meal distribution: on your most recent completed day, ${lowPro.length} of ${recentMeals.length} meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}" [${m.formattedTime}] with ${m.protein.toStringAsFixed(0)}g P').join(', ')}) contained minimal protein, contributing to a daily intake below target. While this protein shortfall is a plausible contributor that may make recovery or adaptation harder, Kyno cannot prove it is the sole cause and distinguishes observed intake patterns from direct causal proof.');
         } else {
-          inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+          inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor that may make recovery or adaptation harder, but Kyno cannot prove it is the sole cause and distinguishes observed intake patterns from direct causal proof.');
         }
       } else {
-        inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor to slower recovery and adaptation, but I cannot prove it is the sole cause.');
+        inferences.add('Your consistently low protein intake ($proPct% of target) is a plausible contributor that may make recovery or adaptation harder, but Kyno cannot prove it is the sole cause and distinguishes observed intake patterns from direct causal proof.');
       }
       contributors.add('Consistent protein intake below configured target (averaging ${proDeficit.toStringAsFixed(0)}g/day below target).');
     }
@@ -948,7 +948,7 @@ class KynoHistoricalAnalysisService {
         insights.add(KynoInsightItem(
           type: KynoInformationType.inference,
           title: 'Meal-Level Bottleneck',
-          detail: 'Recent meal logs show low-protein density across ${lowPro.length} of ${recentMeals.length} logged meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}"').join(', ')}), directly contributing to the ${proDeficit.toStringAsFixed(0)}g average shortfall.',
+          detail: 'Recent meal logs show low-protein density across ${lowPro.length} of ${recentMeals.length} logged meals (such as ${lowPro.take(2).map((m) => '"${m.mealName}"').join(', ')}). This observed meal pattern is a plausible contributor that may make reaching your configured target harder, alongside other lifestyle variables.',
         ));
       }
     }
