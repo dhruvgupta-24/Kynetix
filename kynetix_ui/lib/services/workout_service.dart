@@ -1480,6 +1480,7 @@ class WorkoutService extends ChangeNotifier {
           _sessions = (data['sessions'] as List<dynamic>? ?? [])
               .map((s) => WorkoutSession.fromJson(s as Map<String, dynamic>))
               .toList();
+          debugPrint('[WorkoutService] Loaded ${_sessions.length} sessions for user: $_currentUserId (key: $_currentPrefKey)');
         } catch (e) {
           debugPrint('[WorkoutService] sessions parse error: $e — starting with empty list');
           _sessions = [];
@@ -1526,6 +1527,66 @@ class WorkoutService extends ChangeNotifier {
             });
           } catch (e) {
             debugPrint('[WorkoutService] additionIgnoredCounts parse error: $e');
+          }
+        }
+
+        // Fallback: If draftSession was not in data, check kynetix_workout_recovery
+        if (_draftSession == null) {
+          final recoveryJson = prefs.getString('kynetix_workout_recovery');
+          if (recoveryJson != null) {
+            try {
+              final rData = jsonDecode(recoveryJson) as Map<String, dynamic>;
+              final rawExercises = rData['sessionExercises'] as List<dynamic>?;
+              final weightMap = rData['weightSelections'] as Map<String, dynamic>?;
+              final repsMap = rData['repsSelections'] as Map<String, dynamic>?;
+              final rpeMap = rData['rpeSelections'] as Map<String, dynamic>?;
+              final setTypeMap = rData['setTypeSelections'] as Map<String, dynamic>?;
+              final selectedIdx = rData['selectedIndex'] as int? ?? 0;
+              final timerStarted = rData['timerStartedAt'] as String?;
+              final sDate = timerStarted != null ? DateTime.tryParse(timerStarted) ?? DateTime.now() : DateTime.now();
+
+              if (rawExercises != null && rawExercises.isNotEmpty) {
+                final restoredEntries = <ExerciseEntry>[];
+                for (final exRaw in rawExercises) {
+                  final ex = Exercise.fromJson(exRaw as Map<String, dynamic>);
+                  final sets = <SetEntry>[];
+                  final w = weightMap != null && weightMap.containsKey(ex.id) ? (weightMap[ex.id] as num).toDouble() : 40.0;
+                  final r = repsMap != null && repsMap.containsKey(ex.id) ? (repsMap[ex.id] as num).toInt() : 10;
+                  final rpe = rpeMap != null && rpeMap.containsKey(ex.id) ? (rpeMap[ex.id] as num).toDouble() : 8.0;
+                  SetType type = SetType.normal;
+                  if (setTypeMap != null && setTypeMap.containsKey(ex.id)) {
+                    try {
+                      type = SetType.values.byName(setTypeMap[ex.id] as String);
+                    } catch (_) {}
+                  }
+                  sets.add(SetEntry(
+                    weight: w,
+                    reps: r,
+                    rpe: rpe,
+                    setType: type,
+                  ));
+
+                  restoredEntries.add(ExerciseEntry(
+                    exercise: ex,
+                    sets: sets,
+                  ));
+                }
+
+                final scheduledSplitDay = split.dayFor(sDate.weekday);
+                _draftSession = WorkoutSession(
+                  id: 'ws_recovered_${sDate.millisecondsSinceEpoch}',
+                  date: sDate,
+                  splitDayName: scheduledSplitDay?.name ?? 'Shoulders',
+                  splitDayWeekday: scheduledSplitDay?.weekday,
+                  entries: restoredEntries,
+                  lastExerciseIndex: selectedIdx,
+                );
+                _draftStartedAt = sDate;
+                debugPrint('[WorkoutService] Reconstructed draftSession with ${restoredEntries.length} entries from kynetix_workout_recovery');
+              }
+            } catch (e) {
+              debugPrint('[WorkoutService] Error reconstructing draftSession from recovery: $e');
+            }
           }
         }
       }

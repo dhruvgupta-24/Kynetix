@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import '../models/kyno_fitness_snapshot.dart';
 import '../models/workout_session.dart';
 import '../models/day_log.dart';
@@ -119,6 +120,20 @@ class KynoHistoricalAnalysisService {
     // ── 1. Authoritative Workout Analysis ──────────────────────────────────
     final ws = WorkoutService.instance;
     final allSessions = List<WorkoutSession>.from(ws.sessions);
+
+    // Include the active in-progress draft session if it contains logged sets
+    // and is not already represented in ws.sessions for today.
+    final draft = ws.draftSession;
+    if (draft != null && !draft.isEmpty && draft.entries.any((e) => e.sets.isNotEmpty)) {
+      final draftDateKey = '${draft.date.year}-${draft.date.month.toString().padLeft(2, '0')}-${draft.date.day.toString().padLeft(2, '0')}';
+      final alreadyPresent = allSessions.any((s) {
+        final sKey = '${s.date.year}-${s.date.month.toString().padLeft(2, '0')}-${s.date.day.toString().padLeft(2, '0')}';
+        return sKey == draftDateKey && s.splitDayName == draft.splitDayName;
+      });
+      if (!alreadyPresent) {
+        allSessions.add(draft);
+      }
+    }
     allSessions.sort((a, b) => b.date.compareTo(a.date)); // newest first
 
     final d14 = now.subtract(const Duration(days: 14));
@@ -249,6 +264,9 @@ class KynoHistoricalAnalysisService {
     int lowProDays7 = 0;
     int lowProDays14 = 0;
 
+    DateTime? oldestNutDate;
+    DateTime? newestNutDate;
+
     for (final item in dayLogStore.entries) {
       final date = DateTime.tryParse(item.key);
       if (date == null) continue;
@@ -256,6 +274,8 @@ class KynoHistoricalAnalysisService {
 
       if (l.allEntries.isNotEmpty || l.totalCaloriesMid > 0) {
         totalLoggedDays++;
+        if (oldestNutDate == null || date.isBefore(oldestNutDate)) oldestNutDate = date;
+        if (newestNutDate == null || date.isAfter(newestNutDate)) newestNutDate = date;
 
         final cal = l.totalCaloriesMid;
         final pro = l.totalProteinMid;
@@ -332,6 +352,24 @@ class KynoHistoricalAnalysisService {
     _cachedUserId = currentUserId;
     _lastSnapshotTime = now;
 
+    final oldestSessionDate = allSessions.isNotEmpty ? allSessions.last.date.toIso8601String() : 'none';
+    final newestSessionDate = allSessions.isNotEmpty ? allSessions.first.date.toIso8601String() : 'none';
+    final oldestNutritionDate = oldestNutDate != null ? oldestNutDate.toIso8601String() : 'none';
+    final newestNutritionDate = newestNutDate != null ? newestNutDate.toIso8601String() : 'none';
+
+    debugPrint('[KYNO_HISTORY]');
+    debugPrint('userId=$currentUserId');
+    debugPrint('workoutSessionsLoaded=true');
+    debugPrint('workoutSessionCount=${allSessions.length}');
+    debugPrint('oldestSession=$oldestSessionDate');
+    debugPrint('newestSession=$newestSessionDate');
+
+    debugPrint('[KYNO_HISTORY]');
+    debugPrint('nutritionDaysLoaded=true');
+    debugPrint('nutritionDayCount=$totalLoggedDays');
+    debugPrint('oldestNutritionDay=$oldestNutritionDate');
+    debugPrint('newestNutritionDay=$newestNutritionDate');
+
     return snapshot;
   }
 
@@ -339,6 +377,8 @@ class KynoHistoricalAnalysisService {
   KynoAnalysisResult analyzeQuery(String query) {
     final snapshot = getFitnessSnapshot(forceRefresh: true);
     final intent = classifyIntent(query);
+    debugPrint('[KYNO_QUERY]');
+    debugPrint('intent=${intent.name}');
 
     switch (intent) {
       case KynoAnalysisIntent.strengthPlateau:
@@ -364,6 +404,11 @@ class KynoHistoricalAnalysisService {
   // ─── Question-Specific Analyzers ──────────────────────────────────────────
 
   KynoAnalysisResult _analyzeStrengthPlateau(KynoUserFitnessSnapshot snapshot, String query) {
+    debugPrint('[KYNO_ANALYSIS]');
+    debugPrint('analysis=strength_plateau');
+    debugPrint('training_sessions_used=${snapshot.totalWorkoutsLogged}');
+    debugPrint('nutrition_days_used=${snapshot.totalDaysWithMealsLogged}');
+
     final insights = <KynoInsightItem>[];
     final contributors = <String>[];
     final recommendations = <String>[];
@@ -519,6 +564,11 @@ class KynoHistoricalAnalysisService {
   }
 
   KynoAnalysisResult _analyzeTrainingConsistency(KynoUserFitnessSnapshot snapshot) {
+    debugPrint('[KYNO_ANALYSIS]');
+    debugPrint('analysis=training_consistency');
+    debugPrint('training_sessions_used=${snapshot.totalWorkoutsLogged}');
+    debugPrint('nutrition_days_used=${snapshot.totalDaysWithMealsLogged}');
+
     final insights = <KynoInsightItem>[];
 
     insights.add(KynoInsightItem(
@@ -568,6 +618,11 @@ class KynoHistoricalAnalysisService {
   }
 
   KynoAnalysisResult _analyzeProteinAdherence(KynoUserFitnessSnapshot snapshot) {
+    debugPrint('[KYNO_ANALYSIS]');
+    debugPrint('analysis=protein_adherence');
+    debugPrint('training_sessions_used=${snapshot.totalWorkoutsLogged}');
+    debugPrint('nutrition_days_used=${snapshot.totalDaysWithMealsLogged}');
+
     final insights = <KynoInsightItem>[];
 
     insights.add(KynoInsightItem(
@@ -718,6 +773,11 @@ class KynoHistoricalAnalysisService {
   }
 
   KynoAnalysisResult _analyzeBroadAudit(KynoUserFitnessSnapshot snapshot) {
+    debugPrint('[KYNO_ANALYSIS]');
+    debugPrint('analysis=broad_audit');
+    debugPrint('training_sessions_used=${snapshot.totalWorkoutsLogged}');
+    debugPrint('nutrition_days_used=${snapshot.totalDaysWithMealsLogged}');
+
     final insights = <KynoInsightItem>[];
 
     insights.add(KynoInsightItem(

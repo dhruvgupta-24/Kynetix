@@ -1,3 +1,4 @@
+import '../models/day_log.dart';
 import 'kyno_historical_analysis_service.dart';
 import 'user_session_coordinator.dart';
 
@@ -85,26 +86,54 @@ class KynoCoachingInsightService {
     final List<KynoCoachingInsight> existing = _userInsights[userId] ?? [];
     final List<KynoCoachingInsight> newlyGenerated = [];
 
-    // ── Rule 1: Chronic Low Protein Adherence ──────────────────────────────
+    // ── Rule 1: Protein Adherence (Yesterday Deficit or Chronic Shortfall) ──
+    final yesterday = now.subtract(const Duration(days: 1));
+    final yKey = '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+    final yLog = dayLogStore[yKey];
+    final yTargetProtein = yLog?.targetProtein ?? snapshot.targetDailyProtein;
+
+    final hasYesterdayLog = yLog != null && (yLog.allEntries.isNotEmpty || yLog.totalProteinMid > 0);
+    final isYesterdayLow = hasYesterdayLog && yLog.totalProteinMid < yTargetProtein * 0.75 && yTargetProtein > 0;
+
     final proDeficitKey = 'rule_protein_deficit_$userId';
-    final hasLowProtein = (snapshot.lowProteinDaysLast7Days >= 4 ||
+    final hasChronicLowProtein = (snapshot.lowProteinDaysLast7Days >= 4 ||
             (snapshot.hasSufficientNutritionHistory && snapshot.proteinAdherencePct14Days < 0.75)) &&
         snapshot.targetDailyProtein > 0;
 
-    if (hasLowProtein) {
+    if (isYesterdayLow || hasChronicLowProtein) {
       if (_canTrigger(proDeficitKey, now)) {
-        final insight = KynoCoachingInsight(
-          id: 'insight_${now.millisecondsSinceEpoch}_pro',
-          deduplicationKey: proDeficitKey,
-          severity: KynoInsightSeverity.needsAttention,
-          title: 'Protein Intake Below Target',
-          evidence: 'Your protein intake averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g against your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g daily target. Below target on ${snapshot.lowProteinDaysLast7Days} of the last 7 logged days.',
-          explanation: 'This is the most consistent recovery gap in your recent logs. Consistent low protein intake reduces muscle protein synthesis and limits strength adaptation.',
-          recommendation: 'Anchor 30-40g protein into your first two meals today and add a protein-dense snack if needed.',
-          datePeriod: 'Last 7–14 days',
-          createdAt: now,
-        );
-        newlyGenerated.add(insight);
+        if (isYesterdayLow) {
+          final yProtein = yLog!.totalProteinMid;
+          final yCal = yLog.totalCaloriesMid;
+          final yDeficit = (yTargetProtein - yProtein).clamp(0.0, 999.0);
+
+          final insight = KynoCoachingInsight(
+            id: 'insight_${now.millisecondsSinceEpoch}_pro',
+            deduplicationKey: proDeficitKey,
+            severity: KynoInsightSeverity.needsAttention,
+            title: 'Yesterday Protein Deficit Check-in',
+            evidence: 'YESTERDAY: Protein: ${yProtein.toStringAsFixed(0)}g (Target: ${yTargetProtein.toStringAsFixed(0)}g, Deficit: -${yDeficit.toStringAsFixed(0)}g). Calories: ${yCal.toStringAsFixed(0)} kcal.\n'
+                'PATTERN: Below target on ${snapshot.lowProteinDaysLast7Days} of last 7 logged days (7-day avg: ${snapshot.avgProteinLast7Days.toStringAsFixed(0)}g).',
+            explanation: 'Protein was significantly below your target yesterday, and this has happened repeatedly this week. Don\'t let it become your normal pattern.',
+            recommendation: 'Aim for ~30–40g protein in your next two meals today to restart positive nitrogen balance.',
+            datePeriod: 'Yesterday ($yKey)',
+            createdAt: now,
+          );
+          newlyGenerated.add(insight);
+        } else {
+          final insight = KynoCoachingInsight(
+            id: 'insight_${now.millisecondsSinceEpoch}_pro',
+            deduplicationKey: proDeficitKey,
+            severity: KynoInsightSeverity.needsAttention,
+            title: 'Protein Intake Below Target',
+            evidence: 'Your protein intake averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g against your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g daily target. Below target on ${snapshot.lowProteinDaysLast7Days} of the last 7 logged days.',
+            explanation: 'This is the most consistent recovery gap in your recent logs. Consistent low protein intake reduces muscle protein synthesis and limits strength adaptation.',
+            recommendation: 'Anchor 30-40g protein into your first two meals today and add a protein-dense snack if needed.',
+            datePeriod: 'Last 7–14 days',
+            createdAt: now,
+          );
+          newlyGenerated.add(insight);
+        }
         _lastGeneratedTimeByKey[proDeficitKey] = now;
       }
     } else if (snapshot.hasSufficientNutritionHistory && snapshot.proteinAdherencePct14Days >= 0.85) {

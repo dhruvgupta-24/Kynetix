@@ -9,6 +9,10 @@ import '../services/profile_service.dart';
 import '../models/user_profile.dart';
 import '../services/persistence_service.dart';
 import '../models/workout_split.dart';
+import '../models/workout_session.dart';
+import '../models/day_log.dart';
+import '../models/nutrition_result.dart';
+import '../services/mock_estimation_service.dart';
 import '../services/workout_service.dart';
 import '../config/app_theme.dart';
 import 'app_shell.dart';
@@ -649,6 +653,107 @@ class _AuthScreenState extends State<AuthScreen> {
                           }
                           await PersistenceService.setOnboardingDone();
                           await WorkoutService.instance.saveSplit(defaultWorkoutSplit);
+
+                          // Seed realistic multi-week history for dev test user if empty
+                          if (WorkoutService.instance.sessions.isEmpty) {
+                            final now = DateTime.now();
+                            const shoulderPress = Exercise(
+                              id: 'db_shoulder_press',
+                              name: 'DB Shoulder Press',
+                              muscleGroup: 'Shoulders',
+                              type: ExerciseType.dumbbell,
+                              defaultTargetSets: 3,
+                              defaultRepMin: 8,
+                              defaultRepMax: 10,
+                            );
+
+                            // 3 consecutive historical workouts stalling at 25kg x 8
+                            final s1 = WorkoutSession(
+                              id: 'ws_hist_dev_1',
+                              date: now.subtract(const Duration(days: 10)),
+                              splitDayName: 'Shoulders',
+                              durationMinutes: 48,
+                              entries: [
+                                ExerciseEntry(
+                                  exercise: shoulderPress,
+                                  sets: [
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 8.5),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 8.5),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.0),
+                                  ],
+                                ),
+                              ],
+                            );
+                            final s2 = WorkoutSession(
+                              id: 'ws_hist_dev_2',
+                              date: now.subtract(const Duration(days: 6)),
+                              splitDayName: 'Shoulders',
+                              durationMinutes: 45,
+                              entries: [
+                                ExerciseEntry(
+                                  exercise: shoulderPress,
+                                  sets: [
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 8.5),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.0),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.0),
+                                  ],
+                                ),
+                              ],
+                            );
+                            final s3 = WorkoutSession(
+                              id: 'ws_hist_dev_3',
+                              date: now.subtract(const Duration(days: 2)),
+                              splitDayName: 'Shoulders',
+                              durationMinutes: 52,
+                              entries: [
+                                ExerciseEntry(
+                                  exercise: shoulderPress,
+                                  sets: [
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.0),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.0),
+                                    SetEntry(weight: 25.0, reps: 8, rpe: 9.5),
+                                  ],
+                                ),
+                              ],
+                            );
+                            await WorkoutService.instance.saveSession(s1);
+                            await WorkoutService.instance.saveSession(s2);
+                            await WorkoutService.instance.saveSession(s3);
+
+                            // 14 days of nutrition history (averaging 72g protein, 1850 kcal vs 150g target)
+                            for (int i = 1; i <= 14; i++) {
+                              final d = now.subtract(Duration(days: i));
+                              final dLog = DayLog()
+                                ..targetProtein = 150.0
+                                ..targetCalories = 2300.0
+                                ..gymDay = GymDay(didGym: i % 2 == 0);
+                              final pro = i == 1 ? 62.0 : 72.0; // yesterday protein: 62g
+                              dLog.add(
+                                MealSection.lunch,
+                                MealEntry(
+                                  rawInput: 'Chicken Rice Bowl',
+                                  result: NutritionResult(
+                                    canonicalMeal: 'Chicken Rice Bowl',
+                                    items: [],
+                                    calories: NutrientRange(min: 750, max: 750),
+                                    protein: NutrientRange(min: pro, max: pro),
+                                    confidence: 1.0,
+                                    warnings: [],
+                                    source: 'dev_seed',
+                                    createdAt: d,
+                                  ),
+                                  addedAt: d,
+                                  section: MealSection.lunch,
+                                  dayOfWeek: d.weekday,
+                                  parsedFoods: ['chicken', 'rice'],
+                                  finalSavedInput: 'Chicken Rice Bowl',
+                                ),
+                              );
+                              final dKey = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+                              dayLogStore[dKey] = dLog;
+                            }
+                            await PersistenceService.saveDayLogs();
+                          }
                           if (context.mounted) {
                             Navigator.pushReplacement(
                               context,

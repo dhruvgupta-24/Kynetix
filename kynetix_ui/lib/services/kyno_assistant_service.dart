@@ -70,14 +70,15 @@ class KynoAssistantService {
 
     // ── 0. Longitudinal Historical Analysis ─────────────────────────────────
     // e.g. "Why is my strength not increasing?", "Am I training consistently?", "What am I doing wrong?"
-    final historicalIntent = KynoHistoricalAnalysisService.instance.classifyIntent(query);
-    final isLongitudinal = historicalIntent == KynoAnalysisIntent.strengthPlateau ||
+    final isTodaySpecific = q.contains('today') || q.contains('tonight') || (q.contains('recover') && (q.contains('train') || q.contains('chest') || q.contains('leg')));
+    final historicalIntent = isTodaySpecific ? KynoAnalysisIntent.general : KynoHistoricalAnalysisService.instance.classifyIntent(query);
+    final isLongitudinal = !isTodaySpecific && (historicalIntent == KynoAnalysisIntent.strengthPlateau ||
         historicalIntent == KynoAnalysisIntent.trainingConsistency ||
         historicalIntent == KynoAnalysisIntent.muscleBuilding ||
         historicalIntent == KynoAnalysisIntent.overtraining ||
         historicalIntent == KynoAnalysisIntent.broadAudit ||
         (historicalIntent == KynoAnalysisIntent.proteinAdherence && (q.contains('history') || q.contains('trend') || q.contains('usually') || q.contains('consistently') || q.contains('enough'))) ||
-        (historicalIntent == KynoAnalysisIntent.weightProgression && (q.contains('why') || q.contains('stuck') || q.contains('plateau')));
+        (historicalIntent == KynoAnalysisIntent.weightProgression && (q.contains('why') || q.contains('stuck') || q.contains('plateau'))));
 
     if (isLongitudinal) {
       responseSource = 'Longitudinal Analysis: KynoHistoricalAnalysisService (Intent: ${historicalIntent.name})';
