@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,9 +31,10 @@ class AuthGate extends StatelessWidget {
 
         // SESSION-GATED: require currentSession (live JWT), not just currentUser (stale object).
         final session = Supabase.instance.client.auth.currentSession;
-        debugPrint('[AuthGate] currentSession: ${session != null ? "VALID (expires ${session.expiresAt})" : "NULL — routing to AuthScreen"}');
+        final hasDevSession = kDebugMode && PersistenceService.cachedOwnerId != null;
+        debugPrint('[AuthGate] currentSession: ${session != null ? "VALID (expires ${session.expiresAt})" : (hasDevSession ? "DEV SESSION VALID" : "NULL — routing to AuthScreen")}');
 
-        if (session != null) {
+        if (session != null || hasDevSession) {
           debugPrint('[AuthGate] Session valid. Routing to _LoggedInGate.');
           return const _LoggedInGate();
         }
@@ -54,7 +56,7 @@ class _LoggedInGate extends StatefulWidget {
 class _LoggedInGateState extends State<_LoggedInGate> {
   late bool? _hasProfile = () {
     if (!PersistenceService.isOnboardingDone || currentUserProfile == null) return null;
-    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? (kDebugMode ? PersistenceService.cachedOwnerId : null);
     if (currentUserId == null) return null;
     if (PersistenceService.cachedOwnerId != currentUserId) return null;
     return true;
@@ -75,8 +77,9 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     // ── Session guard ──────────────────────────────────────────────────────────
     // Verify we actually have a live JWT before doing any remote work.
     final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('[_LoggedInGate] currentSession: ${session != null ? "VALID" : "NULL"}');
-    if (session == null) {
+    final currentUserId = session?.user.id ?? (kDebugMode ? PersistenceService.cachedOwnerId : null);
+    debugPrint('[_LoggedInGate] currentSession: ${session != null ? "VALID" : "NULL"} (currentUserId: $currentUserId)');
+    if (currentUserId == null) {
       // No live session — send back to auth screen immediately.
       debugPrint('[_LoggedInGate] No session — forcing re-authentication.');
       if (mounted) setState(() => _hasProfile = null);
@@ -86,15 +89,20 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     }
 
     // Initialize or switch user session via UserSessionCoordinator
-    if (UserSessionCoordinator.instance.currentUserId != session.user.id) {
-      debugPrint('[_LoggedInGate] Initializing user session for: ${session.user.id}');
-      await UserSessionCoordinator.instance.initializeForUser(session.user.id);
+    if (UserSessionCoordinator.instance.currentUserId != currentUserId) {
+      debugPrint('[_LoggedInGate] Initializing user session for: $currentUserId');
+      await UserSessionCoordinator.instance.initializeForUser(currentUserId);
+    }
+
+    if (session == null && kDebugMode) {
+      if (mounted) setState(() => _hasProfile = true);
+      return;
     }
 
     // Quick-pass check: if onboarding is done and local profile exists, show AppShell immediately
     if (PersistenceService.isOnboardingDone && currentUserProfile != null) {
       debugPrint('[_LoggedInGate] Quick-pass active. Showing AppShell immediately, running background sync.');
-      NutritionHydrationGuard.instance.markComplete(session.user.id);
+      NutritionHydrationGuard.instance.markComplete(session?.user.id ?? currentUserId);
       if (mounted) {
         setState(() {
           _hasProfile = true;

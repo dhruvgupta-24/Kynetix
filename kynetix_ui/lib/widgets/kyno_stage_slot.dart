@@ -200,7 +200,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
     return Container(
       width: double.infinity,
       height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),

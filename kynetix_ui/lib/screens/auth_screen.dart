@@ -1,7 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import '../services/auth_service.dart';
+import '../services/user_session_coordinator.dart';
+import '../services/profile_service.dart';
+import '../models/user_profile.dart';
+import '../services/persistence_service.dart';
+import '../models/workout_split.dart';
+import '../services/workout_service.dart';
+import '../config/app_theme.dart';
+import 'app_shell.dart';
 
 enum AuthMethod { email, phone }
 
@@ -615,6 +625,50 @@ class _AuthScreenState extends State<AuthScreen> {
                       ),
                     ),
                     const SizedBox(height: 32),
+                    if (kDebugMode) ...[
+                      TextButton.icon(
+                        key: const ValueKey('dev_quick_login_button'),
+                        onPressed: () async {
+                          const devId = 'dev_tester_pixel7';
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('dev_auto_login_user_id', devId);
+                          await UserSessionCoordinator.instance.initializeForUser(devId);
+                          if (ProfileService.instance.currentUserProfile == null) {
+                            await PersistenceService.saveProfile(
+                              const UserProfile(
+                                name: 'Dev Tester',
+                                age: 25,
+                                gender: 'male',
+                                height: 175,
+                                weight: 75,
+                                workoutDaysMin: 4,
+                                workoutDaysMax: 6,
+                                goal: 'maintain',
+                              ),
+                            );
+                          }
+                          await PersistenceService.setOnboardingDone();
+                          await WorkoutService.instance.saveSplit(defaultWorkoutSplit);
+                          if (context.mounted) {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(builder: (_) => const AppShell()),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.developer_mode, color: KColor.green, size: 18),
+                        label: const Text(
+                          'DEV LOGIN (TEST WORKOUT)',
+                          style: TextStyle(
+                            color: KColor.green,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
                   ],
                 ),
               ),

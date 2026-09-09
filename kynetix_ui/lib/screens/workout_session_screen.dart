@@ -213,6 +213,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // PR Celebration State (Non-blocking)
   bool _showPrToast = false;
   String _prToastMsg = '';
+  Timer? _prToastTimer;
 
   // Completion State
   bool _showCompletionScreen = false;
@@ -331,6 +332,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     WidgetsBinding.instance.removeObserver(this);
     _cancelPendingAutoAdvance();
     _restTimer?.cancel();
+    _prToastTimer?.cancel();
     WakelockService.instance.disable();
     _pageController.dispose();
     _scoreNotifier.dispose();
@@ -1205,11 +1207,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _triggerPRNotification(double weight, int reps, double e1rm) {
+    _prToastTimer?.cancel();
     setState(() {
       _showPrToast = true;
       _prToastMsg = '🏆 NEW PERSONAL RECORD!\n${weight.toStringAsFixed(weight == weight.truncateToDouble() ? 0 : 1)} kg × $reps reps (e1RM: ${e1rm.toStringAsFixed(1)} kg)';
     });
-    Future.delayed(const Duration(seconds: 4), () {
+    _prToastTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) {
         setState(() => _showPrToast = false);
       }

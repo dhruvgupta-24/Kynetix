@@ -95,12 +95,15 @@ void main() {
       expect(restored.source, equals('user_override'));
     });
 
-    testWidgets('Saved meal title displays complete text with soft wrapping and no ellipsis', (tester) async {
+    testWidgets('Saved meal title displays complete text with soft wrapping, macro row, and clickable USE button', (tester) async {
       const longMealName1 = '2 normal roti with 1.2 ladle rice with dal dhaba';
       const longMealName2 =
           '2 normal roti with 1.2 ladle rice with dal dhaba and extra paneer bhurji with roasted papad and green salad';
+      const extremeMealName =
+          '2 normal roti with 1.2 ladle rice with dal dhaba and extra paneer bhurji with roasted papad and green salad along with 200g Greek yogurt and roasted spiced chickpeas with cucumber raita';
 
-      for (final mealTitle in [longMealName1, longMealName2]) {
+      for (final mealTitle in [longMealName1, longMealName2, extremeMealName]) {
+        var usedClicked = false;
         final match = SavedMealMatch(
           title: mealTitle,
           rawInput: mealTitle,
@@ -153,7 +156,10 @@ void main() {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Text('USE'),
+                      InkWell(
+                        onTap: () => usedClicked = true,
+                        child: const Text('USE'),
+                      ),
                     ],
                   ),
                 ),
@@ -164,7 +170,7 @@ void main() {
 
         await tester.pumpAndSettle();
 
-        // 1. Complete text is rendered and found
+        // 1. Complete text is rendered and found without ellipsis
         expect(find.text(mealTitle), findsOneWidget);
 
         // 2. Text widget has no maxLines: 1 and has softWrap: true
@@ -173,8 +179,13 @@ void main() {
         expect(textWidget.overflow, isNot(equals(TextOverflow.ellipsis)));
         expect(textWidget.softWrap, isTrue);
 
-        // 3. USE button is present and visible
+        // 3. Macro row remains visible
+        expect(find.text('550 kcal • 28g protein'), findsOneWidget);
+
+        // 4. USE button is present, visible, and clickable
         expect(find.text('USE'), findsOneWidget);
+        await tester.tap(find.text('USE'));
+        expect(usedClicked, isTrue);
       }
     });
   });

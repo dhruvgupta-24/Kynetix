@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:health/health.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/app_theme.dart';
@@ -54,12 +56,17 @@ Future<void> main() async {
 
   // 2. AUTH-FIRST LIFECYCLE:
   // Check if an authenticated user session already exists.
+  final prefs = await SharedPreferences.getInstance();
+  final devUserId = kDebugMode ? prefs.getString('dev_auto_login_user_id') : null;
   final startupSession = Supabase.instance.client.auth.currentSession;
-  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : "NULL — user must sign in"}');
+  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : (devUserId != null ? "DEV SESSION ($devUserId)" : "NULL — user must sign in")}');
 
   if (startupSession != null) {
     debugPrint('[main] 🔐 Restoring authenticated user (${startupSession.user.id}). Initializing scoped services...');
     await UserSessionCoordinator.instance.initializeForUser(startupSession.user.id);
+  } else if (devUserId != null) {
+    debugPrint('[main] 🛠️ Restoring debug dev session ($devUserId). Initializing scoped services...');
+    await UserSessionCoordinator.instance.initializeForUser(devUserId);
   } else {
     debugPrint('[main] 🛑 No authenticated session at boot — user-specific data load deferred until sign-in.');
   }
