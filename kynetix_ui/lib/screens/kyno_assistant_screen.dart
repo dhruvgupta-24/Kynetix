@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../services/kyno_assistant_service.dart';
 import '../services/kyno_context_service.dart';
+import '../services/kyno_coaching_insight_service.dart';
 
 class KynoAssistantScreen extends StatefulWidget {
   const KynoAssistantScreen({super.key});
@@ -172,6 +173,9 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
               child: _buildTodayContextCard(snapshot),
             ),
 
+            // In-App Proactive Coaching Check-In
+            _buildCoachingCheckInCard(),
+
             // Dynamic Prompt Suggestions Horizontal Scroller
             SizedBox(
               height: 38,
@@ -300,6 +304,89 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
                         color: Colors.white,
                         size: 18,
                       ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoachingCheckInCard() {
+    final insights = KynoCoachingInsightService.instance.getActiveInsights();
+    if (insights.isEmpty) return const SizedBox.shrink();
+
+    final top = insights.first;
+
+    final (color, icon) = switch (top.severity) {
+      KynoInsightSeverity.needsAttention => (const Color(0xFFFFB347), Icons.warning_amber_rounded),
+      KynoInsightSeverity.coaching => (KColor.blue, Icons.lightbulb_outline_rounded),
+      KynoInsightSeverity.progress => (KColor.green, Icons.trending_up_rounded),
+      KynoInsightSeverity.resolved => (const Color(0xFF52B788), Icons.check_circle_outline_rounded),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161625),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.35), width: 0.9),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 14),
+                const SizedBox(width: 6),
+                Text(
+                  'KYNO COACH CHECK-IN • ${top.categoryLabel}',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                  ),
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      KynoCoachingInsightService.instance.dismissInsight(top.id);
+                    });
+                  },
+                  child: const Icon(Icons.close_rounded, size: 14, color: KColor.textMuted),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              top.title,
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              top.evidence,
+              style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, height: 1.3),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      top.recommendation,
+                      style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -510,6 +597,11 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
           'RECOMMENDATION',
           KColor.green,
           Icons.auto_awesome_rounded
+        ),
+      KynoInformationType.unknown => (
+          'UNKNOWN',
+          const Color(0xFF94A3B8),
+          Icons.help_outline_rounded
         ),
     };
 

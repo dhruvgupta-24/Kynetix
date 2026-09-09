@@ -5,6 +5,7 @@ import 'meal_memory.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import 'user_nutrition_memory.dart';
 import 'global_food_service.dart';
+import 'saved_meal_canonicalizer.dart';
 
 /// Categories of locally discoverable meals and foods.
 enum SavedMealType {
@@ -314,7 +315,8 @@ class SavedMealService {
       }
     } catch (_) {}
 
-    final results = candidateMap.values.toList();
+    final rawResults = candidateMap.values.toList();
+    final results = SavedMealCanonicalizer.collapseConservativeDuplicates(rawResults);
     results.sort((a, b) {
       final scoreCmp = b.matchScore.compareTo(a.matchScore);
       if (scoreCmp != 0) return scoreCmp;

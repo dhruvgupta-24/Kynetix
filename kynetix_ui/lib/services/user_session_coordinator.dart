@@ -6,6 +6,8 @@ import '../models/workout_session.dart';
 import 'eating_pattern_service.dart';
 import 'insights_report_service.dart';
 import 'kyno_context_service.dart';
+import 'kyno_historical_analysis_service.dart';
+import 'kyno_coaching_insight_service.dart';
 import 'meal_memory.dart';
 import 'nutrition_hydration_guard.dart';
 import 'persistence_service.dart';
@@ -186,6 +188,8 @@ class UserSessionCoordinator {
     QuickAddService.instance.clearMemory();
     InsightsReportService.instance.clearMemory();
     KynoContextService.instance.reset();
+    KynoHistoricalAnalysisService.instance.clearMemory();
+    KynoCoachingInsightService.instance.clearMemory();
     WakelockService.instance.disable().ignore();
 
     _currentUserId = null;

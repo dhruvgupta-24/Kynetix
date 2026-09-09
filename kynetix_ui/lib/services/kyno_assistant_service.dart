@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'kyno_context_service.dart';
 import 'kyno_progression_engine.dart';
+import 'kyno_historical_analysis_service.dart';
 import 'saved_meal_service.dart';
 import 'workout_service.dart';
 
@@ -52,6 +53,9 @@ class KynoAssistantService {
       chips.add('How am I progressing on bench press?');
     }
 
+    chips.add('Why is my strength not increasing?');
+    chips.add('Am I training consistently?');
+
     return chips;
   }
 
@@ -59,14 +63,42 @@ class KynoAssistantService {
   Future<KynoChatMessage> processQuery(String query) async {
     print('[KYNO_QUERY] Processing query: "$query"');
 
-    // LIVE CONTEXT: Force refresh to guarantee 100% up-to-date state
-    final snapshot = KynoContextService.instance.getSnapshot(forceRefresh: true);
-    print('[KYNO_CONTEXT] Snapshot loaded: Training=${snapshot.training.hasWorkoutToday ? "${snapshot.training.setsLoggedToday} sets" : "none"}, Nutrition=${snapshot.nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${snapshot.nutrition.consumedProtein.toStringAsFixed(1)}g pro');
-
     final q = query.toLowerCase().trim();
     final insights = <KynoInsightItem>[];
     final buffer = StringBuffer();
     String responseSource = 'Unified KynoContextSnapshot';
+
+    // ── 0. Longitudinal Historical Analysis ─────────────────────────────────
+    // e.g. "Why is my strength not increasing?", "Am I training consistently?", "What am I doing wrong?"
+    final historicalIntent = KynoHistoricalAnalysisService.instance.classifyIntent(query);
+    final isLongitudinal = historicalIntent == KynoAnalysisIntent.strengthPlateau ||
+        historicalIntent == KynoAnalysisIntent.trainingConsistency ||
+        historicalIntent == KynoAnalysisIntent.muscleBuilding ||
+        historicalIntent == KynoAnalysisIntent.overtraining ||
+        historicalIntent == KynoAnalysisIntent.broadAudit ||
+        (historicalIntent == KynoAnalysisIntent.proteinAdherence && (q.contains('history') || q.contains('trend') || q.contains('usually') || q.contains('consistently') || q.contains('enough'))) ||
+        (historicalIntent == KynoAnalysisIntent.weightProgression && (q.contains('why') || q.contains('stuck') || q.contains('plateau')));
+
+    if (isLongitudinal) {
+      responseSource = 'Longitudinal Analysis: KynoHistoricalAnalysisService (Intent: ${historicalIntent.name})';
+      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+
+      final analysis = KynoHistoricalAnalysisService.instance.analyzeQuery(query);
+      buffer.writeln(analysis.headline);
+      insights.addAll(analysis.insights);
+
+      return KynoChatMessage(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+        isUser: false,
+        text: buffer.toString().trim(),
+        timestamp: DateTime.now(),
+        structuredInsights: insights,
+      );
+    }
+
+    // LIVE CONTEXT: Force refresh to guarantee 100% up-to-date state
+    final snapshot = KynoContextService.instance.getSnapshot(forceRefresh: true);
+    print('[KYNO_CONTEXT] Snapshot loaded: Training=${snapshot.training.hasWorkoutToday ? "${snapshot.training.setsLoggedToday} sets" : "none"}, Nutrition=${snapshot.nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${snapshot.nutrition.consumedProtein.toStringAsFixed(1)}g pro');
 
     // ── 1. Cross-Domain Recovery Query ──────────────────────────────────────
     // e.g. "I trained chest today. Am I eating enough protein to recover?"

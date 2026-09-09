@@ -15,6 +15,7 @@ enum KynoInformationType {
   calculation,
   inference,
   recommendation,
+  unknown,
 }
 
 class KynoInsightItem {

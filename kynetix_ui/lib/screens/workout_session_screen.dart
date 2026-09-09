@@ -1578,6 +1578,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               child: Column(
                 children: [
                   _buildSessionAppBar(),
+                  _buildWorkoutProgressBar(),
                   Expanded(
                     child: _sessionExercises.isEmpty
                         ? _buildEmptyState()
@@ -1970,6 +1971,59 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                     : const Text('Finish', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkoutProgressBar() {
+    final progress = _completionProgress.clamp(0.0, 1.0);
+    final percent = (progress * 100).round();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'WORKOUT PROGRESS',
+                style: TextStyle(
+                  color: KColor.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              Text(
+                '$percent%',
+                key: const Key('workout_progress_percent_text'),
+                style: const TextStyle(
+                  color: KColor.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: SizedBox(
+              height: 4,
+              child: LinearProgressIndicator(
+                key: const Key('workout_progress_bar'),
+                value: progress,
+                minHeight: 4,
+                backgroundColor: const Color(0xFF1E1E2F),
+                valueColor: const AlwaysStoppedAnimation<Color>(KColor.green),
+              ),
+            ),
           ),
         ],
       ),
