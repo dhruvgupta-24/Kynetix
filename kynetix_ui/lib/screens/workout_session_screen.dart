@@ -1237,7 +1237,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (externalLoadKg != null) _externalLoadSelections[exId] = externalLoadKg;
     if (durationSeconds != null) _durationSelections[exId] = durationSeconds;
     if (distanceMeters != null) _distanceSelections[exId] = distanceMeters;
-    _saveRecoveryState();
+    _queueRecoverySave();
   }
 
   void _removeSet(String exId, int index) {
@@ -1631,15 +1631,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               initialDistanceMeters: _distanceSelections[ex.id],
                               onExternalLoadChange: (load) {
                                 _externalLoadSelections[ex.id] = load;
-                                _saveRecoveryState();
+                                _queueRecoverySave();
                               },
                               onDurationChange: (dur) {
                                 _durationSelections[ex.id] = dur;
-                                _saveRecoveryState();
+                                _queueRecoverySave();
                               },
                               onDistanceChange: (dist) {
                                 _distanceSelections[ex.id] = dist;
-                                _saveRecoveryState();
+                                _queueRecoverySave();
                               },
                               isWideLayout: isWide,
                               initialNotes: _exerciseNotes[ex.id] ?? '',
@@ -4952,8 +4952,9 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                           const SizedBox(height: 18),
                           
                           // Achievements Summary
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
                               _buildCompletionBadge('💪 $totalSets working sets'),
                               if (prCount > 0)

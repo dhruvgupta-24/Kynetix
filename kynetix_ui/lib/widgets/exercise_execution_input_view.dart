@@ -112,6 +112,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   @override
   void didUpdateWidget(ExerciseExecutionInputView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_isInternalUpdating) return;
     if (oldWidget.selectedWeight != widget.selectedWeight && _weightController.hasClients) {
       final wIdx = (widget.selectedWeight / 0.5).round().clamp(0, 700);
       if (_weightController.selectedItem != wIdx) {
@@ -216,40 +217,12 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: ListWheelScrollView.useDelegate(
-                      controller: _weightController,
-                      itemExtent: 32,
-                      physics: const FixedExtentScrollPhysics(),
-                      onSelectedItemChanged: (idx) {
-                        if (_isInternalUpdating) return;
-                        widget.onWeightChanged(_weightOptions[idx]);
-                        HapticFeedback.selectionClick();
-                      },
-                      childDelegate: ListWheelChildBuilderDelegate(
-                        builder: (context, index) {
-                          final w = _weightOptions[index];
-                          final isSel = widget.selectedWeight == w;
-                          return Center(
-                            child: Text(
-                              '${w.toStringAsFixed(1)} kg',
-                              style: TextStyle(
-                                color: isSel ? KColor.green : KColor.textMuted,
-                                fontSize: isSel ? 15 : 12,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                          );
-                        },
-                        childCount: _weightOptions.length,
-                      ),
-                    ),
+                  _Kynetix3DWheelPicker<double>(
+                    controller: _weightController,
+                    items: _weightOptions,
+                    selectedItem: widget.selectedWeight,
+                    labelBuilder: (w) => '${w.toStringAsFixed(1)} kg',
+                    onSelectedItemChanged: _onWeightWheelChanged,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -283,40 +256,12 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: ListWheelScrollView.useDelegate(
-                      controller: _repsController,
-                      itemExtent: 32,
-                      physics: const FixedExtentScrollPhysics(),
-                      onSelectedItemChanged: (idx) {
-                        if (_isInternalUpdating) return;
-                        widget.onRepsChanged(_repsOptions[idx]);
-                        HapticFeedback.selectionClick();
-                      },
-                      childDelegate: ListWheelChildBuilderDelegate(
-                        builder: (context, index) {
-                          final r = _repsOptions[index];
-                          final isSel = widget.selectedReps == r;
-                          return Center(
-                            child: Text(
-                              '$r reps',
-                              style: TextStyle(
-                                color: isSel ? KColor.green : KColor.textMuted,
-                                fontSize: isSel ? 15 : 12,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                          );
-                        },
-                        childCount: _repsOptions.length,
-                      ),
-                    ),
+                  _Kynetix3DWheelPicker<int>(
+                    controller: _repsController,
+                    items: _repsOptions,
+                    selectedItem: widget.selectedReps,
+                    labelBuilder: (r) => '$r reps',
+                    onSelectedItemChanged: _onRepsWheelChanged,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -366,7 +311,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E).withOpacity(0.15),
+                          color: const Color(0xFF22C55E).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -392,7 +337,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                   ),
                   const SizedBox(height: 8),
                   Container(
-                    height: 100,
+                    height: 148,
                     decoration: BoxDecoration(
                       color: const Color(0xFF141624),
                       borderRadius: BorderRadius.circular(16),
@@ -451,40 +396,12 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: ListWheelScrollView.useDelegate(
-                      controller: _repsController,
-                      itemExtent: 32,
-                      physics: const FixedExtentScrollPhysics(),
-                      onSelectedItemChanged: (idx) {
-                        if (_isInternalUpdating) return;
-                        widget.onRepsChanged(_repsOptions[idx]);
-                        HapticFeedback.selectionClick();
-                      },
-                      childDelegate: ListWheelChildBuilderDelegate(
-                        builder: (context, index) {
-                          final r = _repsOptions[index];
-                          final isSel = widget.selectedReps == r;
-                          return Center(
-                            child: Text(
-                              '$r reps',
-                              style: TextStyle(
-                                color: isSel ? KColor.green : KColor.textMuted,
-                                fontSize: isSel ? 15 : 12,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                          );
-                        },
-                        childCount: _repsOptions.length,
-                      ),
-                    ),
+                  _Kynetix3DWheelPicker<int>(
+                    controller: _repsController,
+                    items: _repsOptions,
+                    selectedItem: widget.selectedReps,
+                    labelBuilder: (r) => '$r reps',
+                    onSelectedItemChanged: _onRepsWheelChanged,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -535,7 +452,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
                         color: _isStopwatchRunning
-                            ? const Color(0xFFEF4444).withOpacity(0.12)
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.12)
                             : const Color(0xFF141624),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
@@ -746,24 +663,52 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Helper adjusters
+  // Helper adjusters & wheel callbacks
   // ───────────────────────────────────────────────────────────────────────────
+  void _onWeightWheelChanged(int idx) {
+    if (_isInternalUpdating) return;
+    if (idx < 0 || idx >= _weightOptions.length) return;
+    final w = _weightOptions[idx];
+    if (w != widget.selectedWeight) {
+      _isInternalUpdating = true;
+      widget.onWeightChanged(w);
+      _isInternalUpdating = false;
+      HapticFeedback.selectionClick();
+    }
+  }
+
+  void _onRepsWheelChanged(int idx) {
+    if (_isInternalUpdating) return;
+    if (idx < 0 || idx >= _repsOptions.length) return;
+    final r = _repsOptions[idx];
+    if (r != widget.selectedReps) {
+      _isInternalUpdating = true;
+      widget.onRepsChanged(r);
+      _isInternalUpdating = false;
+      HapticFeedback.selectionClick();
+    }
+  }
+
   void _adjustWeight(double delta) {
     final next = (widget.selectedWeight + delta).clamp(0.0, 350.0);
+    _isInternalUpdating = true;
     widget.onWeightChanged(next);
+    _isInternalUpdating = false;
     final idx = (next / 0.5).round().clamp(0, 700);
     if (_weightController.hasClients) {
-      _weightController.animateToItem(idx, duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+      _weightController.animateToItem(idx, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
     }
     HapticFeedback.selectionClick();
   }
 
   void _adjustReps(int delta) {
     final next = (widget.selectedReps + delta).clamp(1, 100);
+    _isInternalUpdating = true;
     widget.onRepsChanged(next);
+    _isInternalUpdating = false;
     final idx = (next - 1).clamp(0, 99);
     if (_repsController.hasClients) {
-      _repsController.animateToItem(idx, duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+      _repsController.animateToItem(idx, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
     }
     HapticFeedback.selectionClick();
   }
@@ -816,6 +761,203 @@ class _StepButton extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Premium 3D cylindrical wheel picker utilizing Flutter's native [ListWheelScrollView].
+///
+/// Features:
+/// - Selected item centered, prominently magnified (~1.42×) with Kynetix green accent.
+/// - Immediately adjacent items are progressively smaller (~0.90×, 0.52 opacity).
+/// - Second-nearest items are even smaller (~0.72×, 0.22 opacity).
+/// - Farther items progressively fade down to 0.04 into top/bottom cylinder depth gradients.
+/// - Smooth continuous interpolation during scrolling, not only after scroll completion.
+/// - Fixed-extent snapping physics with natural inertia and flings.
+/// - Center framing lens with subtle green border and glassmorphic highlight.
+/// - Zero heavy per-frame calculations for 60+ FPS scrolling smoothness.
+class _Kynetix3DWheelPicker<T> extends StatelessWidget {
+  final FixedExtentScrollController controller;
+  final List<T> items;
+  final T selectedItem;
+  final String Function(T item) labelBuilder;
+  final ValueChanged<int> onSelectedItemChanged;
+  final double height;
+  final double itemExtent;
+
+  const _Kynetix3DWheelPicker({
+    required this.controller,
+    required this.items,
+    required this.selectedItem,
+    required this.labelBuilder,
+    required this.onSelectedItemChanged,
+    this.height = 148.0,
+    this.itemExtent = 36.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0xFF141624),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: KColor.border, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Cylindrical center selection lens highlight
+          IgnorePointer(
+            child: Container(
+              height: itemExtent + 4,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: KColor.green.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.symmetric(
+                  horizontal: BorderSide(
+                    color: KColor.green.withValues(alpha: 0.35),
+                    width: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Native 3D ListWheelScrollView with cylindrical perspective & momentum physics
+          ListWheelScrollView.useDelegate(
+            controller: controller,
+            itemExtent: itemExtent,
+            physics: const FixedExtentScrollPhysics(),
+            perspective: 0.0035,
+            diameterRatio: 1.25,
+            squeeze: 1.04,
+            useMagnifier: false,
+            onSelectedItemChanged: onSelectedItemChanged,
+            childDelegate: ListWheelChildBuilderDelegate(
+              builder: (context, index) {
+                if (index < 0 || index >= items.length) return null;
+                final item = items[index];
+
+                return AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, child) {
+                    double delta = 0.0;
+                    if (controller.hasClients) {
+                      final offset = controller.offset;
+                      delta = (index * itemExtent - offset) / itemExtent;
+                    } else {
+                      delta = (index - controller.initialItem).toDouble();
+                    }
+
+                    final absDelta = delta.abs();
+
+                    // Continuous smooth scale, opacity and color interpolation:
+                    // Center (0.0): ~1.42x magnification, KColor.green, 1.0 opacity, boldest weight
+                    // Immediately adjacent (1.0): ~0.90x, white70, 0.52 opacity, medium bold
+                    // Second-nearest (2.0): ~0.72x, muted slate, 0.22 opacity
+                    // Farther (>2.0): progressively fading down to 0.04 into cylinder depth
+                    final double scale;
+                    final double opacity;
+                    final Color textColor;
+                    final FontWeight fontWeight;
+
+                    if (absDelta <= 1.0) {
+                      final t = (1.0 - absDelta).clamp(0.0, 1.0);
+                      final smoothT = Curves.easeOutCubic.transform(t);
+                      scale = 0.90 + (1.42 - 0.90) * smoothT;
+                      opacity = (0.52 + (1.0 - 0.52) * smoothT).clamp(0.0, 1.0);
+                      textColor = Color.lerp(const Color(0xFF94A3B8), KColor.green, smoothT)!;
+                      fontWeight = smoothT > 0.5 ? FontWeight.w900 : FontWeight.w700;
+                    } else if (absDelta <= 2.0) {
+                      final t = (2.0 - absDelta).clamp(0.0, 1.0);
+                      final smoothT = Curves.easeOutCubic.transform(t);
+                      scale = 0.72 + (0.90 - 0.72) * smoothT;
+                      opacity = (0.22 + (0.52 - 0.22) * smoothT).clamp(0.0, 1.0);
+                      textColor = Color.lerp(const Color(0xFF64748B), const Color(0xFF94A3B8), smoothT)!;
+                      fontWeight = FontWeight.w600;
+                    } else {
+                      final t = (3.0 - absDelta).clamp(0.0, 1.0);
+                      scale = 0.58 + (0.72 - 0.58) * t;
+                      opacity = (0.04 + (0.22 - 0.04) * t).clamp(0.0, 1.0);
+                      textColor = const Color(0xFF64748B);
+                      fontWeight = FontWeight.w500;
+                    }
+
+                    return Center(
+                      child: Opacity(
+                        opacity: opacity,
+                        child: Transform.scale(
+                          scale: scale,
+                          child: Text(
+                            labelBuilder(item),
+                            style: TextStyle(
+                              color: textColor,
+                              fontSize: 13.5,
+                              fontWeight: fontWeight,
+                              letterSpacing: absDelta < 0.4 ? 0.2 : 0.0,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+              childCount: items.length,
+            ),
+          ),
+
+          // Top cylinder depth fade
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 32,
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF141624),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Bottom cylinder depth fade
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 32,
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Color(0xFF141624),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

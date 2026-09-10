@@ -4,11 +4,13 @@ import '../config/app_theme.dart';
 import '../models/workout_session.dart';
 
 /// Available progression metrics to visualize.
+/// Available progression metrics to visualize.
 enum ProgressionMetric {
-  estimated1RM('Estimated 1RM', 'kg'),
-  topWeight('Top Weight', 'kg'),
+  overall('Overall Progress', 'pts'),
   volume('Total Volume', 'kg'),
-  reps('Best Reps', 'reps');
+  topWeight('Top Weight', 'kg'),
+  reps('Best Reps', 'reps'),
+  estimated1RM('Estimated 1RM', 'kg');
 
   final String label;
   final String unit;
@@ -22,6 +24,7 @@ class ExerciseProgressionPoint {
   final int bestReps;
   final double totalVolume;
   final double estimatedOneRepMax;
+  final double overallScore;
 
   const ExerciseProgressionPoint({
     required this.date,
@@ -29,25 +32,46 @@ class ExerciseProgressionPoint {
     required this.bestReps,
     required this.totalVolume,
     required this.estimatedOneRepMax,
+    this.overallScore = 100.0,
   });
+
+  ExerciseProgressionPoint copyWith({
+    DateTime? date,
+    double? topWeight,
+    int? bestReps,
+    double? totalVolume,
+    double? estimatedOneRepMax,
+    double? overallScore,
+  }) {
+    return ExerciseProgressionPoint(
+      date: date ?? this.date,
+      topWeight: topWeight ?? this.topWeight,
+      bestReps: bestReps ?? this.bestReps,
+      totalVolume: totalVolume ?? this.totalVolume,
+      estimatedOneRepMax: estimatedOneRepMax ?? this.estimatedOneRepMax,
+      overallScore: overallScore ?? this.overallScore,
+    );
+  }
 
   double valueFor(ProgressionMetric metric) {
     return switch (metric) {
-      ProgressionMetric.estimated1RM => estimatedOneRepMax,
-      ProgressionMetric.topWeight => topWeight,
+      ProgressionMetric.overall => overallScore,
       ProgressionMetric.volume => totalVolume,
+      ProgressionMetric.topWeight => topWeight,
       ProgressionMetric.reps => bestReps.toDouble(),
+      ProgressionMetric.estimated1RM => estimatedOneRepMax,
     };
   }
 
   String formattedValueFor(ProgressionMetric metric) {
     return switch (metric) {
-      ProgressionMetric.estimated1RM => '${estimatedOneRepMax.toStringAsFixed(1)} kg',
-      ProgressionMetric.topWeight => '${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)} kg',
+      ProgressionMetric.overall => '${overallScore.toStringAsFixed(1)} pts',
       ProgressionMetric.volume => totalVolume >= 1000
           ? '${(totalVolume / 1000).toStringAsFixed(1)}k kg'
           : '${totalVolume.toStringAsFixed(0)} kg',
+      ProgressionMetric.topWeight => '${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)} kg',
       ProgressionMetric.reps => '$bestReps reps',
+      ProgressionMetric.estimated1RM => '${estimatedOneRepMax.toStringAsFixed(1)} kg',
     };
   }
 }
@@ -63,9 +87,10 @@ class ExerciseProgressionPoint {
 /// - Volume = SUM of all valid working sets (weight × reps).
 /// - Estimated 1RM = highest valid estimated 1RM for the session.
 /// - Chronologically sorted (oldest -> newest).
+/// - Overall Progress = relative index (100 baseline at oldest session) derived from historical 1RM and Volume.
 List<ExerciseProgressionPoint> extractProgressionPoints(
     List<({DateTime date, ExerciseEntry entry})> history) {
-  final points = <ExerciseProgressionPoint>[];
+  final rawPoints = <ExerciseProgressionPoint>[];
 
   for (final item in history) {
     final entry = item.entry;
@@ -122,7 +147,7 @@ List<ExerciseProgressionPoint> extractProgressionPoints(
       continue;
     }
 
-    points.add(ExerciseProgressionPoint(
+    rawPoints.add(ExerciseProgressionPoint(
       date: item.date,
       topWeight: maxWeight,
       bestReps: maxReps,
@@ -132,7 +157,60 @@ List<ExerciseProgressionPoint> extractProgressionPoints(
   }
 
   // Sort chronologically (oldest session first to newest last)
-  points.sort((a, b) => a.date.compareTo(b.date));
+  rawPoints.sort((a, b) => a.date.compareTo(b.date));
+  if (rawPoints.isEmpty) return const [];
+
+  // Compute Overall composite progression index relative to oldest session (100.0 baseline).
+  // Formula Specification:
+  // - Baseline: Oldest valid chronological historical point = 100.0 pts.
+  // - Primary Composite: 60% Strength (1RM ratio) + 40% Work Capacity (Volume ratio), scaled by 100:
+  //     Score = 100.0 * (0.6 * (1RM / base_1RM) + 0.4 * (Volume / base_Volume))
+  // - Deterministic Fallbacks for missing/zero baseline components:
+  //     1. base_1RM > 0 and base_Volume > 0: 60/40 (1RM / base_1RM) + (Volume / base_Volume)
+  //     2. base_1RM > 0 only: 100.0 * (1RM / base_1RM)
+  //     3. base_Volume > 0 only: 100.0 * (Volume / base_Volume)
+  //     4. base_Weight > 0 and base_Reps > 0: 60/40 (Weight / base_Weight) + (Reps / base_Reps)
+  //     5. base_Weight > 0 only: 100.0 * (Weight / base_Weight)
+  //     6. base_Reps > 0 only: 100.0 * (Reps / base_Reps)
+  //     7. Otherwise: 100.0 (neutral baseline)
+  // - Historical purity: Computed exclusively from completed historical sessions. Uncommitted
+  //   current session data is never passed to extractProgressionPoints.
+  final base = rawPoints.first;
+  final baseE1rm = base.estimatedOneRepMax;
+  final baseVol = base.totalVolume;
+  final baseWeight = base.topWeight;
+  final baseReps = base.bestReps;
+
+  final points = <ExerciseProgressionPoint>[];
+  for (int i = 0; i < rawPoints.length; i++) {
+    final pt = rawPoints[i];
+    if (i == 0) {
+      points.add(pt.copyWith(overallScore: 100.0));
+    } else {
+      double score;
+      if (baseE1rm > 0 && baseVol > 0) {
+        final strengthRatio = pt.estimatedOneRepMax / baseE1rm;
+        final volRatio = pt.totalVolume / baseVol;
+        score = 100.0 * (0.6 * strengthRatio + 0.4 * volRatio);
+      } else if (baseE1rm > 0) {
+        score = 100.0 * (pt.estimatedOneRepMax / baseE1rm);
+      } else if (baseVol > 0) {
+        score = 100.0 * (pt.totalVolume / baseVol);
+      } else if (baseWeight > 0 && baseReps > 0) {
+        final weightRatio = pt.topWeight / baseWeight;
+        final repsRatio = pt.bestReps / baseReps;
+        score = 100.0 * (0.6 * weightRatio + 0.4 * repsRatio);
+      } else if (baseWeight > 0) {
+        score = 100.0 * (pt.topWeight / baseWeight);
+      } else if (baseReps > 0) {
+        score = 100.0 * (pt.bestReps / baseReps);
+      } else {
+        score = 100.0;
+      }
+      points.add(pt.copyWith(overallScore: score));
+    }
+  }
+
   return points;
 }
 
@@ -152,7 +230,7 @@ class ExerciseProgressionChart extends StatefulWidget {
 }
 
 class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
-  ProgressionMetric _selectedMetric = ProgressionMetric.estimated1RM;
+  ProgressionMetric _selectedMetric = ProgressionMetric.overall;
   int? _hoveredIndex;
 
   // Memoized points based on history reference
@@ -216,13 +294,15 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
               physics: const BouncingScrollPhysics(),
               child: Row(
                 children: [
-                  _buildMetricChip(ProgressionMetric.estimated1RM, '1RM'),
-                  const SizedBox(width: 6),
-                  _buildMetricChip(ProgressionMetric.topWeight, 'Weight'),
+                  _buildMetricChip(ProgressionMetric.overall, 'Overall'),
                   const SizedBox(width: 6),
                   _buildMetricChip(ProgressionMetric.volume, 'Volume'),
                   const SizedBox(width: 6),
+                  _buildMetricChip(ProgressionMetric.topWeight, 'Weight'),
+                  const SizedBox(width: 6),
                   _buildMetricChip(ProgressionMetric.reps, 'Reps'),
+                  const SizedBox(width: 6),
+                  _buildMetricChip(ProgressionMetric.estimated1RM, '1RM'),
                 ],
               ),
             ),
@@ -298,6 +378,7 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
   Widget _buildSinglePointState(ExerciseProgressionPoint point) {
     final dateStr = '${point.date.day}/${point.date.month}';
     final valStr = point.formattedValueFor(_selectedMetric);
+    final isOverall = _selectedMetric == ProgressionMetric.overall;
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
@@ -321,14 +402,18 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '1 Previous Session ($dateStr): $valStr',
+                  isOverall
+                      ? '1 Previous Session ($dateStr): $valStr (Baseline)'
+                      : '1 Previous Session ($dateStr): $valStr',
                   style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'Complete another session to plot trend.',
-                  style: TextStyle(color: KColor.textSecondary, fontSize: 10),
+                Text(
+                  isOverall
+                      ? 'Relative progression index (100 baseline). Complete another session to track progress.'
+                      : 'Complete another session to plot trend.',
+                  style: const TextStyle(color: KColor.textSecondary, fontSize: 10),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -425,10 +510,18 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(firstDateStr, style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
-            Text(
-              '${points.length} Sessions Trend',
-              style: const TextStyle(color: KColor.textSecondary, fontSize: 9, fontWeight: FontWeight.w500),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                _selectedMetric == ProgressionMetric.overall
+                    ? '${points.length} Sessions • 100 Baseline'
+                    : '${points.length} Sessions Trend',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: KColor.textSecondary, fontSize: 9, fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
+            const SizedBox(width: 4),
             Text(lastDateStr, style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
           ],
         ),
