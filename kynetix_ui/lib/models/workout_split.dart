@@ -16,7 +16,7 @@ enum ExerciseType {
   dumbbell, // index 1
   cableMachine, // index 2
   isolation, // index 3
-  bodyweight, // index 4 — rep-first progression
+  bodyweight, // index 4, rep-first progression
 }
 
 enum ExerciseExecutionMode {
@@ -77,7 +77,7 @@ class Exercise {
         ExerciseType.bodyweight => 15,
       };
 
-  String get repRangeLabel => '$targetRepMin–$targetRepMax reps';
+  String get repRangeLabel => '$targetRepMin-$targetRepMax reps';
 
   /// Resolves the runtime execution mode, falling back to smart exercise inference
   /// if executionMode is at its default weightReps value.
@@ -354,7 +354,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'dips',
       name: 'Dips',
       muscleGroup: 'Triceps',
-      type: ExerciseType.barbellCompound,
+      type: ExerciseType.bodyweight,
     ),
   ],
   'Back + Biceps': [
@@ -538,7 +538,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'pullups',
       name: 'Pull-ups',
       muscleGroup: 'Back',
-      type: ExerciseType.barbellCompound,
+      type: ExerciseType.bodyweight,
     ),
     Exercise(
       id: 'lat_pulldown',
@@ -588,6 +588,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
 // Full exercise library (union of all days) — used by the exercise picker.
 final List<Exercise> fullExerciseLibrary = [
   ...exerciseLibraryByDay.values.expand((e) => e),
+  ..._dcExtras,
   // Extra exercises not in default days
   const Exercise(
     id: 'deadlift',
@@ -635,7 +636,7 @@ final List<Exercise> fullExerciseLibrary = [
     id: 'chest_dip',
     name: 'Chest Dip',
     muscleGroup: 'Chest',
-    type: ExerciseType.barbellCompound,
+    type: ExerciseType.bodyweight,
   ),
   const Exercise(
     id: 'standing_calf',
@@ -651,42 +652,68 @@ List<Exercise> get deduplicatedLibrary {
   return fullExerciseLibrary.where((e) => seen.add(e.id)).toList();
 }
 
-// ─── Default split (user's PPL + Legs programme) ─────────────────────────────
+// ─── Developer's Choice ──────────────────────────────────────────────────────
+//
+// The split the person who builds Kynetix actually runs: a bro split for the
+// first half of the week, push/pull to hit everything twice, Sunday off.
+// Every new account starts on it. Edits are saved per user (WorkoutService
+// keys the split by user id), so changing it never touches anyone else.
 
-WorkoutSplit get defaultWorkoutSplit => WorkoutSplit(
-  id: 'default_ppl_legs',
-  name: 'PPL + Legs',
+const developersChoiceId = 'developers_choice';
+const developersChoiceName = "Developer's Choice";
+
+/// Exercises the Developer's Choice uses that the day library doesn't list.
+const _dcExtras = <Exercise>[
+  Exercise(id: 'flat_bench_press', name: 'Flat Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+  Exercise(id: 'incline_bench_press', name: 'Incline Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound),
+  Exercise(id: 'close_grip_cable_row', name: 'Close Grip Seated Cable Row', muscleGroup: 'Back', type: ExerciseType.cableMachine),
+  Exercise(id: 'wide_grip_seated_row', name: 'Wide Grip Seated Row', muscleGroup: 'Back', type: ExerciseType.cableMachine),
+  Exercise(id: 'machine_preacher_curl', name: 'Machine Preacher Curl', muscleGroup: 'Biceps', type: ExerciseType.cableMachine),
+  Exercise(id: 'machine_shoulder_press', name: 'Machine Shoulder Press', muscleGroup: 'Shoulders', type: ExerciseType.cableMachine),
+  Exercise(id: 'rod_tricep_pushdown', name: 'Rod Tricep Pushdown', muscleGroup: 'Triceps', type: ExerciseType.cableMachine),
+];
+
+Exercise _ex(String id) => fullExerciseLibrary.firstWhere((e) => e.id == id);
+
+WorkoutSplit get developersChoiceSplit => WorkoutSplit(
+  id: developersChoiceId,
+  name: developersChoiceName,
   days: [
-    SplitDay(
-      weekday: 1,
-      name: 'Chest + Triceps',
-      exercises: exerciseLibraryByDay['Chest + Triceps']!,
-    ),
-    SplitDay(
-      weekday: 2,
-      name: 'Back + Biceps',
-      exercises: exerciseLibraryByDay['Back + Biceps']!,
-    ),
-    SplitDay(
-      weekday: 3,
-      name: 'Shoulders',
-      exercises: exerciseLibraryByDay['Shoulders']!,
-    ),
-    SplitDay(
-      weekday: 4,
-      name: 'Legs',
-      exercises: exerciseLibraryByDay['Legs']!,
-    ),
-    SplitDay(
-      weekday: 5,
-      name: 'Push',
-      exercises: exerciseLibraryByDay['Push']!,
-    ),
-    SplitDay(
-      weekday: 6,
-      name: 'Pull',
-      exercises: exerciseLibraryByDay['Pull']!,
-    ),
+    SplitDay(weekday: 1, name: 'Chest + Triceps', exercises: [
+      _ex('flat_bench_press'), _ex('incline_db_press'), _ex('cable_chest_fly'),
+      _ex('pec_dec'), _ex('tri_pushdown'), _ex('overhead_tri_ext'),
+    ]),
+    SplitDay(weekday: 2, name: 'Back + Biceps', exercises: [
+      _ex('lat_pulldown'), _ex('close_grip_cable_row'), _ex('tbar_row'),
+      _ex('cable_pullover'), _ex('incline_db_curl'), _ex('machine_preacher_curl'),
+    ]),
+    SplitDay(weekday: 3, name: 'Shoulders', exercises: [
+      _ex('db_shoulder_press'), _ex('cable_lateral_raise'), _ex('face_pull'),
+      _ex('lateral_raise'), _ex('shrugs'),
+    ]),
+    SplitDay(weekday: 4, name: 'Legs', exercises: [
+      _ex('leg_extension'), _ex('leg_press'), _ex('leg_curl'),
+      _ex('adductor_machine'), _ex('calf_raise'),
+    ]),
+    SplitDay(weekday: 5, name: 'Push', exercises: [
+      _ex('incline_bench_press'), _ex('cable_chest_fly'), _ex('machine_shoulder_press'),
+      _ex('cable_lateral_raise'), _ex('rod_tricep_pushdown'), _ex('skullcrusher'),
+    ]),
+    SplitDay(weekday: 6, name: 'Pull', exercises: [
+      _ex('pullups'), _ex('wide_grip_seated_row'), _ex('tbar_row'),
+      _ex('rear_delt_fly'), _ex('bb_curl'), _ex('hammer_curl'),
+    ]),
     const SplitDay(weekday: 7, name: 'Rest Day', exercises: []),
   ],
 );
+
+/// True when [split] still matches the Developer's Choice day for day.
+bool isUnchangedDevelopersChoice(WorkoutSplit split) {
+  String sig(WorkoutSplit s) => s.days
+      .map((d) => '${d.weekday}:${d.name}:${d.exercises.map((e) => e.id).join(',')}')
+      .join('|');
+  return sig(split) == sig(developersChoiceSplit);
+}
+
+/// The split every account starts on.
+WorkoutSplit get defaultWorkoutSplit => developersChoiceSplit;

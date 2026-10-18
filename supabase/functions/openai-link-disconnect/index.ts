@@ -56,6 +56,17 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Failed to disconnect' }, 500);
     }
 
+    // Sign in with ChatGPT fields. Best-effort so disconnect still works before
+    // the siwc migration. oauth_client_id is kept on purpose: the docs say to
+    // reuse the issued client id when the user signs in again.
+    {
+      const { error: siwcErr } = await supabaseAdmin
+        .from('user_openai_links')
+        .update({ granted_scopes: null, plan_paused_until: null, refresh_lock_until: null, openai_subject: null })
+        .eq('user_id', user.id);
+      if (siwcErr) console.warn(`[openai-link-disconnect] siwc fields not cleared: ${siwcErr.code ?? ''}`);
+    }
+
     // Also clear any pending sessions
     await supabaseAdmin
       .from('openai_device_auth_sessions')

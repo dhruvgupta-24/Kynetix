@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,11 +9,19 @@ import '../models/user_profile.dart';
 import 'profile_service.dart';
 import 'chatgpt_link_service.dart';
 import 'insights_engine.dart';
+import 'user_session_coordinator.dart';
 import 'cloud_sync_service.dart';
 import '../services/persistence_service.dart';
 import 'workout_service.dart';
 import 'nutrition_target_engine.dart';
 import 'nutrition_hydration_guard.dart';
+import 'ai_router_error.dart';
+import 'internal/net_timeouts.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
 
 // ─── InsightsReportService ───────────────────────────────────────────────────
 class InsightsReportService extends ChangeNotifier {
@@ -34,6 +43,17 @@ class InsightsReportService extends ChangeNotifier {
   String? _currentUserId;
   String _scopedKey(String base) => _currentUserId != null ? '${base}_$_currentUserId' : base;
 
+  /// This account's own value; the old device-wide key is only ever read by
+  /// the account that owns the device's legacy data (never by a new account,
+  /// which would otherwise see someone else's weekly totals).
+  String? _readKey(SharedPreferences prefs, String base) {
+    final own = prefs.getString(_scopedKey(base));
+    if (own != null || _currentUserId == null) return own ?? prefs.getString(base);
+    return UserSessionCoordinator.legacyOwner(prefs) == _currentUserId
+        ? prefs.getString(base)
+        : null;
+  }
+
   Map<String, WeeklyReport>    _weekly       = {};
   Map<String, MonthlyReport>   _monthly      = {};
   Map<String, YearlyReport>    _yearly       = {};
@@ -41,6 +61,12 @@ class InsightsReportService extends ChangeNotifier {
   List<Achievement>            _achievements = [];
   Map<String, InsightsSummary> _aiSummaries  = {};
   DateTime?                    _lastComputed;
+
+  // Dates whose targeted recompute was requested by a save but not run yet,
+  // keyed by their (week, month, year) bucket — dates in the same bucket
+  // produce identical results, so one recompute per bucket is enough.
+  final Map<String, DateTime> _pendingRecompute = {};
+  UserProfile? _pendingRecomputeProfile;
 
   /// Load for specific authenticated user
   Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
@@ -51,6 +77,7 @@ class InsightsReportService extends ChangeNotifier {
 
   /// Flush in-memory state without deleting persisted disk stores
   void clearMemory() {
+    cancelPendingRecompute();
     _weekly.clear();
     _monthly.clear();
     _yearly.clear();
@@ -66,7 +93,7 @@ class InsightsReportService extends ChangeNotifier {
     try {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
 
-      final weeklyRaw = prefs.getString(_scopedKey(_kWeekly)) ?? prefs.getString(_kWeekly);
+      final weeklyRaw = _readKey(prefs, _kWeekly);
       if (weeklyRaw != null) {
         try {
           final map = jsonDecode(weeklyRaw) as Map<String, dynamic>;
@@ -78,15 +105,15 @@ class InsightsReportService extends ChangeNotifier {
                 _weekly[k] = report;
               }
             } catch (inner) {
-              debugPrint('[InsightsReportService] Error parsing weekly report $k: $inner');
+              _debugLog('[InsightsReportService] Error parsing weekly report $k: $inner');
             }
           });
         } catch (outer) {
-          debugPrint('[InsightsReportService] Error decoding weekly cache: $outer');
+          _debugLog('[InsightsReportService] Error decoding weekly cache: $outer');
         }
       }
 
-      final monthlyRaw = prefs.getString(_kMonthly);
+      final monthlyRaw = _readKey(prefs, _kMonthly);
       if (monthlyRaw != null) {
         try {
           final map = jsonDecode(monthlyRaw) as Map<String, dynamic>;
@@ -98,15 +125,15 @@ class InsightsReportService extends ChangeNotifier {
                 _monthly[k] = report;
               }
             } catch (inner) {
-              debugPrint('[InsightsReportService] Error parsing monthly report $k: $inner');
+              _debugLog('[InsightsReportService] Error parsing monthly report $k: $inner');
             }
           });
         } catch (outer) {
-          debugPrint('[InsightsReportService] Error decoding monthly cache: $outer');
+          _debugLog('[InsightsReportService] Error decoding monthly cache: $outer');
         }
       }
 
-      final yearlyRaw = prefs.getString(_kYearly);
+      final yearlyRaw = _readKey(prefs, _kYearly);
       if (yearlyRaw != null) {
         try {
           final map = jsonDecode(yearlyRaw) as Map<String, dynamic>;
@@ -118,15 +145,15 @@ class InsightsReportService extends ChangeNotifier {
                 _yearly[k] = report;
               }
             } catch (inner) {
-              debugPrint('[InsightsReportService] Error parsing yearly report $k: $inner');
+              _debugLog('[InsightsReportService] Error parsing yearly report $k: $inner');
             }
           });
         } catch (outer) {
-          debugPrint('[InsightsReportService] Error decoding yearly cache: $outer');
+          _debugLog('[InsightsReportService] Error decoding yearly cache: $outer');
         }
       }
 
-      final pbRaw = prefs.getString(_kPersonalBests);
+      final pbRaw = _readKey(prefs, _kPersonalBests);
       if (pbRaw != null) {
         try {
           final pb = PersonalBests.fromJson(jsonDecode(pbRaw) as Map<String, dynamic>);
@@ -134,11 +161,11 @@ class InsightsReportService extends ChangeNotifier {
             _personalBests = pb;
           }
         } catch (e) {
-          debugPrint('[InsightsReportService] Error parsing personal bests cache: $e');
+          _debugLog('[InsightsReportService] Error parsing personal bests cache: $e');
         }
       }
 
-      final achievementsRaw = prefs.getString(_kAchievements);
+      final achievementsRaw = _readKey(prefs, _kAchievements);
       if (achievementsRaw != null) {
         try {
           final list = jsonDecode(achievementsRaw) as List<dynamic>;
@@ -146,56 +173,59 @@ class InsightsReportService extends ChangeNotifier {
               .map((item) => Achievement.fromJson(item as Map<String, dynamic>))
               .toList();
         } catch (e) {
-          debugPrint('[InsightsReportService] Error parsing achievements cache: $e');
+          _debugLog('[InsightsReportService] Error parsing achievements cache: $e');
         }
       }
 
-      final aiRaw = prefs.getString(_kAiSummaries);
+      final aiRaw = _readKey(prefs, _kAiSummaries);
       if (aiRaw != null) {
         try {
           final map = jsonDecode(aiRaw) as Map<String, dynamic>;
           _aiSummaries = map.map((k, v) => MapEntry(k, InsightsSummary.fromJson(v as Map<String, dynamic>)));
         } catch (e) {
-          debugPrint('[InsightsReportService] Error parsing AI summaries cache: $e');
+          _debugLog('[InsightsReportService] Error parsing AI summaries cache: $e');
         }
       }
 
-      final lastComputedRaw = prefs.getString(_kLastComputed);
+      final lastComputedRaw = _readKey(prefs, _kLastComputed);
       if (lastComputedRaw != null) {
         _lastComputed = DateTime.tryParse(lastComputedRaw);
       }
     } catch (e) {
-      debugPrint('[InsightsReportService] Error loading cached insights: $e');
+      _debugLog('[InsightsReportService] Error loading cached insights: $e');
     }
   }
 
   // ── Compute triggers ───────────────────────────────────────────────────────
   Future<void> maybeRecompute(UserProfile profile) async {
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      debugPrint('[InsightsReportService] Hydration guard is not ready. Skipping maybeRecompute.');
+      _debugLog('[InsightsReportService] Hydration guard is not ready. Skipping maybeRecompute.');
       return;
     }
+    // Apply any queued targeted recompute first so the freshness check below
+    // sees the same _lastComputed it would have without deferral.
+    await flushPendingRecompute();
     final now = DateTime.now();
     final workoutsChanged = WorkoutService.instance.lastWorkoutsChangedAt;
     final logsChanged = PersistenceService.lastLogsChangedAt;
 
-    debugPrint('[InsightsReportService] maybeRecompute check:');
-    debugPrint('  - now: $now');
-    debugPrint('  - _lastComputed: $_lastComputed');
-    debugPrint('  - workoutsChanged: $workoutsChanged');
-    debugPrint('  - logsChanged: $logsChanged');
-    debugPrint('  - workoutHydrationCompletedAt: ${WorkoutService.lastWorkoutsHydratedAt}');
-    debugPrint('  - dayLogHydrationCompletedAt: ${PersistenceService.lastDayLogsHydratedAt}');
-    debugPrint('  - historicalRepairCompletedAt: ${PersistenceService.lastHistoricalRepairCompletedAt}');
+    _debugLog('[InsightsReportService] maybeRecompute check:');
+    _debugLog('  - now: $now');
+    _debugLog('  - _lastComputed: $_lastComputed');
+    _debugLog('  - workoutsChanged: $workoutsChanged');
+    _debugLog('  - logsChanged: $logsChanged');
+    _debugLog('  - workoutHydrationCompletedAt: ${WorkoutService.lastWorkoutsHydratedAt}');
+    _debugLog('  - dayLogHydrationCompletedAt: ${PersistenceService.lastDayLogsHydratedAt}');
+    _debugLog('  - historicalRepairCompletedAt: ${PersistenceService.lastHistoricalRepairCompletedAt}');
 
     if (_lastComputed == null ||
         _lastComputed!.isBefore(workoutsChanged) ||
         _lastComputed!.isBefore(logsChanged) ||
         now.difference(_lastComputed!).inMinutes > 60) {
-      debugPrint('[InsightsReportService] Condition met. Starting recomputation...');
+      _debugLog('[InsightsReportService] Condition met. Starting recomputation...');
       await _recompute(profile);
     } else {
-      debugPrint('[InsightsReportService] Cache is up-to-date. Skipping recomputation.');
+      _debugLog('[InsightsReportService] Cache is up-to-date. Skipping recomputation.');
     }
   }
 
@@ -209,6 +239,7 @@ class InsightsReportService extends ChangeNotifier {
   MonthlyReport?          latestMonthly()        => monthlyFor(_currentMonthKey());
   YearlyReport?           latestYearly()         => yearlyFor(_currentYearKey());
   WeeklyReport? weeklyFor(String key) {
+    _flushPendingForRead();
     if (!_weekly.containsKey(key)) {
       final profile = ProfileService.instance.currentUserProfile;
       if (profile != null) {
@@ -225,7 +256,7 @@ class InsightsReportService extends ChangeNotifier {
             _save().ignore();
           }
         } catch (e) {
-          debugPrint('[InsightsReportService] On-demand compute for week $key failed: $e');
+          _debugLog('[InsightsReportService] On-demand compute for week $key failed: $e');
         }
       }
     }
@@ -233,6 +264,7 @@ class InsightsReportService extends ChangeNotifier {
   }
 
   MonthlyReport? monthlyFor(String key) {
+    _flushPendingForRead();
     if (!_monthly.containsKey(key)) {
       final profile = ProfileService.instance.currentUserProfile;
       if (profile != null) {
@@ -249,7 +281,7 @@ class InsightsReportService extends ChangeNotifier {
             _save().ignore();
           }
         } catch (e) {
-          debugPrint('[InsightsReportService] On-demand compute for month $key failed: $e');
+          _debugLog('[InsightsReportService] On-demand compute for month $key failed: $e');
         }
       }
     }
@@ -257,6 +289,7 @@ class InsightsReportService extends ChangeNotifier {
   }
 
   YearlyReport? yearlyFor(String key) {
+    _flushPendingForRead();
     if (!_yearly.containsKey(key)) {
       final profile = ProfileService.instance.currentUserProfile;
       if (profile != null) {
@@ -272,25 +305,27 @@ class InsightsReportService extends ChangeNotifier {
             _save().ignore();
           }
         } catch (e) {
-          debugPrint('[InsightsReportService] On-demand compute for year $key failed: $e');
+          _debugLog('[InsightsReportService] On-demand compute for year $key failed: $e');
         }
       }
     }
     return _yearly[key];
   }
-  PersonalBests?          get personalBests      => _personalBests;
-  List<Achievement>       get achievements       => List.unmodifiable(_achievements);
-  int                     get newAchievementCount => _achievements.where((a) => a.isNew).length;
+  PersonalBests?          get personalBests      { _flushPendingForRead(); return _personalBests; }
+  List<Achievement>       get achievements       { _flushPendingForRead(); return List.unmodifiable(_achievements); }
+  int                     get newAchievementCount { _flushPendingForRead(); return _achievements.where((a) => a.isNew).length; }
   InsightsSummary?        aiSummaryFor(String k) => _aiSummaries[k];
-  DateTime?               get lastComputed       => _lastComputed;
+  DateTime?               get lastComputed       { _flushPendingForRead(); return _lastComputed; }
 
   // AchievementProgress is computed on call — NOT cached, NOT in build()
-  List<AchievementProgress> get progress =>
-      InsightsEngine.computeProgress(_achievements, dayLogStore, ProfileService.instance.currentUserProfile ?? const UserProfile(name: '', age: 0, gender: '', height: 0, weight: 0, workoutDaysMin: 0, workoutDaysMax: 0, goal: ''), WorkoutService.instance.sessions);
+  List<AchievementProgress> get progress {
+    _flushPendingForRead();
+    return InsightsEngine.computeProgress(_achievements, dayLogStore, ProfileService.instance.currentUserProfile ?? const UserProfile(name: '', age: 0, gender: '', height: 0, weight: 0, workoutDaysMin: 0, workoutDaysMax: 0, goal: ''), WorkoutService.instance.sessions);
+  }
 
-  Map<String, WeeklyReport> get weeklyCache => Map.unmodifiable(_weekly);
-  Map<String, MonthlyReport> get monthlyCache => Map.unmodifiable(_monthly);
-  Map<String, YearlyReport> get yearlyCache => Map.unmodifiable(_yearly);
+  Map<String, WeeklyReport> get weeklyCache { _flushPendingForRead(); return Map.unmodifiable(_weekly); }
+  Map<String, MonthlyReport> get monthlyCache { _flushPendingForRead(); return Map.unmodifiable(_monthly); }
+  Map<String, YearlyReport> get yearlyCache { _flushPendingForRead(); return Map.unmodifiable(_yearly); }
 
   // ── Write ──────────────────────────────────────────────────────────────────
   Future<void> markAchievementsViewed() async {
@@ -303,12 +338,18 @@ class InsightsReportService extends ChangeNotifier {
     }
     if (changed) {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kAchievements, jsonEncode(_achievements.map((a) => a.toJson()).toList()));
+      await prefs.setString(_scopedKey(_kAchievements), jsonEncode(_achievements.map((a) => a.toJson()).toList()));
       notifyListeners();
     }
   }
 
-  Future<void> mergeAchievementsFromCloud(List<Achievement> cloud) async {
+  /// [stillCurrent] (cloud hydration) must hold at the merge and again before
+  /// the write; otherwise the session ended and the rows are dropped.
+  Future<void> mergeAchievementsFromCloud(
+    List<Achievement> cloud, {
+    bool Function()? stillCurrent,
+  }) async {
+    if (stillCurrent != null && !stillCurrent()) return;
     final localMap = {for (final a in _achievements) a.id: a};
     bool changed = false;
     for (final ca in cloud) {
@@ -325,12 +366,14 @@ class InsightsReportService extends ChangeNotifier {
       // Sort chronologically (oldest first, to preserve presentation order if needed)
       _achievements.sort((a, b) => a.earnedAt.compareTo(b.earnedAt));
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kAchievements, jsonEncode(_achievements.map((a) => a.toJson()).toList()));
+      if (stillCurrent != null && !stillCurrent()) return;
+      await prefs.setString(_scopedKey(_kAchievements), jsonEncode(_achievements.map((a) => a.toJson()).toList()));
       notifyListeners();
     }
   }
 
   Future<void> reset() async {
+    cancelPendingRecompute();
     _weekly.clear();
     _monthly.clear();
     _yearly.clear();
@@ -340,20 +383,18 @@ class InsightsReportService extends ChangeNotifier {
     _lastComputed = null;
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kWeekly);
-    await prefs.remove(_kMonthly);
-    await prefs.remove(_kYearly);
-    await prefs.remove(_kPersonalBests);
-    await prefs.remove(_kAchievements);
-    await prefs.remove(_kAiSummaries);
-    await prefs.remove(_kLastComputed);
+    for (final k in const [_kWeekly, _kMonthly, _kYearly, _kPersonalBests,
+        _kAchievements, _kAiSummaries, _kLastComputed]) {
+      await prefs.remove(k);
+      if (_currentUserId != null) await prefs.remove(_scopedKey(k));
+    }
 
     notifyListeners();
   }
 
   Future<void> _recompute(UserProfile profile) async {
     final startTime = DateTime.now();
-    debugPrint('[InsightsReportService] _recompute started at: $startTime');
+    _debugLog('[InsightsReportService] _recompute started at: $startTime');
 
     // Run historical repair migration for DayLogs with null gymDay on training days
     await PersistenceService.runHistoricalRepairMigration();
@@ -457,7 +498,7 @@ class InsightsReportService extends ChangeNotifier {
 
     _lastComputed = DateTime.now();
     final endTime = DateTime.now();
-    debugPrint('[InsightsReportService] _recompute ended at: $endTime. Duration: ${endTime.difference(startTime).inMilliseconds}ms');
+    _debugLog('[InsightsReportService] _recompute ended at: $endTime. Duration: ${endTime.difference(startTime).inMilliseconds}ms');
 
     await _save();
     notifyListeners();
@@ -475,18 +516,18 @@ class InsightsReportService extends ChangeNotifier {
     _pruneYearly();
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kWeekly, jsonEncode(_weekly.map((k, v) => MapEntry(k, v.toJson()))));
-    await prefs.setString(_kMonthly, jsonEncode(_monthly.map((k, v) => MapEntry(k, v.toJson()))));
-    await prefs.setString(_kYearly, jsonEncode(_yearly.map((k, v) => MapEntry(k, v.toJson()))));
+    await prefs.setString(_scopedKey(_kWeekly), jsonEncode(_weekly.map((k, v) => MapEntry(k, v.toJson()))));
+    await prefs.setString(_scopedKey(_kMonthly), jsonEncode(_monthly.map((k, v) => MapEntry(k, v.toJson()))));
+    await prefs.setString(_scopedKey(_kYearly), jsonEncode(_yearly.map((k, v) => MapEntry(k, v.toJson()))));
     if (_personalBests != null) {
-      await prefs.setString(_kPersonalBests, jsonEncode(_personalBests!.toJson()));
+      await prefs.setString(_scopedKey(_kPersonalBests), jsonEncode(_personalBests!.toJson()));
     }
-    await prefs.setString(_kAchievements, jsonEncode(_achievements.map((a) => a.toJson()).toList()));
-    await prefs.setString(_kAiSummaries, jsonEncode(_aiSummaries.map((k, v) => MapEntry(k, v.toJson()))));
+    await prefs.setString(_scopedKey(_kAchievements), jsonEncode(_achievements.map((a) => a.toJson()).toList()));
+    await prefs.setString(_scopedKey(_kAiSummaries), jsonEncode(_aiSummaries.map((k, v) => MapEntry(k, v.toJson()))));
     if (_lastComputed != null) {
-      await prefs.setString(_kLastComputed, _lastComputed!.toIso8601String());
+      await prefs.setString(_scopedKey(_kLastComputed), _lastComputed!.toIso8601String());
     } else {
-      await prefs.remove(_kLastComputed);
+      await prefs.remove(_scopedKey(_kLastComputed));
     }
 
     // Fire-and-forget cloud sync
@@ -520,6 +561,21 @@ class InsightsReportService extends ChangeNotifier {
   }
 
   // ── AI narrative (weekly only, V1) ─────────────────────────────────────────
+  /// Last weekly-summary AI failure (rate limit, too long, generic), or null
+  /// after a success. Exposed for the Insights UI; never holds raw bodies.
+  final ValueNotifier<AiRouterException?> lastAiSummaryError =
+      ValueNotifier<AiRouterException?>(null);
+
+  /// ai-chat-router body for the weekly summary. The server owns the system
+  /// prompt for purpose 'weekly_summary'; only the user message is sent.
+  @visibleForTesting
+  static Map<String, dynamic> weeklySummaryRequestBody(String userPrompt) => {
+        'purpose': 'weekly_summary',
+        'messages': [
+          {'role': 'user', 'content': userPrompt},
+        ],
+      };
+
   Future<void> _generateAiSummaryIfNeeded(WeeklyReport report, UserProfile profile) async {
     final existing = _aiSummaries[report.weekKey];
     if (existing != null && !existing.isStale) return;
@@ -528,7 +584,7 @@ class InsightsReportService extends ChangeNotifier {
       final status = await ChatGptLinkService.getStatus();
       if (!status.isConnected) return;
 
-      final systemPrompt = 'You are Kyno, an elite Indian-first fat-loss nutrition coach. Analyze the user\'s weekly report data and write a highly encouraging, 2-3 sentence summary of their week. Focus on consistency, protein target hit rate, and workout habits. Avoid technical or developer jargon. Do not mention "adherence score", "pipeline", "delta", or "regression" in your summary. Be brief, specific, and actionable.';
+      // The system prompt is server-owned (purpose 'weekly_summary').
       final userPrompt = 'Weekly Report Data:\n'
           '- Week: ${report.weekKey}\n'
           '- Consistency Score: ${report.consistencyScore.score}/100\n'
@@ -543,19 +599,28 @@ class InsightsReportService extends ChangeNotifier {
       final session = Supabase.instance.client.auth.currentSession;
       if (session == null) return;
 
-      final res = await Supabase.instance.client.functions.invoke(
-        'ai-chat-router',
-        body: {
-          'messages': [
-            {'role': 'system', 'content': systemPrompt},
-            {'role': 'user', 'content': userPrompt},
-          ]
-        },
-        headers: {'Authorization': 'Bearer ${session.accessToken}'},
-      );
+      final FunctionResponse res;
+      try {
+        res = await Supabase.instance.client.functions.invoke(
+          'ai-chat-router',
+          body: weeklySummaryRequestBody(userPrompt),
+          headers: {'Authorization': 'Bearer ${session.accessToken}'},
+        ).within(NetTimeouts.ai, 'weekly summary');
+      } on FunctionException catch (e) {
+        // Rate limit / too long: keep the calm, typed error for the UI and
+        // retry on a later recompute. Never surface the raw body.
+        lastAiSummaryError.value = AiRouterException.from(e);
+        _debugLog('[InsightsReportService] AI summary skipped: ${lastAiSummaryError.value}');
+        return;
+      }
 
-      final data = res.data as Map<String, dynamic>?;
-      if (data != null && data['success'] == true) {
+      final data = res.data is Map ? (res.data as Map).cast<String, dynamic>() : null;
+      if (data == null || data['success'] != true) {
+        lastAiSummaryError.value = AiRouterException.fromResponse(res.status, data);
+        return;
+      }
+      lastAiSummaryError.value = null;
+      {
         final narrative = data['response'] as String? ?? '';
         if (narrative.isNotEmpty) {
           _aiSummaries[report.weekKey] = InsightsSummary(
@@ -565,16 +630,29 @@ class InsightsReportService extends ChangeNotifier {
             isStale: false,
           );
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_kAiSummaries, jsonEncode(_aiSummaries.map((k, v) => MapEntry(k, v.toJson()))));
+          await prefs.setString(_scopedKey(_kAiSummaries), jsonEncode(_aiSummaries.map((k, v) => MapEntry(k, v.toJson()))));
           notifyListeners();
         }
       }
     } catch (e) {
-      debugPrint('[InsightsReportService] AI Summary generation error: $e');
+      _debugLog('[InsightsReportService] AI Summary generation error: $e');
     }
   }
 
   Future<void> recomputeForDate(DateTime date, UserProfile profile) async {
+    final wKey = _recomputeForDateCore(date, profile);
+    await _save();
+    notifyListeners();
+
+    // Trigger AI summary generation if connected and latest weekly report exists
+    final latestW = latestWeekly();
+    if (latestW != null && latestW.weekKey == wKey) {
+      _generateAiSummaryIfNeeded(latestW, profile).ignore();
+    }
+  }
+
+  /// Synchronous part of [recomputeForDate]; returns the affected week key.
+  String _recomputeForDateCore(DateTime date, UserProfile profile) {
     final wKey = InsightsEngine.weekKeyOf(date);
     final mKey = InsightsEngine.monthKeyOf(date);
     final yKey = date.year.toString();
@@ -656,17 +734,89 @@ class InsightsReportService extends ChangeNotifier {
     );
 
     _lastComputed = DateTime.now();
-    await _save();
-    notifyListeners();
+    return wKey;
+  }
 
-    // Trigger AI summary generation if connected and latest weekly report exists
+  // ── Deferred targeted recompute ────────────────────────────────────────────
+  //
+  // Saves queue the affected date instead of recomputing on the interaction
+  // frame. The queue is applied (same computation as recomputeForDate) when:
+  //   • PersistenceService runs its debounced post-save effects,
+  //   • any cached report / achievement getter is read (so readers never see
+  //     stale data), or
+  //   • maybeRecompute / app pause flushes it.
+
+  bool get hasPendingRecompute => _pendingRecompute.isNotEmpty;
+
+  void queueRecomputeForDate(DateTime date, UserProfile profile) {
+    final bucket = '${InsightsEngine.weekKeyOf(date)}|'
+        '${InsightsEngine.monthKeyOf(date)}|${date.year}';
+    _pendingRecompute.putIfAbsent(bucket, () => date);
+    _pendingRecomputeProfile = profile;
+  }
+
+  void cancelPendingRecompute() {
+    _pendingRecompute.clear();
+    _pendingRecomputeProfile = null;
+  }
+
+  /// Applies queued recomputes synchronously. Returns the affected week keys.
+  Set<String> _applyPendingRecomputes() {
+    final profile = _pendingRecomputeProfile;
+    if (_pendingRecompute.isEmpty || profile == null) {
+      cancelPendingRecompute();
+      return const {};
+    }
+    final dates = _pendingRecompute.values.toList();
+    cancelPendingRecompute();
+    final weeks = <String>{};
+    for (final d in dates) {
+      weeks.add(_recomputeForDateCore(d, profile));
+    }
+    _lastAppliedProfile = profile;
+    return weeks;
+  }
+
+  UserProfile? _lastAppliedProfile;
+
+  void _afterAppliedRecompute(Set<String> weeks) {
+    final profile = _lastAppliedProfile;
     final latestW = latestWeekly();
-    if (latestW != null && latestW.weekKey == wKey) {
+    if (profile != null && latestW != null && weeks.contains(latestW.weekKey)) {
       _generateAiSummaryIfNeeded(latestW, profile).ignore();
     }
   }
 
-  Future<void> mergeCacheFromCloud(Map<String, dynamic> cache) async {
+  /// Runs queued recomputes now, persists and notifies (like recomputeForDate).
+  Future<void> flushPendingRecompute() async {
+    if (_pendingRecompute.isEmpty) return;
+    final weeks = _applyPendingRecomputes();
+    if (weeks.isEmpty) return;
+    await _save();
+    notifyListeners();
+    _afterAppliedRecompute(weeks);
+  }
+
+  /// Read-path flush: getters must return fresh data, but may run during a
+  /// build, so listeners are notified in a microtask instead of synchronously.
+  void _flushPendingForRead() {
+    if (_pendingRecompute.isEmpty) return;
+    final weeks = _applyPendingRecomputes();
+    if (weeks.isEmpty) return;
+    _save().ignore();
+    scheduleMicrotask(() {
+      notifyListeners();
+      _afterAppliedRecompute(weeks);
+    });
+  }
+
+  /// [stillCurrent] (cloud hydration) must hold when the merge starts;
+  /// otherwise the session ended and the cache is dropped.
+  Future<void> mergeCacheFromCloud(
+    Map<String, dynamic> cache, {
+    bool Function()? stillCurrent,
+  }) async {
+    if (stillCurrent != null && !stillCurrent()) return;
     try {
       final weeklyJson = cache['weekly_json'] as Map?;
       final monthlyJson = cache['monthly_json'] as Map?;
@@ -690,7 +840,7 @@ class InsightsReportService extends ChangeNotifier {
       await _save();
       notifyListeners();
     } catch (e) {
-      debugPrint('[InsightsReportService] Error merging cache from cloud: $e');
+      _debugLog('[InsightsReportService] Error merging cache from cloud: $e');
     }
   }
 

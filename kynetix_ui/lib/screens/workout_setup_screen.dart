@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
@@ -8,26 +7,54 @@ import '../widgets/exercise_picker_sheet.dart';
 // ─── Training Onboarding Questionnaire Enums ────────────────────────────────
 
 enum TrainingExperience {
-  beginner('Beginner', 'New to structured lifting or resuming after a break.', '👶'),
-  intermediate('Intermediate', 'Consistent lifting for 1–3 years with structured progression.', '💪'),
-  advanced('Advanced', '3+ years of serious training, optimizing for minor gains.', '🏋️');
+  beginner(
+    'Beginner',
+    'New to lifting, or coming back after a break.',
+    Icons.signal_cellular_alt_1_bar_rounded,
+  ),
+  intermediate(
+    'Intermediate',
+    'Lifting steadily for 1-3 years.',
+    Icons.signal_cellular_alt_2_bar_rounded,
+  ),
+  advanced(
+    'Advanced',
+    '3+ years in. Chasing the small gains now.',
+    Icons.signal_cellular_alt_rounded,
+  );
 
   final String label;
   final String description;
-  final String emoji;
-  const TrainingExperience(this.label, this.description, this.emoji);
+  final IconData icon;
+  const TrainingExperience(this.label, this.description, this.icon);
 }
 
 enum TrainingGoal {
-  buildMuscle('Build Muscle', 'Focus on hypertrophy, moderate/high volume, and metabolic stress.', '🍗'),
-  buildStrength('Build Strength', 'Focus on heavy compound lifts, lower reps, and neural drive.', '⚡'),
-  loseFat('Lose Fat', 'Focus on calorie burn, muscle retention, and training density.', '🔥'),
-  generalFitness('General Fitness', 'Focus on athletic capacity, core strength, and joint health.', '🏃');
+  buildMuscle(
+    'Build muscle',
+    'More volume, moderate to high reps. Size first.',
+    KIcons.upper,
+  ),
+  buildStrength(
+    'Build strength',
+    'Heavy compound lifts, lower reps.',
+    KIcons.train,
+  ),
+  loseFat(
+    'Lose fat',
+    'Keep the muscle, burn more, train denser.',
+    KIcons.calories,
+  ),
+  generalFitness(
+    'General fitness',
+    'Move well, stay strong, keep your joints happy.',
+    KIcons.cardio,
+  );
 
   final String label;
   final String description;
-  final String emoji;
-  const TrainingGoal(this.label, this.description, this.emoji);
+  final IconData icon;
+  const TrainingGoal(this.label, this.description, this.icon);
 }
 
 // ─── WorkoutSetupScreen ───────────────────────────────────────────────────────
@@ -92,7 +119,8 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
   void initState() {
     super.initState();
     if (widget.editMode) {
-      _step = 4; // Skip directly to customization step when editing existing split
+      _step =
+          4; // Skip directly to customization step when editing existing split
     }
     _initDefaultFields();
   }
@@ -143,9 +171,21 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
         findEx('leg_press'),
         findEx('bb_curl'),
       ].whereType<Exercise>().toList();
-      days[0] = SplitDay(weekday: 1, name: 'Full Body A', exercises: fullBodyEx);
-      days[2] = SplitDay(weekday: 3, name: 'Full Body B', exercises: fullBodyEx);
-      days[4] = SplitDay(weekday: 5, name: 'Full Body C', exercises: fullBodyEx);
+      days[0] = SplitDay(
+        weekday: 1,
+        name: 'Full Body A',
+        exercises: fullBodyEx,
+      );
+      days[2] = SplitDay(
+        weekday: 3,
+        name: 'Full Body B',
+        exercises: fullBodyEx,
+      );
+      days[4] = SplitDay(
+        weekday: 5,
+        name: 'Full Body C',
+        exercises: fullBodyEx,
+      );
     } else if (_daysPerWeek == 4) {
       final upperEx = [
         findEx('bench_press'),
@@ -166,9 +206,21 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
       days[3] = SplitDay(weekday: 4, name: 'Upper Day B', exercises: upperEx);
       days[4] = SplitDay(weekday: 5, name: 'Lower Day B', exercises: lowerEx);
     } else if (_daysPerWeek == 5) {
-      days[0] = SplitDay(weekday: 1, name: 'Push', exercises: exerciseLibraryByDay['Push']!);
-      days[1] = SplitDay(weekday: 2, name: 'Pull', exercises: exerciseLibraryByDay['Pull']!);
-      days[2] = SplitDay(weekday: 3, name: 'Legs', exercises: exerciseLibraryByDay['Legs']!);
+      days[0] = SplitDay(
+        weekday: 1,
+        name: 'Push',
+        exercises: exerciseLibraryByDay['Push']!,
+      );
+      days[1] = SplitDay(
+        weekday: 2,
+        name: 'Pull',
+        exercises: exerciseLibraryByDay['Pull']!,
+      );
+      days[2] = SplitDay(
+        weekday: 3,
+        name: 'Legs',
+        exercises: exerciseLibraryByDay['Legs']!,
+      );
       final upperEx = [
         findEx('bench_press'),
         findEx('lat_pulldown'),
@@ -183,12 +235,36 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
       days[4] = SplitDay(weekday: 5, name: 'Upper', exercises: upperEx);
       days[5] = SplitDay(weekday: 6, name: 'Lower', exercises: lowerEx);
     } else {
-      days[0] = SplitDay(weekday: 1, name: 'Chest + Triceps', exercises: exerciseLibraryByDay['Chest + Triceps']!);
-      days[1] = SplitDay(weekday: 2, name: 'Back + Biceps', exercises: exerciseLibraryByDay['Back + Biceps']!);
-      days[2] = SplitDay(weekday: 3, name: 'Shoulders', exercises: exerciseLibraryByDay['Shoulders']!);
-      days[3] = SplitDay(weekday: 4, name: 'Legs', exercises: exerciseLibraryByDay['Legs']!);
-      days[4] = SplitDay(weekday: 5, name: 'Push', exercises: exerciseLibraryByDay['Push']!);
-      days[5] = SplitDay(weekday: 6, name: 'Pull', exercises: exerciseLibraryByDay['Pull']!);
+      days[0] = SplitDay(
+        weekday: 1,
+        name: 'Chest + Triceps',
+        exercises: exerciseLibraryByDay['Chest + Triceps']!,
+      );
+      days[1] = SplitDay(
+        weekday: 2,
+        name: 'Back + Biceps',
+        exercises: exerciseLibraryByDay['Back + Biceps']!,
+      );
+      days[2] = SplitDay(
+        weekday: 3,
+        name: 'Shoulders',
+        exercises: exerciseLibraryByDay['Shoulders']!,
+      );
+      days[3] = SplitDay(
+        weekday: 4,
+        name: 'Legs',
+        exercises: exerciseLibraryByDay['Legs']!,
+      );
+      days[4] = SplitDay(
+        weekday: 5,
+        name: 'Push',
+        exercises: exerciseLibraryByDay['Push']!,
+      );
+      days[5] = SplitDay(
+        weekday: 6,
+        name: 'Pull',
+        exercises: exerciseLibraryByDay['Pull']!,
+      );
     }
 
     return WorkoutSplit(
@@ -230,7 +306,10 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     }
   }
 
+  bool _finishing = false;
+
   Future<void> _finish() async {
+    if (_finishing) return;
     final days = <SplitDay>[];
     for (int wd = 1; wd <= 7; wd++) {
       final isTraining = _selectedDays[wd] == true;
@@ -246,15 +325,43 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
       );
     }
 
-    final newSplit = WorkoutSplit(
+    var newSplit = WorkoutSplit(
       id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
       name: 'My Split',
       days: days,
     );
-    await WorkoutService.instance.saveSplit(newSplit);
-    if (mounted) {
-      Navigator.of(context).pop(true);
+    // Saved untouched: still the Developer's Choice, keep its name.
+    if (isUnchangedDevelopersChoice(newSplit)) newSplit = developersChoiceSplit;
+    // Captured before the await: the result toast lands on the screen below.
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() => _finishing = true);
+    try {
+      await WorkoutService.instance.saveSplit(newSplit);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _finishing = false);
+      KHaptics.reject();
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't save your split. Try again in a moment."),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
+    if (!mounted) return;
+    KHaptics.success();
+    Navigator.of(context).pop(true);
+    messenger
+      ?..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.editMode ? 'Split saved.' : "Split saved. Chalo, let's train.",
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   void _removeExercise(int weekday, Exercise ex) {
@@ -280,7 +387,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
       excludeIds: excludeIds,
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() => _dayExercises[weekday] = [...current, picked]);
     }
   }
@@ -289,26 +396,81 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: KColor.bg,
+    return KPage(
+      tone: KTone.train,
+      intensity: 0.8,
       appBar: AppBar(
-        backgroundColor: KColor.bg,
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: _step > 0 && !widget.editMode
             ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: KColor.textPrimary,
+                ),
+                tooltip: 'Back',
                 onPressed: _goBack,
               )
             : IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: KColor.textPrimary,
+                ),
+                tooltip: 'Close',
                 onPressed: () => Navigator.of(context).pop(),
               ),
         title: Text(
-          widget.editMode ? 'Edit Training Split' : 'Set Up Training',
-          style: KText.h2.copyWith(color: Colors.white, fontSize: 16),
+          widget.editMode ? 'Edit training split' : 'Set up training',
+          style: KText.h2.copyWith(fontSize: 17),
+        ),
+        bottom: widget.editMode
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(14),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    KSpacing.xxl,
+                    0,
+                    KSpacing.xxl,
+                    10,
+                  ),
+                  child: Semantics(
+                    label: 'Step ${_step + 1} of 5',
+                    child: KBar(
+                      progress: (_step + 1) / 5,
+                      colors: KGradient.train,
+                      height: 4,
+                      duration: KMotion.emphasized,
+                    ),
+                  ),
+                ),
+              ),
+      ),
+      body: AnimatedSwitcher(
+        duration: KMotion.of(context, KMotion.emphasized),
+        switchInCurve: KMotion.emphasizedCurve,
+        switchOutCurve: KMotion.accelerate,
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, ?current],
+        ),
+        transitionBuilder: (child, anim) => FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween(
+              begin: const Offset(0.06, 0),
+              end: Offset.zero,
+            ).animate(anim),
+            child: child,
+          ),
+        ),
+        child: KeyedSubtree(
+          key: ValueKey('step_$_step'),
+          child: _buildCurrentStep(),
         ),
       ),
-      body: _buildCurrentStep(),
     );
   }
 
@@ -323,228 +485,129 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     };
   }
 
+  /// Shared layout for the questionnaire steps: title, subtitle, a body that
+  /// takes the remaining height, and a bottom CTA that respects the safe area.
+  Widget _stepScaffold({
+    required String title,
+    required String subtitle,
+    required Widget body,
+    required Widget footer,
+  }) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          KSpacing.xxl,
+          KSpacing.lg,
+          KSpacing.xxl,
+          KSpacing.lg,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: KText.h1.copyWith(fontSize: 26)),
+            const SizedBox(height: KSpacing.sm),
+            Text(
+              subtitle,
+              style: KText.body.copyWith(color: KColor.textSecondary),
+            ),
+            const SizedBox(height: KSpacing.xxl),
+            Expanded(child: body),
+            const SizedBox(height: KSpacing.md),
+            footer,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _continueButton({String label = 'Continue'}) => SizedBox(
+    width: double.infinity,
+    child: KButton(
+      label: label,
+      icon: Icons.arrow_forward_rounded,
+      onTap: _goForward,
+    ),
+  );
+
   // ── Step 0: Experience ────────────────────────────────────────────────────
 
   Widget _buildExperienceStep() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return _stepScaffold(
+      title: 'Experience level',
+      subtitle:
+          'Helps us size your weight jumps and weekly volume.',
+      body: ListView(
         children: [
-          Text('Experience level', style: KText.h1.copyWith(color: Colors.white)),
-          const SizedBox(height: 8),
-          Text(
-            'We will use this to recommend progression jumps and volume guidelines.',
-            style: KText.body.copyWith(color: KColor.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: ListView(
-              children: TrainingExperience.values.map((exp) {
-                final selected = _experience == exp;
-                return GestureDetector(
-                  onTap: () => setState(() => _experience = exp),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFF132F23) : KColor.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: selected ? KColor.green : KColor.border,
-                        width: selected ? 1.5 : 1.0,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(exp.emoji, style: const TextStyle(fontSize: 28)),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                exp.label,
-                                style: KText.bodyMedium.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                exp.description,
-                                style: KText.caption.copyWith(color: KColor.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (selected)
-                          const Icon(Icons.check_circle_rounded, color: KColor.green, size: 20),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
+          for (final (i, exp) in TrainingExperience.values.indexed)
+            KReveal(
+              index: i,
+              child: _ChoiceCard(
+                icon: exp.icon,
+                label: exp.label,
+                description: exp.description,
+                selected: _experience == exp,
+                onTap: () => setState(() => _experience = exp),
+              ),
             ),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: 'Continue',
-              icon: Icons.arrow_forward_rounded,
-              onTap: _goForward,
-            ),
-          ),
         ],
       ),
+      footer: _continueButton(),
     );
   }
 
   // ── Step 1: Days ──────────────────────────────────────────────────────────
 
   Widget _buildDaysStep() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return _stepScaffold(
+      title: 'How many days?',
+      subtitle:
+          'Pick what you can actually stick to. Consistency beats ambition.',
+      body: GridView.count(
+        crossAxisCount: 2,
+        mainAxisSpacing: KSpacing.md,
+        crossAxisSpacing: KSpacing.md,
+        childAspectRatio: 1.05,
         children: [
-          Text('How many days?', style: KText.h1.copyWith(color: Colors.white)),
-          const SizedBox(height: 8),
-          Text(
-            'How many days per week can you consistently commit to training?',
-            style: KText.body.copyWith(color: KColor.textSecondary),
-          ),
-          const SizedBox(height: 28),
-          Expanded(
-            child: Center(
-              child: Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: [3, 4, 5, 6].map((days) {
-                  final selected = _daysPerWeek == days;
-                  return GestureDetector(
-                    onTap: () => setState(() => _daysPerWeek = days),
-                    child: Container(
-                      width: 140,
-                      height: 140,
-                      decoration: BoxDecoration(
-                        color: selected ? const Color(0xFF132F23) : KColor.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: selected ? KColor.green : KColor.border,
-                          width: selected ? 1.5 : 1.0,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '$days',
-                            style: KText.display.copyWith(
-                              color: selected ? KColor.green : Colors.white,
-                              fontSize: 40,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Days / week',
-                            style: KText.caption.copyWith(color: KColor.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
+          for (final (i, days) in [3, 4, 5, 6].indexed)
+            KReveal(
+              index: i,
+              fromScale: 0.94,
+              child: _DaysTile(
+                days: days,
+                selected: _daysPerWeek == days,
+                onTap: () => setState(() => _daysPerWeek = days),
               ),
             ),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: 'Continue',
-              icon: Icons.arrow_forward_rounded,
-              onTap: _goForward,
-            ),
-          ),
         ],
       ),
+      footer: _continueButton(),
     );
   }
 
   // ── Step 2: Goal ──────────────────────────────────────────────────────────
 
   Widget _buildGoalStep() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return _stepScaffold(
+      title: 'Primary focus',
+      subtitle:
+          'Shapes your exercise picks and rep ranges.',
+      body: ListView(
         children: [
-          Text('Primary focus', style: KText.h1.copyWith(color: Colors.white)),
-          const SizedBox(height: 8),
-          Text(
-            'This drives default exercise selections and compound rep-range strategies.',
-            style: KText.body.copyWith(color: KColor.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: ListView(
-              children: TrainingGoal.values.map((goal) {
-                final selected = _goal == goal;
-                return GestureDetector(
-                  onTap: () => setState(() => _goal = goal),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFF132F23) : KColor.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: selected ? KColor.green : KColor.border,
-                        width: selected ? 1.5 : 1.0,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(goal.emoji, style: const TextStyle(fontSize: 28)),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                goal.label,
-                                style: KText.bodyMedium.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                goal.description,
-                                style: KText.caption.copyWith(color: KColor.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (selected)
-                          const Icon(Icons.check_circle_rounded, color: KColor.green, size: 20),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
+          for (final (i, goal) in TrainingGoal.values.indexed)
+            KReveal(
+              index: i,
+              child: _ChoiceCard(
+                icon: goal.icon,
+                label: goal.label,
+                description: goal.description,
+                selected: _goal == goal,
+                onTap: () => setState(() => _goal = goal),
+              ),
             ),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: 'See Recommendation',
-              icon: Icons.arrow_forward_rounded,
-              onTap: _goForward,
-            ),
-          ),
         ],
       ),
+      footer: _continueButton(label: 'See my recommended split'),
     );
   }
 
@@ -554,88 +617,78 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     final split = _generateRecommendedSplit();
     final splitDays = split.days.where((d) => !d.isRestDay).toList();
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Recommended Split', style: KText.h1.copyWith(color: Colors.white)),
-          const SizedBox(height: 6),
-          Text(
-            'Based on your inputs, this program offers optimal volume and recovery overlap.',
-            style: KText.body.copyWith(color: KColor.textSecondary),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: ListView.builder(
-              itemCount: splitDays.length,
-              itemBuilder: (context, i) {
-                final d = splitDays[i];
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: KColor.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: KColor.border, width: 0.5),
+    return _stepScaffold(
+      title: 'Recommended split',
+      subtitle:
+          'Built from your answers, with enough volume and enough rest. You can tweak any day.',
+      body: ListView.builder(
+        itemCount: splitDays.length,
+        itemBuilder: (context, i) {
+          final d = splitDays[i];
+          return KReveal(
+            index: i,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: KColor.card,
+                borderRadius: KRadius.md,
+                border: Border.all(color: _hairline),
+                boxShadow: KShadow.card,
+              ),
+              child: Row(
+                children: [
+                  _WeekdayBadge(label: _shortDays[d.weekday]!),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          d.name,
+                          style: KText.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${d.exercises.length} exercises planned',
+                          style: KText.caption.copyWith(
+                            fontSize: 13,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: KColor.bg,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          _shortDays[d.weekday]!,
-                          style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              d.name,
-                              style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${d.exercises.length} exercises planned',
-                              style: KText.caption.copyWith(color: KColor.textMuted),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+                ],
+              ),
             ),
+          );
+        },
+      ),
+      footer: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          KButton(
+            label: 'Use this split',
+            onTap: () => _applyRecommendation(split),
           ),
-          Row(
-            children: [
-              Expanded(
-                child: KButton(
-                  label: 'Use Recommended',
-                  onTap: () => _applyRecommendation(split),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: KButton(
-                  label: 'Manual Select',
-                  outlined: true,
-                  onTap: () {
-                    setState(() {
-                      _step = 4;
-                    });
-                  },
-                ),
-              ),
-            ],
+          const SizedBox(height: 10),
+          KButton(
+            label: "Use Developer's Choice",
+            outlined: true,
+            onTap: () => _applyRecommendation(developersChoiceSplit),
+          ),
+          const SizedBox(height: 10),
+          KButton(
+            label: 'Set up days myself',
+            outlined: true,
+            onTap: () {
+              setState(() {
+                _step = 4;
+              });
+            },
           ),
         ],
       ),
@@ -649,37 +702,53 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
     return Column(
       children: [
-        // Pinned Segmented Weekday Tabs
+        // Pinned weekday tabs
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.p,
+            KSpacing.lg,
+            KSpacing.p,
+            KSpacing.md,
+          ),
           child: _buildWeekdayTabs(),
         ),
-        
+
         // Active tab configuration area
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(
-              children: [
-                _buildActiveDayCard(activeWd),
-              ],
+            padding: const EdgeInsets.fromLTRB(
+              KSpacing.p,
+              0,
+              KSpacing.p,
+              KSpacing.xl,
             ),
+            child: Column(children: [_buildActiveDayCard(activeWd)]),
           ),
         ),
 
         // Sticky anchored button area
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: SizedBox(
-              width: double.infinity,
-              child: KButton(
-                label: widget.editMode ? 'Save Split' : 'Start Training',
-                onTap: _trainingDayCount == 0 ? null : () {
-                  HapticFeedback.mediumImpact();
-                  _finish();
-                },
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: KColor.divider),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                KSpacing.p,
+                KSpacing.md,
+                KSpacing.p,
+                KSpacing.lg,
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: KButton(
+                  label: 'Save split',
+                  loading: _finishing,
+                  onTap: _trainingDayCount == 0 ? null : _finish,
+                ),
               ),
             ),
           ),
@@ -690,11 +759,13 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
 
   Widget _buildWeekdayTabs() {
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(KSpacing.xs),
       decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
+        color: KColor.isDark
+            ? KColor.fg.withValues(alpha: 0.04)
+            : KColor.cardHigh.withValues(alpha: 0.7),
+        borderRadius: KRadius.md,
+        border: Border.all(color: _hairline),
       ),
       child: Row(
         children: List.generate(7, (i) {
@@ -703,61 +774,66 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
           final isTraining = _selectedDays[wd] == true;
 
           return Expanded(
-            child: GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  _activeCustomizingWeekday = wd;
-                });
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: isActive
-                      ? const LinearGradient(
-                          colors: [KColor.green, Color(0xFF1B6A47)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: isActive
-                      ? [
-                          BoxShadow(
-                            color: KColor.green.withValues(alpha: 0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _shortDays[wd]!,
-                      style: TextStyle(
-                        color: isActive 
-                            ? Colors.white 
-                            : (isTraining ? Colors.white70 : KColor.textMuted),
-                        fontWeight: isActive ? FontWeight.w800 : FontWeight.bold,
-                        fontSize: 12,
+            child: Semantics(
+              button: true,
+              selected: isActive,
+              label:
+                  '${_shortDays[wd]!}, ${isTraining ? 'training day' : 'rest day'}',
+              excludeSemantics: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (_activeCustomizingWeekday == wd) return;
+                  KHaptics.select();
+                  setState(() {
+                    _activeCustomizingWeekday = wd;
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: KMotion.of(context, KMotion.standard),
+                  curve: KMotion.emphasizedCurve,
+                  constraints: const BoxConstraints(minHeight: 48),
+                  padding: const EdgeInsets.symmetric(vertical: KSpacing.sm),
+                  // Selected = ink, like every other selected state.
+                  decoration: BoxDecoration(
+                    color: isActive ? KColor.ink : Colors.transparent,
+                    borderRadius: KRadius.sm,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _shortDays[wd]!,
+                        style: KText.label.copyWith(
+                          fontSize: 12,
+                          letterSpacing: 0,
+                          fontWeight: isActive
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                          color: isActive
+                              ? KColor.onInk
+                              : (isTraining
+                                    ? KColor.textPrimary
+                                    : KColor.textMuted),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    // Small training indicator dot
-                    Container(
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: isTraining 
-                            ? (isActive ? Colors.white : KColor.green)
-                            : Colors.transparent,
-                        shape: BoxShape.circle,
+                      const SizedBox(height: 3),
+                      // Training indicator: filled dot = training, dash = rest
+                      Container(
+                        width: isTraining ? 5 : 8,
+                        height: isTraining ? 5 : 2,
+                        decoration: BoxDecoration(
+                          color: isTraining
+                              ? (isActive ? KColor.onInk : KColor.violet)
+                              : (isActive
+                                    ? KColor.onInk.withValues(alpha: 0.5)
+                                    : KColor.textDisabled),
+                          borderRadius: KRadius.pill,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -772,79 +848,74 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     final exercises = _dayExercises[weekday] ?? [];
 
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
+      duration: KMotion.of(context, KMotion.standard),
+      switchInCurve: KMotion.emphasizedCurve,
+      switchOutCurve: KMotion.accelerate,
       transitionBuilder: (child, anim) => FadeTransition(
         opacity: anim,
         child: SizeTransition(
           sizeFactor: anim,
-          axisAlignment: 0.0,
+          axisAlignment: -1.0,
           child: child,
         ),
       ),
       child: Container(
         key: ValueKey('${weekday}_$isTraining'),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(KSpacing.xl),
         decoration: BoxDecoration(
-          color: isTraining ? KColor.surface : const Color(0xFF141624),
-          gradient: isTraining 
-              ? null 
-              : const LinearGradient(
-                  colors: [Color(0xFF1A1F36), Color(0xFF0F101A)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+          borderRadius: KRadius.xl,
+          color: KColor.card,
+          // Train colour as a corner accent only, fading out by mid-card.
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: const Alignment(0.4, 0.4),
+            colors: [
+              Color.alphaBlend(
+                (isTraining ? KColor.violet : KColor.cyan).withValues(
+                  alpha: KColor.isDark ? 0.06 : 0.04,
                 ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isTraining 
-                ? KColor.border 
-                : KColor.blue.withValues(alpha: 0.2), 
-            width: 0.5,
+                KColor.card,
+              ),
+              KColor.card,
+            ],
           ),
-          boxShadow: isTraining 
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+          border: Border.all(color: _hairline),
+          boxShadow: KShadow.card,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isTraining ? 'Training Day Split' : 'Scheduled Rest Day',
-                        style: KText.h2.copyWith(color: Colors.white, fontSize: 16),
+                        isTraining
+                            ? 'Training day'
+                            : 'Rest day',
+                        style: KText.h2.copyWith(fontSize: 17),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _defaultNames[weekday]!,
-                        style: KText.caption.copyWith(color: KColor.textMuted),
+                        style: KText.caption.copyWith(fontSize: 13),
                       ),
                     ],
                   ),
                 ),
+                // Ink switch from the app theme.
                 Switch(
                   value: isTraining,
-                  activeThumbColor: KColor.green,
-                  activeTrackColor: KColor.green.withValues(alpha: 0.2),
-                  inactiveThumbColor: KColor.textMuted,
-                  inactiveTrackColor: KColor.border,
                   onChanged: (val) {
-                    HapticFeedback.lightImpact();
+                    KHaptics.select();
                     setState(() {
                       _selectedDays[weekday] = val;
                       if (val && _dayExercises[weekday]!.isEmpty) {
                         _dayExercises[weekday] = List.of(
-                          exerciseLibraryByDay[_defaultNames[weekday] ?? ''] ?? const [],
+                          exerciseLibraryByDay[_defaultNames[weekday] ?? ''] ??
+                              const [],
                         );
                       }
                     });
@@ -852,210 +923,63 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            const Divider(color: KColor.border, height: 1),
-            const SizedBox(height: 16),
+            const SizedBox(height: KSpacing.md),
+            Divider(color: KColor.divider, height: 1),
+            const SizedBox(height: KSpacing.lg),
             if (isTraining) ...[
-              Text(
-                'SPLIT DAY NAME',
-                style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-              ),
-              const SizedBox(height: 8),
+              Text('Split day name', style: _fieldLabel),
+              const SizedBox(height: KSpacing.sm),
               TextField(
                 controller: _nameControllers[weekday],
-                style: KText.bodyMedium.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'e.g. Chest + Triceps',
-                  hintStyle: const TextStyle(color: KColor.textMuted),
-                  fillColor: KColor.bg,
-                  filled: true,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                ),
+                style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+                cursorColor: KColor.ink,
+                decoration: _fieldDecoration(hint: 'e.g. Chest + Triceps'),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: KSpacing.xl),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: Text(
-                      'EXERCISES PLAN',
-                      style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-                      overflow: TextOverflow.ellipsis,
+                  Expanded(child: Text('Exercises', style: _fieldLabel)),
+                  const SizedBox(width: KSpacing.sm),
+                  AnimatedSwitcher(
+                    duration: KMotion.of(context, KMotion.quick),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: ScaleTransition(scale: anim, child: child),
                     ),
+                    child: exercises.isEmpty
+                        ? const SizedBox.shrink(key: ValueKey('count_none'))
+                        : Text(
+                            plural(exercises.length, 'exercise'),
+                            key: ValueKey('count_${exercises.length}'),
+                            style: KText.numSmall.copyWith(
+                              color: KColor.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
                   ),
-                  const SizedBox(width: 8),
-                  if (exercises.isNotEmpty)
-                    Flexible(
-                      child: Text(
-                        '${exercises.length} Exercises',
-                        style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
                 ],
               ),
               const SizedBox(height: 10),
-              if (exercises.isEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
-                  alignment: Alignment.center,
-                  child: Column(
-                    children: [
-                      const Icon(Icons.fitness_center_rounded, color: KColor.textMuted, size: 32),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No Exercises Planned',
-                        style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Tap "Add exercise" below to build this day split.',
-                        style: KText.caption.copyWith(color: KColor.textMuted),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                )
-              else ...[
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.drag_indicator_rounded, color: KColor.textMuted, size: 14),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Drag handle to change exercise ordering',
-                          style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ReorderableListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  buildDefaultDragHandles: false,
-                  onReorder: (oldIdx, newIdx) => _reorderExercise(weekday, oldIdx, newIdx),
-                  itemCount: exercises.length,
-                  itemBuilder: (_, index) {
-                    final ex = exercises[index];
-                    final subtitle = ex.notes?.trim().isNotEmpty == true
-                        ? '${ex.muscleGroup} • ${ex.repRangeLabel} • ${ex.notes!.trim()}'
-                        : '${ex.muscleGroup} • ${ex.repRangeLabel}';
-                    return Container(
-                      key: ValueKey('${weekday}_${ex.id}'),
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        color: KColor.bg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: KColor.border, width: 0.5),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
-                        leading: Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: KColor.surface,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Center(
-                            child: Text(
-                              '${index + 1}',
-                              style: KText.caption.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          ex.name,
-                          style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          subtitle,
-                          style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 10.5),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              onPressed: () {
-                                HapticFeedback.lightImpact();
-                                _removeExercise(weekday, ex);
-                              },
-                              icon: const Icon(
-                                Icons.remove_circle_outline_rounded,
-                                color: KColor.danger,
-                                size: 18,
-                              ),
-                            ),
-                            ReorderableDragStartListener(
-                              index: index,
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 8),
-                                child: Icon(
-                                  Icons.drag_handle_rounded,
-                                  color: KColor.textMuted,
-                                  size: 20,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-              const SizedBox(height: 8),
-              InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _addExercise(weekday);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: KColor.green.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: KColor.green.withValues(alpha: 0.25), width: 1),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.add_circle_outline_rounded,
-                        color: KColor.green,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          'Add Exercise',
-                          overflow: TextOverflow.ellipsis,
-                          style: KText.bodyMedium.copyWith(
-                            color: KColor.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              AnimatedSize(
+                duration: KMotion.of(context, KMotion.standard),
+                curve: KMotion.emphasizedCurve,
+                alignment: Alignment.topCenter,
+                child: AnimatedSwitcher(
+                  duration: KMotion.of(context, KMotion.standard),
+                  child: exercises.isEmpty
+                      ? _buildEmptyExercises()
+                      : _buildExerciseList(weekday, exercises),
                 ),
               ),
+              const SizedBox(height: KSpacing.sm),
+              _AddExerciseButton(
+                onTap: () {
+                  KHaptics.select();
+                  _addExercise(weekday);
+                },
+              ),
             ] else ...[
-              // Rest Day Recovery Placeholder Card (No Nesting, beautifully customized)
+              // Rest-day recovery placeholder
               Center(
                 child: Column(
                   children: [
@@ -1064,33 +988,31 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                       width: 72,
                       height: 72,
                       decoration: BoxDecoration(
-                        color: KColor.blue.withValues(alpha: 0.1),
+                        color: KColor.cyan.withValues(
+                          alpha: KColor.isDark ? 0.1 : 0.07,
+                        ),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: KColor.blue.withValues(alpha: 0.2),
+                          color: KColor.cyan.withValues(alpha: 0.25),
                           width: 1.5,
                         ),
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Icon(
                           Icons.spa_rounded,
-                          color: KColor.blue,
-                          size: 36,
+                          color: KColor.cyan,
+                          size: 34,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: KSpacing.xl),
+                    Text('Rest and recovery', style: KText.h2),
+                    const SizedBox(height: KSpacing.sm),
                     Text(
-                      'Rest & Recovery',
-                      style: KText.h2.copyWith(color: Colors.white, fontSize: 18),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Scheduled Rest Day — muscles grow when you rest, not when you lift. Use this day to focus on sleep, quality nutrition, hydration, and light mobility work to return stronger.',
+                      'Rest is where the growth happens. Sleep well, eat well, drink water, maybe some light mobility.',
                       style: KText.body.copyWith(
                         color: KColor.textSecondary,
-                        height: 1.5,
-                        fontSize: 13,
+                        fontSize: 14,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -1099,6 +1021,499 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyExercises() {
+    // The "Add exercise" action sits directly below, so the empty state
+    // points to it instead of repeating it.
+    return Container(
+      key: const ValueKey('empty'),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: KRadius.md,
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.025 : 0.02),
+        border: Border.all(color: _hairline),
+      ),
+      child: const KEmptyState(
+        type: KEmptyStateType.workout,
+        title: 'Nothing planned yet',
+        message: 'Tap "Add exercise" below to build this day.',
+      ),
+    );
+  }
+
+  Widget _buildExerciseList(int weekday, List<Exercise> exercises) {
+    return Column(
+      key: const ValueKey('list'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: KSpacing.sm),
+          child: Row(
+            children: [
+              Icon(
+                Icons.drag_indicator_rounded,
+                color: KColor.textMuted,
+                size: 14,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Drag the handle to reorder exercises',
+                  style: KText.caption.copyWith(
+                    color: KColor.textMuted,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          buildDefaultDragHandles: false,
+          onReorderStart: (_) => KHaptics.select(),
+          onReorder: (oldIdx, newIdx) {
+            KHaptics.commit();
+            _reorderExercise(weekday, oldIdx, newIdx);
+          },
+          proxyDecorator: _liftProxy,
+          itemCount: exercises.length,
+          itemBuilder: (_, index) {
+            final ex = exercises[index];
+            final subtitle = ex.notes?.trim().isNotEmpty == true
+                ? '${ex.muscleGroup} • ${ex.repRangeLabel} • ${ex.notes!.trim()}'
+                : '${ex.muscleGroup} • ${ex.repRangeLabel}';
+            return Container(
+              key: ValueKey('${weekday}_${ex.id}'),
+              margin: const EdgeInsets.only(bottom: KSpacing.sm),
+              padding: const EdgeInsets.fromLTRB(
+                KSpacing.md,
+                6,
+                KSpacing.xs,
+                6,
+              ),
+              decoration: BoxDecoration(
+                color: KColor.isDark ? KColor.surface : KColor.bg,
+                borderRadius: KRadius.md,
+                border: Border.all(color: _hairline),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: KColor.fg.withValues(
+                        alpha: KColor.isDark ? 0.07 : 0.06,
+                      ),
+                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    ),
+                    child: Text(
+                      '${index + 1}',
+                      style: KText.numSmall.copyWith(
+                        color: KColor.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: KSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          ex.name,
+                          style: KText.bodyMedium.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: KText.caption.copyWith(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove ${ex.name}',
+                    onPressed: () {
+                      KHaptics.commit();
+                      _removeExercise(weekday, ex);
+                    },
+                    icon: Icon(
+                      Icons.remove_circle_outline_rounded,
+                      color: KColor.danger,
+                      size: 18,
+                    ),
+                  ),
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Semantics(
+                      label: 'Reorder ${ex.name}',
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Icon(
+                          Icons.drag_handle_rounded,
+                          color: KColor.textMuted,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  /// Lifted look while dragging: slight scale and a soft drop shadow
+  /// (deep on Carbon, warm and light on Paper) with a faint train halo.
+  Widget _liftProxy(Widget child, int index, Animation<double> animation) {
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (context, child) {
+        final t = KMotion.emphasizedCurve.transform(animation.value);
+        return Transform.scale(
+          scale: 1 + 0.03 * t,
+          child: Material(
+            type: MaterialType.transparency,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: KRadius.md,
+                boxShadow: [
+                  BoxShadow(
+                    color: KColor.palette.shadow.withValues(
+                      alpha: (KColor.isDark ? 0.6 : 0.16) * t,
+                    ),
+                    blurRadius: 24 * t,
+                    offset: Offset(0, 12 * t),
+                    spreadRadius: -4,
+                  ),
+                ],
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Hairline for cards and rows: a light seam on Carbon, the warm border on
+/// Paper. A getter so it follows the active theme.
+Color get _hairline =>
+    KColor.isDark ? KColor.fg.withValues(alpha: 0.07) : KColor.border;
+
+/// Sentence-case field / section label.
+TextStyle get _fieldLabel => KText.caption.copyWith(
+      color: KColor.textSecondary,
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+    );
+
+InputDecoration _fieldDecoration({String? label, String? hint}) {
+  return InputDecoration(
+    labelText: label,
+    hintText: hint,
+    labelStyle: KText.body.copyWith(color: KColor.textSecondary),
+    hintStyle: KText.body.copyWith(color: KColor.textMuted),
+    filled: true,
+    fillColor: KColor.isDark
+        ? KColor.fg.withValues(alpha: 0.05)
+        : KColor.cardHigh.withValues(alpha: 0.6),
+    contentPadding: const EdgeInsets.symmetric(
+      horizontal: 14,
+      vertical: KSpacing.md,
+    ),
+    border: const OutlineInputBorder(
+      borderRadius: KRadius.sm,
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: KRadius.sm,
+      borderSide: BorderSide(color: _hairline),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: KRadius.sm,
+      borderSide: BorderSide(color: KColor.ink, width: 1.5),
+    ),
+  );
+}
+
+// ─── Private setup widgets ───────────────────────────────────────────────────
+
+class _ChoiceCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String description;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ChoiceCard({
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.md),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: '$label. $description',
+        excludeSemantics: true,
+        child: Pressable(
+          scale: 0.98,
+          borderRadius: KRadius.lg,
+          onTap: () {
+            if (!selected) KHaptics.select();
+            onTap();
+          },
+          child: AnimatedContainer(
+            duration: KMotion.of(context, KMotion.standard),
+            curve: KMotion.emphasizedCurve,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              borderRadius: KRadius.lg,
+              // Selected = ink outline + a whisper of ink tint; no glow.
+              color: selected
+                  ? Color.alphaBlend(
+                      KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.035),
+                      KColor.card,
+                    )
+                  : KColor.card,
+              border: Border.all(
+                color: selected ? KColor.ink : _hairline,
+                width: selected ? 1.5 : 1.0,
+              ),
+              boxShadow: KShadow.card,
+            ),
+            child: Row(
+              children: [
+                KIcon(
+                  icon,
+                  size: KIcons.lg,
+                  color: selected ? KColor.textPrimary : KColor.textSecondary,
+                ),
+                const SizedBox(width: KSpacing.lg),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: KText.h3.copyWith(fontSize: 16)),
+                      const SizedBox(height: KSpacing.xs),
+                      Text(description, style: KText.caption.copyWith(fontSize: 13)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: KSpacing.sm),
+                AnimatedSwitcher(
+                  duration: KMotion.of(context, KMotion.quick),
+                  transitionBuilder: (child, anim) => ScaleTransition(
+                    scale: CurvedAnimation(
+                      parent: anim,
+                      curve: KMotion.overshoot,
+                    ),
+                    child: child,
+                  ),
+                  child: selected
+                      ? Icon(
+                          Icons.check_circle_rounded,
+                          key: ValueKey('on'),
+                          color: KColor.ink,
+                          size: 22,
+                        )
+                      : Icon(
+                          Icons.radio_button_unchecked_rounded,
+                          key: ValueKey('off'),
+                          color: KColor.textDisabled,
+                          size: 22,
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DaysTile extends StatelessWidget {
+  final int days;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _DaysTile({
+    required this.days,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$days days per week',
+      excludeSemantics: true,
+      child: Pressable(
+        borderRadius: KRadius.xl,
+        onTap: () {
+          if (!selected) KHaptics.select();
+          onTap();
+        },
+        child: AnimatedContainer(
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
+          decoration: BoxDecoration(
+            borderRadius: KRadius.xl,
+            color: selected
+                ? Color.alphaBlend(
+                    KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.035),
+                    KColor.card,
+                  )
+                : KColor.card,
+            border: Border.all(
+              color: selected ? KColor.ink : _hairline,
+              width: selected ? 1.5 : 1.0,
+            ),
+            boxShadow: KShadow.card,
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedDefaultTextStyle(
+                  duration: KMotion.of(context, KMotion.standard),
+                  style: KText.numDisplay.copyWith(
+                    fontSize: 42,
+                    color: selected ? KColor.textPrimary : KColor.textSecondary,
+                  ),
+                  child: Text('$days'),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (selected) ...[
+                      Icon(
+                        Icons.check_rounded,
+                        color: KColor.ink,
+                        size: 14,
+                      ),
+                      const SizedBox(width: KSpacing.xs),
+                    ],
+                    Flexible(
+                      child: Text(
+                        'days a week',
+                        style: KText.caption.copyWith(fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WeekdayBadge extends StatelessWidget {
+  final String label;
+  const _WeekdayBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 46),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: KColor.violet.withValues(alpha: KColor.isDark ? 0.12 : 0.08),
+        borderRadius: KRadius.pill,
+        border: Border.all(
+          color: KColor.violet.withValues(alpha: KColor.isDark ? 0.3 : 0.24),
+        ),
+      ),
+      child: Text(
+        label,
+        style: KText.label.copyWith(
+          color: KColor.textPrimary,
+          fontSize: 12,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+class _AddExerciseButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddExerciseButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      borderRadius: KRadius.md,
+      semanticLabel: 'Add exercise',
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(
+          vertical: KSpacing.md,
+          horizontal: KSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: KRadius.md,
+          border: Border.all(
+            color: KColor.fg.withValues(alpha: KColor.isDark ? 0.18 : 0.2),
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.add_circle_outline_rounded,
+              color: KColor.textPrimary,
+              size: 18,
+            ),
+            const SizedBox(width: KSpacing.sm),
+            Flexible(
+              child: Text(
+                'Add exercise',
+                textAlign: TextAlign.center,
+                style: KText.bodyMedium.copyWith(
+                  color: KColor.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1137,40 +1552,29 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
       expand: false,
       builder: (_, controller) => Column(
         children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 10, bottom: 6),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: KColor.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
+          const KDragHandle(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            padding: const EdgeInsets.fromLTRB(
+              KSpacing.lg,
+              KSpacing.xs,
+              KSpacing.lg,
+              KSpacing.sm,
+            ),
             child: TextField(
               autofocus: true,
-              style: const TextStyle(color: Colors.white),
+              style: KText.body,
               onChanged: (v) => setState(() => _query = v),
-              decoration: InputDecoration(
-                hintText: 'Search exercises...',
-                prefixIcon: const Icon(
-                  Icons.search_rounded,
-                  color: KColor.textMuted,
-                ),
-                fillColor: KColor.surface,
-                filled: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+              decoration: _fieldDecoration(hint: 'Search exercises…')
+                  .copyWith(
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: KColor.textMuted,
+                    ),
+                  ),
             ),
           ),
           _CreateCustomTile(onCreated: (ex) => Navigator.of(context).pop(ex)),
-          const Divider(height: 1, color: KColor.border),
+          Divider(height: 1, color: KColor.divider),
           Expanded(
             child: ListView.builder(
               controller: controller,
@@ -1181,16 +1585,13 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
                 return ListTile(
                   title: Text(
                     ex.name,
-                    style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13.5),
+                    style: KText.bodyMedium.copyWith(fontSize: 14),
                   ),
                   subtitle: Text(
                     '${ex.muscleGroup}${isCustom ? ' (custom)' : ''}',
-                    style: KText.caption.copyWith(color: KColor.textMuted),
+                    style: KText.caption.copyWith(fontSize: 13),
                   ),
-                  trailing: const Icon(
-                    Icons.add_rounded,
-                    color: KColor.green,
-                  ),
+                  trailing: Icon(Icons.add_rounded, color: KColor.textSecondary),
                   onTap: () => Navigator.of(context).pop(ex),
                 );
               },
@@ -1203,13 +1604,9 @@ class _ExercisePickerSheetState extends State<_ExercisePickerSheet> {
 }
 
 Future<Exercise?> showCreateCustomExerciseSheet(BuildContext context) {
-  return showModalBottomSheet<Exercise>(
+  return showKSheet<Exercise>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: const Color(0xFF1A1A28),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
     builder: (_) => const _CreateCustomExerciseSheet(),
   );
 }
@@ -1220,7 +1617,10 @@ class _CreateCustomTile extends StatelessWidget {
   const _CreateCustomTile({required this.onCreated});
 
   @override
-  Widget build(BuildContext context) => InkWell(
+  Widget build(BuildContext context) => Pressable(
+    scale: 0.98,
+    borderRadius: KRadius.md,
+    semanticLabel: 'Add custom exercise',
     onTap: () async {
       final ex = await showCreateCustomExerciseSheet(context);
       if (ex != null) {
@@ -1228,37 +1628,39 @@ class _CreateCustomTile extends StatelessWidget {
       }
     },
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: KSpacing.lg,
+        vertical: KSpacing.lg,
+      ),
       child: Row(
         children: [
           Container(
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: KColor.green.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
+              color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.05),
+              borderRadius: KRadius.sm,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.add_rounded,
-              color: KColor.green,
+              color: KColor.textPrimary,
               size: 20,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: KSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '+ Add Custom Exercise',
+                  'Add custom exercise',
                   style: KText.bodyMedium.copyWith(
-                    color: KColor.green,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
                   'Save your own exercise and use it everywhere',
-                  style: KText.caption.copyWith(color: KColor.textMuted),
+                  style: KText.caption.copyWith(fontSize: 13),
                 ),
               ],
             ),
@@ -1319,20 +1721,22 @@ class _CreateCustomExerciseSheetState
     final repMin = int.tryParse(_repMinCtrl.text.trim());
     final repMax = int.tryParse(_repMaxCtrl.text.trim());
     if (name.isEmpty) {
+      KHaptics.reject();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a name for the exercise.'),
-          backgroundColor: Color(0xFF1E1E2C),
+        SnackBar(
+          content: Text('Give the exercise a name first.'),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
     if ((repMin != null || repMax != null) &&
         (repMin == null || repMax == null || repMin <= 0 || repMax < repMin)) {
+      KHaptics.reject();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid rep range.'),
-          backgroundColor: Color(0xFF1E1E2C),
+        SnackBar(
+          content: Text('Check the rep range. Use both numbers, low to high.'),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -1361,222 +1765,218 @@ class _CreateCustomExerciseSheetState
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+        padding: const EdgeInsets.only(bottom: 40),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: KColor.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+            const KSheetHeader(
+              'Custom exercise',
+              subtitle:
+                  'Saved to your library. Shows up in setup, logging and history.',
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                KSpacing.p,
+                KSpacing.lg,
+                KSpacing.p,
+                0,
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Custom Exercise',
-              style: KText.h2.copyWith(color: Colors.white),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Saved permanently and available in split setup, logging, and history.',
-              style: KText.caption.copyWith(color: KColor.textSecondary),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _nameCtrl,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white),
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: 'Exercise name (e.g. Preacher Curl)',
-                labelStyle: const TextStyle(color: KColor.textSecondary),
-                filled: true,
-                fillColor: KColor.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                    color: KColor.green,
-                    width: 1.5,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'DEFAULT REP RANGE (OPTIONAL)',
-              style: KText.label.copyWith(fontSize: 10),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _repMinCtrl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Min reps',
-                      labelStyle: const TextStyle(color: KColor.textSecondary),
-                      filled: true,
-                      fillColor: KColor.surface,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _nameCtrl,
+                    autofocus: true,
+                    style: KText.body,
+                    cursorColor: KColor.ink,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: _fieldDecoration(
+                      label: 'Exercise name (e.g. Preacher curl)',
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _repMaxCtrl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Max reps',
-                      labelStyle: const TextStyle(color: KColor.textSecondary),
-                      filled: true,
-                      fillColor: KColor.surface,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _notesCtrl,
-              style: const TextStyle(color: Colors.white),
-              textCapitalization: TextCapitalization.sentences,
-              maxLines: 2,
-              decoration: InputDecoration(
-                labelText: 'Notes or cue (optional)',
-                hintText: 'Example: chest-supported, use 10 to 15 reps',
-                labelStyle: const TextStyle(color: KColor.textSecondary),
-                hintStyle: const TextStyle(color: KColor.textMuted),
-                filled: true,
-                fillColor: KColor.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'MUSCLE GROUP',
-              style: KText.label.copyWith(fontSize: 10),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _muscleGroups.map((g) {
-                final selected = _muscleGroup == g;
-                return GestureDetector(
-                  onTap: () => setState(() => _muscleGroup = g),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? KColor.green.withValues(alpha: 0.15)
-                          : KColor.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: selected ? KColor.green : KColor.border,
-                      ),
-                    ),
-                    child: Text(
-                      g,
-                      style: TextStyle(
-                        color: selected ? KColor.green : KColor.textSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'EXERCISE TYPE',
-              style: KText.label.copyWith(fontSize: 10),
-            ),
-            const SizedBox(height: 10),
-            for (final opt in _typeOptions)
-              GestureDetector(
-                onTap: () => setState(() => _type = opt.type),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _type == opt.type
-                        ? KColor.green.withValues(alpha: 0.15)
-                        : KColor.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _type == opt.type ? KColor.green : KColor.border,
-                    ),
-                  ),
-                  child: Row(
+                  const SizedBox(height: KSpacing.xl),
+                  Text('Default rep range (optional)', style: _fieldLabel),
+                  const SizedBox(height: 10),
+                  Row(
                     children: [
-                      Text(opt.emoji, style: const TextStyle(fontSize: 18)),
-                      const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              opt.label,
-                              style: KText.bodyMedium.copyWith(
-                                color: _type == opt.type ? Colors.white : KColor.textSecondary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              opt.hint,
-                              style: KText.caption.copyWith(color: KColor.textMuted),
-                            ),
-                          ],
+                        child: TextField(
+                          controller: _repMinCtrl,
+                          keyboardType: TextInputType.number,
+                          style: KText.numSmall.copyWith(fontSize: 14),
+                          cursorColor: KColor.ink,
+                          decoration: _fieldDecoration(label: 'Min reps'),
                         ),
                       ),
-                      if (_type == opt.type)
-                        const Icon(
-                          Icons.check_circle_rounded,
-                          color: KColor.green,
-                          size: 18,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: _repMaxCtrl,
+                          keyboardType: TextInputType.number,
+                          style: KText.numSmall.copyWith(fontSize: 14),
+                          cursorColor: KColor.ink,
+                          decoration: _fieldDecoration(label: 'Max reps'),
                         ),
+                      ),
                     ],
                   ),
-                ),
-              ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: KButton(
-                label: 'Save Exercise',
-                onTap: _saving ? null : _save,
+                  const SizedBox(height: KSpacing.xl),
+                  TextField(
+                    controller: _notesCtrl,
+                    style: KText.body,
+                    cursorColor: KColor.ink,
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 2,
+                    decoration: _fieldDecoration(
+                      label: 'Notes or cue (optional)',
+                      hint: 'Example: chest-supported, use 10 to 15 reps',
+                    ),
+                  ),
+                  const SizedBox(height: KSpacing.xl),
+                  Text('Muscle group', style: _fieldLabel),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: KSpacing.sm,
+                    runSpacing: 0,
+                    children: _muscleGroups.map((g) {
+                      final selected = _muscleGroup == g;
+                      return Semantics(
+                        button: true,
+                        selected: selected,
+                        label: g,
+                        excludeSemantics: true,
+                        // 48dp hit area around a 40dp ink-selectable chip.
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            if (!selected) KHaptics.select();
+                            setState(() => _muscleGroup = g);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: AnimatedContainer(
+                              duration: KMotion.of(context, KMotion.quick),
+                              constraints: const BoxConstraints(minHeight: 40),
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? KColor.ink
+                                    : KColor.fg.withValues(
+                                        alpha: KColor.isDark ? 0.05 : 0.04,
+                                      ),
+                                borderRadius: KRadius.pill,
+                                border: Border.all(
+                                  color: selected ? KColor.ink : _hairline,
+                                ),
+                              ),
+                              child: Text(
+                                g,
+                                style: KText.caption.copyWith(
+                                  fontSize: 13,
+                                  color: selected
+                                      ? KColor.onInk
+                                      : KColor.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: KSpacing.xl),
+                  Text('Exercise type', style: _fieldLabel),
+                  const SizedBox(height: 10),
+                  for (final opt in _typeOptions)
+                    Semantics(
+                      button: true,
+                      selected: _type == opt.type,
+                      label: '${opt.label}. ${opt.hint}',
+                      excludeSemantics: true,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (_type != opt.type) KHaptics.select();
+                          setState(() => _type = opt.type);
+                        },
+                        child: AnimatedContainer(
+                          duration: KMotion.of(context, KMotion.quick),
+                          margin: const EdgeInsets.only(bottom: KSpacing.sm),
+                          constraints: const BoxConstraints(minHeight: 56),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _type == opt.type
+                                ? Color.alphaBlend(
+                                    KColor.fg.withValues(
+                                      alpha: KColor.isDark ? 0.06 : 0.035,
+                                    ),
+                                    KColor.card,
+                                  )
+                                : KColor.fg.withValues(
+                                    alpha: KColor.isDark ? 0.03 : 0.02,
+                                  ),
+                            borderRadius: KRadius.sm,
+                            border: Border.all(
+                              color: _type == opt.type
+                                  ? KColor.ink
+                                  : _hairline,
+                              width: _type == opt.type ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      opt.label,
+                                      style: KText.bodyMedium.copyWith(
+                                        color: _type == opt.type
+                                            ? KColor.textPrimary
+                                            : KColor.textSecondary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    Text(
+                                      opt.hint,
+                                      style: KText.caption.copyWith(
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (_type == opt.type)
+                                Icon(
+                                  Icons.check_circle_rounded,
+                                  color: KColor.ink,
+                                  size: 18,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: KSpacing.xxl),
+                  SizedBox(
+                    width: double.infinity,
+                    child: KButton(
+                      label: 'Save exercise',
+                      loading: _saving,
+                      onTap: _saving ? null : _save,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1589,13 +1989,11 @@ class _CreateCustomExerciseSheetState
 class _TypeOption {
   final ExerciseType type;
   final String label;
-  final String emoji;
   final String hint;
 
   const _TypeOption({
     required this.type,
     required this.label,
-    required this.emoji,
     required this.hint,
   });
 }
@@ -1603,32 +2001,27 @@ class _TypeOption {
 const _typeOptions = [
   _TypeOption(
     type: ExerciseType.barbellCompound,
-    label: 'Barbell Compound',
-    emoji: '🏋️',
+    label: 'Barbell compound',
     hint: '+2.5 kg jumps when rep range is earned',
   ),
   _TypeOption(
     type: ExerciseType.dumbbell,
     label: 'Dumbbell',
-    emoji: '💪',
     hint: '+2 kg jumps (nearest DB increment)',
   ),
   _TypeOption(
     type: ExerciseType.cableMachine,
-    label: 'Cable / Machine',
-    emoji: '⚙️',
+    label: 'Cable or machine',
     hint: '+5 kg stack increments',
   ),
   _TypeOption(
     type: ExerciseType.isolation,
     label: 'Isolation',
-    emoji: '🎯',
     hint: 'Beat reps twice before adding weight',
   ),
   _TypeOption(
     type: ExerciseType.bodyweight,
     label: 'Bodyweight',
-    emoji: '🧘',
     hint: 'Rep-first progression, then add load',
   ),
 ];

@@ -52,6 +52,62 @@ class ExerciseSearchResult {
   });
 }
 
+/// Normalized fields of one exercise that scoring reads on every keystroke.
+/// Computed once per definition (they depend only on the definition).
+class ExerciseSearchFields {
+  final String normName;
+  final String normDisplay;
+  final String normId;
+  final String normTarget;
+  final String normEq;
+  final List<String> nameTokens;
+  final List<String> displayTokens;
+
+  /// Typo fallback: normalized display/name/canonical/aliases.
+  final Set<String> candidatePhrases;
+
+  /// Typo fallback: tokens of display/name/canonical/aliases.
+  final Set<String> candidateTokens;
+
+  ExerciseSearchFields._({
+    required this.normName,
+    required this.normDisplay,
+    required this.normId,
+    required this.normTarget,
+    required this.normEq,
+    required this.nameTokens,
+    required this.displayTokens,
+    required this.candidatePhrases,
+    required this.candidateTokens,
+  });
+
+  factory ExerciseSearchFields.of(ExerciseDefinition ex) {
+    final normName = ExerciseQueryNormalizer.normalize(ex.name);
+    final normDisplay = ExerciseQueryNormalizer.normalize(ex.displayName);
+    return ExerciseSearchFields._(
+      normName: normName,
+      normDisplay: normDisplay,
+      normId: ExerciseQueryNormalizer.normalize(ex.id),
+      normTarget: ExerciseQueryNormalizer.normalize(ex.targetMuscle),
+      normEq: ExerciseQueryNormalizer.normalize(ex.equipment),
+      nameTokens: ExerciseQueryNormalizer.extractTokens('$normDisplay $normName'),
+      displayTokens: ExerciseQueryNormalizer.extractTokens(normDisplay),
+      candidatePhrases: <String>{
+        normDisplay,
+        normName,
+        ExerciseQueryNormalizer.normalize(ex.canonicalName),
+        ...ex.aliases.map(ExerciseQueryNormalizer.normalize),
+      },
+      candidateTokens: <String>{
+        ...ExerciseQueryNormalizer.extractTokens(normDisplay),
+        ...ExerciseQueryNormalizer.extractTokens(ex.name),
+        ...ExerciseQueryNormalizer.extractTokens(ex.canonicalName),
+        ...ex.aliases.expand(ExerciseQueryNormalizer.extractTokens),
+      },
+    );
+  }
+}
+
 /// Internal precomputed index for high-speed, relevance-ranked exercise search.
 class ExerciseSearchIndex {
   final List<ExerciseDefinition> allDefinitions;
@@ -61,6 +117,9 @@ class ExerciseSearchIndex {
   final Map<String, List<ExerciseDefinition>> _exactAliasMap = {};
   final Map<String, Set<String>> _defAliasesMap = {};
   final Map<String, Set<String>> _defTokensMap = {};
+  // Keyed by object identity: fields depend only on that exact definition.
+  final Map<ExerciseDefinition, ExerciseSearchFields> _fields =
+      Map<ExerciseDefinition, ExerciseSearchFields>.identity();
 
   ExerciseSearchIndex(this.allDefinitions) {
     _buildIndex();
@@ -68,6 +127,7 @@ class ExerciseSearchIndex {
 
   void _buildIndex() {
     for (final def in allDefinitions) {
+      _fields[def] = ExerciseSearchFields.of(def);
       final normName = ExerciseQueryNormalizer.normalize(def.name);
       final normDisplay = ExerciseQueryNormalizer.normalize(def.displayName);
       final normCanonical = ExerciseQueryNormalizer.normalize(def.canonicalName);
@@ -110,6 +170,11 @@ class ExerciseSearchIndex {
 
   Set<String> getTokensFor(String exerciseId) =>
       _defTokensMap[exerciseId] ?? const {};
+
+  /// Precomputed normalized fields for [def]; computed on the spot for a
+  /// definition this index was not built with.
+  ExerciseSearchFields fieldsFor(ExerciseDefinition def) =>
+      _fields[def] ?? ExerciseSearchFields.of(def);
 }
 
 /// Relevance-Ranked Search Engine for Kynetix Exercise Discovery.
@@ -122,6 +187,12 @@ class ExerciseSearchEngine {
   /// Rebuilds the search index with all active catalog definitions.
   void setDefinitions(List<ExerciseDefinition> definitions) {
     _index = ExerciseSearchIndex(definitions);
+  }
+
+  /// Installs an index that was already built (e.g. in a background isolate)
+  /// for exactly the definitions the library exposes.
+  void setPrebuiltIndex(ExerciseSearchIndex index) {
+    _index = index;
   }
 
   /// Executes relevance-ranked search across the exercise catalog.
@@ -162,6 +233,11 @@ class ExerciseSearchEngine {
     // Generate search variations (e.g. "t-bar" -> "t bar", "tbar", "db" -> "dumbbell")
     final queryVariations = ExerciseQueryNormalizer.generateVariations(query);
     final queryTokens = rawTokens;
+    // Per-token synonym sets depend only on the query: build them once per
+    // search instead of once per exercise.
+    final queryTokenSyns = [
+      for (final t in queryTokens) ExerciseQueryNormalizer.generateVariations(t),
+    ];
 
     final scoredResults = <ExerciseSearchResult>[];
 
@@ -184,10 +260,11 @@ class ExerciseSearchEngine {
       final personalBoost = UserExercisePreferencesService.instance.getPersonalBoost(ex.id);
 
       final scoreTuple = _scoreExercise(
-        ex: ex,
+        f: index.fieldsFor(ex),
         cleanQuery: cleanQuery,
         queryVariations: queryVariations,
         queryTokens: queryTokens,
+        queryTokenSyns: queryTokenSyns,
         aliases: aliases,
         tokens: tokens,
         isSplit: isSplit,
@@ -214,6 +291,7 @@ class ExerciseSearchEngine {
     final highConfidenceCount = scoredResults.where((r) => r.score >= 3000).length;
     if (highConfidenceCount < 3 && cleanQuery.length >= 4) {
       final typoMatches = _findTypoFallbackMatches(
+        index: index,
         allDefinitions: allDefinitions,
         cleanQuery: cleanQuery,
         selectedCategory: selectedCat,
@@ -246,7 +324,7 @@ class ExerciseSearchEngine {
     final deduplicatedResults = <ExerciseSearchResult>[];
     final seenKeys = <String>{};
     for (final r in scoredResults) {
-      final key = '${ExerciseQueryNormalizer.normalize(r.definition.displayName)}_${r.definition.equipmentGroup}';
+      final key = '${index.fieldsFor(r.definition).normDisplay}_${r.definition.equipmentGroup}';
       if (seenKeys.add(key)) {
         deduplicatedResults.add(r);
       }
@@ -257,24 +335,25 @@ class ExerciseSearchEngine {
 
   /// Evaluates an exercise against query variations with strict hierarchical scoring.
   ({int score, MatchReason reason}) _scoreExercise({
-    required ExerciseDefinition ex,
+    required ExerciseSearchFields f,
     required String cleanQuery,
     required Set<String> queryVariations,
     required List<String> queryTokens,
+    required List<Set<String>> queryTokenSyns,
     required Set<String> aliases,
     required Set<String> tokens,
     required bool isSplit,
     required bool isRecent,
     required int personalBoost,
   }) {
-    final normName = ExerciseQueryNormalizer.normalize(ex.name);
-    final normDisplay = ExerciseQueryNormalizer.normalize(ex.displayName);
-    final normId = ExerciseQueryNormalizer.normalize(ex.id);
-    final normTarget = ExerciseQueryNormalizer.normalize(ex.targetMuscle);
-    final normEq = ExerciseQueryNormalizer.normalize(ex.equipment);
+    final normName = f.normName;
+    final normDisplay = f.normDisplay;
+    final normId = f.normId;
+    final normTarget = f.normTarget;
+    final normEq = f.normEq;
 
-    final nameTokens = ExerciseQueryNormalizer.extractTokens('$normDisplay $normName');
-    final displayTokens = ExerciseQueryNormalizer.extractTokens(normDisplay);
+    final nameTokens = f.nameTokens;
+    final displayTokens = f.displayTokens;
 
     // ─────────────────────────────────────────────────────────────────────────
     // EXPLICIT VARIATION BONUS & UNREQUESTED MODIFIER PENALTY
@@ -327,8 +406,9 @@ class ExerciseSearchEngine {
 
     // Compactness ratio: How much of the display name is covered by query tokens
     int matchedInDisplay = 0;
-    for (final t in queryTokens) {
-      final syns = ExerciseQueryNormalizer.generateVariations(t);
+    for (var i = 0; i < queryTokens.length; i++) {
+      final t = queryTokens[i];
+      final syns = queryTokenSyns[i];
       if (displayTokens.any((dt) => syns.contains(dt) || dt.startsWith(t))) {
         matchedInDisplay++;
       }
@@ -423,8 +503,7 @@ class ExerciseSearchEngine {
     // E.g. "db incline press" matching "Incline DB Press"
     // ─────────────────────────────────────────────────────────────────────────
     bool allTokensInName = true;
-    for (final t in queryTokens) {
-      final syns = ExerciseQueryNormalizer.generateVariations(t);
+    for (final syns in queryTokenSyns) {
       bool tokenHit = false;
       for (final s in syns) {
         if (nameTokens.contains(s) || nameTokens.any((nt) => nt.startsWith(s))) {
@@ -450,8 +529,7 @@ class ExerciseSearchEngine {
     // SIGNAL 7: All Query Tokens in Enhanced Aliases (+2,200 pts)
     // ─────────────────────────────────────────────────────────────────────────
     bool allTokensInAliases = true;
-    for (final t in queryTokens) {
-      final syns = ExerciseQueryNormalizer.generateVariations(t);
+    for (final syns in queryTokenSyns) {
       bool tokenHit = false;
       for (final s in syns) {
         if (tokens.contains(s) || aliases.any((a) => a.contains(s))) {
@@ -513,6 +591,7 @@ class ExerciseSearchEngine {
 
   /// Typo tolerance fallback using token-level and full-string Levenshtein distance.
   List<ExerciseSearchResult> _findTypoFallbackMatches({
+    required ExerciseSearchIndex index,
     required List<ExerciseDefinition> allDefinitions,
     required String cleanQuery,
     required String? selectedCategory,
@@ -533,13 +612,8 @@ class ExerciseSearchEngine {
         continue;
       }
 
-      final normDisplay = ExerciseQueryNormalizer.normalize(ex.displayName);
-      final candidatePhrases = <String>{
-        normDisplay,
-        ExerciseQueryNormalizer.normalize(ex.name),
-        ExerciseQueryNormalizer.normalize(ex.canonicalName),
-        ...ex.aliases.map(ExerciseQueryNormalizer.normalize),
-      };
+      final fields = index.fieldsFor(ex);
+      final candidatePhrases = fields.candidatePhrases;
 
       double bestPhraseSim = 0.0;
       for (final cp in candidatePhrases) {
@@ -565,12 +639,7 @@ class ExerciseSearchEngine {
 
       // Token-level typo fallback
       if (queryTokens.isNotEmpty) {
-        final candidateTokens = <String>{
-          ...ExerciseQueryNormalizer.extractTokens(normDisplay),
-          ...ExerciseQueryNormalizer.extractTokens(ex.name),
-          ...ExerciseQueryNormalizer.extractTokens(ex.canonicalName),
-          ...ex.aliases.expand(ExerciseQueryNormalizer.extractTokens),
-        };
+        final candidateTokens = fields.candidateTokens;
         int matchedTokens = 0;
         double totalSim = 0.0;
 

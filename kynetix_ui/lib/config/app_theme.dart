@@ -1,118 +1,490 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../ui/k_format.dart';
+
+import '../ui/k_icons.dart';
+import '../ui/k_loaders.dart';
+import '../ui/k_motion.dart';
+import '../ui/k_surfaces.dart';
+import '../ui/k_transitions.dart';
+
+// The design system: one import gives screens tokens, motion, surfaces,
+// transitions and animated primitives.
+export '../ui/k_format.dart';
+export '../ui/k_hero.dart';
+export '../ui/k_icons.dart';
+export '../ui/k_loaders.dart';
+export '../ui/k_motion.dart';
+export '../ui/k_reveal.dart';
+export '../ui/k_surfaces.dart';
+export '../ui/k_transitions.dart';
+export '../ui/k_widgets.dart';
+
+// ─── KPalette ─────────────────────────────────────────────────────────────────
+// "Graphite". Dark first: a neutral near-black ground with surfaces that step
+// up in clear, flat layers and 1px hairlines for edges. No glow, no tinted
+// fog. Colour carries meaning only:
+//   Calories → ember (the one warm accent)
+//   Protein  → mint
+//   Train    → iris
+//   Kyno     → sky
+// Light mode is warm greige paper with white cards and deeper accents.
+
+@immutable
+class KPalette {
+  const KPalette({
+    required this.brightness,
+    required this.bg,
+    required this.surface,
+    required this.card,
+    required this.cardHigh,
+    required this.inset,
+    required this.border,
+    required this.divider,
+    required this.fg,
+    required this.ink,
+    required this.onInk,
+    required this.green,
+    required this.greenDark,
+    required this.ember,
+    required this.saffron,
+    required this.violet,
+    required this.cyan,
+    required this.blue,
+    required this.danger,
+    required this.warning,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textMuted,
+    required this.textDisabled,
+    required this.onAccent,
+    required this.shadow,
+    required this.track,
+    required this.auroraStrength,
+  });
+
+  final Brightness brightness;
+  final Color bg, surface, card, cardHigh, inset, border, divider;
+  final Color fg, ink, onInk;
+  final Color green, greenDark, ember, saffron, violet, cyan, blue;
+  final Color danger, warning;
+  final Color textPrimary, textSecondary, textMuted, textDisabled;
+  final Color onAccent;
+  final Color shadow;
+
+  /// Unfilled part of rings and bars.
+  final Color track;
+  final double auroraStrength;
+
+  bool get isDark => brightness == Brightness.dark;
+
+  /// Graphite night: neutral near-black, flat layered surfaces.
+  static const dark = KPalette(
+    brightness: Brightness.dark,
+    bg: Color(0xFF0A0A0B),
+    surface: Color(0xFF111113),
+    card: Color(0xFF161618),
+    cardHigh: Color(0xFF1F1F22),
+    inset: Color(0xFF0E0E10),
+    border: Color(0xFF2A2A2E),
+    divider: Color(0xFF212124),
+    fg: Color(0xFFFFFFFF),
+    ink: Color(0xFFF4F4F2),
+    onInk: Color(0xFF0A0A0B),
+    green: Color(0xFF4ADE9B),
+    greenDark: Color(0xFF14895A),
+    ember: Color(0xFFFF6A3D),
+    saffron: Color(0xFFFFB648),
+    violet: Color(0xFF9D8CFF),
+    cyan: Color(0xFF5CC8F0),
+    blue: Color(0xFF5B95F7),
+    danger: Color(0xFFFF5A6E),
+    warning: Color(0xFFFFB648),
+    textPrimary: Color(0xFFF4F4F2),
+    textSecondary: Color(0xFFA3A3A8),
+    textMuted: Color(0xFF7C7C82),
+    textDisabled: Color(0xFF4A4A50),
+    onAccent: Color(0xFFFFFFFF),
+    shadow: Color(0xFF000000),
+    track: Color(0xFF242427),
+    auroraStrength: 0,
+  );
+
+  /// Greige paper: warm off-white ground, white cards, deeper accents.
+  static const light = KPalette(
+    brightness: Brightness.light,
+    bg: Color(0xFFF2F2EF),
+    surface: Color(0xFFF8F8F6),
+    card: Color(0xFFFFFFFF),
+    cardHigh: Color(0xFFEBEBE7),
+    inset: Color(0xFFF0F0EC),
+    border: Color(0xFFE2E2DD),
+    divider: Color(0xFFEAEAE5),
+    fg: Color(0xFF111112),
+    ink: Color(0xFF111112),
+    onInk: Color(0xFFFFFFFF),
+    green: Color(0xFF0E9C64),
+    greenDark: Color(0xFF0A7A4E),
+    ember: Color(0xFFF0501F),
+    saffron: Color(0xFFC27A0A),
+    violet: Color(0xFF6650EE),
+    cyan: Color(0xFF0A86B0),
+    blue: Color(0xFF2F6BE0),
+    danger: Color(0xFFD9304A),
+    warning: Color(0xFFB7740B),
+    textPrimary: Color(0xFF111112),
+    textSecondary: Color(0xFF5E5E63),
+    textMuted: Color(0xFF8A8A8F),
+    textDisabled: Color(0xFFBDBDB8),
+    onAccent: Color(0xFFFFFFFF),
+    shadow: Color(0xFF000000),
+    track: Color(0xFFE8E8E3),
+    auroraStrength: 0,
+  );
+}
 
 // ─── KColor ───────────────────────────────────────────────────────────────────
-// All color tokens for the app. Import this everywhere instead of hardcoding.
+// Reads the active palette. Values change when the theme changes, so never
+// cache them in a `static final`, a State field, or a `const`.
 
 abstract class KColor {
+  static KPalette _p = KPalette.dark;
+  static KPalette get palette => _p;
+  static bool get isDark => _p.isDark;
+
   // ── Backgrounds
-  static const bg        = Color(0xFF0F0F1A); // page background
-  static const surface   = Color(0xFF1A1A28); // cards, bars
-  static const card      = Color(0xFF1E1E2C); // elevated cards
-  static const cardHigh  = Color(0xFF252535); // hovered / pressed cards
+  static Color get bg => _p.bg; // page background
+  static Color get surface => _p.surface; // bars, sheets
+  static Color get card => _p.card; // cards
+  static Color get cardHigh => _p.cardHigh; // raised / pressed cards
+
+  /// Recessed tray inside a card (e.g. the logged meals under a meal header).
+  static Color get inset => _p.inset;
 
   // ── Borders
-  static const border    = Color(0xFF2A2A3C);
-  static const divider   = Color(0xFF252535);
+  static Color get border => _p.border;
+  static Color get divider => _p.divider;
 
-  // ── Brand
-  static const green     = Color(0xFF52B788); // primary accent
-  static const greenDark = Color(0xFF2D6A4F); // dark green
-  static const greenGlow = Color(0xFF52B788); // glow accent (same, used explicitly)
+  /// Hairlines and translucent overlays: white on Carbon, ink on Paper.
+  /// Use `KColor.fg.withValues(alpha: …)` instead of `Colors.white.withValues`.
+  static Color get fg => _p.fg;
+
+  // ── Monochrome primary (buttons, selected states)
+  static Color get ink => _p.ink;
+  static Color get onInk => _p.onInk;
+
+  // ── Brand / data
+  static Color get green => _p.green; // protein / success
+  static Color get greenDark => _p.greenDark; // fills behind white text
+  static Color get greenGlow => _p.green;
+  static Color get ember => _p.ember;
+  static Color get saffron => _p.saffron;
+  static Color get violet => _p.violet;
+  static Color get cyan => _p.cyan;
+
+  // ── World accents (one per tab)
+  static Color get fuel => _p.ember;
+  static Color get train => _p.violet;
+  static Color get kyno => _p.cyan;
+
+  /// The accent for dock tab [index]: Nutrition, Train, Kyno.
+  static Color tabAccent(int index) => switch (index) {
+        0 => _p.ember,
+        1 => _p.violet,
+        _ => _p.cyan,
+      };
+
+  /// A whisper of [accent] over a card, for a world's hero surface.
+  static Color tint(Color accent, {double dark = 0.08, double light = 0.06}) =>
+      Color.alphaBlend(accent.withValues(alpha: isDark ? dark : light), _p.card);
 
   // ── Semantic
-  static const calorie   = Color(0xFFFF6B35); // orange
-  static const protein   = Color(0xFF52B788); // green
-  static const amber     = Color(0xFFFFB347);
-  static const blue      = Color(0xFF60A5FA);
-  static const danger    = Color(0xFFEF4444);
-  static const warning   = Color(0xFFF59E0B);
-  static const success   = Color(0xFF10B981);
+  static Color get calorie => _p.ember;
+  static Color get protein => _p.green;
+  static Color get amber => _p.saffron;
+  static Color get blue => _p.blue;
+  static Color get danger => _p.danger;
+  static Color get warning => _p.warning;
+  static Color get success => _p.green;
 
   // ── Text
-  static const textPrimary   = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFB0B7C3);
-  static const textMuted     = Color(0xFF6B7280);
-  static const textDisabled  = Color(0xFF4B5563);
+  static Color get textPrimary => _p.textPrimary;
+  static Color get textSecondary => _p.textSecondary;
+  static Color get textMuted => _p.textMuted;
+  static Color get textDisabled => _p.textDisabled;
+
+  /// Text / icons placed ON a saturated accent fill.
+  static Color get onAccent => _p.onAccent;
+
+  /// Unfilled part of rings and progress bars.
+  static Color get track => _p.track;
+
+  /// The 1px edge of a card.
+  static Color get hairline => isDark ? const Color(0xFF232326) : _p.border;
+}
+
+// ─── KThemeController ─────────────────────────────────────────────────────────
+// System / Light / Dark preference, persisted locally. A UI preference only —
+// it never touches user data. `KThemeScope` applies it.
+
+class KThemeController extends ValueNotifier<ThemeMode> {
+  // Kynetix is designed dark first: everyone starts in dark, and a choice
+  // made in Settings sticks.
+  KThemeController._() : super(ThemeMode.dark);
+  static final instance = KThemeController._();
+
+  static const _key = 'ui_theme_mode_v2';
+  static const _legacyKey = 'ui_theme_mode_v1';
+
+  Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // v1 defaulted to System. Only an explicit Light pick carries over;
+      // everything else starts in dark.
+      final v = prefs.getString(_key) ??
+          (prefs.getString(_legacyKey) == ThemeMode.light.name ? ThemeMode.light.name : null);
+      value = ThemeMode.values.firstWhere(
+        (m) => m.name == v,
+        orElse: () => ThemeMode.dark,
+      );
+    } catch (_) {
+      /* keep dark */
+    }
+  }
+
+  Future<void> set(ThemeMode mode) async {
+    value = mode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_key, mode.name);
+    } catch (_) {}
+  }
+}
+
+/// Resolves the active palette above the app and repaints every widget when it
+/// changes, without remounting anything (state, scroll and forms survive).
+class KThemeScope extends StatefulWidget {
+  const KThemeScope({super.key, required this.builder});
+  final Widget Function(BuildContext context, KPalette palette) builder;
+
+  @override
+  State<KThemeScope> createState() => _KThemeScopeState();
+}
+
+class _KThemeScopeState extends State<KThemeScope> with WidgetsBindingObserver {
+  final _ctrl = KThemeController.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _ctrl.addListener(_apply);
+    _resolve();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _ctrl.removeListener(_apply);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() => _apply();
+
+  void _resolve() {
+    final mode = _ctrl.value;
+    final platformDark =
+        SchedulerBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    final dark =
+        mode == ThemeMode.dark || (mode == ThemeMode.system && platformDark);
+    KColor._p = dark ? KPalette.dark : KPalette.light;
+    KText._refresh();
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: dark
+            ? Brightness.light
+            : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
+  }
+
+  void _apply() {
+    final before = KColor._p;
+    _resolve();
+    if (identical(before, KColor._p) || !mounted) return;
+    setState(() {});
+    // Widgets read KColor statically, so they don't depend on Theme. Mark the
+    // whole tree dirty so everything repaints in the new palette.
+    void visit(Element e) {
+      e.markNeedsBuild();
+      e.visitChildren(visit);
+    }
+
+    (context as Element).visitChildren(visit);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, KColor._p);
+}
+
+// ─── KGradient ────────────────────────────────────────────────────────────────
+
+abstract class KGradient {
+  // Graphite is flat: every "gradient" is one colour, so fills read as solid
+  // pigment. The lists stay two long so existing gradient call sites work.
+  static List<Color> _flat(Color c) => [c, c];
+
+  static List<Color> get fuel => _flat(KColor.ember);
+  static List<Color> get protein => _flat(KColor.green);
+  static List<Color> get train => _flat(KColor.violet);
+  static List<Color> get kyno => _flat(KColor.cyan);
+
+  /// The fill for a world's accent elements.
+  static List<Color> world(KTone tone) => switch (tone) {
+        KTone.fuel => fuel,
+        KTone.train => train,
+        KTone.kyno => kyno,
+        KTone.neutral => primary,
+      };
+
+  /// Primary actions are solid ink: white on Graphite, near-black on paper.
+  static List<Color> get primary => _flat(KColor.ink);
+  static List<Color> get danger => _flat(KColor.danger);
+
+  static LinearGradient linear(
+    List<Color> c, {
+    AlignmentGeometry begin = Alignment.topLeft,
+    AlignmentGeometry end = Alignment.bottomRight,
+  }) => LinearGradient(colors: c, begin: begin, end: end);
 }
 
 // ─── KText ────────────────────────────────────────────────────────────────────
-// Typography scale. Use these consistently.
+// Geist (bundled, OFL) for text and numbers; Bricolage Grotesque (bundled,
+// OFL) for display and h1 headlines, where the type itself is the voice.
+// Numbers use tabular figures so they don't jitter while counting.
 
 abstract class KText {
-  static final _base = GoogleFonts.inter(color: KColor.textPrimary);
+  static const family = 'Inter';
+  static const displayFace = 'InterTight';
 
-  static final display = _base.copyWith(
-    fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5, height: 1.2,
-  );
-  static final h1 = _base.copyWith(
-    fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.25,
-  );
-  static final h2 = _base.copyWith(
-    fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.2, height: 1.3,
-  );
-  static final h3 = _base.copyWith(
-    fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.1, height: 1.35,
-  );
-  static final body = _base.copyWith(
-    fontSize: 14, fontWeight: FontWeight.w400, height: 1.6,
-  );
-  static final bodyMedium = _base.copyWith(
-    fontSize: 14, fontWeight: FontWeight.w500, height: 1.5,
-  );
-  static final caption = _base.copyWith(
-    fontSize: 12, fontWeight: FontWeight.w500, color: KColor.textSecondary, height: 1.4,
-  );
-  static final label = _base.copyWith(
-    fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: KColor.textMuted,
-  );
-  static final numDisplay = _base.copyWith(
-    fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -1.0, height: 1.0,
+  /// The Kynetix wordmark face. Used for the name only.
+  static const brandFace = 'Bricolage';
+  static const _tabular = [FontFeature.tabularFigures()];
+
+  /// Display font family, for inline TextStyles that need the display face.
+  static String? get displayFamily => displayFace;
+
+  static _KTextSet _set = _KTextSet(KPalette.dark);
+  static void _refresh() => _set = _KTextSet(KColor._p);
+
+  static TextStyle get display => _set.display;
+  static TextStyle get h1 => _set.h1;
+  static TextStyle get h2 => _set.h2;
+  static TextStyle get h3 => _set.h3;
+  static TextStyle get body => _set.body;
+  static TextStyle get bodyMedium => _set.bodyMedium;
+  static TextStyle get caption => _set.caption;
+  static TextStyle get label => _set.label;
+  static TextStyle get numDisplay => _set.numDisplay;
+  static TextStyle get numMedium => _set.numMedium;
+  static TextStyle get numSmall => _set.numSmall;
+}
+
+// Inter Tight sets headlines and numbers tight (-4% at display sizes, -2%
+// below), Inter sets everything you read. Weights stop at 700.
+class _KTextSet {
+  _KTextSet(KPalette p)
+    : display = _s(p.textPrimary, 32, FontWeight.w700, -1.3, 1.05, face: KText.displayFace),
+      h1 = _s(p.textPrimary, 25, FontWeight.w700, -0.9, 1.12, face: KText.displayFace),
+      h2 = _s(p.textPrimary, 19, FontWeight.w600, -0.5, 1.22, face: KText.displayFace),
+      h3 = _s(p.textPrimary, 15, FontWeight.w600, -0.25, 1.35),
+      body = _s(p.textPrimary, 14, FontWeight.w400, -0.15, 1.55),
+      bodyMedium = _s(p.textPrimary, 14, FontWeight.w500, -0.15, 1.5),
+      caption = _s(p.textSecondary, 12, FontWeight.w500, -0.05, 1.4),
+      label = _s(p.textMuted, 11.5, FontWeight.w500, 0.1, 1.3),
+      numDisplay = _s(p.textPrimary, 36, FontWeight.w700, -1.5, 1.0, tab: true, face: KText.displayFace),
+      numMedium = _s(p.textPrimary, 22, FontWeight.w600, -0.7, 1.05, tab: true, face: KText.displayFace),
+      numSmall = _s(p.textPrimary, 13, FontWeight.w600, -0.1, 1.1, tab: true);
+
+  final TextStyle display, h1, h2, h3, body, bodyMedium, caption, label;
+  final TextStyle numDisplay, numMedium, numSmall;
+
+  static TextStyle _s(
+    Color c,
+    double size,
+    FontWeight w,
+    double ls,
+    double h, {
+    bool tab = false,
+    String face = KText.family,
+  }) => TextStyle(
+    fontFamily: face,
+    color: c,
+    fontSize: size,
+    fontWeight: w,
+    letterSpacing: ls,
+    height: h,
+    fontFeatures: tab ? KText._tabular : null,
   );
 }
 
 // ─── KSpacing ─────────────────────────────────────────────────────────────────
 
 abstract class KSpacing {
-  static const double xs  = 4;
-  static const double sm  = 8;
-  static const double md  = 12;
-  static const double lg  = 16;
-  static const double xl  = 20;
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 20;
   static const double xxl = 24;
-  static const double p   = 20; // standard horizontal page padding
+  static const double xxxl = 32;
+  static const double p = 20; // standard horizontal page padding
+
+  /// Bottom padding scrollable tab content needs to clear the floating dock.
+  static const double dockClearance = 112;
 }
 
 // ─── KRadius ──────────────────────────────────────────────────────────────────
 
+// Radius follows hierarchy: tags and inputs are nearly square (xs/sm),
+// objects such as a meal or a product are softly rounded (md/lg), and only
+// sheets and the floating dock get the big curve (xl). Buttons are pills.
 abstract class KRadius {
-  static const sm  = BorderRadius.all(Radius.circular(10));
-  static const md  = BorderRadius.all(Radius.circular(14));
-  static const lg  = BorderRadius.all(Radius.circular(18));
-  static const xl  = BorderRadius.all(Radius.circular(22));
-  static const pill= BorderRadius.all(Radius.circular(100));
+  static const xs = BorderRadius.all(Radius.circular(8));
+  static const sm = BorderRadius.all(Radius.circular(12));
+  static const md = BorderRadius.all(Radius.circular(16));
+  static const lg = BorderRadius.all(Radius.circular(22));
+  static const xl = BorderRadius.all(Radius.circular(28));
+  static const pill = BorderRadius.all(Radius.circular(100));
 }
 
 // ─── KShadow ──────────────────────────────────────────────────────────────────
 
 abstract class KShadow {
-  static final card = [
-    BoxShadow(
-      color: Colors.black.withValues(alpha: 0.25),
-      blurRadius: 20, offset: const Offset(0, 6),
-    ),
-  ];
-  static List<BoxShadow> glow(Color c) => [
-    BoxShadow(
-      color: c.withValues(alpha: 0.25),
-      blurRadius: 16, spreadRadius: 0, offset: const Offset(0, 4),
-    ),
-  ];
+  /// Depth comes from surface steps and hairlines in both themes, never from
+  /// shadows.
+  static List<BoxShadow> get card => const [];
+  /// Retired: the owner's rule is no glow anywhere. Kept so callers compile;
+  /// it draws nothing.
+  static List<BoxShadow> glow(Color c, {double strength = 1}) => const [];
 }
 
 // ─── Pressable ────────────────────────────────────────────────────────────────
 // A card that physically responds to press with scale + haptic.
+
+// Press = immediate squash on finger-down (same frame), springy release.
+// Optional `haptic` fires a selection tick on commit; `semanticLabel` makes the
+// target speak as a button.
 
 class Pressable extends StatefulWidget {
   final Widget child;
@@ -121,15 +493,19 @@ class Pressable extends StatefulWidget {
   final double scale;
   final Duration duration;
   final BorderRadius borderRadius;
+  final bool haptic;
+  final String? semanticLabel;
 
   const Pressable({
     super.key,
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.scale = 0.97,
-    this.duration = const Duration(milliseconds: 100),
-    this.borderRadius = const BorderRadius.all(Radius.circular(18)),
+    this.scale = 0.96,
+    this.duration = KMotion.instant,
+    this.borderRadius = const BorderRadius.all(Radius.circular(22)),
+    this.haptic = false,
+    this.semanticLabel,
   });
 
   @override
@@ -139,28 +515,36 @@ class Pressable extends StatefulWidget {
 class _PressableState extends State<Pressable>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double>   _scaleAnim;
+  late final Animation<double> _scaleAnim;
   bool _isDown = false;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync: this, duration: widget.duration,
-      reverseDuration: const Duration(milliseconds: 180),
+      vsync: this,
+      duration: widget.duration,
+      reverseDuration: const Duration(milliseconds: 420),
     );
     _scaleAnim = Tween<double>(begin: 1.0, end: widget.scale).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
+      CurvedAnimation(
+        parent: _ctrl,
+        curve: Curves.easeOutCubic,
+        reverseCurve: const _ReleaseSpring(),
+      ),
     );
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   void _down() {
     if (!_isDown) {
       _isDown = true;
-      _ctrl.forward();
+      if (!KMotion.reduced(context)) _ctrl.forward();
     }
   }
 
@@ -173,22 +557,51 @@ class _PressableState extends State<Pressable>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final enabled = widget.onTap != null || widget.onLongPress != null;
+    Widget out = GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTapDown:    (_) => _down(),
-      onTapUp:      (_) { _up(); widget.onTap?.call(); },
-      onTapCancel:  ()  => _up(),
-      onLongPress:  widget.onLongPress,
-      child: ScaleTransition(
-        scale: _scaleAnim,
-        child: widget.child,
-      ),
+      onTapDown: enabled ? (_) => _down() : null,
+      onTapUp: enabled
+          ? (_) {
+              _up();
+              if (widget.haptic) KHaptics.select();
+              widget.onTap?.call();
+            }
+          : null,
+      onTapCancel: enabled ? () => _up() : null,
+      onLongPress: widget.onLongPress,
+      child: ScaleTransition(scale: _scaleAnim, child: widget.child),
     );
+    if (widget.semanticLabel != null) {
+      out = Semantics(
+        container: true,
+        button: true,
+        enabled: enabled,
+        label: widget.semanticLabel,
+        // excludeSemantics drops the GestureDetector's own tap action, so
+        // re-expose it: screen readers must be able to activate the target.
+        onTap: enabled ? widget.onTap : null,
+        onLongPress: widget.onLongPress,
+        excludeSemantics: true,
+        child: out,
+      );
+    }
+    return out;
   }
 }
 
+/// Reverse curve for press release. Reverse runs t: 1 → 0, so we mirror a
+/// small overshoot spring into that direction.
+class _ReleaseSpring extends Curve {
+  const _ReleaseSpring();
+  static const _s = KSpringCurve(damping: 7, frequency: 13);
+  @override
+  double transformInternal(double t) => 1.0 - _s.transform(1.0 - t);
+}
+
 // ─── KCard ────────────────────────────────────────────────────────────────────
-// Standard app card. Replaces every hand-rolled `Container + BoxDecoration`.
+// Standard app card. Carbon: a lifted surface step plus a hairline (no shadow).
+// Paper: an off-white sheet with a warm hairline and a soft, low shadow.
 
 class KCard extends StatelessWidget {
   final Widget child;
@@ -210,13 +623,14 @@ class KCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Flat: one surface step above the page and a 1px hairline.
     return Container(
       padding: padding ?? const EdgeInsets.all(KSpacing.lg),
       decoration: BoxDecoration(
         color: color ?? KColor.card,
         borderRadius: borderRadius ?? KRadius.lg,
-        border: border ?? Border.all(color: KColor.border, width: 0.5),
-        boxShadow: boxShadow ?? KShadow.card,
+        border: border ?? Border.all(color: KColor.hairline, width: 1),
+        boxShadow: boxShadow,
       ),
       child: child,
     );
@@ -224,6 +638,7 @@ class KCard extends StatelessWidget {
 }
 
 // ─── KSectionTitle ────────────────────────────────────────────────────────────
+// Quiet sentence-case heading for a group of cards.
 
 class KSectionTitle extends StatelessWidget {
   final String text;
@@ -232,19 +647,34 @@ class KSectionTitle extends StatelessWidget {
 
   const KSectionTitle(this.text, {super.key, this.trailing, this.padding});
 
+  static String _sentence(String s) {
+    if (s.isEmpty || s != s.toUpperCase()) return s;
+    final lower = s.toLowerCase();
+    return lower[0].toUpperCase() + lower.substring(1);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: padding ?? const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.xxl, KSpacing.xl, 0),
+      padding:
+          padding ??
+          const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.xxl, KSpacing.xl, 0),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              text.toUpperCase(),
-              style: KText.label,
+            child: Semantics(
+              header: true,
+              child: Text(
+                _sentence(text),
+                style: KText.h3.copyWith(
+                  color: KColor.textSecondary,
+                  fontSize: 14,
+                  letterSpacing: -0.1,
+                ),
+              ),
             ),
           ),
-          if (trailing case final t?) t,
+          ?trailing,
         ],
       ),
     );
@@ -252,7 +682,9 @@ class KSectionTitle extends StatelessWidget {
 }
 
 // ─── KButton ──────────────────────────────────────────────────────────────────
-// Branded primary button with built-in loading state.
+// Primary action: a monochrome ink pill (warm white on Carbon, near-black on
+// Paper) — unmistakably "the" action without borrowing a data colour. 56dp
+// tall, haptic on commit, built-in loading state.
 
 class KButton extends StatelessWidget {
   final String label;
@@ -276,52 +708,76 @@ class KButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = color ?? KColor.greenDark;
+    // One primary look everywhere: a solid ink pill (white on Graphite,
+    // near-black on paper). A custom colour fills it instead.
+    final custom = color != null;
+    final bg = color ?? KColor.ink;
+    final Color fg;
+    if (outlined) {
+      fg = custom ? bg : KColor.textPrimary;
+    } else if (custom) {
+      fg = bg.computeLuminance() > 0.45 ? const Color(0xFF0A0A0B) : Colors.white;
+    } else {
+      fg = KColor.onInk;
+    }
+    final disabled = onTap == null && !loading;
+    final dim = loading || disabled;
     return SizedBox(
       width: width,
       child: Pressable(
-        onTap: (loading || onTap == null) ? null : onTap,
-        borderRadius: KRadius.md,
+        onTap: (loading || onTap == null)
+            ? null
+            : () {
+                KHaptics.commit();
+                onTap!();
+              },
+        borderRadius: KRadius.pill,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+          duration: KMotion.of(context, KMotion.quick),
+          curve: KMotion.emphasizedCurve,
+          constraints: const BoxConstraints(minHeight: 56),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
           decoration: BoxDecoration(
-            color: outlined ? Colors.transparent : (loading ? bg.withValues(alpha: 0.5) : bg),
-            borderRadius: KRadius.md,
-            border: outlined ? Border.all(color: KColor.green, width: 1.5) : null,
-            boxShadow: outlined ? null : [
-              BoxShadow(
-                color: bg.withValues(alpha: 0.4),
-                blurRadius: 12, offset: const Offset(0, 4),
-              ),
-            ],
+            color: outlined ? Colors.transparent : (dim ? bg.withValues(alpha: 0.4) : bg),
+            borderRadius: KRadius.pill,
+            border: outlined
+                ? Border.all(
+                    color: custom ? bg.withValues(alpha: 0.6) : KColor.border,
+                    width: 1,
+                  )
+                : null,
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (loading) ...[
-                const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 10),
-              ] else if (icon != null) ...[
-                Icon(icon, size: 18, color: Colors.white),
-                const SizedBox(width: 8),
-              ],
+              AnimatedSwitcher(
+                duration: KMotion.of(context, KMotion.quick),
+                child: loading
+                    ? Padding(
+                        key: const ValueKey('l'),
+                        padding: const EdgeInsets.only(right: 10),
+                        child: KSpinner(size: 16, color: fg),
+                      )
+                    : icon != null
+                    ? Padding(
+                        key: const ValueKey('i'),
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(icon, size: 19, color: fg),
+                      )
+                    : const SizedBox.shrink(key: ValueKey('n')),
+              ),
               Flexible(
                 child: Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
+                  style: TextStyle(
+                    fontFamily: KText.family,
+                    color: fg,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
                   ),
                 ),
               ),
@@ -345,32 +801,41 @@ class KChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = (color ?? KColor.green).withValues(alpha: 0.15);
-    final fg = textColor ?? color ?? KColor.green;
+    // A quiet filled pill on the step above the card. A colour (when the
+    // tag carries meaning) shows only in the leading icon or dot, so the
+    // label stays readable in both themes.
+    final tone = color;
+    final fg = textColor ?? KColor.textSecondary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: bg,
         borderRadius: KRadius.pill,
-        border: Border.all(color: fg.withValues(alpha: 0.3), width: 0.5),
+        color: KColor.cardHigh,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 12, color: fg),
+            Icon(icon, size: 13, color: tone ?? fg),
             const SizedBox(width: 4),
+          ] else if (tone != null) ...[
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
           ],
           Flexible(
             child: Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
+              style: KText.caption.copyWith(
                 color: fg,
-                fontSize: 11,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 0.3,
+                letterSpacing: 0,
               ),
             ),
           ),
@@ -390,9 +855,11 @@ class KDragHandle extends StatelessWidget {
     return Center(
       child: Container(
         margin: const EdgeInsets.only(top: 12, bottom: 8),
-        width: 36, height: 4,
+        width: 40,
+        height: 4.5,
         decoration: BoxDecoration(
-          color: KColor.border, borderRadius: KRadius.pill,
+          color: KColor.fg.withValues(alpha: 0.18),
+          borderRadius: KRadius.pill,
         ),
       ),
     );
@@ -429,29 +896,14 @@ class KSheetHeader extends StatelessWidget {
 
 // ─── Navigation helpers ───────────────────────────────────────────────────────
 
-/// Slide-up + fade route — used for detail screens (DayDetail, AddMeal, etc.)
-PageRoute<T> slideUpRoute<T>({required WidgetBuilder builder}) {
-  return PageRouteBuilder<T>(
-    pageBuilder: (ctx, anim, sec) => builder(ctx),
-    transitionDuration: const Duration(milliseconds: 350),
-    reverseTransitionDuration: const Duration(milliseconds: 280),
-    transitionsBuilder: (ctx, anim, sec, child) {
-      final slide = Tween<Offset>(
-        begin: const Offset(0, 0.06),
-        end:   Offset.zero,
-      ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
-      return FadeTransition(
-        opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
-        child: SlideTransition(position: slide, child: child),
-      );
-    },
-  );
-}
+/// Rise + fade route — used for composer / editor screens (AddMeal, etc.)
+PageRoute<T> slideUpRoute<T>({required WidgetBuilder builder}) =>
+    kRiseRoute<T>(builder: builder);
 
-/// Haptic tap convenience
-void kHaptic() => HapticFeedback.lightImpact();
-void kHapticMedium() => HapticFeedback.mediumImpact();
-void kHapticSelect() => HapticFeedback.selectionClick();
+/// Haptic conveniences — routed through the central [KHaptics] map.
+void kHaptic() => KHaptics.commit();
+void kHapticMedium() => KHaptics.success();
+void kHapticSelect() => KHaptics.select();
 
 // ─── KGradientCircularProgress ───────────────────────────────────────────────
 
@@ -516,7 +968,10 @@ class _GradientCircularProgressPainter extends CustomPainter {
     final rect = Rect.fromCircle(center: center, radius: radius);
     final sweepGradient = SweepGradient(
       colors: colors,
-      stops: List.generate(colors.length, (index) => index / (colors.length - 1)),
+      stops: List.generate(
+        colors.length,
+        (index) => index / (colors.length - 1),
+      ),
       transform: const GradientRotation(-3.14159 / 2),
     );
 
@@ -560,106 +1015,6 @@ class _GradientCircularProgressPainter extends CustomPainter {
   }
 }
 
-// ─── KShimmer ─────────────────────────────────────────────────────────────────
-
-class KShimmer extends StatefulWidget {
-  final Widget child;
-  final bool enabled;
-
-  const KShimmer({super.key, required this.child, this.enabled = true});
-
-  @override
-  State<KShimmer> createState() => _KShimmerState();
-}
-
-class _KShimmerState extends State<KShimmer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!widget.enabled) return widget.child;
-
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return ShaderMask(
-          blendMode: BlendMode.srcIn,
-          shaderCallback: (bounds) {
-            final double slide = _controller.value;
-            return LinearGradient(
-              begin: const Alignment(-1.0, -0.3),
-              end: const Alignment(1.0, 0.3),
-              colors: const [
-                Color(0xFF1E1E2C),
-                Color(0xFF2E2E3C),
-                Color(0xFF1E1E2C),
-              ],
-              stops: const [0.3, 0.5, 0.7],
-              transform: _ShimmerGradientTransform(slide),
-            ).createShader(bounds);
-          },
-          child: widget.child,
-        );
-      },
-      child: widget.child,
-    );
-  }
-}
-
-class _ShimmerGradientTransform extends GradientTransform {
-  final double percent;
-
-  const _ShimmerGradientTransform(this.percent);
-
-  @override
-  Matrix4? transform(Rect bounds, {TextDirection? textDirection}) {
-    return Matrix4.translationValues(bounds.width * (percent * 2 - 1), 0.0, 0.0);
-  }
-}
-
-class KShimmerBox extends StatelessWidget {
-  final double width;
-  final double height;
-  final BorderRadius? borderRadius;
-
-  const KShimmerBox({
-    super.key,
-    required this.width,
-    required this.height,
-    this.borderRadius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return KShimmer(
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: borderRadius ?? KRadius.md,
-        ),
-      ),
-    );
-  }
-}
-
 // ─── KAnimatedCount ──────────────────────────────────────────────────────────
 
 class KAnimatedCount extends StatefulWidget {
@@ -669,6 +1024,9 @@ class KAnimatedCount extends StatefulWidget {
   final String prefix;
   final int decimalPlaces;
 
+  /// "2,181" instead of "2181" (whole numbers only).
+  final bool thousandsSeparator;
+
   const KAnimatedCount({
     super.key,
     required this.value,
@@ -676,6 +1034,7 @@ class KAnimatedCount extends StatefulWidget {
     this.suffix = '',
     this.prefix = '',
     this.decimalPlaces = 0,
+    this.thousandsSeparator = false,
   });
 
   @override
@@ -695,11 +1054,30 @@ class _KAnimatedCountState extends State<KAnimatedCount>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    _animation = Tween<double>(begin: 0.0, end: widget.value.toDouble()).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
-    _controller.forward();
+    _animation = Tween<double>(
+      begin: 0.0,
+      end: widget.value.toDouble(),
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
     _oldValue = widget.value.toDouble();
+  }
+
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller.duration = KMotion.of(
+      context,
+      const Duration(milliseconds: 800),
+    );
+    if (!_started) {
+      _started = true;
+      if (_controller.duration == Duration.zero) {
+        _controller.value = 1.0;
+      } else {
+        _controller.forward();
+      }
+    }
   }
 
   @override
@@ -707,9 +1085,10 @@ class _KAnimatedCountState extends State<KAnimatedCount>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value) {
       _oldValue = oldWidget.value.toDouble();
-      _animation = Tween<double>(begin: _oldValue, end: widget.value.toDouble()).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-      );
+      _animation = Tween<double>(begin: _oldValue, end: widget.value.toDouble())
+          .animate(
+            CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+          );
       _controller.reset();
       _controller.forward();
     }
@@ -728,174 +1107,15 @@ class _KAnimatedCountState extends State<KAnimatedCount>
       builder: (context, child) {
         final current = _animation.value;
         final text = widget.decimalPlaces == 0
-            ? current.round().toString()
+            ? (widget.thousandsSeparator
+                  ? thousands(current)
+                  : current.round().toString())
             : current.toStringAsFixed(widget.decimalPlaces);
         return Text(
           '${widget.prefix}$text${widget.suffix}',
           style: widget.style,
         );
       },
-    );
-  }
-}
-
-// ─── KPulseLoader ────────────────────────────────────────────────────────────
-
-class KPulseLoader extends StatefulWidget {
-  final double size;
-  final Color color;
-
-  const KPulseLoader({
-    super.key,
-    this.size = 40.0,
-    this.color = KColor.green,
-  });
-
-  @override
-  State<KPulseLoader> createState() => _KPulseLoaderState();
-}
-
-class _KPulseLoaderState extends State<KPulseLoader>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: widget.size * (1.0 + _controller.value * 0.5),
-              height: widget.size * (1.0 + _controller.value * 0.5),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.color.withValues(alpha: 0.4 * (1.0 - _controller.value)),
-              ),
-            ),
-            Container(
-              width: widget.size,
-              height: widget.size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.color,
-                boxShadow: KShadow.glow(widget.color),
-              ),
-              child: const Center(
-                child: Icon(
-                  Icons.bolt,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-// ─── KLoadingDots ────────────────────────────────────────────────────────────
-
-class KLoadingDots extends StatefulWidget {
-  final double size;
-  final Color color;
-
-  const KLoadingDots({
-    super.key,
-    this.size = 6.0,
-    this.color = KColor.textSecondary,
-  });
-
-  @override
-  State<KLoadingDots> createState() => _KLoadingDotsState();
-}
-
-class _KLoadingDotsState extends State<KLoadingDots>
-    with TickerProviderStateMixin {
-  late final List<AnimationController> _controllers;
-  late final List<Animation<double>> _animations;
-
-  @override
-  void initState() {
-    super.initState();
-    _controllers = List.generate(3, (index) {
-      return AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 600),
-      );
-    });
-
-    _animations = _controllers.map((controller) {
-      return Tween<double>(begin: 0.0, end: -8.0).animate(
-        CurvedAnimation(
-          parent: controller,
-          curve: Curves.easeInOut,
-        ),
-      );
-    }).toList();
-
-    _startAnimations();
-  }
-
-  void _startAnimations() async {
-    for (int i = 0; i < 3; i++) {
-      if (!mounted) return;
-      await Future.delayed(const Duration(milliseconds: 150));
-      if (!mounted) return;
-      _controllers[i].repeat(reverse: true);
-    }
-  }
-
-  @override
-  void dispose() {
-    for (var c in _controllers) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(3, (index) {
-        return AnimatedBuilder(
-          animation: _animations[index],
-          builder: (context, child) {
-            return Transform.translate(
-              offset: Offset(0, _animations[index].value),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 2.0),
-                width: widget.size,
-                height: widget.size,
-                decoration: BoxDecoration(
-                  color: widget.color,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            );
-          },
-        );
-      }),
     );
   }
 }
@@ -928,28 +1148,42 @@ class KEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CustomPaint(
-              size: const Size(120, 100),
-              painter: _KEmptyStateVectorPainter(type: type),
+            // A single outlined glyph in a hairline ring. No illustration.
+            ExcludeSemantics(
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.16 : 0.14)),
+                ),
+                child: Icon(
+                  switch (type) {
+                    KEmptyStateType.nutrition => KIcons.plate,
+                    KEmptyStateType.workout => KIcons.train,
+                    KEmptyStateType.general => Icons.inbox_outlined,
+                  },
+                  size: 24,
+                  color: KColor.textSecondary,
+                ),
+              ),
             ),
-            const SizedBox(height: 20),
-            Text(
-              title,
-              style: KText.h2.copyWith(color: Colors.white),
-              textAlign: TextAlign.center,
-            ),
+            const SizedBox(height: 16),
+            Text(title, style: KText.h2, textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(
               message,
-              style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
+              style: KText.caption.copyWith(
+                color: KColor.textSecondary,
+                height: 1.4,
+              ),
               textAlign: TextAlign.center,
             ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 24),
-              KButton(
-                label: actionLabel!,
-                onTap: onAction,
-                width: 200,
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+                child: KButton(label: actionLabel!, onTap: onAction),
               ),
             ],
           ],
@@ -957,146 +1191,6 @@ class KEmptyState extends StatelessWidget {
       ),
     );
   }
-}
-
-class _KEmptyStateVectorPainter extends CustomPainter {
-  final KEmptyStateType type;
-
-  _KEmptyStateVectorPainter({required this.type});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = KColor.green.withValues(alpha: 0.15)
-      ..style = PaintingStyle.fill;
-
-    final strokePaint = Paint()
-      ..color = KColor.green.withValues(alpha: 0.7)
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    final dashedPaint = Paint()
-      ..color = KColor.textMuted.withValues(alpha: 0.3)
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    final center = Offset(size.width / 2, size.height / 2);
-    final double radius = size.height / 2;
-
-    for (double i = 0; i < 360; i += 15) {
-      final double radians = i * 3.14159 / 180;
-      final double nextRadians = (i + 8) * 3.14159 / 180;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        radians,
-        nextRadians - radians,
-        false,
-        dashedPaint,
-      );
-    }
-
-    if (type == KEmptyStateType.nutrition) {
-      final plateRect = Rect.fromCircle(center: center, radius: radius * 0.6);
-      canvas.drawOval(plateRect, paint);
-      canvas.drawOval(plateRect, strokePaint);
-
-      final innerRect = Rect.fromCircle(center: center, radius: radius * 0.4);
-      canvas.drawOval(innerRect, strokePaint..strokeWidth = 1.0);
-
-      strokePaint.strokeWidth = 2.0;
-      final forkX = center.dx - radius * 0.9;
-      canvas.drawLine(Offset(forkX, center.dy - 12), Offset(forkX, center.dy + 16), strokePaint);
-      canvas.drawLine(Offset(forkX - 4, center.dy - 12), Offset(forkX - 4, center.dy - 2), strokePaint);
-      canvas.drawLine(Offset(forkX + 4, center.dy - 12), Offset(forkX + 4, center.dy - 2), strokePaint);
-      canvas.drawLine(Offset(forkX - 4, center.dy - 2), Offset(forkX + 4, center.dy - 2), strokePaint);
-
-      final knifeX = center.dx + radius * 0.9;
-      canvas.drawLine(Offset(knifeX, center.dy - 12), Offset(knifeX, center.dy + 16), strokePaint);
-      final knifePath = Path()
-        ..moveTo(knifeX, center.dy - 12)
-        ..lineTo(knifeX + 5, center.dy - 12)
-        ..quadraticBezierTo(knifeX + 7, center.dy - 6, knifeX, center.dy)
-        ..close();
-      canvas.drawPath(knifePath, strokePaint..style = PaintingStyle.fill);
-      strokePaint.style = PaintingStyle.stroke;
-    } else if (type == KEmptyStateType.workout) {
-      final barWidth = radius * 1.1;
-      canvas.drawLine(
-        Offset(center.dx - barWidth / 2, center.dy),
-        Offset(center.dx + barWidth / 2, center.dy),
-        strokePaint..strokeWidth = 4.0,
-      );
-
-      strokePaint.strokeWidth = 2.0;
-      final leftX = center.dx - barWidth / 2;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(leftX - 4, center.dy), width: 8, height: 32),
-          const Radius.circular(2),
-        ),
-        paint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(leftX - 4, center.dy), width: 8, height: 32),
-          const Radius.circular(2),
-        ),
-        strokePaint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(leftX - 10, center.dy), width: 4, height: 20),
-          const Radius.circular(1),
-        ),
-        strokePaint,
-      );
-
-      final rightX = center.dx + barWidth / 2;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(rightX + 4, center.dy), width: 8, height: 32),
-          const Radius.circular(2),
-        ),
-        paint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(rightX + 4, center.dy), width: 8, height: 32),
-          const Radius.circular(2),
-        ),
-        strokePaint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(rightX + 10, center.dy), width: 4, height: 20),
-          const Radius.circular(1),
-        ),
-        strokePaint,
-      );
-    } else {
-      final boxRect = Rect.fromCenter(center: center, width: 40, height: 44);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(boxRect, const Radius.circular(6)),
-        paint,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(boxRect, const Radius.circular(6)),
-        strokePaint..strokeWidth = 2.0,
-      );
-
-      canvas.drawLine(Offset(center.dx - 10, center.dy - 26), Offset(center.dx - 10, center.dy - 18), strokePaint);
-      canvas.drawLine(Offset(center.dx + 10, center.dy - 26), Offset(center.dx + 10, center.dy - 18), strokePaint);
-
-      canvas.drawLine(Offset(center.dx - 12, center.dy - 8), Offset(center.dx + 12, center.dy - 8), strokePaint..strokeWidth = 1.5);
-      canvas.drawLine(Offset(center.dx - 12, center.dy), Offset(center.dx + 12, center.dy), strokePaint);
-      canvas.drawLine(Offset(center.dx - 12, center.dy + 8), Offset(center.dx + 12, center.dy + 8), strokePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _KEmptyStateVectorPainter oldDelegate) => oldDelegate.type != type;
 }
 
 // ─── KErrorCard ──────────────────────────────────────────────────────────────
@@ -1136,8 +1230,21 @@ class _KErrorCardState extends State<KErrorCard>
       TweenSequenceItem(tween: Tween<double>(begin: 6.0, end: -4.0), weight: 2),
       TweenSequenceItem(tween: Tween<double>(begin: -4.0, end: 0.0), weight: 1),
     ]).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeIn));
+  }
 
-    _shakeController.forward();
+  bool _played = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_played) return;
+    _played = true;
+    // Rejection is acknowledged once; under reduced motion it's message-only.
+    if (KMotion.reduced(context)) {
+      _shakeController.value = 1.0;
+    } else {
+      _shakeController.forward();
+    }
   }
 
   @override
@@ -1158,47 +1265,54 @@ class _KErrorCardState extends State<KErrorCard>
       },
       child: KCard(
         color: KColor.danger.withValues(alpha: 0.08),
-        border: Border.all(color: KColor.danger.withValues(alpha: 0.3), width: 1.0),
+        border: Border.all(
+          color: KColor.danger.withValues(alpha: 0.3),
+          width: 1.0,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(
-              Icons.error_outline_rounded,
-              color: KColor.danger,
-              size: 24,
-            ),
+            Icon(Icons.error_outline_rounded, color: KColor.danger, size: 24),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    widget.title,
-                    style: KText.h3.copyWith(color: Colors.white),
-                  ),
+                  Text(widget.title, style: KText.h3),
                   const SizedBox(height: 4),
                   Text(
                     widget.message,
-                    style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
+                    style: KText.caption.copyWith(
+                      color: KColor.textSecondary,
+                      height: 1.4,
+                    ),
                   ),
                   if (widget.onRetry != null) ...[
                     const SizedBox(height: 12),
-                    GestureDetector(
+                    Pressable(
                       onTap: widget.onRetry,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.refresh_rounded, color: KColor.blue, size: 14),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Retry Request',
-                            style: KText.caption.copyWith(
-                              color: KColor.blue,
-                              fontWeight: FontWeight.w700,
+                      semanticLabel: 'Retry',
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.refresh_rounded,
+                              color: KColor.textPrimary,
+                              size: 14,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            Text(
+                              'Try again',
+                              style: KText.caption.copyWith(
+                                color: KColor.textPrimary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -1226,18 +1340,24 @@ class KSuccessBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: KColor.success.withValues(alpha: 0.15),
         borderRadius: KRadius.md,
-        border: Border.all(color: KColor.success.withValues(alpha: 0.4), width: 1.0),
+        border: Border.all(
+          color: KColor.success.withValues(alpha: 0.4),
+          width: 1.0,
+        ),
         boxShadow: KShadow.glow(KColor.success),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.check_circle_rounded, color: KColor.success, size: 18),
+          Icon(Icons.check_circle_rounded, color: KColor.success, size: 18),
           const SizedBox(width: 10),
           Flexible(
             child: Text(
               message,
-              style: KText.bodyMedium.copyWith(color: Colors.white, fontSize: 13),
+              style: KText.bodyMedium.copyWith(
+                color: KColor.textPrimary,
+                fontSize: 13,
+              ),
             ),
           ),
         ],
@@ -1246,152 +1366,5 @@ class KSuccessBanner extends StatelessWidget {
   }
 }
 
-// ─── KCardShimmer ────────────────────────────────────────────────────────────
-
-class KCardShimmer extends StatelessWidget {
-  final double height;
-  const KCardShimmer({super.key, this.height = 100});
-
-  @override
-  Widget build(BuildContext context) {
-    return KCard(
-      child: SizedBox(
-        height: height,
-        child: KShimmer(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 120,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: 200,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── KChartShimmer ───────────────────────────────────────────────────────────
-
-class KChartShimmer extends StatelessWidget {
-  final double height;
-  const KChartShimmer({super.key, this.height = 140});
-
-  @override
-  Widget build(BuildContext context) {
-    return KCard(
-      child: SizedBox(
-        height: height,
-        child: KShimmer(
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(width: 80, height: 16, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
-                  Container(width: 40, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4))),
-                ],
-              ),
-              const Spacer(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: List.generate(7, (index) {
-                  final barHeight = (index % 3 == 0) ? 60.0 : (index % 2 == 0 ? 100.0 : 40.0);
-                  return Container(
-                    width: 20,
-                    height: barHeight,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  );
-                }),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── KMessageShimmer ──────────────────────────────────────────────────────────
-
-class KMessageShimmer extends StatelessWidget {
-  const KMessageShimmer({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-      child: KShimmer(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 200,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                width: 140,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
+// KShimmer, KShimmerBox, KCardShimmer, KChartShimmer, KMessageShimmer,
+// KPulseLoader and KLoadingDots live in lib/ui/k_loaders.dart (exported above).

@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 
 /// Zero-dependency, high-performance SVG path parser for Flutter.
@@ -255,11 +254,45 @@ class SvgPathParser {
     return cmds.contains(token);
   }
 
+  /// Splits path data into commands and numbers. Arc flags are single
+  /// digits that minified SVG writes with no separator ("a.23.23 0 01-.19"
+  /// is flags 0 and 1, then x = -.19), so inside an arc each 4th and 5th
+  /// argument is read as one character.
   static List<String> _tokenize(String d) {
     final tokens = <String>[];
-    final regex = RegExp(r'[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?');
-    for (final match in regex.allMatches(d)) {
-      tokens.add(match.group(0)!);
+    final number = RegExp(r'[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?');
+    var cmd = '';
+    var argIndex = 0;
+    var i = 0;
+    while (i < d.length) {
+      final ch = d[i];
+      if (ch == ' ' || ch == ',' || ch == '\n' || ch == '\t' || ch == '\r') {
+        i++;
+        continue;
+      }
+      if (RegExp(r'[MmLlHhVvCcSsQqTtAaZz]').hasMatch(ch)) {
+        tokens.add(ch);
+        cmd = ch;
+        argIndex = 0;
+        i++;
+        continue;
+      }
+      final isArc = cmd == 'a' || cmd == 'A';
+      final slot = argIndex % 7;
+      if (isArc && (slot == 3 || slot == 4) && (ch == '0' || ch == '1')) {
+        tokens.add(ch);
+        argIndex++;
+        i++;
+        continue;
+      }
+      final m = number.matchAsPrefix(d, i);
+      if (m == null) {
+        i++;
+        continue;
+      }
+      tokens.add(m.group(0)!);
+      argIndex++;
+      i = m.end;
     }
     return tokens;
   }
@@ -282,47 +315,13 @@ class SvgPathParser {
       return;
     }
 
-    final phi = angle * pi / 180.0;
-    final cosPhi = cos(phi);
-    final sinPhi = sin(phi);
-
-    final dx = (x1 - x2) / 2.0;
-    final dy = (y1 - y2) / 2.0;
-
-    final x1p = cosPhi * dx + sinPhi * dy;
-    final y1p = -sinPhi * dx + cosPhi * dy;
-
-    var rxSq = rx * rx;
-    var rySq = ry * ry;
-    final x1pSq = x1p * x1p;
-    final y1pSq = y1p * y1p;
-
-    final lambda = x1pSq / rxSq + y1pSq / rySq;
-    if (lambda > 1.0) {
-      rx *= sqrt(lambda);
-      ry *= sqrt(lambda);
-      rxSq = rx * rx;
-      rySq = ry * ry;
-    }
-
-    final sign = (largeArc == sweep) ? -1.0 : 1.0;
-    final num = max(0.0, (rxSq * rySq - rxSq * y1pSq - rySq * x1pSq));
-    final den = rxSq * y1pSq + rySq * x1pSq;
-    final sq = den == 0 ? 0.0 : sign * sqrt(num / den);
-
-    final cxp = sq * (rx * y1p / ry);
-    final cyp = sq * -(ry * x1p / rx);
-
-    final cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2.0;
-    final cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2.0;
-
-    final rect = Rect.fromCenter(
-      center: Offset(cx, cy),
-      width: rx * 2,
-      height: ry * 2,
+    // SVG elliptical arc, which Flutter implements natively.
+    path.arcToPoint(
+      Offset(x2, y2),
+      radius: Radius.elliptical(rx, ry),
+      rotation: angle,
+      largeArc: largeArc,
+      clockwise: sweep,
     );
-
-    path.arcTo(rect, 0, pi, false);
-    path.lineTo(x2, y2);
   }
 }

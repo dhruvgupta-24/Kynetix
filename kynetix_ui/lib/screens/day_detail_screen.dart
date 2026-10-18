@@ -1,6 +1,8 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
+import 'barcode_scanner_screen.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
 import '../models/day_status.dart';
@@ -9,15 +11,19 @@ import '../models/quick_add_item.dart';
 import '../screens/onboarding_screen.dart';
 import '../services/coach_service.dart';
 import '../services/health_service.dart';
+import '../services/meal_tombstones.dart';
+import '../services/meal_memory.dart';
 import '../services/nutrition_pipeline.dart';
 import '../services/nutrition_target_engine.dart';
+import '../services/persistence_service.dart';
+import '../services/meal_repeat_service.dart';
 import '../services/quick_add_service.dart';
 import '../services/user_nutrition_memory.dart';
+import '../services/food_link_service.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
 import 'dashboard_screen.dart';
-import 'home_screen.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -34,11 +40,11 @@ class DayDetailScreen extends StatefulWidget {
   static MealSection getSectionForTimeAndDate(DateTime now, DateTime targetDate) {
     final today = DateTime(now.year, now.month, now.day);
     final targetDateMidnight = DateTime(targetDate.year, targetDate.month, targetDate.day);
-    
+
     if (now.hour < 5 && targetDateMidnight.isBefore(today)) {
       return MealSection.lateNight;
     }
-    
+
     final h = now.hour;
     if (h < 11) return MealSection.breakfast;
     if (h < 16) return MealSection.lunch;
@@ -54,6 +60,7 @@ class DayDetailScreen extends StatefulWidget {
 class _DayDetailScreenState extends State<DayDetailScreen> {
   late DateTime _currentDate;
   late final PageController _dayPageController;
+  late final int _initialPageIndex;
 
   static final DateTime _todayMidnight = () {
     final now = DateTime.now();
@@ -83,7 +90,8 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   void initState() {
     super.initState();
     _currentDate = widget.date;
-    _dayPageController = PageController(initialPage: _dateToPageIndex(widget.date));
+    _initialPageIndex = _dateToPageIndex(widget.date);
+    _dayPageController = PageController(initialPage: _initialPageIndex);
   }
 
   @override
@@ -98,6 +106,17 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     return '$wd, ${d.day} ${_months[d.month - 1]} ${d.year}';
   }
 
+  /// Secondary header line: how far this day is from today.
+  String get _relativeLabel {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d = DateTime(_currentDate.year, _currentDate.month, _currentDate.day);
+    final diff = d.difference(today).inDays;
+    if (diff == -1) return 'Yesterday';
+    if (diff == 1) return 'Tomorrow';
+    return diff < 0 ? '${-diff} days ago' : 'In $diff days';
+  }
+
   bool get _isToday {
     final now = DateTime.now();
     return _currentDate.year == now.year &&
@@ -110,26 +129,36 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
+  /// Animated page step that collapses to a jump under reduced motion
+  /// (a zero-duration animateTo is not allowed by the scroll machinery).
+  void _stepPage(int delta) {
+    if (!_dayPageController.hasClients) return;
+    final current = _dayPageController.page?.round() ?? _initialPageIndex;
+    final target = current + delta;
+    final d = KMotion.of(context, KMotion.standard);
+    if (d == Duration.zero) {
+      _dayPageController.jumpToPage(target);
+    } else {
+      _dayPageController.animateToPage(
+        target,
+        duration: d,
+        curve: KMotion.emphasizedCurve,
+      );
+    }
+  }
+
   void _navigateToPrevDay() {
-    _dayPageController.previousPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    _stepPage(-1);
   }
 
   void _navigateToNextDay() {
     if (_isToday) return;
-    _dayPageController.nextPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
+    _stepPage(1);
   }
 
   @override
   Widget build(BuildContext context) {
     final profile = currentUserProfile;
-
-
 
     final target = profile != null
         ? NutritionTargetEngine().effectiveTargetForDate(
@@ -139,9 +168,10 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           )
         : null;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
-      floatingActionButton: _AiCoachFab(
+    return KPage(
+      tone: KTone.fuel,
+      intensity: 0.85,
+      floatingActionButton: KAskKyno(
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => AiCoachScreen(
@@ -154,44 +184,69 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           ),
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          icon: Icon(KIcons.back, color: KColor.textPrimary),
+          tooltip: 'Back',
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _isToday ? 'Today' : _dateLabel,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
+        titleSpacing: 0,
+        title: AnimatedSwitcher(
+          duration: KMotion.of(context, KMotion.quick),
+          switchInCurve: KMotion.decelerate,
+          switchOutCurve: KMotion.accelerate,
+          layoutBuilder: (current, previous) => Stack(
+            alignment: AlignmentDirectional.centerStart,
+            children: [...previous, ?current],
+          ),
+          child: Semantics(
+            key: ValueKey(_dateKey),
+            header: true,
+            liveRegion: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _isToday ? 'Today' : _dateLabel,
+                  style: KText.h2,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
+                ),
+                if (!_isToday)
+                  Text(
+                    _relativeLabel,
+                    style: KText.caption.copyWith(color: KColor.textMuted),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.fade,
+                  ),
+              ],
             ),
-            if (!_isToday)
-              Text(
-                _dateLabel,
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-              ),
-          ],
+          ),
         ),
         actions: [
+          // A balanced pair: "next" stays in place on today, just disabled,
+          // so the control never looks half-drawn.
           IconButton(
-            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white),
+            icon: const Icon(KIcons.prev),
+            color: KColor.textPrimary,
             tooltip: 'Previous day',
             onPressed: _navigateToPrevDay,
           ),
-          if (!_isToday)
-            IconButton(
-              icon: const Icon(Icons.chevron_right_rounded, color: Colors.white),
-              tooltip: 'Next day',
-              onPressed: _navigateToNextDay,
-            ),
+          IconButton(
+            icon: const Icon(KIcons.next),
+            color: KColor.textPrimary,
+            disabledColor: KColor.textDisabled,
+            tooltip: _isToday ? 'Next day (you\'re on today)' : 'Next day',
+            onPressed: _isToday ? null : _navigateToNextDay,
+          ),
+          const SizedBox(width: KSpacing.xs),
         ],
       ),
       body: PageView.builder(
@@ -209,6 +264,8 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             date: date,
             health: widget.health,
             weightContext: widget.weightContext,
+            // One orchestrated entrance — only for the day the screen opened on.
+            entrance: index == _initialPageIndex,
           );
         },
       ),
@@ -222,11 +279,13 @@ class _DayDetailContent extends StatefulWidget {
   final DateTime date;
   final HealthSyncResult? health;
   final WeightContext? weightContext;
+  final bool entrance;
 
   const _DayDetailContent({
     required this.date,
     this.health,
     this.weightContext,
+    this.entrance = false,
   });
 
   @override
@@ -250,60 +309,109 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     }
   }
 
+  /// Saves a meal add/remove explicitly. The target refresh below only saves
+  /// as a side effect, and skips it on days with a manual calorie target —
+  /// which used to let deleted meals come back after a restart. It also
+  /// schedules the cloud upload, so the removal (or Undo) reaches the cloud
+  /// and hydration cannot bring a deleted meal back.
+  void _persistLogChange() {
+    PersistenceService.saveDayLogsAndSync(widget.date).ignore();
+    PersistenceService.notifyLogsChanged();
+  }
+
   void _refresh() {
     NutritionTargetEngine.instance.refreshTargetForDate(widget.date, force: true).ignore();
+    // Undo snackbars and sheets can call back after this page was swiped
+    // away (PageView disposes off-screen days): the data work above still
+    // runs, only the rebuild is skipped.
+    if (!mounted) return;
     setState(() {
       _log = logFor(widget.date);
     });
   }
 
+  /// The same meal on an earlier day: yesterday first, else the same weekday
+  /// last week (mess menus and office lunches repeat by weekday).
+  ({String when, List<MealEntry> entries})? _repeatSource(MealSection section) {
+    for (final (back, label) in [(1, 'yesterday'), (7, 'last ${_weekdayName(widget.date)}')]) {
+      final d = widget.date.subtract(Duration(days: back));
+      final entries = dayLogStore[dateKey(d)]?.entriesFor(section) ?? const <MealEntry>[];
+      if (entries.isNotEmpty) return (when: label, entries: entries);
+    }
+    return null;
+  }
+
+  static String _weekdayName(DateTime d) =>
+      const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d.weekday - 1];
+
+  Future<void> _copyEarlier(MealSection section, String when, List<MealEntry> entries) async {
+    final added = await MealRepeatService.relog(widget.date, entries, section: section);
+    if (!mounted) return;
+    _refresh();
+    KHaptics.success();
+    final kcal = added.fold<double>(0, (s, e) => s + e.calMid).round();
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        persist: false,
+        behavior: SnackBarBehavior.floating,
+        content: Text('Copied ${section.displayName.toLowerCase()} from $when, ${thousands(kcal)} kcal.'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            await MealRepeatService.undo(widget.date, added);
+            _refresh();
+          },
+        ),
+      ));
+  }
+
   Future<void> _openAddMeal(MealSection section) async {
-    final option = await showModalBottomSheet<String>(
+    final repeat = _repeatSource(section);
+    final option = await showKSheet<String>(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+            padding: const EdgeInsets.only(bottom: KSpacing.xl),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const KDragHandle(),
-                const SizedBox(height: 8),
-                Text(
-                  'Add to ${section.displayName}',
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 20),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: KColor.green.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.auto_awesome_rounded, color: KColor.green),
+                KSheetHeader('Add to ${section.displayName}'),
+                const SizedBox(height: KSpacing.sm),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      KOptionRow(
+                        icon: KIcons.kyno,
+                        leading: const KynoMark(size: 24, outlined: true),
+                        title: 'Describe it to Kyno',
+                        subtitle: 'Type it like you\'d say it, e.g. 2 roti and dal.',
+                        onTap: () => Navigator.pop(ctx, 'ai'),
+                      ),
+                      const KHairline(indent: 40),
+                      KOptionRow(
+                        icon: KIcons.scan,
+                        title: 'Scan a barcode',
+                        subtitle: 'Packaged food. Logs the exact pack, like 40 g.',
+                        onTap: () => Navigator.pop(ctx, 'scan'),
+                      ),
+                      if (repeat != null) ...[
+                        const KHairline(indent: 40),
+                        KOptionRow(
+                          icon: Icons.replay_rounded,
+                          title: 'Same as ${repeat.when}',
+                          subtitle: '${repeat.entries.map((e) => e.finalSavedInput.isNotEmpty ? e.finalSavedInput : e.rawInput).take(3).join(', ')}'
+                              '${repeat.entries.length > 3 ? ' and more' : ''}, '
+                              '${thousands(repeat.entries.fold<double>(0, (s, e) => s + e.calMid).round())} kcal',
+                          onTap: () => Navigator.pop(ctx, 'repeat'),
+                        ),
+                      ],
+                    ],
                   ),
-                  title: const Text('AI Meal Logger', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: const Text('Describe your food in plain text (e.g. 2 eggs and toast).', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
-                  onTap: () => Navigator.pop(ctx, 'ai'),
-                ),
-                const Divider(color: KColor.divider, height: 16),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: KColor.blue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.bolt_rounded, color: KColor.blue),
-                  ),
-                  title: const Text('Quick Macro Estimator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: const Text('Directly input macros or estimate with manual override.', style: TextStyle(color: KColor.textMuted, fontSize: 12)),
-                  onTap: () => Navigator.pop(ctx, 'quick'),
                 ),
               ],
             ),
@@ -312,39 +420,53 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       },
     );
 
+    if (option == 'repeat' && repeat != null) {
+      await _copyEarlier(section, repeat.when, repeat.entries);
+      return;
+    }
     if (option == 'ai') {
       if (!mounted) return;
       final entry = await Navigator.of(context).push<dynamic>(
-        PageRouteBuilder(
-          pageBuilder: (_, animation, secondaryAnimation) =>
-              AddMealScreen(section: section, date: widget.date),
-          transitionsBuilder: (_, animation, secondaryAnimation, child) =>
-              SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 1),
-                  end: Offset.zero,
-                ).animate(
-                  CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  ),
-                ),
-                child: child,
-              ),
-          transitionDuration: const Duration(milliseconds: 380),
+        kRiseRoute<dynamic>(
+          builder: (_) => AddMealScreen(section: section, date: widget.date),
         ),
       );
-      if (entry != null) _refresh();
-    } else if (option == 'quick') {
+      if (entry != null) {
+        _refresh();
+        if (entry is MealEntry) _showLoggedFeedback(section);
+      }
+    } else if (option == 'scan') {
       if (!mounted) return;
-      final updated = await showModalBottomSheet<dynamic>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (ctx) => HomeScreen(initialSection: section),
+      final outcome = await openBarcodeFlow(
+        context,
+        date: widget.date,
+        section: section,
       );
-      if (updated == true) _refresh();
+      if (outcome?.entry != null) _refresh();
     }
+  }
+
+  /// Success acknowledgement after a meal comes back from the composer: the
+  /// summary ring and kcal count tick up to the new total (KRing / _CountUp
+  /// animate from their current value), one success haptic lands on the same
+  /// frame, and a short banner repeats the button's verb.
+  void _showLoggedFeedback(MealSection section) {
+    if (!mounted) return;
+    KHaptics.success();
+    final accessible = MediaQuery.accessibleNavigationOf(context);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          duration: Duration(seconds: accessible ? 8 : 2),
+          margin: const EdgeInsets.fromLTRB(KSpacing.lg, 0, KSpacing.lg, 88),
+          padding: EdgeInsets.zero,
+          content: KSuccessBanner(message: 'Meal logged to ${section.displayName}.'),
+        ),
+      );
   }
 
   MealSection get _currentSection {
@@ -360,21 +482,34 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     final sw = Stopwatch()..start();
     final sec = section ?? _currentSection;
 
-    await QuickAddService.instance.addMealToDay(
-      date: widget.date,
-      name: name,
-      calories: calories,
-      protein: protein,
-      section: sec,
-    );
+    // Optimistic: continue as soon as the entry is in the in-memory log; the
+    // coalesced persistence inside addMealToDay finishes in the background.
+    final inserted = Completer<void>();
+    QuickAddService.instance
+        .addMealToDay(
+          date: widget.date,
+          name: name,
+          calories: calories,
+          protein: protein,
+          section: sec,
+          onInserted: (_) {
+            if (!inserted.isCompleted) inserted.complete();
+          },
+        )
+        .then<void>((_) {
+      if (!inserted.isCompleted) inserted.complete();
+    }, onError: (Object e, StackTrace st) {
+      if (!inserted.isCompleted) inserted.completeError(e, st);
+    });
+    await inserted.future;
 
     final tRebuild = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ UI rebuild started: T+${tRebuild.toStringAsFixed(2)} ms');
+    if (kDebugMode) debugPrint('[QuickAddTap] ⏱️ UI rebuild started: T+${tRebuild.toStringAsFixed(2)} ms');
 
     _refresh();
 
     final tVisible = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Meal visible in list: T+${tVisible.toStringAsFixed(2)} ms');
+    if (kDebugMode) debugPrint('[QuickAddTap] ⏱️ Meal visible in list: T+${tVisible.toStringAsFixed(2)} ms');
 
     if (!mounted) return;
     kHapticMedium();
@@ -382,54 +517,34 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       SnackBar(
         content: Row(
           children: [
-            const Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
+            Icon(KIcons.done, color: KColor.onInk, size: 16),
             const SizedBox(width: 8),
-            Text('Added $name', style: const TextStyle(fontSize: 13, color: Colors.white)),
+            Expanded(child: Text('$name logged.')),
           ],
         ),
         duration: const Duration(seconds: 2),
-        backgroundColor: KColor.surface,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: KRadius.md,
-          side: const BorderSide(color: KColor.border, width: 0.5),
-        ),
-        margin: const EdgeInsets.all(12),
       ),
     );
 
     final tSnackbar = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Snackbar shown: T+${tSnackbar.toStringAsFixed(2)} ms');
+    if (kDebugMode) debugPrint('[QuickAddTap] ⏱️ Snackbar shown: T+${tSnackbar.toStringAsFixed(2)} ms');
   }
 
   Future<void> _openEditMeal(MealEntry entry) async {
     final updated = await Navigator.of(context).push<dynamic>(
-      PageRouteBuilder(
-        pageBuilder: (_, animation, secondaryAnimation) => AddMealScreen(
+      kRiseRoute<dynamic>(
+        builder: (_) => AddMealScreen(
           section: entry.section,
           date: widget.date,
           initialEntry: entry,
         ),
-        transitionsBuilder: (_, animation, secondaryAnimation, child) =>
-            SlideTransition(
-              position:
-                  Tween<Offset>(
-                    begin: const Offset(0, 1),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    ),
-                  ),
-              child: child,
-            ),
-        transitionDuration: const Duration(milliseconds: 380),
       ),
     );
     if (!mounted) return;
     if (updated is DeleteSentinel) {
       _log.remove(entry.section, entry);
+      MealTombstones.instance.recordRemoval(dateKey(widget.date), entry);
+      _persistLogChange();
       _refresh();
     } else if (updated != null) {
       _refresh();
@@ -440,75 +555,93 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     final t = _dayTarget;
     if (t == null) return;
     final currentOverride = _log.gymDay?.targetCaloriesOverride;
-    
+
     final ctrl = TextEditingController(
       text: currentOverride != null ? currentOverride.toInt().toString() : t.calories.toInt().toString(),
     );
-    
-    final result = await showModalBottomSheet<double?>(
+
+    final result = await showKSheet<double?>(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
           child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Override Daily Target', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  const Text('Manually adjust your calorie target for this day.', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: ctrl,
-                    autofocus: true,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                    decoration: InputDecoration(
-                      labelText: 'Calories (kcal)',
-                      labelStyle: const TextStyle(color: Color(0xFF4B5563)),
-                      filled: true,
-                      fillColor: const Color(0xFF0F0F14),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: KSpacing.xxl),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const KSheetHeader(
+                      'Change this day\'s target',
+                      subtitle: 'Just for this day. Your usual target stays put.',
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      if (currentOverride != null) ...[
-                        Expanded(
-                          child: TextButton(
-                            onPressed: () => Navigator.pop(ctx, -1.0),
-                            child: const Text('Clear Override', style: TextStyle(color: Color(0xFFF87171))),
+                    const SizedBox(height: KSpacing.lg),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: ctrl,
+                            autofocus: true,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            cursorColor: KColor.ink,
+                            style: KText.numMedium.copyWith(fontSize: 24, color: KColor.textPrimary),
+                            decoration: InputDecoration(
+                              labelText: 'Calories (kcal)',
+                              labelStyle: KText.caption.copyWith(color: KColor.textSecondary),
+                              prefixIcon: Icon(Icons.local_fire_department_rounded, color: KColor.ember),
+                              filled: true,
+                              fillColor: KColor.card,
+                              border: const OutlineInputBorder(
+                                borderRadius: KRadius.md,
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: KRadius.md,
+                                borderSide: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: KRadius.md,
+                                borderSide: BorderSide(color: KColor.ink, width: 1.5),
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            final val = double.tryParse(ctrl.text);
-                            Navigator.pop(ctx, val);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF52B788),
-                            foregroundColor: const Color(0xFF0F0F14),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          const SizedBox(height: KSpacing.xxl),
+                          Row(
+                            children: [
+                              if (currentOverride != null) ...[
+                                Expanded(
+                                  child: TextButton(
+                                    onPressed: () => Navigator.pop(ctx, -1.0),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: KColor.danger,
+                                      minimumSize: const Size(44, 48),
+                                      textStyle: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+                                    ),
+                                    child: const Text('Use usual target'),
+                                  ),
+                                ),
+                                const SizedBox(width: KSpacing.md),
+                              ],
+                              Expanded(
+                                child: KButton(
+                                  label: 'Save target',
+                                  onTap: () {
+                                    final val = double.tryParse(ctrl.text);
+                                    Navigator.pop(ctx, val);
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
-                          child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700)),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -524,16 +657,23 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       }
     } else {
       if (_log.gymDay == null) {
-        _log.gymDay = GymDay(didGym: false, targetCaloriesOverride: result);
+        _log.gymDay = GymDay.unpicked(targetCaloriesOverride: result);
       } else {
         _log.gymDay = _log.gymDay!.withTargetCaloriesOverride(result);
       }
     }
+    // refreshTargetForDate deliberately skips days with a manual target, so
+    // it never saved this change: persist it explicitly or it is lost on
+    // restart.
+    PersistenceService.saveDay(widget.date).ignore();
+    PersistenceService.notifyLogsChanged();
     _refresh();
   }
 
   void _handleDeleteWithUndo(MealSection section, MealEntry entry) {
     _log.remove(section, entry);
+    MealTombstones.instance.recordRemoval(dateKey(widget.date), entry);
+    _persistLogChange();
     _refresh();
 
     final media = MediaQuery.of(context);
@@ -545,44 +685,33 @@ class _DayDetailContentState extends State<_DayDetailContent> {
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 4),
+          duration: Duration(seconds: media.accessibleNavigation ? 10 : 4),
           persist: false,
-          backgroundColor: const Color(0xFF222232),
-          behavior: SnackBarBehavior.floating,
           margin: EdgeInsets.only(
             bottom: bottomPadding + 80.0,
             left: horizontalMargin,
             right: horizontalMargin,
           ),
-          elevation: 6.0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFF52B788), width: 1.2),
-          ),
           content: Row(
             children: [
-              const Icon(Icons.delete_outline_rounded,
-                  color: Color(0xFF9CA3AF), size: 16),
+              Icon(KIcons.delete, color: KColor.onInk, size: 16),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Deleted ${entry.finalSavedInput}',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  'Deleted ${entry.finalSavedInput}.',
+                  maxLines: 2,
                 ),
               ),
             ],
           ),
           action: SnackBarAction(
             label: 'Undo',
-            textColor: const Color(0xFF52B788),
             onPressed: () {
-              _log.add(section, entry);
+              // Touched: the restored copy must beat the deletion even if
+              // it already reached the cloud.
+              _log.add(section, entry.touched());
+              MealTombstones.instance.forgive(dateKey(widget.date), entry);
+              _persistLogChange();
               _refresh();
               kHapticMedium();
             },
@@ -621,106 +750,77 @@ class _DayDetailContentState extends State<_DayDetailContent> {
           )
         : const <CoachInsight>[];
 
+    // Keyed blocks so conditional sections never steal another block's state.
+    var revealIndex = 0;
+    Widget block(String key, Widget child) {
+      // Only the first few blocks take part in the entrance; the rest are
+      // below the fold and should simply be there.
+      final i = revealIndex++;
+      if (!widget.entrance || i > 6) {
+        return KeyedSubtree(key: ValueKey(key), child: child);
+      }
+      return KReveal(key: ValueKey(key), index: i, child: child);
+    }
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+      padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.sm, KSpacing.p, 112),
       children: [
-        _DaySummaryBanner(
-          log: _log,
-          target: target,
-          dayStatus: dayStatus,
-          onEditTarget: _editDailyTarget,
-        ),
-        const SizedBox(height: 12),
-
-        // ── Coach insights ───────────────────────────────────────
-        if (insights.isNotEmpty) ...[
-          _CoachInsightCard(insights: insights),
-          const SizedBox(height: 12),
-        ],
-
-        DailyNutritionQualityCard(
-          log: _log,
-          targetCal: target?.calories ?? 2000.0,
-          targetPro: target?.protein ?? 130.0,
-        ),
-        AdditionalMacrosCard(
-          log: _log,
-          targetCal: target?.calories ?? 2000.0,
-          targetPro: target?.protein ?? 130.0,
-          targetFiber: _targetFiber,
-        ),
-        const SizedBox(height: 12),
-
-        // ── Quick Add ───────────────────────────────────────────
-        _QuickAddCard(onAdd: _quickAddMeal),
-        const SizedBox(height: 12),
-
-        // ── Gym tracking ──────────────────────────────────────────
-        _GymCard(log: _log, date: widget.date, onChanged: _refresh),
-        const SizedBox(height: 4),
-        ...MealSection.values.map(
-          (section) => _MealSectionCard(
-            section: section,
+        block(
+          'summary',
+          _DaySummaryBanner(
             log: _log,
-            onAdd: () => _openAddMeal(section),
-            onEdit: _openEditMeal,
-            onDelete: (entry) => _handleDeleteWithUndo(section, entry),
+            target: target,
+            dayStatus: dayStatus,
+            onEditTarget: _editDailyTarget,
           ),
         ),
+        // ── Coach insights ───────────────────────────────────────
+        if (insights.isNotEmpty)
+          block('insights', _CoachInsightCard(insights: insights)),
+
+        block(
+          'quality',
+          DailyNutritionQualityCard(
+            log: _log,
+            targetCal: target?.calories ?? 2000.0,
+            targetPro: target?.protein ?? 130.0,
+          ),
+        ),
+        block(
+          'macros',
+          AdditionalMacrosCard(
+            log: _log,
+            targetCal: target?.calories ?? 2000.0,
+            targetPro: target?.protein ?? 130.0,
+            targetFiber: _targetFiber,
+          ),
+        ),
+        // ── Meals ───────────────────────────────────────────────
+        const _SectionHead('Meals', top: KSpacing.xxl),
+        ...MealSection.values.map(
+          (section) => block(
+            'meal_${section.name}',
+            _MealSectionCard(
+              section: section,
+              log: _log,
+              onAdd: () => _openAddMeal(section),
+              onEdit: _openEditMeal,
+              onDelete: (entry) => _handleDeleteWithUndo(section, entry),
+            ),
+          ),
+        ),
+        // ── Quick Add ───────────────────────────────────────────
+        block('quickadd', _QuickAddCard(onAdd: _quickAddMeal)),
+
+        // ── Gym tracking ──────────────────────────────────────────
+        block('gym', _GymCard(log: _log, date: widget.date, onChanged: _refresh)),
       ],
     );
   }
 
 }
 
-// ─── AI Coach FAB ─────────────────────────────────────────────────────────────
-
-class _AiCoachFab extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AiCoachFab({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF52B788), Color(0xFF2D6A4F)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF52B788).withValues(alpha: 0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20),
-            SizedBox(width: 8),
-            Text(
-              'Ask Kyno',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.2,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// ─── Shared private bits ─────────────────────────────────────────────────────
 
 // ─── Gym tracking card ────────────────────────────────────────────────────────
 
@@ -750,52 +850,35 @@ class _GymCard extends StatelessWidget {
   /// This synthesised value is NOT persisted to log.gymDay — persistence only
   /// happens when the user interacts (toggleGym / selectType).
   GymDay _effectiveGymDay() {
-    if (log.gymDay != null) return log.gymDay!;
-
-    final splitDay = WorkoutService.instance.splitDayFor(date);
-    if (splitDay == null || splitDay.isRestDay) {
-      return const GymDay(didGym: false);
-    }
-
+    final plan = WorkoutService.instance.planFor(date, log: log);
+    if (plan.source == DayPlanSource.manual && log.gymDay != null) return log.gymDay!;
+    if (!plan.isTraining) return const GymDay.unpicked();
+    final name = plan.name;
     return GymDay(
       didGym:          true,
-      workoutType:     WorkoutType.fromSplitName(splitDay.name),
-      splitDayName:    splitDay.name,
+      workoutType:     name == null ? null : WorkoutType.fromSplitName(name),
+      splitDayName:    name,
       splitOverridden: false,
+      manual:          false,
     );
   }
 
   void _toggleGym(bool didGym) {
+    final base = log.gymDay ?? const GymDay.unpicked();
     if (!didGym) {
-      // User explicitly said No → clear, persist rest-day state.
-      if (log.gymDay != null) {
-        log.gymDay = log.gymDay!.withGym(false);
-      } else {
-        log.gymDay = const GymDay(didGym: false);
-      }
+      // An explicit No: a rest day on both the Nutrition and Train tabs.
+      log.gymDay = base.withGym(false);
       onChanged();
       return;
     }
-
-    // User said Yes.
-    if (log.gymDay != null) {
-      // Already had a stored state — just flip didGym on.
-      log.gymDay = log.gymDay!.withGym(true);
-    } else {
-      // No stored state yet.  Synthesise from split and immediately persist
-      // so the auto-selected workout type survives an app restart.
-      final splitDay = WorkoutService.instance.splitDayFor(date);
-      if (splitDay != null && !splitDay.isRestDay) {
-        log.gymDay = GymDay(
-          didGym:          true,
-          workoutType:     WorkoutType.fromSplitName(splitDay.name),
-          splitDayName:    splitDay.name,
-          splitOverridden: false,
-        );
-      } else {
-        log.gymDay = const GymDay(didGym: true);
-      }
-    }
+    // Yes: keep what the day already shows (the split's day), now as a pick.
+    final shown = _effectiveGymDay();
+    final name = shown.didGym
+        ? shown.splitDayName
+        : WorkoutService.instance.splitDayFor(date)?.name;
+    log.gymDay = name != null
+        ? base.withUserOverride(splitName: name, type: WorkoutType.fromSplitName(name))
+        : base.withGym(true);
     onChanged();
   }
 
@@ -819,181 +902,234 @@ class _GymCard extends StatelessWidget {
 
   Widget _buildChip({
     required String label,
+    required IconData icon,
     required bool selected,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF52B788).withValues(alpha: 0.18)
-              : const Color(0xFF13131F),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF52B788).withValues(alpha: 0.6)
-                : const Color(0xFF2E2E3E),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: selected
-                ? const Color(0xFF52B788)
-                : const Color(0xFF6B7280),
-          ),
-        ),
-      ),
-    );
+    return _SelectChip(label: label, icon: icon, selected: selected, onTap: onTap);
   }
 
   @override
   Widget build(BuildContext context) {
     final gym    = _effectiveGymDay();
     final didGym = gym.didGym;
-    final isPrefilled = log.gymDay == null && didGym;
+    final source = WorkoutService.instance.planFor(date, log: log).source;
+    final isPrefilled = source == DayPlanSource.split && didGym;
+    final fromSession = source == DayPlanSource.session;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: didGym
-              ? const Color(0xFF52B788).withValues(alpha: 0.40)
-              : const Color(0xFF2E2E3E),
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+    return Padding(
+      padding: const EdgeInsets.only(top: KSpacing.xxl, bottom: KSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header row with toggle
           Row(
             children: [
-              Text(didGym ? '🏋️' : '💤',
-                  style: const TextStyle(fontSize: 18)),
-              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Gym / Workout',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Semantics(
+                      header: true,
+                      child: Text('Did you train?', style: KText.h2.copyWith(fontSize: 18)),
                     ),
-                    if (isPrefilled && gym.splitDayName != null)
+                    if (fromSession && gym.splitDayName != null)
                       Text(
-                        '• ${gym.splitDayName} (from split)',
-                        style: const TextStyle(
-                          color: Color(0xFF52B788),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        '${gym.splitDayName}, from your logged workout',
+                        style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary),
+                      )
+                    else if (isPrefilled && gym.splitDayName != null)
+                      Text(
+                        WorkoutService.instance.isSetupDone
+                            ? '${gym.splitDayName}, from your split'
+                            : '${gym.splitDayName}, from ${WorkoutService.instance.split.name}',
+                        style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary),
                       ),
                   ],
                 ),
               ),
+              const SizedBox(width: KSpacing.sm),
               // Yes / No toggle
-              _GymToggleButton(
-                label: 'Yes',
-                active: didGym,
-                activeColor: const Color(0xFF52B788),
-                onTap: () => _toggleGym(true),
-              ),
-              const SizedBox(width: 8),
-              _GymToggleButton(
-                label: 'No',
-                active: !didGym,
-                activeColor: const Color(0xFF4B5563),
-                onTap: () => _toggleGym(false),
+              _GymSegmented(
+                didGym: didGym,
+                onYes: () => _toggleGym(true),
+                onNo: fromSession
+                    ? () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('A workout is logged for this day. Delete it in Train to make it a rest day.'),
+                          ),
+                        )
+                    : () => _toggleGym(false),
               ),
             ],
           ),
 
           // Workout type chips (only shown when gym = yes)
-          if (didGym) ...[
-            const SizedBox(height: 12),
-            const Divider(color: Color(0xFF2E2E3E), height: 1),
-            const SizedBox(height: 12),
-            Builder(
-              builder: (context) {
-                // Get exact unique split names from user's current configuration.
-                final exactSplitDays = WorkoutService.instance.trainingDays
-                    .map((d) => d.name)
-                    .toSet()
-                    .toList();
-                
-                final hasSplitOptions = exactSplitDays.isNotEmpty;
+          AnimatedSize(
+            duration: KMotion.of(context, KMotion.standard),
+            curve: KMotion.emphasizedCurve,
+            alignment: Alignment.topCenter,
+            child: !didGym
+                ? const SizedBox(width: double.infinity)
+                : Builder(
+                    builder: (context) {
+                      // Get exact unique split names from user's current configuration.
+                      final exactSplitDays = WorkoutService.instance.trainingDays
+                          .map((d) => d.name)
+                          .toSet()
+                          .toList();
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (hasSplitOptions) ...[
-                      const Text(
-                        'Your Split',
-                        style: TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // MAIN SPLIT CHIPS
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: exactSplitDays.map((name) {
-                          // Match by name rather than generic enum to ensure fidelity
-                          final selected = gym.splitDayName == name;
-                          final inferredType = WorkoutType.fromSplitName(name);
-                          return _buildChip(
-                            label: '${inferredType.emoji} $name',
-                            selected: selected,
-                            onTap: () => _selectSplitDay(name),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
+                      final hasSplitOptions = exactSplitDays.isNotEmpty;
 
-                    // FALLBACK CHIPS
-                    const Text(
-                      'Other Workouts',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontSize: 12,
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: KSpacing.md),
+                          if (hasSplitOptions) ...[
+                            Text('Your split', style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: KSpacing.xs),
+                            // MAIN SPLIT CHIPS
+                            Wrap(
+                              spacing: KSpacing.sm,
+                              children: exactSplitDays.map((name) {
+                                // Match by name rather than generic enum to ensure fidelity
+                                final selected = gym.splitDayName == name;
+                                return _buildChip(
+                                  label: name,
+                                  icon: KIcons.split(name),
+                                  selected: selected,
+                                  onTap: () => _selectSplitDay(name),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: KSpacing.md),
+                          ],
+
+                          // FALLBACK CHIPS
+                          Text('Other workouts', style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: KSpacing.xs),
+                          Wrap(
+                            spacing: KSpacing.sm,
+                            children: [WorkoutType.cardio, WorkoutType.other].map((t) {
+                              // Mark fallback as selected if type matches but name is NOT in the main split
+                              // (e.g. they literally chose 'Cardio' or 'Other')
+                              final selected = gym.workoutType == t && !exactSplitDays.contains(gym.splitDayName);
+                              return _buildChip(
+                                label: t.displayName,
+                                icon: KIcons.workout(t),
+                                selected: selected,
+                                onTap: () => _selectCoarseType(t),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Selectable chip with a 48dp tap target. Text first, with a tiny
+/// muscle-group mark; selection is an ink fill AND a check (never colour
+/// alone).
+class _SelectChip extends StatelessWidget {
+  const _SelectChip({required this.label, required this.icon, required this.selected, required this.onTap});
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? KColor.onInk : KColor.textPrimary;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: () {
+          KHaptics.select();
+          onTap();
+        },
+        borderRadius: KRadius.sm,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Align(
+            widthFactor: 1,
+            child: AnimatedContainer(
+              duration: KMotion.of(context, KMotion.quick),
+              curve: KMotion.emphasizedCurve,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected ? KColor.ink : null,
+                borderRadius: KRadius.sm,
+                border: Border.all(
+                  color: selected
+                      ? KColor.ink
+                      : KColor.fg.withValues(alpha: KColor.isDark ? 0.16 : 0.16),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  KIcon(selected ? KIcons.done : icon, size: 15, color: selected ? fg : KColor.textSecondary),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: KText.bodyMedium.copyWith(
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: fg,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [WorkoutType.cardio, WorkoutType.other].map((t) {
-                        // Mark fallback as selected if type matches but name is NOT in the main split
-                        // (e.g. they literally chose 'Cardio' or 'Other')
-                        final selected = gym.workoutType == t && !exactSplitDays.contains(gym.splitDayName);
-                        return _buildChip(
-                          label: '${t.emoji} ${t.displayName}',
-                          selected: selected,
-                          onTap: () => _selectCoarseType(t),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                );
-              },
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Yes / No segmented toggle for "did you train today".
+class _GymSegmented extends StatelessWidget {
+  const _GymSegmented({required this.didGym, required this.onYes, required this.onNo});
+  final bool didGym;
+  final VoidCallback onYes;
+  final VoidCallback onNo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+        borderRadius: KRadius.pill,
+        border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _GymToggleButton(
+            label: 'Yes',
+            active: didGym,
+            activeColor: KColor.violet,
+            onTap: onYes,
+          ),
+          _GymToggleButton(
+            label: 'No',
+            active: !didGym,
+            activeColor: KColor.textSecondary,
+            onTap: onNo,
+          ),
         ],
       ),
     );
@@ -1014,25 +1150,36 @@ class _GymToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: active
-              ? activeColor.withValues(alpha: 0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: active ? activeColor : const Color(0xFF2E2E3E),
+    return Semantics(
+      button: true,
+      selected: active,
+      label: 'Trained today: $label',
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: () {
+          if (!active) KHaptics.select();
+          onTap();
+        },
+        borderRadius: KRadius.pill,
+        child: AnimatedContainer(
+          duration: KMotion.of(context, KMotion.quick),
+          curve: KMotion.emphasizedCurve,
+          constraints: const BoxConstraints(minWidth: 52, minHeight: 44),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            // Selected = ink; the "Yes" side keeps a violet rim (train world).
+            color: active ? KColor.ink : Colors.transparent,
+            borderRadius: KRadius.pill,
+            border: Border.all(color: Colors.transparent, width: 1.4),
           ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: active ? activeColor : const Color(0xFF4B5563),
+          child: Text(
+            label,
+            style: KText.caption.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: active ? KColor.onInk : KColor.textSecondary,
+            ),
           ),
         ),
       ),
@@ -1040,7 +1187,8 @@ class _GymToggleButton extends StatelessWidget {
   }
 }
 
-// ─── Day summary banner ───────────────────────────────────────────────────────
+// ─── Day summary ──────────────────────────────────────────────────────────────
+// The same fuel label as the dashboard, so a day reads the same everywhere.
 
 class _DaySummaryBanner extends StatelessWidget {
   final DayLog log;
@@ -1049,163 +1197,44 @@ class _DaySummaryBanner extends StatelessWidget {
   final VoidCallback? onEditTarget;
   const _DaySummaryBanner({required this.log, this.target, this.dayStatus, this.onEditTarget});
 
+  static String _targetTitle(DayTarget t) => switch (t.label) {
+        'Manual Override' => 'Custom target for this day',
+        'Saved Target' => 'Your saved target',
+        'Default' => 'Daily target',
+        _ => '${t.label[0].toUpperCase()}${t.label.substring(1).toLowerCase()} target',
+      };
+
   @override
   Widget build(BuildContext context) {
     final t = target;
+    final status = dayStatus;
+    final showStatus = !log.isEmpty &&
+        status != null &&
+        status.outcome != DayOutcome.incomplete &&
+        status.outcome != DayOutcome.unlogged;
 
-    // ── Empty log — show target only ──────────────────────────────────────
-    if (log.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2C),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF2E2E3E)),
-        ),
-        child: t == null
-            ? const Row(
-                children: [
-                  Icon(
-                    Icons.restaurant_menu_rounded,
-                    color: Color(0xFF4B5563),
-                    size: 20,
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'No meals logged yet — add a meal below.',
-                      style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
-                    ),
-                  ),
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
-                      if (onEditTarget != null) ...[
-                        const Spacer(),
-                        GestureDetector(
-                          onTap: onEditTarget,
-                          child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF6B7280)),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _TargetPill(
-                        icon: Icons.local_fire_department_rounded,
-                        color: const Color(0xFFFF6B35),
-                        label: 'Target',
-                        value: '${t.calories.toInt()} kcal',
-                      ),
-                      const SizedBox(width: 10),
-                      _TargetPill(
-                        icon: Icons.fitness_center_rounded,
-                        color: const Color(0xFF52B788),
-                        label: 'Protein',
-                        value: '${t.protein.toInt()} g',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'No meals logged yet — start tracking',
-                    style: TextStyle(color: Color(0xFF4B5563), fontSize: 11),
-                  ),
-                ],
-              ),
-      );
-    }
-
-    // ── Has food — show progress vs target ────────────────────────────────
-    final consumedCal = log.totalCaloriesMid;
-    final consumedProt = log.totalProteinMid;
-    final targetCal = t?.calories;
-    final targetProt = t?.protein;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1A3A2A), Color(0xFF1E1E2C)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF52B788).withValues(alpha: 0.25),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (t != null) ...[
-            Row(
-              children: [
-                _DayTypeChip(isGymDay: t.isTrainingDay, label: t.label),
-                if (onEditTarget != null) ...[
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: onEditTarget,
-                    child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF6B7280)),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 12),
-          ],
-          Row(
-            children: [
-              Expanded(
-                child: _MacroProgress(
-                  label: 'Calories',
-                  consumed: consumedCal,
-                  target: targetCal,
-                  unit: 'kcal',
-                  color: const Color(0xFFFF6B35),
-                ),
-              ),
-              Container(
-                width: 1,
-                height: 50,
-                color: const Color(0xFF2E2E3E),
-                margin: const EdgeInsets.symmetric(horizontal: 14),
-              ),
-              Expanded(
-                child: _MacroProgress(
-                  label: 'Protein',
-                  consumed: consumedProt,
-                  target: targetProt,
-                  unit: 'g',
-                  color: const Color(0xFF52B788),
-                ),
-              ),
-            ],
-          ),
-          // Day status chip — only for meaningful outcomes
-          if (dayStatus != null &&
-              dayStatus!.outcome != DayOutcome.incomplete &&
-              dayStatus!.outcome != DayOutcome.unlogged) ...[
-            const SizedBox(height: 10),
-            // Constrain width so Flexible inside the chip's Row can ellipsize
-            // long notes on small screens instead of overflowing.
-            SizedBox(
-              width: double.infinity,
-              child: _DayStatusChip(status: dayStatus!),
-            ),
-          ],
-        ],
-      ),
+    return FuelLabel(
+      title: t == null ? 'Fuel' : _targetTitle(t),
+      trailing: (t != null && onEditTarget != null)
+          ? KTextAction('Edit target', onTap: onEditTarget, semanticLabel: 'Edit daily target')
+          : null,
+      consumedCal: displayKcal(log),
+      targetCal: t?.calories ?? 0,
+      consumedPro: displayProtein(log),
+      targetPro: t?.protein ?? 0,
+      footer: log.isEmpty
+          ? Text(
+              'Nothing logged yet. Your first meal sets the tone.',
+              style: KText.caption.copyWith(fontSize: 13.5, color: KColor.textSecondary),
+            )
+          : showStatus
+              ? _DayStatusChip(status: status)
+              : null,
     );
   }
 }
 
-// ─── Day status chip ──────────────────────────────────────────────────────────
+// ─── Day status line ──────────────────────────────────────────────────────────
 
 class _DayStatusChip extends StatelessWidget {
   final DayOutcomeResult status;
@@ -1213,249 +1242,39 @@ class _DayStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: status.color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: status.color.withValues(alpha: 0.30),
-          width: 1,
-        ),
-      ),
-      // Use an intrinsic-width row but let the note shrink to available space.
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.92, end: status.isPositive ? 1.0 : 0.97),
-            duration: const Duration(milliseconds: 650),
-            curve: Curves.easeOutBack,
-            builder: (_, scale, child) =>
-                Transform.scale(scale: scale, child: child),
-            child: Text(status.emoji, style: const TextStyle(fontSize: 12)),
-          ),
-          const SizedBox(width: 5),
-          // Label is fixed — always visible.
-          Flexible(
-            flex: 0,
-            child: Text(
-              status.label,
-              style: TextStyle(
-                color: status.color,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.2,
-              ),
-            ),
-          ),
-          // Note is secondary — shrinks / ellipses on small screens.
-          if (status.note.isNotEmpty) ...[
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                '· ${status.note}',
-                style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
-                  fontSize: 11,
-                ),
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Day type chip ────────────────────────────────────────────────────────────
-
-class _DayTypeChip extends StatelessWidget {
-  final bool isGymDay;
-  final String label;
-  const _DayTypeChip({required this.isGymDay, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isGymDay ? const Color(0xFF52B788) : const Color(0xFF6B7280);
-    final emoji = isGymDay ? '⚡' : '😴';
+    // A dot, the verdict, the note. No tinted pill, no emoji.
     return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 13)),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: color,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Macro progress col ───────────────────────────────────────────────────────
-
-class _MacroProgress extends StatelessWidget {
-  final String label;
-  final double consumed;
-  final double? target;
-  final String unit;
-  final Color color;
-  const _MacroProgress({
-    required this.label,
-    required this.consumed,
-    required this.target,
-    required this.unit,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasTarget     = target != null && target! > 0;
-    final progressRatio = hasTarget ? (consumed / target!).clamp(0.0, 1.0) : 0.0;
-    final realPct       = hasTarget ? ((consumed / target!) * 100).round() : 0;
-    final overGoal      = hasTarget && consumed > target!;
-
-    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            color: Color(0xFF6B7280),
-            letterSpacing: 0.6,
-          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: KDot(color: status.color, size: 7),
         ),
-        const SizedBox(height: 3),
-        // Consumed / Target
-        RichText(
-          text: TextSpan(
-            children: [
+        const SizedBox(width: KSpacing.sm),
+        Expanded(
+          child: Text.rich(
+            TextSpan(children: [
               TextSpan(
-                text: '${consumed.toInt()}',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: overGoal ? const Color(0xFFFFB347) : color,
-                ),
+                text: status.label,
+                style: KText.bodyMedium.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
               ),
-              if (hasTarget)
+              if (status.note.isNotEmpty)
                 TextSpan(
-                  text: ' / ${target!.toInt()} $unit',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6B7280),
-                  ),
-                )
-              else
-                TextSpan(
-                  text: ' $unit',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6B7280),
-                  ),
+                  text: '. ${status.note}',
+                  style: KText.body.copyWith(fontSize: 14, color: KColor.textSecondary),
                 ),
-            ],
+            ]),
           ),
         ),
-        if (hasTarget) ...[
-          const SizedBox(height: 5),
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: progressRatio),
-            duration: const Duration(milliseconds: 600),
-            curve: Curves.easeOutCubic,
-            builder: (_, v, _) => ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: v,
-                minHeight: 4,
-                backgroundColor: const Color(0xFF2E2E3E),
-                valueColor: AlwaysStoppedAnimation(
-                  overGoal ? const Color(0xFFFFB347) : color,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '$realPct%${overGoal ? ' — over goal' : ''}',
-            style: TextStyle(
-              fontSize: 9,
-              color: overGoal
-                  ? const Color(0xFFFFB347)
-                  : const Color(0xFF4B5563),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ],
     );
   }
 }
 
-// ─── Target pill (empty state only) ──────────────────────────────────────────
-
-class _TargetPill extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String label;
-  final String value;
-  const _TargetPill({
-    required this.icon,
-    required this.color,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 9,
-                  color: color.withValues(alpha: 0.7),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Meal section card ────────────────────────────────────────────────────────
+// ─── Meal section ─────────────────────────────────────────────────────────────
+// Quietly typographic: a small time-of-day glyph, the section name, its kcal
+// total set right, and an Add action. Logged meals hang beneath as hairline
+// rows. No tile, no card.
 
 class _MealSectionCard extends StatelessWidget {
   final MealSection section;
@@ -1475,116 +1294,141 @@ class _MealSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entries = log.entriesFor(section);
+    final hasEntries = entries.isNotEmpty;
+    // The total is the sum of the numbers printed on the rows below.
+    final kcal = entries.fold<int>(0, (s, e) => s + e.calMid.round());
+    final pro = entries.fold<int>(0, (s, e) => s + e.result.protein.mid.round());
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header row ────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
-            child: Row(
-              children: [
-                Text(section.emoji, style: const TextStyle(fontSize: 18)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    section.displayName,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const KHairline(),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 4),
+          child: Row(
+            children: [
+              KIcon(KIcons.meal(section), size: 18, color: hasEntries ? KColor.ember : KColor.textMuted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: section.displayName, style: KText.h3.copyWith(fontSize: 16)),
+                      if (hasEntries)
+                        TextSpan(
+                          text: '   ${plural(entries.length, 'item')}',
+                          style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted),
+                        ),
+                    ]),
+                  ),
+                ),
+              ),
+              if (hasEntries) ...[
+                Semantics(
+                  label: '$kcal kilocalories, $pro grams protein',
+                  child: ExcludeSemantics(
+                    child: Text.rich(
+                      TextSpan(children: [
+                        TextSpan(
+                          text: thousands(kcal),
+                          style: KText.numSmall.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                        TextSpan(
+                          text: ' kcal',
+                          style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary),
+                        ),
+                      ]),
                     ),
                   ),
                 ),
-                if (entries.isNotEmpty) ...[
-                  Text(
-                    _macroLabel(
-                      entries.fold<double>(
-                        0,
-                        (s, e) => s + e.result.calories.min,
-                      ),
-                      entries.fold<double>(
-                        0,
-                        (s, e) => s + e.result.calories.max,
-                      ),
-                      'kcal',
-                    ),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFFF6B35),
-                      fontWeight: FontWeight.w600,
-                    ),
+                const SizedBox(width: 2),
+              ],
+              _AddIconButton(
+                onTap: onAdd,
+                semanticLabel: 'Log a meal to ${section.displayName}',
+              ),
+            ],
+          ),
+        ),
+        if (hasEntries)
+          Padding(
+            padding: const EdgeInsets.only(left: 28, bottom: KSpacing.sm),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < entries.length; i++) ...[
+                  if (i > 0) const KHairline(),
+                  _EntryTile(
+                    entry: entries[i],
+                    onTap: onEdit != null ? () => onEdit!(entries[i]) : null,
+                    onDelete: () => onDelete(entries[i]),
                   ),
                 ],
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: onAdd,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.20),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFF52B788).withValues(alpha: 0.40),
-                      ),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.add_rounded,
-                          size: 14,
-                          color: Color(0xFF52B788),
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          'Add',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF52B788),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
+      ],
+    );
+  }
+}
 
-          // ── Empty slot ────────────────────────────────────
-          if (entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              child: Text(
-                'Nothing logged — tap Add',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
-              ),
-            )
-          else ...[
-            const Divider(color: Color(0xFF2E2E3E), height: 1),
-            ...entries.map(
-              (entry) => _EntryTile(
-                entry: entry,
-                onTap: onEdit != null ? () => onEdit!(entry) : null,
-                onDelete: () => onDelete(entry),
-              ),
+/// A 48dp "+" with an outlined circle: the one action per meal section.
+class _AddIconButton extends StatelessWidget {
+  const _AddIconButton({required this.onTap, required this.semanticLabel});
+  final VoidCallback onTap;
+  final String semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: () {
+        KHaptics.select();
+        onTap();
+      },
+      semanticLabel: semanticLabel,
+      borderRadius: KRadius.pill,
+      scale: 0.9,
+      child: SizedBox.square(
+        dimension: 48,
+        child: Center(
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.22 : 0.2)),
             ),
-          ],
-        ],
+            child: KIcon(KIcons.add, size: 18, color: KColor.textPrimary),
+          ),
+        ),
       ),
     );
   }
+}
+
+/// Section heading on the day page: weight and space, no box.
+class _SectionHead extends StatelessWidget {
+  const _SectionHead(this.title, {this.top = KSpacing.xl, this.trailing});
+  final String title;
+  final double top;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.only(top: top, bottom: KSpacing.xs),
+        child: Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(title, style: KText.h2.copyWith(fontSize: 18)),
+              ),
+            ),
+            ?trailing,
+          ],
+        ),
+      );
 }
 
 // ─── Entry tile ───────────────────────────────────────────────────────────────
@@ -1596,97 +1440,95 @@ class _EntryTile extends StatelessWidget {
 
   const _EntryTile({required this.entry, this.onTap, required this.onDelete});
 
+  static Color _qualityColor(int score) => score >= 80
+      ? KColor.success
+      : (score >= 60 ? KColor.warning : KColor.danger);
+
   @override
   Widget build(BuildContext context) {
     final calMid = entry.result.calories.mid;
+    final time = '${entry.addedAt.hour.toString().padLeft(2, '0')}:'
+        '${entry.addedAt.minute.toString().padLeft(2, '0')}';
+    // One printed number per macro; the section and day totals add these.
+    final kcalN = entry.calMid.round();
+    final protN = entry.result.protein.mid.round();
+    final kcal = '$kcalN kcal';
+    final prot = '$protN g';
     return Dismissible(
       key: ObjectKey(entry),
       direction: DismissDirection.endToStart,
       onDismissed: (_) => onDelete(),
       background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        decoration: BoxDecoration(
-          color: const Color(0xFFEF4444).withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(0),
-        ),
-        child: const Icon(
-          Icons.delete_outline_rounded,
-          color: Color(0xFFEF4444),
-          size: 20,
+        alignment: AlignmentDirectional.centerEnd,
+        padding: const EdgeInsetsDirectional.only(end: 20),
+        color: KColor.danger.withValues(alpha: KColor.isDark ? 0.16 : 0.1),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Delete',
+              style: KText.caption.copyWith(fontSize: 13, color: KColor.danger, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 6),
+            KIcon(KIcons.delete, color: KColor.danger, size: 20),
+          ],
         ),
       ),
-      child: InkWell(
+      child: Pressable(
         onTap: () => _showMealDetailSheet(context, entry, onTap),
+        scale: 0.985,
+        borderRadius: BorderRadius.zero,
+        semanticLabel: '${entry.finalSavedInput}, $kcal, $prot protein, logged at $time. Open details',
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Icon(
-                  Icons.fastfood_rounded,
-                  size: 14,
-                  color: Color(0xFF4B5563),
-                ),
-              ),
-              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       entry.finalSavedInput,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        color: Colors.white70,
+                      style: KText.bodyMedium.copyWith(
+                        fontSize: 15,
+                        color: KColor.textPrimary,
                         fontWeight: FontWeight.w600,
+                        height: 1.35,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        _MacroBadge(
-                          _macroLabel(
-                            entry.result.calories.min,
-                            entry.result.calories.max,
-                            'kcal',
+                    const SizedBox(height: 4),
+                    KDotStats([
+                      KDotStat('$kcalN', 'kcal', color: KColor.ember),
+                      KDotStat('$protN', 'g protein', color: KColor.green),
+                      if (calMid >= 50 && entry.result.mealQualityScore != null)
+                        Text(
+                          'Quality ${entry.result.mealQualityScore}',
+                          style: KText.caption.copyWith(
+                            fontSize: 13,
+                            color: _qualityColor(entry.result.mealQualityScore!),
+                            fontWeight: FontWeight.w600,
                           ),
-                          const Color(0xFFFF6B35),
                         ),
-                        const SizedBox(width: 6),
-                        _MacroBadge(
-                          _macroLabel(
-                            entry.result.protein.min,
-                            entry.result.protein.max,
-                            'g',
-                          ),
-                          const Color(0xFF52B788),
-                        ),
-                        if (calMid >= 50 && entry.result.mealQualityScore != null) ...[
-                          const SizedBox(width: 6),
-                          _MacroBadge(
-                            'Quality: ${entry.result.mealQualityScore}',
-                            entry.result.mealQualityScore! >= 80
-                                ? const Color(0xFF52B788)
-                                : (entry.result.mealQualityScore! >= 60
-                                    ? const Color(0xFFFFB347)
-                                    : const Color(0xFFEF4444)),
-                          ),
-                        ],
-                      ],
-                    ),
+                    ]),
                   ],
                 ),
               ),
-              Text(
-                '${entry.addedAt.hour.toString().padLeft(2, '0')}:'
-                '${entry.addedAt.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  color: Color(0xFF4B5563),
-                ),
+              const SizedBox(width: KSpacing.sm),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    time,
+                    style: KText.numSmall.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: KColor.textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  KIcon(KIcons.next, size: 18, color: KColor.textDisabled),
+                ],
               ),
             ],
           ),
@@ -1706,253 +1548,176 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
   final score = entry.result.mealQualityScore;
   final userWarnings = entry.result.userFacingWarnings;
 
-  showModalBottomSheet<void>(
+  showKSheet<void>(
     context: context,
-    backgroundColor: const Color(0xFF13131F),
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
     builder: (ctx) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 4.5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2E2E3E),
-                  borderRadius: BorderRadius.circular(2.25),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
+      final scoreColor = score == null
+          ? KColor.textMuted
+          : (score >= 80
+              ? KColor.success
+              : (score >= 60 ? KColor.warning : KColor.danger));
+      return SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(KSpacing.p, 0, KSpacing.p, KSpacing.xxl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        entry.finalSavedInput,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Logged at ${entry.addedAt.hour.toString().padLeft(2, '0')}:${entry.addedAt.minute.toString().padLeft(2, '0')} · ${entry.section.displayName}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Color(0xFF6B7280), size: 20),
-                  onPressed: () => Navigator.pop(ctx),
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E1E2C),
-                    padding: const EdgeInsets.all(8),
-                    minimumSize: Size.zero,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            if (score != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF2E2E3E), width: 0.5),
-                ),
-                child: Row(
+                const KDragHandle(),
+                const SizedBox(height: KSpacing.md),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: (score >= 80
-                            ? const Color(0xFF52B788)
-                            : (score >= 60
-                                ? const Color(0xFFFFB347)
-                                : const Color(0xFFEF4444))).withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: score >= 80
-                              ? const Color(0xFF52B788)
-                              : (score >= 60
-                                  ? const Color(0xFFFFB347)
-                                  : const Color(0xFFEF4444)),
-                          width: 2.2,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        '$score',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: score >= 80
-                              ? const Color(0xFF52B788)
-                              : (score >= 60
-                                  ? const Color(0xFFFFB347)
-                                  : const Color(0xFFEF4444)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Meal Quality Rating',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
+                          Text(entry.finalSavedInput, style: KText.h2),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Logged at ${entry.addedAt.hour.toString().padLeft(2, '0')}:${entry.addedAt.minute.toString().padLeft(2, '0')} · ${entry.section.displayName}',
+                            style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary),
                           ),
-                          if (entry.result.mealQualityExplanation != null &&
-                              entry.result.mealQualityExplanation!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              entry.result.mealQualityExplanation!,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: Color(0xFF9CA3AF),
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, color: KColor.textSecondary, size: 20),
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(ctx),
+                      style: IconButton.styleFrom(backgroundColor: KColor.cardHigh),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
-            ],
-            const Text(
-              'MACRONUTRIENTS',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF6B7280),
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Builder(builder: (c) {
-              final locked = entry.result.macrosLockedByUser;
-              final cards = <Widget>[
-                _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), const Color(0xFFFF6B35), locked: locked),
-                _buildGridMacroCell('Protein',  _macroLabel(entry.result.protein.min,  entry.result.protein.max,  'g'),    const Color(0xFF52B788), locked: locked),
-                // When macros are locked always show carbs/fat/fiber, even if 0.
-                if (locked || (carbs != null && (carbs.max > 0 || carbs.min > 0)))
-                  _buildGridMacroCell('Carbs', _macroLabel(carbs?.min ?? 0, carbs?.max ?? 0, 'g'), const Color(0xFF60A5FA), locked: locked),
-                if (locked || (fat != null && (fat.max > 0 || fat.min > 0)))
-                  _buildGridMacroCell('Fat', _macroLabel(fat?.min ?? 0, fat?.max ?? 0, 'g'), const Color(0xFFFBBF24), locked: locked),
-                if (locked || (fiber != null && (fiber.max > 0 || fiber.min > 0)))
-                  _buildGridMacroCell('Fiber', _macroLabel(fiber?.min ?? 0, fiber?.max ?? 0, 'g'), const Color(0xFFA78BFA), locked: locked),
-                if (sugar != null && (sugar.max > 0 || sugar.min > 0))
-                  _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), const Color(0xFFF472B6)),
-                if (satFat != null && (satFat.max > 0 || satFat.min > 0))
-                  _buildGridMacroCell('Sat. Fat', _macroLabel(satFat.min, satFat.max, 'g'), const Color(0xFFFB7185)),
-                if (sodium != null && (sodium.max > 0 || sodium.min > 0))
-                  _buildGridMacroCell('Sodium', _macroLabel(sodium.min, sodium.max, 'mg'), const Color(0xFF9CA3AF)),
-              ];
-
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 2.8,
-                ),
-                itemCount: cards.length,
-                itemBuilder: (context, index) => cards[index],
-              );
-            }),
-            if (userWarnings.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const Text(
-                'MEAL CALIBRATION REMINDERS',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF6B7280),
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ...userWarnings.map((w) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 2.0),
-                      child: Icon(Icons.info_outline_rounded,
-                          color: Color(0xFFFFB347), size: 12),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        w,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: Color(0xFFFFB347),
-                          height: 1.35,
-                        ),
+                const SizedBox(height: KSpacing.xl),
+                if (score != null) ...[
+                  KReveal(
+                    child: KCard(
+                      boxShadow: const [],
+                      child: Row(
+                        children: [
+                          RepaintBoundary(
+                            child: KRing(
+                              progress: (score / 100).clamp(0.0, 1.0),
+                              colors: [scoreColor.withValues(alpha: 0.7), scoreColor],
+                              size: 52,
+                              stroke: 5,
+                              semanticsLabel: 'Meal quality',
+                              child: Text(
+                                '$score',
+                                style: KText.numSmall.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: scoreColor),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: KSpacing.lg),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Meal quality', style: KText.h3),
+                                if (entry.result.mealQualityExplanation != null &&
+                                    entry.result.mealQualityExplanation!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    entry.result.mealQualityExplanation!,
+                                    style: KText.caption.copyWith(fontSize: 13, height: 1.45),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              )),
-            ],
-            if (onEditClick != null) ...[
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    onEditClick();
-                  },
-                  icon: const Icon(Icons.edit_rounded, size: 16, color: Colors.white),
-                  label: const Text(
-                    'Edit or Adjust Entry',
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Colors.white),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D6A4F),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: KSpacing.xl),
+                ],
+                Text('Macros', style: KText.h3.copyWith(color: KColor.textSecondary, fontSize: 14)),
+                const SizedBox(height: 10),
+                Builder(builder: (c) {
+                  final locked = entry.result.macrosLockedByUser;
+                  final cards = <Widget>[
+                    _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), KColor.ember, locked: locked),
+                    _buildGridMacroCell('Protein',  _macroLabel(entry.result.protein.min,  entry.result.protein.max,  'g'),    KColor.green, locked: locked),
+                    // When macros are locked always show carbs/fat/fiber, even if 0.
+                    if (locked || (carbs != null && (carbs.max > 0 || carbs.min > 0)))
+                      _buildGridMacroCell('Carbs', _macroLabel(carbs?.min ?? 0, carbs?.max ?? 0, 'g'), KColor.blue, locked: locked),
+                    if (locked || (fat != null && (fat.max > 0 || fat.min > 0)))
+                      _buildGridMacroCell('Fat', _macroLabel(fat?.min ?? 0, fat?.max ?? 0, 'g'), KColor.saffron, locked: locked),
+                    if (locked || (fiber != null && (fiber.max > 0 || fiber.min > 0)))
+                      _buildGridMacroCell('Fiber', _macroLabel(fiber?.min ?? 0, fiber?.max ?? 0, 'g'), KColor.violet, locked: locked),
+                    if (sugar != null && (sugar.max > 0 || sugar.min > 0))
+                      _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), KColor.cyan),
+                    if (satFat != null && (satFat.max > 0 || satFat.min > 0))
+                      _buildGridMacroCell('Sat. fat', _macroLabel(satFat.min, satFat.max, 'g'), KColor.danger),
+                    if (sodium != null && (sodium.max > 0 || sodium.min > 0))
+                      _buildGridMacroCell('Sodium', _macroLabel(sodium.min, sodium.max, 'mg'), KColor.textSecondary),
+                  ];
+
+                  // Two-column flow with intrinsic heights, so large text
+                  // grows the cells instead of overflowing a fixed ratio.
+                  return LayoutBuilder(
+                    builder: (context, box) {
+                      final cellW = (box.maxWidth - 10) / 2;
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (var i = 0; i < cards.length; i++)
+                            SizedBox(
+                              width: cellW,
+                              child: i < 8 ? KReveal(index: i, rise: 10, child: cards[i]) : cards[i],
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                }),
+                if (userWarnings.isNotEmpty) ...[
+                  const SizedBox(height: KSpacing.xl),
+                  Text('Worth checking', style: KText.h3.copyWith(color: KColor.textSecondary, fontSize: 14)),
+                  const SizedBox(height: KSpacing.sm),
+                  ...userWarnings.map((w) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.only(top: 2.0),
+                          child: Icon(Icons.info_outline_rounded,
+                              color: KColor.warning, size: 13),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            w,
+                            style: KText.caption.copyWith(
+                              fontSize: 13,
+                              color: KColor.textSecondary,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  )),
+                ],
+                if (onEditClick != null) ...[
+                  const SizedBox(height: KSpacing.xxl),
+                  KButton(
+                    label: 'Edit this meal',
+                    icon: Icons.edit_rounded,
+                    width: double.infinity,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      onEditClick();
+                    },
                   ),
-                ),
-              ),
-            ],
-          ],
+                ],
+              ],
+            ),
+          ),
         ),
       );
     },
@@ -1960,45 +1725,54 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
 }
 
 Widget _buildGridMacroCell(String name, String value, Color color, {bool locked = false}) {
+  final dark = KColor.isDark;
   return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
-      color: const Color(0xFF1E1E2C),
-      borderRadius: BorderRadius.circular(12),
+      color: KColor.fg.withValues(alpha: dark ? 0.04 : 0.035),
+      borderRadius: KRadius.sm,
       border: Border.all(
         color: locked
-            ? color.withValues(alpha: 0.35)
-            : const Color(0xFF2E2E3E),
-        width: locked ? 1.0 : 0.5,
+            ? color.withValues(alpha: dark ? 0.4 : 0.45)
+            : Colors.transparent,
+        width: 1.0,
       ),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
-            Text(
-              name,
-              style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w600,
-                color: color.withValues(alpha: 0.85),
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                name,
+                style: KText.caption.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: KColor.textSecondary,
+                ),
               ),
             ),
             if (locked) ...[
-              const SizedBox(width: 3),
-              Icon(Icons.lock_rounded, size: 7, color: color.withValues(alpha: 0.6)),
+              const SizedBox(width: 4),
+              Icon(Icons.lock_rounded, size: 12, color: KColor.textMuted, semanticLabel: 'Locked'),
             ],
           ],
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
+          style: KText.numSmall.copyWith(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: KColor.textPrimary,
           ),
         ),
       ],
@@ -2006,35 +1780,10 @@ Widget _buildGridMacroCell(String name, String value, Color color, {bool locked 
   );
 }
 
-class _MacroBadge extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _MacroBadge(this.text, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
-
 String _macroLabel(double min, double max, String unit) {
-  final minI = min.toInt();
-  final maxI = max.toInt();
-  return minI == maxI ? '$minI $unit' : '$minI–$maxI $unit';
+  final minI = min.round();
+  final maxI = max.round();
+  return minI == maxI ? '$minI $unit' : '$minI-$maxI $unit';
 }
 
 // ─── Coach insight card ───────────────────────────────────────────────────────
@@ -2043,48 +1792,41 @@ class _CoachInsightCard extends StatelessWidget {
   final List<CoachInsight> insights;
   const _CoachInsightCard({required this.insights});
 
-  static (IconData, Color) _iconColor(CoachInsightType type) => switch (type) {
-    CoachInsightType.protein => (
-      Icons.fitness_center_rounded,
-      const Color(0xFF52B788),
-    ),
-    CoachInsightType.overGoal => (
-      Icons.warning_amber_rounded,
-      const Color(0xFFFFB347),
-    ),
-    CoachInsightType.underEaten => (
-      Icons.restaurant_menu_rounded,
-      const Color(0xFF60A5FA),
-    ),
-    CoachInsightType.balance => (
-      Icons.balance_rounded,
-      const Color(0xFFA78BFA),
-    ),
-    CoachInsightType.info => (
-      Icons.info_outline_rounded,
-      const Color(0xFF9CA3AF),
-    ),
+  static Color _tone(CoachInsightType type) => switch (type) {
+    CoachInsightType.protein => KColor.green,
+    CoachInsightType.overGoal => KColor.warning,
+    CoachInsightType.underEaten => KColor.ember,
+    CoachInsightType.balance => KColor.violet,
+    CoachInsightType.info => KColor.textMuted,
   };
 
   @override
   Widget build(BuildContext context) {
-    // Show only the top 2 most relevant insights.
+    // Show only the top 2 most relevant insights, as Kyno talking: its mark,
+    // then plain sentences keyed by a thin coloured rule.
     final top = insights.take(2).toList();
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1E2A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E3550)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(top: KSpacing.xl),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Row(
+            children: [
+              const KynoMark(size: 22),
+              const SizedBox(width: KSpacing.sm),
+              Semantics(
+                header: true,
+                child: Text('Kyno noticed', style: KText.h3.copyWith(fontSize: 16)),
+              ),
+            ],
+          ),
+          const SizedBox(height: KSpacing.md),
           for (int i = 0; i < top.length; i++) ...[
-            if (i > 0) const Divider(color: Color(0xFF1E2438), height: 1),
-            _CoachInsightRow(
-              insight: top[i],
-              iconColor: _iconColor(top[i].type),
-            ),
+            if (i > 0) const SizedBox(height: KSpacing.md),
+            _CoachInsightRow(insight: top[i], tone: _tone(top[i].type)),
           ],
+          const SizedBox(height: KSpacing.lg),
+          const KHairline(),
         ],
       ),
     );
@@ -2093,49 +1835,38 @@ class _CoachInsightCard extends StatelessWidget {
 
 class _CoachInsightRow extends StatelessWidget {
   final CoachInsight insight;
-  final (IconData, Color) iconColor;
-  const _CoachInsightRow({required this.insight, required this.iconColor});
+  final Color tone;
+  const _CoachInsightRow({required this.insight, required this.tone});
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color) = iconColor;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 1),
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 14, color: color),
+            width: 2,
+            margin: const EdgeInsets.only(left: 10, right: 16, top: 3, bottom: 3),
+            decoration: BoxDecoration(color: tone, borderRadius: KRadius.pill),
           ),
-          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   insight.message,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
+                  style: KText.bodyMedium.copyWith(
+                    color: KColor.textPrimary,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    height: 1.3,
+                    height: 1.4,
                   ),
                 ),
                 if (insight.actionHint != null) ...[
                   const SizedBox(height: 3),
                   Text(
                     insight.actionHint!,
-                    style: const TextStyle(
-                      color: Color(0xFF9CA3AF),
-                      fontSize: 11.5,
-                      height: 1.4,
-                    ),
+                    style: KText.body.copyWith(fontSize: 14, color: KColor.textSecondary, height: 1.45),
                   ),
                 ],
               ],
@@ -2146,8 +1877,6 @@ class _CoachInsightRow extends StatelessWidget {
     );
   }
 }
-
-
 
 // ─── Quick Add item model ─────────────────────────────────────────────────────
 
@@ -2168,11 +1897,6 @@ class _QuickAddCard extends StatefulWidget {
 }
 
 class _QuickAddCardState extends State<_QuickAddCard> {
-  static final _builtIn = [
-    const QuickAddItem(id: 'builtin_whey', name: '1 scoop whey',              calories: 115, protein: 22, emoji: '🥛', builtIn: true),
-    const QuickAddItem(id: 'builtin_eggs', name: '4 egg whites + 400ml milk', calories: 328, protein: 27, emoji: '🥚', builtIn: true),
-  ];
-
   Map<String, NutritionResult> _resolvedResults = {};
   String? _loadingItemId;
 
@@ -2183,12 +1907,18 @@ class _QuickAddCardState extends State<_QuickAddCard> {
   }
 
   Future<void> _resolveItems() async {
-    final List<QuickAddItem> allItems = [..._builtIn, ...QuickAddService.instance.customItems];
+    final List<QuickAddItem> allItems = QuickAddService.instance.customItems;
     final map = <String, NutritionResult>{};
     for (final item in allItems) {
-      final userMem = UserNutritionMemory.instance.lookup(item.name);
-      final double cals = userMem != null ? userMem.calories.mid : item.calories;
-      final double prot = userMem != null ? userMem.protein.mid : item.protein;
+      // Same precedence QuickAddService.addMealToDay logs with, so the card
+      // always shows exactly what a tap will log: your correction, then your
+      // remembered meal, then the item's own numbers.
+      final remembered = FoodLinkService.instance.resolveMeal(item.name) ??
+          UserNutritionMemory.instance.lookup(item.name) ??
+          MealMemory.instance.lookupExactKnownFood(item.name) ??
+          MealMemory.instance.lookupRecurring(item.name);
+      final double cals = remembered != null ? remembered.calories.mid : item.calories;
+      final double prot = remembered != null ? remembered.protein.mid : item.protein;
       map[item.id] = NutritionResult.createCustom(
         canonicalMeal: item.name,
         calories: cals,
@@ -2208,14 +1938,14 @@ class _QuickAddCardState extends State<_QuickAddCard> {
     if (_loadingItemId != null) return;
     final sw = Stopwatch()..start();
     final t0 = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Tap received: T+${t0.toStringAsFixed(2)} ms (Item: "${item.name}")');
+    if (kDebugMode) debugPrint('[QuickAddTap] ⏱️ Tap received: T+${t0.toStringAsFixed(2)} ms (Item: "${item.name}")');
 
     setState(() => _loadingItemId = item.id);
-    HapticFeedback.lightImpact();
+    KHaptics.commit();
 
     await WidgetsBinding.instance.endOfFrame;
     final t1 = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Loading state displayed: T+${t1.toStringAsFixed(2)} ms');
+    if (kDebugMode) debugPrint('[QuickAddTap] ⏱️ Loading state displayed: T+${t1.toStringAsFixed(2)} ms');
 
     try {
       await widget.onAdd(name: item.name, calories: calories, protein: protein);
@@ -2227,112 +1957,97 @@ class _QuickAddCardState extends State<_QuickAddCard> {
   }
 
   Future<void> _deleteCustomItem(QuickAddItem item) async {
-    await QuickAddService.instance.deleteItem(item);
+    // Optimistic: deleteItem drops the item from memory synchronously, so the
+    // chip disappears this frame; the disk write follows.
+    final done = QuickAddService.instance.deleteItem(item);
     await _resolveItems();
+    await done;
   }
 
   Future<void> _openAddCustom() async {
-    final result = await showModalBottomSheet<QuickAddItem>(
+    final result = await showKSheet<QuickAddItem>(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const _AddCustomQuickSheet(),
     );
     if (result == null || !mounted) return;
-    final exists = [..._builtIn, ...QuickAddService.instance.customItems].any(
+    final exists = QuickAddService.instance.customItems.any(
       (i) => i.name.toLowerCase() == result.name.toLowerCase(),
     );
     if (exists) {
+      KHaptics.reject();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Already in Quick Add'), backgroundColor: Color(0xFF1E1E2C), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text('That one\'s already in Quick Add.'),
+        ),
       );
       return;
     }
-    await UserNutritionMemory.instance.saveOverride(
-      result.name,
-      result.calories,
-      result.protein,
-      referenceQuantity: 1.0,
-      referenceUnit: 'serving',
-    );
-    await QuickAddService.instance.saveItem(result);
+    // Optimistic: both calls update memory synchronously, so the new chip
+    // shows this frame; the disk writes finish after.
+    final saved = Future.wait([
+      UserNutritionMemory.instance.saveOverride(
+        result.name,
+        result.calories,
+        result.protein,
+        referenceQuantity: 1.0,
+        referenceUnit: 'serving',
+      ),
+      QuickAddService.instance.saveItem(result),
+    ]);
     await _resolveItems();
+    await saved;
   }
 
   @override
   Widget build(BuildContext context) {
-    final allItems = [..._builtIn, ...QuickAddService.instance.customItems];
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2C),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E2E3E)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 12, 0),
-            child: Row(
-              children: [
-                const Icon(Icons.bolt_rounded, size: 14, color: Color(0xFF52B788)),
-                const SizedBox(width: 6),
-                const Text('Quick Add', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-                const Spacer(),
-                GestureDetector(
-                  onTap: _openAddCustom,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.4)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_rounded, size: 13, color: Color(0xFF52B788)),
-                        SizedBox(width: 4),
-                        Text('Add', style: TextStyle(color: Color(0xFF52B788), fontSize: 11, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+    final allItems = QuickAddService.instance.customItems;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHead(
+          'Quick add',
+          top: KSpacing.xxl,
+          trailing: KTextAction(
+            'New',
+            icon: KIcons.add,
+            onTap: _openAddCustom,
+            semanticLabel: 'Add a Quick Add item',
           ),
-          const SizedBox(height: 10),
-          const Divider(color: Color(0xFF2A2A3A), height: 1),
-
-          // Items
-          ...allItems.asMap().entries.map((entry) {
-            final i = entry.key;
-            final item = entry.value;
-            final resolved = _resolvedResults[item.id];
-            final cals = resolved?.calories.mid ?? item.calories;
-            final prot = resolved?.protein.mid ?? item.protein;
-            final isLoading = _loadingItemId == item.id;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _QuickAddRow(
-                  emoji: item.emoji,
-                  title: item.name,
-                  meta: '${cals.toInt()} kcal  ·  ${prot.toInt()}g protein',
-                  isCustom: !item.builtIn,
-                  isLoading: isLoading,
-                  onTap: () => _handleAdd(item, cals, prot),
-                  onDelete: !item.builtIn ? () => _deleteCustomItem(item) : null,
-                ),
-                if (i < allItems.length - 1)
-                  const Divider(color: Color(0xFF252535), height: 1, indent: 16, endIndent: 16),
-              ],
-            );
-          }),
-          const SizedBox(height: 4),
-        ],
-      ),
+        ),
+        Text(
+          allItems.isEmpty
+              ? 'Nothing here yet. Add your go-to meals and log them in one tap.'
+              : 'Tap to log. Long-press to remove.',
+          style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted),
+        ),
+        const SizedBox(height: KSpacing.xs),
+        ...allItems.asMap().entries.map((entry) {
+          final i = entry.key;
+          final item = entry.value;
+          final resolved = _resolvedResults[item.id];
+          final cals = resolved?.calories.mid ?? item.calories;
+          final prot = resolved?.protein.mid ?? item.protein;
+          final isLoading = _loadingItemId == item.id;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (i > 0) const KHairline(),
+              _QuickAddRow(
+                title: item.name,
+                calories: cals.round(),
+                protein: prot.round(),
+                isCustom: true,
+                isLoading: isLoading,
+                onTap: () => _handleAdd(item, cals, prot),
+                onDelete: () => _deleteCustomItem(item),
+              ),
+            ],
+          );
+        }),
+        const KHairline(),
+      ],
     );
   }
 }
@@ -2340,18 +2055,18 @@ class _QuickAddCardState extends State<_QuickAddCard> {
 // ─── Quick Add row ────────────────────────────────────────────────────────────
 
 class _QuickAddRow extends StatelessWidget {
-  final String       emoji;
   final String       title;
-  final String       meta;
+  final int          calories;
+  final int          protein;
   final bool         isCustom;
   final bool         isLoading;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
 
   const _QuickAddRow({
-    required this.emoji,
     required this.title,
-    required this.meta,
+    required this.calories,
+    required this.protein,
     required this.isCustom,
     this.isLoading = false,
     required this.onTap,
@@ -2360,84 +2075,101 @@ class _QuickAddRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return Pressable(
       onTap: isLoading ? null : onTap,
       onLongPress: (isCustom && onDelete != null && !isLoading)
           ? () => showDialog(
                 context: context,
                 builder: (_) => AlertDialog(
-                  backgroundColor: const Color(0xFF1E1E2C),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  title: const Text('Remove from Quick Add?',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                  content: Text('Remove "$title" from your quick add list?',
-                      style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                  backgroundColor: KColor.surface,
+                  surfaceTintColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: KRadius.xl,
+                    side: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+                  ),
+                  title: Text('Remove from Quick Add?', style: KText.h2),
+                  content: Text('"$title" comes off your Quick Add list. You can add it back any time.',
+                      style: KText.body.copyWith(color: KColor.textSecondary)),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+                      style: TextButton.styleFrom(
+                        foregroundColor: KColor.textSecondary,
+                        minimumSize: const Size(64, 48),
+                      ),
+                      child: const Text('Cancel'),
                     ),
                     TextButton(
                       onPressed: () { Navigator.of(context).pop(); onDelete!(); },
-                      child: const Text('Remove',
-                          style: TextStyle(color: Color(0xFFF87171), fontWeight: FontWeight.w700)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: KColor.danger,
+                        minimumSize: const Size(64, 48),
+                        textStyle: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      child: const Text('Remove'),
                     ),
                   ],
                 ),
               )
           : null,
-      borderRadius: BorderRadius.circular(10),
+      scale: 0.985,
+      borderRadius: BorderRadius.zero,
+      semanticLabel: 'Quick add $title, $calories kcal, $protein grams protein',
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 150),
+        duration: KMotion.of(context, KMotion.quick),
         opacity: isLoading ? 0.6 : 1.0,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           child: Row(
             children: [
-              Text(emoji, style: const TextStyle(fontSize: 18)),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(title,
-                              style: const TextStyle(color: Colors.white, fontSize: 13,
-                                  fontWeight: FontWeight.w600, height: 1.3)),
-                        ),
-                        if (isCustom) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text('custom',
-                                style: TextStyle(color: Color(0xFF52B788), fontSize: 9,
-                                    fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                        Text(
+                          title,
+                          style: KText.bodyMedium.copyWith(
+                            fontSize: 15,
+                            color: KColor.textPrimary,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
                           ),
-                        ],
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(meta, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11.5)),
+                    const SizedBox(height: 3),
+                    KDotStats([
+                      KDotStat('$calories', 'kcal', color: KColor.ember),
+                      KDotStat('$protein', 'g protein', color: KColor.green),
+                    ]),
                   ],
                 ),
               ),
-              if (isLoading)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF52B788)),
-                  ),
-                )
-              else
-                const Icon(Icons.add_circle_outline_rounded, size: 20, color: Color(0xFF52B788)),
+              const SizedBox(width: KSpacing.sm),
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: AnimatedSwitcher(
+                  duration: KMotion.of(context, KMotion.quick),
+                  child: isLoading
+                      ? Padding(
+                          key: const ValueKey('busy'),
+                          padding: const EdgeInsets.all(3),
+                          child: KSpinner(size: 18, color: KColor.textSecondary),
+                        )
+                      : Icon(
+                          Icons.add_circle_outline,
+                          key: const ValueKey('add'),
+                          size: 22,
+                          color: KColor.textPrimary,
+                        ),
+                ),
+              ),
             ],
           ),
         ),
@@ -2488,7 +2220,7 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
       setState(() { _calories = cal; _protein = pro; _loading = false; });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _loading = false; _error = 'Could not estimate. Try again.'; });
+      setState(() { _loading = false; _error = "Couldn't estimate that. Check your connection and try again."; });
     }
   }
 
@@ -2523,172 +2255,194 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final kbHeight = MediaQuery.of(context).viewInsets.bottom;
+    final kbHeight = MediaQuery.viewInsetsOf(context).bottom;
+    final fieldBorder = OutlineInputBorder(
+      borderRadius: KRadius.md,
+      borderSide: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+    );
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF1A1A28),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: KColor.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(top: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 14, 20, 20 + kbHeight),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFF4B5563), borderRadius: BorderRadius.circular(2)),
+      padding: EdgeInsets.only(bottom: KSpacing.xl + kbHeight),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const KSheetHeader(
+              'Add to Quick Add',
+              subtitle: 'Name a food and Kyno estimates it. One tap to log next time.',
             ),
-          ),
-          const SizedBox(height: 16),
-          const Text('Add to Quick Add',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          const Text("Type a food — we'll estimate nutrition for you.",
-              style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
-          const SizedBox(height: 14),
-
-          // Input row
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _ctrl,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _estimate(),
-                  decoration: InputDecoration(
-                    hintText: 'e.g. 2 rotis with dal',
-                    hintStyle: const TextStyle(color: Color(0xFF4B5563), fontSize: 13),
-                    filled: true,
-                    fillColor: const Color(0xFF1E1E2C),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF2E2E3E))),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5)),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              GestureDetector(
-                onTap: _loading ? null : _estimate,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2D6A4F),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: _loading
-                      ? const SizedBox(
-                          width: 16, height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Estimate',
-                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ],
-          ),
-
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Color(0xFFFFB347), fontSize: 12)),
-          ],
-
-          // Result
-          if (_calories != null) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF52B788).withValues(alpha: 0.3)),
-              ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Input row
                   Row(
                     children: [
-                      const Icon(Icons.auto_awesome_rounded, size: 13, color: Color(0xFFA78BFA)),
-                      const SizedBox(width: 5),
-                      const Text('AI Estimate',
-                          style: TextStyle(color: Color(0xFFA78BFA), fontSize: 11, fontWeight: FontWeight.w600)),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => setState(() => _showEdit = !_showEdit),
-                        child: Text(_showEdit ? 'Hide edit' : 'Fix values',
-                            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                      Expanded(
+                        child: TextField(
+                          controller: _ctrl,
+                          style: KText.body.copyWith(color: KColor.textPrimary),
+                          cursorColor: KColor.ink,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => _estimate(),
+                          decoration: InputDecoration(
+                            hintText: 'e.g. 2 roti with dal',
+                            hintStyle: KText.body.copyWith(color: KColor.textDisabled),
+                            filled: true,
+                            fillColor: KColor.card,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: fieldBorder,
+                            enabledBorder: fieldBorder,
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: KRadius.md,
+                                borderSide: BorderSide(color: KColor.ink, width: 1.5)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Pressable(
+                        onTap: _loading ? null : _estimate,
+                        semanticLabel: 'Estimate',
+                        borderRadius: KRadius.md,
+                        child: AnimatedContainer(
+                          duration: KMotion.of(context, KMotion.quick),
+                          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: _loading
+                                  ? KGradient.primary.map((c) => c.withValues(alpha: 0.45)).toList()
+                                  : KGradient.primary,
+                            ),
+                            borderRadius: KRadius.pill,
+                          ),
+                          child: AnimatedSwitcher(
+                            duration: KMotion.of(context, KMotion.quick),
+                            child: _loading
+                                ? KSpinner(
+                                    key: const ValueKey('busy'),
+                                    size: 16,
+                                    color: KColor.onInk,
+                                  )
+                                : Text(
+                                    'Estimate',
+                                    key: const ValueKey('label'),
+                                    style: KText.bodyMedium.copyWith(
+                                      color: KColor.onInk,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  if (!_showEdit)
-                    Row(
-                      children: [
-                        _EstimateChip(
-                          icon: Icons.local_fire_department_rounded,
-                          color: const Color(0xFFFF6B35),
-                          value: '${_calories!.toInt()} kcal',
-                        ),
-                        const SizedBox(width: 10),
-                        _EstimateChip(
-                          icon: Icons.fitness_center_rounded,
-                          color: const Color(0xFF52B788),
-                          value: '${_protein!.toInt()}g protein',
-                        ),
-                      ],
-                    )
-                  else
-                    Row(
-                      children: [
-                        Expanded(child: _NumField(controller: _calCtrl, label: 'kcal', color: const Color(0xFFFF6B35))),
-                        const SizedBox(width: 10),
-                        Expanded(child: _NumField(controller: _proCtrl, label: 'g protein', color: const Color(0xFF52B788))),
-                      ],
+
+                  if (_error != null) ...[
+                    const SizedBox(height: 8),
+                    Semantics(
+                      liveRegion: true,
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline_rounded, size: 14, color: KColor.warning),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(_error!, style: KText.caption.copyWith(fontSize: 13, color: KColor.warning)),
+                          ),
+                        ],
+                      ),
                     ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _accept,
-                      child: const Text('Accept & Save to Quick Add'),
-                    ),
+                  ],
+
+                  // Result
+                  AnimatedSize(
+                    duration: KMotion.of(context, KMotion.standard),
+                    curve: KMotion.emphasizedCurve,
+                    alignment: Alignment.topCenter,
+                    child: _calories == null
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(
+                            padding: const EdgeInsets.only(top: KSpacing.lg),
+                            child: KCard(
+                              boxShadow: const [],
+                              border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const KynoMark(size: 18),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Kyno\'s estimate',
+                                          style: KText.caption.copyWith(
+                                            color: KColor.textSecondary,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => setState(() => _showEdit = !_showEdit),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: KColor.textSecondary,
+                                          minimumSize: const Size(48, 48),
+                                          textStyle: KText.caption.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+                                        ),
+                                        child: Text(_showEdit ? 'Done' : 'Adjust'),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  AnimatedSwitcher(
+                                    duration: KMotion.of(context, KMotion.quick),
+                                    child: !_showEdit
+                                        ? KDotStats(
+                                            key: const ValueKey('chips'),
+                                            [
+                                              KDotStat('${_calories!.round()}', 'kcal', color: KColor.ember, size: 16),
+                                              KDotStat('${_protein!.round()}', 'g protein', color: KColor.green, size: 16),
+                                            ],
+                                          )
+                                        : Row(
+                                            key: const ValueKey('edit'),
+                                            children: [
+                                              Expanded(child: _NumField(controller: _calCtrl, label: 'kcal', color: KColor.ember)),
+                                              const SizedBox(width: 10),
+                                              Expanded(child: _NumField(controller: _proCtrl, label: 'g protein', color: KColor.green)),
+                                            ],
+                                          ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  KButton(
+                                    label: 'Save to Quick Add',
+                                    onTap: _accept,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                   ),
                 ],
               ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
-}
-
-class _EstimateChip extends StatelessWidget {
-  final IconData icon;
-  final Color    color;
-  final String   value;
-  const _EstimateChip({required this.icon, required this.color, required this.value});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: color),
-        const SizedBox(width: 5),
-        Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
-      ],
-    ),
-  );
 }
 
 class _NumField extends StatelessWidget {
@@ -2698,79 +2452,43 @@ class _NumField extends StatelessWidget {
   const _NumField({required this.controller, required this.label, required this.color});
 
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: controller,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w700),
-    textAlign: TextAlign.center,
-    decoration: InputDecoration(
-      labelText: label,
-      labelStyle: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 11),
-      filled: true,
-      fillColor: color.withValues(alpha: 0.08),
-      border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: color.withValues(alpha: 0.3))),
-      enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: color.withValues(alpha: 0.3))),
-      focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: color, width: 1.5)),
-      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-    ),
-  );
-}
-
-class _SourceBadge extends StatelessWidget {
-  final String source;
-  const _SourceBadge(this.source);
-
-  @override
   Widget build(BuildContext context) {
-    final (label, icon, color) = _getAttribution(source);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(icon, style: const TextStyle(fontSize: 9.5)),
-          const SizedBox(width: 3),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              color: color,
+    final hair = KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border;
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      cursorColor: KColor.ink,
+      style: KText.numSmall.copyWith(color: KColor.textPrimary, fontSize: 17, fontWeight: FontWeight.w700),
+      textAlign: TextAlign.center,
+      decoration: InputDecoration(
+        label: Text.rich(
+          TextSpan(children: [
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Container(
+                width: 6,
+                height: 6,
+                margin: const EdgeInsets.only(right: 5),
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
             ),
-          ),
-        ],
+            TextSpan(text: label),
+          ]),
+        ),
+        labelStyle: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 13),
+        filled: true,
+        fillColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+        border: OutlineInputBorder(
+            borderRadius: KRadius.sm,
+            borderSide: BorderSide(color: hair)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: KRadius.sm,
+            borderSide: BorderSide(color: hair)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: KRadius.sm,
+            borderSide: BorderSide(color: KColor.ink, width: 1.5)),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
       ),
     );
   }
-
-  (String, String, Color) _getAttribution(String src) {
-    switch (src) {
-      case 'memory_exact':
-      case 'personal_exact':
-      case 'personal_template':
-        return ('From your saved foods', '📋', const Color(0xFF60A5FA));
-      case 'cache':
-      case 'memory_recurring_promoted':
-        return ('Matched from your history', '🔄', const Color(0xFF2DD4BF));
-      case 'user_override':
-        return ('Your confirmed macros', '✏️', const Color(0xFF3B82F6));
-      case 'local_hybrid':
-      case 'local_fallback':
-        return ('Local estimate', '📊', const Color(0xFF9CA3AF));
-      default:
-        return ('AI estimate', '🤖', const Color(0xFF9CA3AF));
-    }
-  }
 }
-

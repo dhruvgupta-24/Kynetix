@@ -1,12 +1,13 @@
 import '../models/workout_split.dart';
 import 'workout_service.dart';
 import 'exercise_media_service.dart';
+import '../ui/k_format.dart';
 
 /// Structured, rich progression recommendation produced by Kyno.
 class KynoProgressionAdvice {
   final String action; // e.g. "KEEP 70.0 KG" or "INCREASE TO 72.5 KG"
   final String styleLabel; // e.g. "Double Progression"
-  final String todayTarget; // e.g. "70.0 kg • 4 sets • 8–10 reps"
+  final String todayTarget; // e.g. "70.0 kg • 4 sets • 8-10 reps"
   final String summary; // Clear, non-truncated primary coaching recommendation
   final List<String> evidence; // Explicit factual bullet points (reps, volume, history)
   final String nextMilestone; // Explicit criteria to trigger the next progression
@@ -62,14 +63,14 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'DELOAD / REDUCE LOAD',
         styleLabel: 'Active Recovery',
-        todayTarget: 'Reduce volume by 30–50%',
+        todayTarget: 'Reduce volume by 30-50%',
         summary: 'Fatigue accumulation detected. Your estimated 1RM has steadily declined across your last 3 consecutive sessions.',
         evidence: [
           'Estimated 1RM dropped across the last 3 sessions.',
           'Cumulative nervous system & muscular fatigue detected.',
           if (bestEver != null) 'Lifetime best on this movement is ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}.',
         ],
-        nextMilestone: 'Complete 1 deload session at 60–70% load to allow systemic recovery before resuming progression.',
+        nextMilestone: 'Complete 1 deload session at 60-70% load to allow systemic recovery before resuming progression.',
         confidence: 'Deload',
         isDeload: true,
         spark1RmTrend: sparkData,
@@ -84,7 +85,7 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'KEEP ${KynoProgressionAdvice.fmtWeight(curW).toUpperCase()}',
         styleLabel: 'Safety & Form Stabilization',
-        todayTarget: '${KynoProgressionAdvice.fmtWeight(curW)} • $typicalSets sets • ${exercise.targetRepMin}–${exercise.targetRepMax} reps',
+        todayTarget: '${KynoProgressionAdvice.fmtWeight(curW)} • ${plural(typicalSets, 'set')} • ${exercise.targetRepMin}-${exercise.targetRepMax} reps',
         summary: 'Safety limit triggered. Your last session reached technical failure with very high RPE. Hold load and focus on clean movement mechanics.',
         evidence: [
           'High RPE (10) or technical grind observed on recent set.',
@@ -118,7 +119,7 @@ class KynoProgressionEngine {
         return KynoProgressionAdvice(
           action: 'START AT ${KynoProgressionAdvice.fmtWeight(bestEver.weight).toUpperCase()}',
           styleLabel: styleLabel,
-          todayTarget: '${KynoProgressionAdvice.fmtWeight(bestEver.weight)} • $typicalSets sets • ${exercise.targetRepMin}–${exercise.targetRepMax} reps',
+          todayTarget: '${KynoProgressionAdvice.fmtWeight(bestEver.weight)} • ${plural(typicalSets, 'set')} • ${exercise.targetRepMin}-${exercise.targetRepMax} reps',
           summary: 'Re-establishing this exercise. Start at or slightly below your historical best weight to benchmark current strength.',
           evidence: [
             'Lifetime best is ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}.',
@@ -133,13 +134,13 @@ class KynoProgressionEngine {
         return KynoProgressionAdvice(
           action: 'CALIBRATE BASELINE',
           styleLabel: styleLabel,
-          todayTarget: '$typicalSets sets • ${exercise.targetRepMin}–${exercise.targetRepMax} reps (Moderate RPE 7-8)',
+          todayTarget: '${plural(typicalSets, 'set')} • ${exercise.targetRepMin}-${exercise.targetRepMax} reps (Moderate RPE 7-8)',
           summary: 'Use a controlled first session to find a stable working load that allows crisp form across all sets.',
           evidence: [
             'New exercise in active rotation.',
-            'Target rep range is ${exercise.targetRepMin}–${exercise.targetRepMax} reps.',
+            'Target rep range is ${exercise.targetRepMin}-${exercise.targetRepMax} reps.',
           ],
-          nextMilestone: 'Find a weight where you can complete $typicalSets sets leaving 1-2 reps in reserve.',
+          nextMilestone: 'Find a weight where you can complete ${plural(typicalSets, 'set')} leaving 1-2 reps in reserve.',
           confidence: 'Baseline',
           isDeload: false,
           spark1RmTrend: sparkData,
@@ -163,14 +164,14 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'INCREASE TO ${KynoProgressionAdvice.fmtWeight(nextWeight).toUpperCase()}',
         styleLabel: styleLabel,
-        todayTarget: '$typicalSets × $minReps–$maxReps (${KynoProgressionAdvice.fmtWeight(nextWeight)})',
+        todayTarget: '$typicalSets × $minReps-$maxReps (${KynoProgressionAdvice.fmtWeight(nextWeight)})',
         summary: 'Target ceiling reached across all working sets! Increase load by ${KynoProgressionAdvice.fmtWeight(increment)} today.',
         evidence: [
           'Recent: ${recentSetsFormatted.join(", ")}',
-          'Target ceiling: $maxReps reps achieved on all $typicalSets sets',
+          'Target ceiling: ${plural(maxReps, 'rep')} achieved on all ${plural(typicalSets, 'set')}',
           if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}',
         ],
-        nextMilestone: 'Achieve at least $minReps reps across all sets at ${KynoProgressionAdvice.fmtWeight(nextWeight)}.',
+        nextMilestone: 'Achieve at least ${plural(minReps, 'rep')} across all sets at ${KynoProgressionAdvice.fmtWeight(nextWeight)}.',
         confidence: 'High',
         isDeload: false,
         spark1RmTrend: sparkData,
@@ -180,14 +181,14 @@ class KynoProgressionEngine {
       return KynoProgressionAdvice(
         action: 'KEEP ${KynoProgressionAdvice.fmtWeight(currentWeight).toUpperCase()}',
         styleLabel: styleLabel,
-        todayTarget: '$typicalSets × $minReps–$maxReps (${KynoProgressionAdvice.fmtWeight(currentWeight)})',
+        todayTarget: '$typicalSets × $minReps-$maxReps (${KynoProgressionAdvice.fmtWeight(currentWeight)})',
         summary: 'You are still below the rep ceiling on recent sets. Keep the load and try to add reps before increasing weight.',
         evidence: [
           'Recent: ${recentSetsFormatted.join(", ")}',
-          'Target ceiling: $maxReps reps',
+          'Target ceiling: ${plural(maxReps, 'rep')}',
           if (bestEver != null) 'Lifetime best: ${KynoProgressionAdvice.fmtWeight(bestEver.weight)} × ${bestEver.reps}',
         ],
-        nextMilestone: 'Complete all $typicalSets sets at $maxReps reps at ${KynoProgressionAdvice.fmtWeight(currentWeight)} → then increase load.',
+        nextMilestone: 'Complete all ${plural(typicalSets, 'set')} at ${plural(maxReps, 'rep')} at ${KynoProgressionAdvice.fmtWeight(currentWeight)} → then increase load.',
         confidence: analysis.confidence >= 0.70 ? 'High' : 'Moderate',
         isDeload: false,
         spark1RmTrend: sparkData,

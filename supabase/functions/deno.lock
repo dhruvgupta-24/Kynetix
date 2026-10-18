@@ -5,6 +5,7 @@
     "jsr:@supabase/functions-js@*": "2.101.1",
     "npm:@supabase/supabase-js@2": "2.44.2",
     "npm:@supabase/supabase-js@2.44.2": "2.44.2",
+    "npm:jose@5.9.6": "5.9.6",
     "npm:openai@^4.52.5": "4.104.0"
   },
   "jsr": {
@@ -222,6 +223,9 @@
       "dependencies": [
         "ms"
       ]
+    },
+    "jose@5.9.6": {
+      "integrity": "sha512-AMlnetc9+CV9asI19zHmrgS/WYsWUwCn2R7RzlbJWD7F9eWYUTGyBmU9o6PxngtLGOiDGPRu+Uc4fhKzbpteZQ=="
     },
     "math-intrinsics@1.1.0": {
       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="

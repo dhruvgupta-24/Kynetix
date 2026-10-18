@@ -59,15 +59,15 @@ void main() {
     final state = tester.state(find.byType(WorkoutSessionScreen)) as dynamic;
 
     // Verify initial state: 6 exercises, header EXERCISE 1 OF 6
-    expect(find.text('EXERCISE 1 OF 6'), findsOneWidget);
+    expect(find.text('Exercise 1 of 6'), findsOneWidget);
 
     // Call replacement method directly: replace ex3 (Cable Fly) with replacementEx3 (Pec Deck Fly)
     state.replaceExerciseForTest('ex_3', replacementEx3);
     await tester.pumpAndSettle();
 
     // Verify after replacement: 6 active exercises, header EXERCISE 3 OF 6
-    expect(find.text('EXERCISE 3 OF 6'), findsOneWidget);
-    expect(find.text('EXERCISE 3 OF 7'), findsNothing);
+    expect(find.text('Exercise 3 of 6'), findsOneWidget);
+    expect(find.text('Exercise 3 of 7'), findsNothing);
 
     // Verify exercise list count in state
     final activeExercises = state.activeSessionExercisesForTest as List<Exercise>;
@@ -79,7 +79,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify after undo: 6 active exercises, header EXERCISE 3 OF 6 with original exercise ex3
-    expect(find.text('EXERCISE 3 OF 6'), findsOneWidget);
+    expect(find.text('Exercise 3 of 6'), findsOneWidget);
     final revertedExercises = state.activeSessionExercisesForTest as List<Exercise>;
     expect(revertedExercises.length, equals(6));
     expect(revertedExercises.map((e) => e.id).toList(), equals(['ex_1', 'ex_2', 'ex_3', 'ex_4', 'ex_5', 'ex_6']));

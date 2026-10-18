@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
@@ -10,16 +11,24 @@ import '../screens/auth_gate.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
-import '../services/persistence_service.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/insights_report_service.dart';
 import 'insights_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'account_deletion_screen.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
 
 // ─── Profile Screen ────────────────────────────────────────────────────────────
+//
+// "Carbon & Paper" settings: a pushed KPage (neutral tone) with a hero identity
+// card (the screen's one signature moment), then monochrome grouped cards with
+// inset hairlines. Every row has the same fixed-width trailing slot so values
+// line up whether or not they're editable. Colour appears only where it means
+// something (fuel, protein, status, danger). Destructive actions live in a
+// separate group at the bottom. All logic is unchanged — only presentation.
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onProfileChanged;
@@ -47,6 +56,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _syncing = false;
   String? _syncMessage;
+  bool _syncOk = false;
 
   // ── AI provider state ─────────────────────────────────────────────────────
   ChatGptLinkStatus? _aiStatus;
@@ -75,19 +85,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _aiStatusLoading = true);
     try {
       final status = await ChatGptLinkService.getStatus();
-      if (mounted) setState(() { _aiStatus = status; _aiStatusLoading = false; });
+      if (mounted) {
+        setState(() {
+          _aiStatus = status;
+          _aiStatusLoading = false;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() { _aiStatus = ChatGptLinkStatus.disconnected; _aiStatusLoading = false; });
+      if (mounted) {
+        setState(() {
+          _aiStatus = ChatGptLinkStatus.disconnected;
+          _aiStatusLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _disconnectChatGpt() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _KDialog(
+        title: 'Disconnect ChatGPT?',
+        icon: Icons.link_off_rounded,
+        iconColor: KColor.danger,
+        content: Text(
+          'Kyno goes back to Kynetix servers. You can connect again any time.',
+          style: _dialogBody,
+        ),
+        actions: [
+          _DialogCancel(onPressed: () => Navigator.pop(ctx, false)),
+          _DialogConfirm(
+            label: 'Disconnect',
+            danger: true,
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
     setState(() => _aiDisconnecting = true);
     try {
       await ChatGptLinkService.disconnect();
       await _loadAiStatus();
+      _showToast('ChatGPT disconnected.', success: true);
+    } catch (e) {
+      debugPrint('[ProfileScreen] Disconnect failed: $e');
+      _showToast('Couldn\'t disconnect. Check your connection and try again.');
     } finally {
       if (mounted) setState(() => _aiDisconnecting = false);
+    }
+  }
+
+  Future<void> _openConnectChatGpt() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ConnectChatGptScreen()),
+    );
+    if (mounted) _loadAiStatus();
+  }
+
+  Future<void> _openManageUsage() async {
+    var opened = false;
+    try {
+      opened = await launchUrl(
+        Uri.parse(ChatGptLinkService.manageUsageUrl),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (e) {
+      debugPrint('[ProfileScreen] Could not open usage settings: $e');
+    }
+    if (!opened) {
+      _showToast('Couldn\'t open ChatGPT settings. Try again in a moment.');
     }
   }
 
@@ -101,6 +170,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {
       _syncing = true;
       _syncMessage = null;
+      _syncOk = false;
     });
 
     final hasPerm = await HealthService().hasPermission();
@@ -110,7 +180,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (mounted) {
           setState(() {
             _syncing = false;
-            _syncMessage = 'Permission denied.';
+            _syncMessage =
+                'Health Connect access is off. Allow it to sync your steps.';
           });
         }
         return;
@@ -125,21 +196,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
         averageDailySteps: result.effectiveAverageSteps!.toInt(),
         lastHealthSyncAt: result.syncedAt,
       );
-      PersistenceService.saveProfile(currentUserProfile!).ignore();
+      ProfileService.instance.save(currentUserProfile!).ignore();
       widget.onProfileChanged?.call();
+      _syncOk = true;
+      final avg14 =
+          result.averageDailySteps14d ?? result.effectiveAverageSteps!;
       _syncMessage =
-          'Synced — ${result.effectiveAverageSteps!.toInt()} steps/day effective';
+          'Synced. ${avg14.round()} steps a day over your last 14 full days.';
     } else {
-      _syncMessage = result.error ?? 'No step data found.';
+      _syncMessage = _friendlySyncError(result.error);
     }
 
     setState(() => _syncing = false);
   }
 
+  /// Calm copy for a failed Health Connect sync. Never raw exception text.
+  static String _friendlySyncError(String? raw) {
+    final e = (raw ?? '').toLowerCase();
+    if (e.contains('permission')) {
+      return 'Health Connect access is off. Tap Connect to allow it.';
+    }
+    if (raw == null || e.contains('no step data')) {
+      return 'No steps in Health Connect yet. Check it\'s tracking, then sync again.';
+    }
+    return 'Couldn\'t sync with Health Connect. Try again in a moment.';
+  }
+
+  /// The screen's one snackbar style: floating surface pill, icon + one line.
+  void _showToast(String message, {bool success = false}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+              color: success ? KColor.green : KColor.textSecondary,
+              size: 16,
+            ),
+            const SizedBox(width: KSpacing.sm),
+            Flexible(
+              child: Text(
+                message,
+                style: KText.bodyMedium.copyWith(
+                  fontSize: 13,
+                  color: KColor.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 3),
+        backgroundColor: KColor.surface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: KRadius.md,
+          side: BorderSide(color: KColor.border, width: 0.5),
+        ),
+        margin: const EdgeInsets.all(KSpacing.md),
+      ),
+    );
+  }
+
   void _saveProfile(UserProfile newProfile) {
     currentUserProfile = newProfile;
-    PersistenceService.saveProfile(currentUserProfile!).ignore();
-    ProfileService.instance.upsertProfile(currentUserProfile!).ignore(); // Upload to cloud
+    // Local write + cloud backup of the whole profile.
+    ProfileService.instance.save(currentUserProfile!).ignore();
     widget.onProfileChanged?.call();
     setState(() {});
   }
@@ -147,21 +271,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ── Sheets ─────────────────────────────────────────────────────────────────
 
   void _editGoal() {
-    showModalBottomSheet(
+    showKSheet<void>(
       context: context,
-      backgroundColor: KColor.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: KSpacing.xl),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const KSheetHeader('Select Goal'),
-                const SizedBox(height: 10),
+                const KSheetHeader(
+                  'Pick your goal',
+                  subtitle: 'Your calorie and protein targets follow it.',
+                ),
+                const SizedBox(height: KSpacing.md),
                 ...[
                   kFatLoss,
                   kMaintenance,
@@ -170,21 +294,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   kRecomposition,
                 ].map((g) {
                   final isSel = g == _profile.goal;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                    title: Text(
-                      g,
-                      style: TextStyle(
-                        color: isSel ? KColor.green : Colors.white,
-                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                    trailing: isSel
-                        ? const Icon(
-                            Icons.check_circle_rounded,
-                            color: KColor.green,
-                          )
-                        : null,
+                  return _SheetOption(
+                    label: g,
+                    selected: isSel,
+                    accent: _goalColor(g),
                     onTap: () {
                       Navigator.pop(ctx);
                       _saveProfile(_profile.copyWith(goal: g));
@@ -200,38 +313,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _editEatingStyle() {
-    showModalBottomSheet(
+    showKSheet<void>(
       context: context,
-      backgroundColor: KColor.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: KSpacing.xl),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const KSheetHeader('Eating Style', subtitle: 'How do you eat a meal with roti or rice?'),
-                const SizedBox(height: 10),
+                const KSheetHeader(
+                  'Eating style',
+                  subtitle: 'How do you eat a meal with roti or rice?',
+                ),
+                const SizedBox(height: KSpacing.md),
                 ...PortionAnchor.values.map((anchor) {
                   final isSel = anchor == _profile.portionAnchor;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                    title: Text(
-                      anchor.displayLabel,
-                      style: TextStyle(
-                        color: isSel ? KColor.green : Colors.white,
-                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                    trailing: isSel
-                        ? const Icon(
-                            Icons.check_circle_rounded,
-                            color: KColor.green,
-                          )
-                        : null,
+                  return _SheetOption(
+                    label: anchor.displayLabel,
+                    selected: isSel,
+                    accent: KColor.ember,
                     onTap: () {
                       Navigator.pop(ctx);
                       _saveProfile(_profile.copyWith(portionAnchor: anchor));
@@ -239,44 +341,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   );
                 }),
                 // Not specified option
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                  title: Text(
-                    'Not specified',
-                    style: TextStyle(
-                      color: _profile.portionAnchor == null
-                          ? KColor.green
-                          : Colors.white,
-                      fontWeight: _profile.portionAnchor == null
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                    ),
-                  ),
-                  trailing: _profile.portionAnchor == null
-                      ? const Icon(Icons.check_circle_rounded,
-                          color: KColor.green)
-                      : null,
+                _SheetOption(
+                  label: 'Not specified',
+                  selected: _profile.portionAnchor == null,
+                  accent: KColor.ember,
                   onTap: () {
                     Navigator.pop(ctx);
-                    // Save with portionAnchor explicitly null by rebuilding profile
-                    currentUserProfile = UserProfile(
-                      name:              _profile.name,
-                      age:               _profile.age,
-                      gender:            _profile.gender,
-                      height:            _profile.height,
-                      weight:            _profile.weight,
-                      workoutDaysMin:    _profile.workoutDaysMin,
-                      workoutDaysMax:    _profile.workoutDaysMax,
-                      goal:              _profile.goal,
-                      portionAnchor:     null,
-                      averageDailySteps: _profile.averageDailySteps,
-                      healthSyncEnabled: _profile.healthSyncEnabled,
-                      lastHealthSyncAt:  _profile.lastHealthSyncAt,
-                    );
-                    PersistenceService.saveProfile(currentUserProfile!).ignore();
-                    ProfileService.instance.upsertProfile(currentUserProfile!).ignore();
-                    widget.onProfileChanged?.call();
-                    setState(() {});
+                    // Only the eating style changes; custom targets, their
+                    // history and carry-forward settings are kept.
+                    _saveProfile(_profile.copyWith(clearPortionAnchor: true));
                   },
                 ),
               ],
@@ -289,17 +362,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _editBodyMetrics() {
     final ageCtrl = TextEditingController(text: _profile.age.toString());
-    final heightCtrl = TextEditingController(text: _profile.height.toStringAsFixed(1));
-    final weightCtrl = TextEditingController(text: _profile.weight.toStringAsFixed(1));
+    final heightCtrl = TextEditingController(
+      text: _profile.height.toStringAsFixed(1),
+    );
+    final weightCtrl = TextEditingController(
+      text: _profile.weight.toStringAsFixed(1),
+    );
     final formKey = GlobalKey<FormState>();
 
-    showModalBottomSheet(
+    showKSheet<void>(
       context: context,
-      backgroundColor: KColor.card,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) {
         return Padding(
           padding: EdgeInsets.only(
@@ -310,73 +383,127 @@ class _ProfileScreenState extends State<ProfileScreen> {
               key: formKey,
               autovalidateMode: AutovalidateMode.onUserInteraction,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, KSpacing.xl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const KSheetHeader('Body Metrics', subtitle: 'Update metrics for accurate daily calculations'),
-                    const SizedBox(height: 16),
-                    _buildFormInput(
-                      controller: ageCtrl,
-                      label: 'Age',
-                      suffix: 'years',
-                      keyboardType: TextInputType.number,
-                      formatters: [FilteringTextInputFormatter.digitsOnly],
-                      validator: (val) {
-                        if (val == null || val.isEmpty) return 'Age is required';
-                        final numVal = int.tryParse(val);
-                        if (numVal == null || numVal < 1 || numVal > 120) return 'Enter a valid age (1-120)';
-                        return null;
-                      },
+                    const KSheetHeader(
+                      'Body metrics',
+                      subtitle: 'Keeps your daily targets honest.',
                     ),
-                    const SizedBox(height: 16),
-                    _buildFormInput(
-                      controller: heightCtrl,
-                      label: 'Height',
-                      suffix: 'cm',
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      formatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-                      validator: (val) {
-                        if (val == null || val.isEmpty) return 'Height is required';
-                        final numVal = double.tryParse(val);
-                        if (numVal == null || numVal < 50 || numVal > 280) return 'Enter a valid height (50-280 cm)';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    _buildFormInput(
-                      controller: weightCtrl,
-                      label: 'Weight',
-                      suffix: 'kg',
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      formatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-                      validator: (val) {
-                        if (val == null || val.isEmpty) return 'Weight is required';
-                        final numVal = double.tryParse(val);
-                        if (numVal == null || numVal < 20 || numVal > 400) return 'Enter a valid weight (20-400 kg)';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                    KButton(
-                      label: 'Save Metrics',
-                      onTap: () {
-                        if (formKey.currentState?.validate() ?? false) {
-                          final age = int.tryParse(ageCtrl.text) ?? _profile.age;
-                          final height = double.tryParse(heightCtrl.text) ?? _profile.height;
-                          final weight = double.tryParse(weightCtrl.text) ?? _profile.weight;
-                          
-                          _saveProfile(_profile.copyWith(
-                            age: age,
-                            height: height,
-                            weight: weight,
-                          ));
-                          Navigator.pop(ctx);
-                        } else {
-                          kHapticMedium();
-                        }
-                      },
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: KSpacing.p - 4,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SizedBox(height: KSpacing.lg),
+                          _buildFormInput(
+                            controller: ageCtrl,
+                            label: 'Age',
+                            suffix: 'years',
+                            keyboardType: TextInputType.number,
+                            formatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            validator: (val) {
+                              if (val == null || val.isEmpty) {
+                                return 'Add your age';
+                              }
+                              final numVal = int.tryParse(val);
+                              if (numVal == null ||
+                                  numVal < 1 ||
+                                  numVal > 120) {
+                                return 'Age should be between 1 and 120';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: KSpacing.lg),
+                          _buildFormInput(
+                            controller: heightCtrl,
+                            label: 'Height',
+                            suffix: 'cm',
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            formatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[\d.]'),
+                              ),
+                            ],
+                            validator: (val) {
+                              if (val == null || val.isEmpty) {
+                                return 'Add your height';
+                              }
+                              final numVal = double.tryParse(val);
+                              if (numVal == null ||
+                                  numVal < 50 ||
+                                  numVal > 280) {
+                                return 'Height should be 50-280 cm';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: KSpacing.lg),
+                          _buildFormInput(
+                            controller: weightCtrl,
+                            label: 'Weight',
+                            suffix: 'kg',
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            formatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[\d.]'),
+                              ),
+                            ],
+                            validator: (val) {
+                              if (val == null || val.isEmpty) {
+                                return 'Add your weight';
+                              }
+                              final numVal = double.tryParse(val);
+                              if (numVal == null ||
+                                  numVal < 20 ||
+                                  numVal > 400) {
+                                return 'Weight should be 20-400 kg';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: KSpacing.xxl),
+                          KButton(
+                            label: 'Save metrics',
+                            width: double.infinity,
+                            onTap: () {
+                              if (formKey.currentState?.validate() ?? false) {
+                                final age =
+                                    int.tryParse(ageCtrl.text) ?? _profile.age;
+                                final height =
+                                    double.tryParse(heightCtrl.text) ??
+                                    _profile.height;
+                                final weight =
+                                    double.tryParse(weightCtrl.text) ??
+                                    _profile.weight;
+
+                                _saveProfile(
+                                  _profile.copyWith(
+                                    age: age,
+                                    height: height,
+                                    weight: weight,
+                                  ),
+                                );
+                                Navigator.pop(ctx);
+                                _showToast('Metrics saved.', success: true);
+                              } else {
+                                KHaptics.reject();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -399,34 +526,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: KColor.textSecondary, fontSize: 13, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
+        Text(label, style: KText.label),
+        const SizedBox(height: KSpacing.sm),
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
           inputFormatters: formatters,
           validator: validator,
-          style: const TextStyle(color: Colors.white, fontSize: 15),
-          decoration: InputDecoration(
-            suffixText: suffix,
-            suffixStyle: const TextStyle(color: KColor.textMuted, fontSize: 14),
-            filled: true,
-            fillColor: const Color(0xFF13131F),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            errorStyle: const TextStyle(color: KColor.danger, fontSize: 11),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: KColor.green, width: 1),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: KColor.danger, width: 1),
-            ),
+          style: KText.numSmall.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
           ),
+          decoration: _inputDecoration(suffix: suffix),
         ),
       ],
     );
@@ -436,128 +547,219 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
+    final sections = <Widget>[
+      _buildProfileCard(),
+      _buildAppearanceCard(),
+      _buildBodyCard(),
+      _buildGoalCard(),
+      _buildNutritionTargetsCard(),
+      _buildLiftingMetricsCard(),
+      _buildHealthCard(),
+      _buildAiCard(),
+      _buildLibraryAndInsightsCard(),
+      _buildAboutCard(),
+      _buildPrivacyCard(),
+      _buildAccountCard(),
+    ];
+
+    return KPage(
+      tone: KTone.neutral,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          tooltip: 'Back',
+          icon: Icon(Icons.arrow_back_rounded, color: KColor.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text(
-          'Settings',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        title: Text('Settings', style: KText.h2),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
-        children: [
-          _buildProfileCard(),
-          const SizedBox(height: 16),
-          _buildBodyCard(),
-          const SizedBox(height: 16),
-          _buildGoalCard(),
-          const SizedBox(height: 16),
-          _buildLiftingMetricsCard(),
-          const SizedBox(height: 16),
-          _buildNutritionTargetsCard(),
-          const SizedBox(height: 16),
-          _buildHealthCard(),
-          const SizedBox(height: 16),
-          _buildNutritionIntelligenceCard(),
-          const SizedBox(height: 16),
-          _buildAiCard(),
-          const SizedBox(height: 16),
-          _buildInsightsCard(),
-          const SizedBox(height: 16),
-          _buildAboutCard(),
-          const SizedBox(height: 24),
-          _buildLogoutButton(),
-        ],
+      // Built eagerly (not lazily) so the one-shot entrance plays once on
+      // mount and never replays while scrolling.
+      // Rows carry their own 16dp inset, so the page itself runs nearly
+      // edge to edge: sections read as one editorial list, not a card stack.
+      body: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          KSpacing.xs,
+          KSpacing.xs,
+          KSpacing.xs,
+          MediaQuery.paddingOf(context).bottom + KSpacing.xxxl,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < sections.length; i++)
+              Padding(
+                padding: EdgeInsets.only(
+                  top: i == 0
+                      ? 0
+                      : (i == sections.length - 1
+                            ? KSpacing.xxxl + KSpacing.sm
+                            : KSpacing.xxxl),
+                ),
+                child: KReveal(index: i, child: sections[i]),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Profile Banner ─────────────────────────────────────────────────────────
+  // ── Profile Banner (hero identity card) ────────────────────────────────────
 
   Widget _buildProfileCard() {
-    return _Section(
-      child: Row(
+    final plan = _plan;
+
+    // The person, set like a masthead: a plain avatar, the name large, the
+    // goal as a coloured word, then their numbers in a ruled row. No card,
+    // no gradient ring.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Builder(
-            builder: (context) {
-              final user = Supabase.instance.client.auth.currentUser;
-              final avatarUrl = user?.userMetadata?['avatar_url'] ?? user?.userMetadata?['picture'] as String?;
+          const SizedBox(height: KSpacing.sm),
+          Row(
+            children: [
+              Builder(
+                builder: (context) {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  final avatarUrl =
+                      user?.userMetadata?['avatar_url'] ??
+                      user?.userMetadata?['picture'] as String?;
 
-              String getInitials(String name) {
-                if (name.isEmpty) return 'K';
-                final parts = name.trim().split(RegExp(r'\s+'));
-                if (parts.length == 1) {
-                  return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
-                }
-                return (parts.first[0] + parts.last[0]).toUpperCase();
-              }
+                  String getInitials(String name) {
+                    if (name.isEmpty) return 'K';
+                    final parts = name.trim().split(RegExp(r'\s+'));
+                    if (parts.length == 1) {
+                      return parts.first
+                          .substring(0, parts.first.length >= 2 ? 2 : 1)
+                          .toUpperCase();
+                    }
+                    return (parts.first[0] + parts.last[0]).toUpperCase();
+                  }
 
-              final initials = getInitials(_profile.name);
+                  final initials = getInitials(_profile.name);
+                  final initialsWidget = Center(
+                    child: Text(
+                      initials,
+                      style: KText.h3.copyWith(
+                        color: KColor.textPrimary,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  );
 
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  color: const Color(0xFF2D6A4F),
-                  child: avatarUrl != null && avatarUrl.isNotEmpty
-                      ? Image.network(
-                          avatarUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Center(
-                              child: Text(
-                                initials,
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            );
-                          },
-                        )
-                      : Center(
-                          child: Text(
-                            initials,
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                  return ExcludeSemantics(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: KColor.cardHigh,
+                        border: Border.all(
+                          color: KColor.fg.withValues(
+                            alpha: KColor.isDark ? 0.12 : 0.1,
                           ),
                         ),
+                      ),
+                      child: avatarUrl != null && avatarUrl.isNotEmpty
+                          ? Image.network(
+                              avatarUrl,
+                              fit: BoxFit.cover,
+                              // Decode at display size, not the full
+                              // upload resolution.
+                              cacheWidth:
+                                  (56 * MediaQuery.devicePixelRatioOf(context))
+                                      .round(),
+                              errorBuilder: (context, error, stackTrace) {
+                                return initialsWidget;
+                              },
+                            )
+                          : initialsWidget,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: KSpacing.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _profile.name,
+                      style: KText.h1.copyWith(fontSize: 26, height: 1.1),
+                    ),
+                    const SizedBox(height: 6),
+                    _GoalChip(goal: _profile.goal),
+                  ],
                 ),
-              );
-            },
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _profile.name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
+          const SizedBox(height: KSpacing.xl),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: KColor.textPrimary, width: 1.5),
+                bottom: BorderSide(
+                  color: KColor.fg.withValues(alpha: KColor.isDark ? 0.1 : 0.1),
                 ),
-                const SizedBox(height: 4),
-                _GoalChip(goal: _profile.goal),
-              ],
+              ),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _StatTile(
+                      icon: Icons.height_rounded,
+                      label: 'Height',
+                      value: _profile.height,
+                      decimals: 1,
+                      unit: 'cm',
+                      tint: KColor.textSecondary,
+                      onTap: _editBodyMetrics,
+                    ),
+                  ),
+                  const _StatRule(),
+                  Expanded(
+                    child: _StatTile(
+                      icon: Icons.monitor_weight_outlined,
+                      label: 'Weight',
+                      value: _profile.weight,
+                      decimals: 1,
+                      unit: 'kg',
+                      tint: KColor.textSecondary,
+                      onTap: _editBodyMetrics,
+                    ),
+                  ),
+                  const _StatRule(),
+                  Expanded(
+                    child: _StatTile(
+                      icon: Icons.local_fire_department_rounded,
+                      // A weekly average; training/rest days differ, so say so.
+                      label: 'kcal a day',
+                      value: plan.avgDailyCalories,
+                      unit: 'kcal',
+                      tint: KColor.ember,
+                    ),
+                  ),
+                  const _StatRule(),
+                  Expanded(
+                    child: _StatTile(
+                      icon: Icons.egg_outlined,
+                      label: 'Protein a day',
+                      value: plan.avgDailyProtein,
+                      unit: 'g',
+                      tint: KColor.green,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -565,47 +767,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ── Appearance ─────────────────────────────────────────────────────────────
+  // System / Light / Dark. A UI preference only (persisted by the controller);
+  // KThemeScope repaints the whole tree, so the switch is live.
+
+  Widget _buildAppearanceCard() {
+    return _Group(
+      title: 'Appearance',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            KSpacing.md,
+            KSpacing.lg,
+            KSpacing.md,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ValueListenableBuilder<ThemeMode>(
+                valueListenable: KThemeController.instance,
+                builder: (context, mode, _) =>
+                    _ThemeModeSegmented(selected: mode),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Privacy & legal ────────────────────────────────────────────────────────
+
+  Widget _buildPrivacyCard() {
+    return _Group(
+      title: 'Privacy & legal',
+      children: [
+        _SettingRow(
+          icon: Icons.privacy_tip_outlined,
+          tint: KColor.textSecondary,
+          label: 'Privacy policy',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+          ),
+        ),
+        _SettingRow(
+          icon: Icons.description_outlined,
+          tint: KColor.textSecondary,
+          label: 'Open-source licences',
+          onTap: () =>
+              showLicensePage(context: context, applicationName: 'Kynetix'),
+        ),
+      ],
+    );
+  }
+
   // ── Body Metrics ───────────────────────────────────────────────────────────
 
   Widget _buildBodyCard() {
-    return _Section(
-      title: 'Body Metrics',
-      child: Column(
-        children: [
-          _InfoRow(
-            icon: Icons.person_outline_rounded,
-            label: 'Gender',
-            value: _profile.gender,
-          ),
-          _InfoRow(
-            icon: Icons.cake_outlined,
-            label: 'Age',
-            value: '${_profile.age} years',
-            isEditable: true,
-            onTap: _editBodyMetrics,
-          ),
-          _InfoRow(
-            icon: Icons.height_rounded,
-            label: 'Height',
-            value: '${_profile.height.toStringAsFixed(1)} cm',
-            isEditable: true,
-            onTap: _editBodyMetrics,
-          ),
-          _InfoRow(
-            icon: Icons.monitor_weight_outlined,
-            label: 'Weight',
-            value: '${_profile.weight.toStringAsFixed(1)} kg',
-            isEditable: true,
-            onTap: _editBodyMetrics,
-          ),
-          _InfoRow(
-            icon: Icons.calculate_outlined,
-            label: 'BMI',
-            value: _profile.bmi.toStringAsFixed(1),
-            isLast: true,
-          ),
-        ],
-      ),
+    return _Group(
+      title: 'Body metrics',
+      children: [
+        _SettingRow(
+          icon: Icons.person_outline_rounded,
+          tint: KColor.textSecondary,
+          label: 'Gender',
+          value: _profile.gender.isEmpty
+              ? _profile.gender
+              : _profile.gender[0].toUpperCase() + _profile.gender.substring(1),
+        ),
+        _SettingRow(
+          icon: Icons.cake_outlined,
+          tint: KColor.textSecondary,
+          label: 'Age',
+          value: '${_profile.age} years',
+          isEditable: true,
+          onTap: _editBodyMetrics,
+        ),
+        _SettingRow(
+          icon: Icons.height_rounded,
+          tint: KColor.textSecondary,
+          label: 'Height',
+          value: '${amount(_profile.height)} cm',
+          isEditable: true,
+          onTap: _editBodyMetrics,
+        ),
+        _SettingRow(
+          icon: Icons.monitor_weight_outlined,
+          tint: KColor.textSecondary,
+          label: 'Weight',
+          value: '${amount(_profile.weight)} kg',
+          isEditable: true,
+          onTap: _editBodyMetrics,
+        ),
+        _SettingRow(
+          icon: Icons.calculate_outlined,
+          tint: KColor.textSecondary,
+          label: 'BMI',
+          value: _profile.bmi.toStringAsFixed(1),
+        ),
+      ],
     );
   }
 
@@ -614,85 +875,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildGoalCard() {
     final freqLabel = _profile.workoutDaysMin == _profile.workoutDaysMax
         ? '${_profile.workoutDaysMin}×/week'
-        : '${_profile.workoutDaysMin}–${_profile.workoutDaysMax}×/week';
+        : '${_profile.workoutDaysMin}-${_profile.workoutDaysMax}×/week';
     final plan = _plan;
 
-    return _Section(
-      title: 'Goal Settings',
-      child: Column(
-        children: [
-          _InfoRow(
-            icon: Icons.flag_rounded,
-            label: 'Goal',
-            value: _profile.goal,
-            isEditable: true,
-            onTap: _editGoal,
-          ),
-          _InfoRow(
-            icon: Icons.restaurant_outlined,
-            label: 'Eating Style',
-            value: _profile.portionAnchor?.displayLabel ?? 'Not specified',
-            isEditable: true,
-            onTap: _editEatingStyle,
-          ),
-          _InfoRow(
-            icon: Icons.fitness_center_rounded,
-            label: 'Workouts',
-            value: freqLabel,
-          ),
-          _InfoRow(
-            icon: Icons.local_fire_department_rounded,
-            label: 'Maintenance',
-            value: '${plan.maintenanceCalories.toStringAsFixed(0)} kcal',
-          ),
-          _InfoRow(
-            icon: Icons.bolt_rounded,
-            label: 'Base Target',
-            value: '${plan.avgDailyCalories.toStringAsFixed(0)} kcal',
-          ),
-          _InfoRow(
-            icon: Icons.egg_outlined,
-            label: 'Base Protein',
-            value: '${plan.avgDailyProtein.toStringAsFixed(0)} g',
-            isLast: true,
-          ),
-        ],
-      ),
+    return _Group(
+      title: 'Goal settings',
+      children: [
+        _SettingRow(
+          icon: Icons.flag_rounded,
+          tint: _goalColor(_profile.goal),
+          label: 'Goal',
+          value: _profile.goal,
+          isEditable: true,
+          onTap: _editGoal,
+        ),
+        _SettingRow(
+          icon: Icons.restaurant_outlined,
+          tint: KColor.ember,
+          label: 'Eating style',
+          value: _profile.portionAnchor?.displayLabel ?? 'Not specified',
+          isEditable: true,
+          onTap: _editEatingStyle,
+        ),
+        _SettingRow(
+          icon: Icons.fitness_center_rounded,
+          tint: KColor.textSecondary,
+          label: 'Workouts',
+          value: freqLabel,
+        ),
+        _SettingRow(
+          icon: Icons.local_fire_department_rounded,
+          tint: KColor.ember,
+          label: 'Maintenance',
+          value: '${plan.maintenanceCalories.toStringAsFixed(0)} kcal',
+        ),
+        _SettingRow(
+          icon: Icons.bolt_rounded,
+          tint: KColor.saffron,
+          label: 'Base target',
+          value: '${plan.avgDailyCalories.toStringAsFixed(0)} kcal',
+        ),
+        _SettingRow(
+          icon: Icons.egg_outlined,
+          tint: KColor.green,
+          label: 'Base protein',
+          value: '${plan.avgDailyProtein.toStringAsFixed(0)} g',
+        ),
+      ],
     );
   }
 
   Widget _buildLiftingMetricsCard() {
-    return _Section(
-      title: 'Advanced Lifting Metrics',
-      child: SwitchListTile(
-        title: const Text(
-          'Enable RPE Tracking',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+    return _Group(
+      title: 'Advanced lifting metrics',
+      children: [
+        _SwitchRow(
+          icon: Icons.speed_rounded,
+          tint: KColor.textSecondary,
+          title: 'RPE tracking',
+          subtitle: 'Rate of perceived exertion (1-10) for each set',
+          value: _enableRpeTracking,
+          onChanged: (val) async {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('enable_rpe_tracking', val);
+            if (!mounted) return;
+            setState(() {
+              _enableRpeTracking = val;
+            });
+          },
         ),
-        subtitle: const Text(
-          'Rate of Perceived Exertion (1-10 scale) for sets',
-          style: TextStyle(
-            color: KColor.textMuted,
-            fontSize: 12,
-          ),
-        ),
-        value: _enableRpeTracking,
-        activeColor: KColor.green,
-        activeTrackColor: KColor.green.withValues(alpha: 0.2),
-        inactiveTrackColor: const Color(0xFF1F1F2F),
-        contentPadding: EdgeInsets.zero,
-        onChanged: (val) async {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('enable_rpe_tracking', val);
-          setState(() {
-            _enableRpeTracking = val;
-          });
-        },
-      ),
+      ],
     );
   }
 
@@ -703,7 +955,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final steps = _profile.averageDailySteps;
     final syncAt = _profile.lastHealthSyncAt;
 
-    String syncTimeLabel = 'Never synced';
+    String syncTimeLabel = 'Not yet';
     if (syncAt != null) {
       syncTimeLabel =
           '${syncAt.day}/${syncAt.month} at '
@@ -714,123 +966,135 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ? _stepOffsetLabel(steps)
         : null;
 
-    return _Section(
+    final syncOk = _syncOk;
+
+    return _Group(
       title: 'Health Connect',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            KSpacing.md,
+            KSpacing.md,
+            KSpacing.md,
+          ),
+          child: Row(
             children: [
-              Icon(
-                synced ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                size: 16,
-                color: synced
-                    ? const Color(0xFF52B788)
-                    : const Color(0xFF4B5563),
+              _IconTile(
+                icon: synced
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                tint: synced ? KColor.green : KColor.textMuted,
               ),
-              const SizedBox(width: 8),
-              Text(
-                synced ? 'Connected' : 'Not connected',
-                style: TextStyle(
-                  color: synced
-                      ? const Color(0xFF52B788)
-                      : const Color(0xFF6B7280),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: _syncing ? null : _doSync,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF52B788).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFF52B788).withValues(alpha: 0.4),
+              const SizedBox(width: KSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      synced ? 'Connected' : 'Not connected',
+                      style: KText.bodyMedium.copyWith(
+                        color: synced ? KColor.green : KColor.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  child: _syncing
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFF52B788),
-                          ),
-                        )
-                      : Text(
-                          synced ? 'Sync Now' : 'Connect',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF52B788),
-                          ),
-                        ),
+                    AnimatedSize(
+                      duration: KMotion.of(context, KMotion.standard),
+                      curve: KMotion.emphasizedCurve,
+                      alignment: AlignmentDirectional.topStart,
+                      child: _syncMessage == null
+                          ? const SizedBox(width: double.infinity)
+                          : Semantics(
+                              liveRegion: true,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 1),
+                                      child: Icon(
+                                        syncOk
+                                            ? Icons.check_circle_rounded
+                                            : Icons.info_outline_rounded,
+                                        size: 13,
+                                        color: syncOk
+                                            ? KColor.green
+                                            : KColor.saffron,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        _syncMessage!,
+                                        style: KText.caption.copyWith(
+                                          fontSize: 11,
+                                          color: syncOk
+                                              ? KColor.green
+                                              : KColor.saffron,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(width: KSpacing.sm),
+              _PillAction(
+                label: synced ? 'Sync now' : 'Connect',
+                busy: _syncing,
+                onTap: _syncing ? null : _doSync,
               ),
             ],
           ),
+        ),
 
-          if (_syncMessage != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _syncMessage!,
-              style: TextStyle(
-                fontSize: 11,
-                color: _syncMessage!.contains('Synced')
-                    ? const Color(0xFF52B788)
-                    : const Color(0xFFFFB347),
-              ),
-            ),
-          ],
-
-          if (synced) ...[
-            const SizedBox(height: 12),
-            const Divider(color: Color(0xFF2E2E3E), height: 1),
-            const SizedBox(height: 12),
-            _InfoRow(
-              icon: Icons.directions_walk_rounded,
-              label: 'Avg Steps',
-              value: steps != null ? '${steps.toStringAsFixed(0)}/day' : '—',
-            ),
-            _InfoRow(
-              icon: Icons.tune_rounded,
-              label: 'Calorie Correction',
-              value: stepOffset ?? '—',
-            ),
-            _InfoRow(
-              icon: Icons.schedule_rounded,
-              label: 'Last Sync',
-              value: syncTimeLabel,
-              isLast: true,
-            ),
-          ],
+        if (synced) ...[
+          _SettingRow(
+            icon: Icons.directions_walk_rounded,
+            tint: KColor.textSecondary,
+            label: 'Avg steps',
+            value: steps != null ? '${steps.toStringAsFixed(0)}/day' : '-',
+          ),
+          _SettingRow(
+            icon: Icons.tune_rounded,
+            tint: KColor.ember,
+            label: 'Calorie correction',
+            value: stepOffset ?? '-',
+          ),
+          _SettingRow(
+            icon: Icons.schedule_rounded,
+            tint: KColor.textSecondary,
+            label: 'Last sync',
+            value: syncTimeLabel,
+          ),
         ],
-      ),
+      ],
     );
   }
 
   /// Shows the actual weight-aware calorie offset for the persisted step count.
   /// Uses the same formula as NutritionTargetEngine._stepCorrectionKcal.
+  /// The engine's own step adjustment for the persisted step count.
   String _stepOffsetLabel(int steps) {
-    final weight = _profile.weight;
-    const baseline = 7000.0;
-    const strideKm = 0.00075;
-    const metFactor = 0.55;
-    final kcalPerStep = weight * strideKm * metFactor;
-    final rawOffset = ((steps - baseline) * kcalPerStep).clamp(-400.0, 400.0).round();
+    final rawOffset = NutritionTargetEngine.instance.stepCorrectionKcal(
+      _profile.copyWith(averageDailySteps: steps),
+      null,
+    );
     final sign = rawOffset >= 0 ? '+' : '';
     return '$sign$rawOffset kcal vs baseline';
   }
 
   ActivityTier _tierFromPersistedSteps(int steps) {
-    if (steps < 4000)  return ActivityTier.sedentary;
-    if (steps < 7000)  return ActivityTier.light;
+    if (steps < 4000) return ActivityTier.sedentary;
+    if (steps < 7000) return ActivityTier.light;
     if (steps < 10000) return ActivityTier.moderate;
     if (steps < 13000) return ActivityTier.active;
     return ActivityTier.veryActive;
@@ -839,21 +1103,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ── AI Engine Info ───────────────────────────────────────────────────────────
 
   Widget _buildAiCard() {
-    return _Section(
-      title: 'Connected AI',
-      child: _aiStatusLoading
-          ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(
-                child: SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Color(0xFF52B788),
-                  ),
+    return _Group(
+      title: 'ChatGPT',
+      children: [
+        AnimatedSwitcher(
+          duration: KMotion.of(context, KMotion.standard),
+          switchInCurve: KMotion.decelerate,
+          switchOutCurve: KMotion.accelerate,
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topCenter,
+            children: [...previous, ?current],
+          ),
+          child: _aiStatusLoading
+              ? const _AiStatusSkeleton(key: ValueKey('ai-loading'))
+              : KeyedSubtree(
+                  key: const ValueKey('ai-body'),
+                  child: _buildAiStatusBody(),
                 ),
-              ),
-            )
-          : _buildAiStatusBody(),
+        ),
+      ],
     );
   }
 
@@ -871,112 +1139,171 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildAiStatusBody() {
     final s = _aiStatus ?? ChatGptLinkStatus.disconnected;
     final isConnected = s.isConnected;
-    final health = _providerHealth;
-    
-    Color statusColor;
-    String statusLabel;
-    switch (health) {
-      case ProviderHealth.operational:
-        statusColor = const Color(0xFF52B788); // Green
-        statusLabel = 'Operational';
-        break;
-      case ProviderHealth.degraded:
-        statusColor = const Color(0xFFFFB347); // Amber
-        statusLabel = 'Degraded (Backup Server)';
-        break;
-      case ProviderHealth.setupRequired:
-        statusColor = const Color(0xFF9CA3AF); // Gray
-        statusLabel = 'Setup Required';
-        break;
+    final viaPlan = isConnected && s.usesChatGptPlan;
+    final paused =
+        viaPlan && (s.planPausedUntil?.isAfter(DateTime.now()) ?? false);
+
+    // Same states and words as ConnectChatGptScreen. Colour carries meaning
+    // only (success / attention) and always pairs with an icon and a label.
+    final Color statusColor;
+    final String statusLabel;
+    final IconData statusIcon;
+    final String body;
+    if (!isConnected) {
+      statusColor = KColor.textMuted;
+      statusLabel = 'Not connected';
+      statusIcon = Icons.link_off_rounded;
+      body =
+          'Kyno runs on Kynetix servers. Connect ChatGPT to run it on your plan instead.';
+    } else if (s.tokenExpired) {
+      statusColor = KColor.warning;
+      statusLabel = 'Sign-in expired';
+      statusIcon = Icons.lock_clock_rounded;
+      body =
+          'Your ChatGPT sign-in expired, so Kyno\'s using the standard model until you reconnect.';
+    } else if (paused) {
+      statusColor = KColor.warning;
+      statusLabel = 'Limit reached';
+      statusIcon = Icons.hourglass_bottom_rounded;
+      body = s.fallbackReason == 'plan_unavailable'
+          ? 'ChatGPT\'s busy right now, so Kyno\'s using the standard model for now.'
+          : 'Your ChatGPT limit\'s tapped out, so Kyno\'s using the standard model for now.';
+    } else if (viaPlan && s.fallbackReason == 'not_eligible') {
+      statusColor = KColor.warning;
+      statusLabel = 'Plan not available';
+      statusIcon = Icons.block_rounded;
+      body =
+          'Your ChatGPT plan can\'t be used here, so Kyno\'s using the standard model.';
+    } else if (_providerHealth == ProviderHealth.degraded &&
+        s.fallbackReason != 'usage_limit' &&
+        s.fallbackReason != 'plan_unavailable') {
+      statusColor = KColor.warning;
+      statusLabel = 'Using backup';
+      statusIcon = Icons.warning_amber_rounded;
+      body =
+          'Couldn\'t reach ChatGPT last time, so Kyno used the standard model. It tries your account again next time.';
+    } else if (viaPlan) {
+      statusColor = KColor.green;
+      statusLabel = 'Using ChatGPT plan';
+      statusIcon = Icons.check_circle_rounded;
+      body =
+          'Kyno\'s AI requests run on your ChatGPT plan and count toward its usage.';
+    } else {
+      statusColor = KColor.green;
+      statusLabel = 'Connected';
+      statusIcon = Icons.check_circle_rounded;
+      body = 'Kyno runs on your ChatGPT account.';
+    }
+
+    final String actionLabel;
+    final Color? actionColor;
+    final VoidCallback onAction;
+    if (!isConnected) {
+      actionLabel = 'Connect ChatGPT';
+      actionColor = null;
+      onAction = _openConnectChatGpt;
+    } else if (s.tokenExpired) {
+      actionLabel = 'Reconnect';
+      actionColor = null;
+      onAction = _openConnectChatGpt;
+    } else {
+      actionLabel = 'Disconnect';
+      actionColor = KColor.danger;
+      onAction = _disconnectChatGpt;
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ── Status and Connect Row ──────────────────────────────────────────
-        Row(
-          children: [
-            Container(
-              width: 8, height: 8,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              statusLabel,
-              style: TextStyle(
-                color: statusColor,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const Spacer(),
-            // Connect / Disconnect button
-            GestureDetector(
-              onTap: _aiDisconnecting
-                  ? null
-                  : isConnected
-                      ? _disconnectChatGpt
-                      : () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ConnectChatGptScreen(),
-                            ),
-                          );
-                          _loadAiStatus();
-                        },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: isConnected ? const Color(0xFFEF4444).withValues(alpha: 0.12) : const Color(0xFF52B788).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isConnected ? const Color(0xFFEF4444).withValues(alpha: 0.4) : const Color(0xFF52B788).withValues(alpha: 0.4)
+        // ── Status and action row ──────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            KSpacing.md,
+            KSpacing.md,
+            0,
+          ),
+          child: Row(
+            children: [
+              _IconTile(icon: statusIcon, tint: statusColor),
+              const SizedBox(width: KSpacing.md),
+              Expanded(
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    statusLabel,
+                    style: KText.bodyMedium.copyWith(
+                      color: statusColor == KColor.textMuted
+                          ? KColor.textSecondary
+                          : statusColor,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                child: _aiDisconnecting
-                    ? const SizedBox(
-                        width: 14, height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Color(0xFF52B788),
-                        ),
-                      )
-                    : Text(
-                        isConnected ? 'Disconnect' : 'Connect',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: isConnected ? const Color(0xFFEF4444) : const Color(0xFF52B788),
-                        ),
-                      ),
               ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 12),
-        const Divider(color: Color(0xFF2E2E3E), height: 1),
-        const SizedBox(height: 8),
-
-        // Descriptive prompt / subtitle
-        Text(
-          isConnected
-              ? (health == ProviderHealth.operational
-                  ? 'Your personal AI connection is active. Meals are analyzed using your account credits.'
-                  : 'Your personal AI connection is active but fell back to our backup server due to a connection error.')
-              : 'Meals are analyzed using our shared servers. Connect your account to use your own premium credits.',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.white.withValues(alpha: 0.5),
-            height: 1.5,
+              const SizedBox(width: KSpacing.sm),
+              _PillAction(
+                label: actionLabel,
+                color: actionColor,
+                busy: _aiDisconnecting,
+                onTap: _aiDisconnecting ? null : onAction,
+              ),
+            ],
           ),
         ),
 
-        const SizedBox(height: 8),
-        
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            KSpacing.md,
+            KSpacing.lg,
+            0,
+          ),
+          child: Text(
+            body,
+            style: KText.caption.copyWith(
+              color: KColor.textSecondary,
+              height: 1.5,
+            ),
+          ),
+        ),
+
+        if (viaPlan)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              KSpacing.sm,
+              KSpacing.xs,
+              KSpacing.lg,
+              0,
+            ),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: () {
+                  KHaptics.select();
+                  _openManageUsage();
+                },
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm),
+                  foregroundColor: KColor.textPrimary,
+                ),
+                icon: Icon(
+                  Icons.north_east_rounded,
+                  size: 16,
+                  color: KColor.textPrimary,
+                ),
+                label: Text(
+                  'Manage usage',
+                  style: KText.bodyMedium.copyWith(
+                    color: KColor.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
         // Expandable drawer for Advanced Diagnostics (Connection Details)
         Theme(
           data: Theme.of(context).copyWith(
@@ -985,95 +1312,132 @@ class _ProfileScreenState extends State<ProfileScreen> {
             highlightColor: Colors.transparent,
           ),
           child: ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            childrenPadding: EdgeInsets.zero,
+            tilePadding: const EdgeInsets.symmetric(horizontal: KSpacing.lg),
+            childrenPadding: const EdgeInsets.only(bottom: KSpacing.sm),
+            expansionAnimationStyle: AnimationStyle(
+              duration: KMotion.of(context, KMotion.standard),
+              curve: KMotion.emphasizedCurve,
+            ),
             title: Row(
               children: [
-                const Icon(Icons.info_outline_rounded, size: 14, color: KColor.textMuted),
+                Icon(
+                  Icons.info_outline_rounded,
+                  size: 14,
+                  color: KColor.textMuted,
+                ),
                 const SizedBox(width: 6),
-                Text(
-                  'Connection Details',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white.withValues(alpha: 0.6),
+                Flexible(
+                  child: Text(
+                    'Connection details',
+                    style: KText.caption.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: KColor.textSecondary,
+                    ),
                   ),
                 ),
               ],
             ),
-            iconColor: Colors.white.withValues(alpha: 0.6),
-            collapsedIconColor: Colors.white.withValues(alpha: 0.4),
+            iconColor: KColor.textSecondary,
+            collapsedIconColor: KColor.textMuted,
             children: [
-              const SizedBox(height: 8),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.cloud_queue_rounded,
-                label: 'Connected Service',
+                label: 'Running on',
                 value: _providerDisplayName(s.activeProvider),
               ),
-              _InfoRow(
-                icon: Icons.psychology_rounded,
-                label: 'Analysis Service',
-                value: s.selectedModel ?? (isConnected ? 'Discovering…' : '—'),
+              _DetailRow(
+                icon: Icons.key_rounded,
+                label: 'Sign-in',
+                value: !isConnected
+                    ? '-'
+                    : (viaPlan
+                          ? 'ChatGPT plan'
+                          : (s.authMethod == 'codex_device'
+                                ? 'Code'
+                                : 'ChatGPT account')),
               ),
-              _InfoRow(
+              if (paused)
+                _DetailRow(
+                  icon: Icons.hourglass_bottom_rounded,
+                  label: 'Plan resumes',
+                  value: _relativeFuture(s.planPausedUntil),
+                ),
+              _DetailRow(
+                icon: Icons.psychology_rounded,
+                label: 'Model',
+                value:
+                    s.selectedModel ??
+                    s.activeModel ??
+                    (isConnected ? 'Checking…' : '-'),
+              ),
+              _DetailRow(
                 icon: Icons.access_time_rounded,
-                label: 'Last Used',
+                label: 'Last used',
                 value: _relativeTime(s.lastUsedAt),
               ),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.sync_rounded,
-                label: 'Connection Status',
-                value: isConnected ? 'Connected' : 'Disconnected',
+                label: 'Status',
+                value: statusLabel,
               ),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.check_circle_outline_rounded,
-                label: 'Last Successful Request',
-                value: s.lastSuccessfulRequestAt != null ? _relativeTime(s.lastSuccessfulRequestAt) : '—',
+                label: 'Last good reply',
+                value: s.lastSuccessfulRequestAt != null
+                    ? _relativeTime(s.lastSuccessfulRequestAt)
+                    : '-',
               ),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.error_outline_rounded,
-                label: 'Last Failed Request',
-                value: s.lastFailedRequestAt != null ? _relativeTime(s.lastFailedRequestAt) : '—',
+                label: 'Last failed reply',
+                value: s.lastFailedRequestAt != null
+                    ? _relativeTime(s.lastFailedRequestAt)
+                    : '-',
               ),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.network_check_rounded,
-                label: 'Last Active Provider',
+                label: 'Last answered by',
                 value: _providerDisplayName(s.lastSuccessfulProvider),
               ),
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.speed_rounded,
-                label: 'Average Response Latency',
-                value: s.averageLatencyMs != null ? '${s.averageLatencyMs!.toStringAsFixed(0)} ms' : '—',
+                label: 'Average reply time',
+                value: s.averageLatencyMs != null
+                    ? '${s.averageLatencyMs!.toStringAsFixed(0)} ms'
+                    : '-',
               ),
               if (isConnected) ...[
-                _InfoRow(
+                _DetailRow(
                   icon: Icons.refresh_rounded,
-                  label: 'Last Token Refresh',
+                  label: 'Sign-in refreshed',
                   value: _relativeTime(s.lastRefreshedAt),
                 ),
-                _InfoRow(
+                _DetailRow(
                   icon: Icons.assignment_turned_in_rounded,
-                  label: 'Last Connection Test',
-                  value: s.testGenerationSnippet != null ? '"${s.testGenerationSnippet}"' : '—',
+                  label: 'Last test reply',
+                  value: s.testGenerationSnippet != null
+                      ? '"${s.testGenerationSnippet}"'
+                      : '-',
                 ),
-                _InfoRow(
+                _DetailRow(
                   icon: Icons.schedule_rounded,
                   label: 'Connected',
                   value: _relativeTime(s.connectedAt),
                 ),
               ],
               if (s.fallbackReason != null) ...[
-                _InfoRow(
+                _DetailRow(
                   icon: Icons.warning_amber_rounded,
-                  label: 'Backup Reason',
+                  label: 'Why the backup',
                   value: _fallbackReasonDisplayName(s.fallbackReason),
                 ),
               ],
-              _InfoRow(
+              _DetailRow(
                 icon: Icons.verified_rounded,
-                label: 'Service Verified',
-                value: s.modelDiscoveryVerified ? 'Yes' : (isConnected ? 'Pending' : '—'),
-                isLast: true,
+                label: 'Model checked',
+                value: s.modelDiscoveryVerified
+                    ? 'Yes'
+                    : (isConnected ? 'Pending' : '-'),
               ),
             ],
           ),
@@ -1083,25 +1447,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _providerDisplayName(String? raw) {
-    if (raw == null) return '—';
+    if (raw == null) return '-';
     return switch (raw) {
-      'user_chatgpt' => 'Direct Connection',
-      'openrouter'   => 'Shared Server',
-      'openai'       => 'Direct Connection',
-      _              => raw,
+      'user_chatgpt' => 'Your ChatGPT',
+      'openrouter' || 'gemini' || 'groq' => 'Kynetix servers',
+      'openai' => 'Your ChatGPT',
+      _ => raw,
     };
   }
 
   String _fallbackReasonDisplayName(String? reason) {
-    if (reason == null) return '—';
+    if (reason == null) return '-';
     return switch (reason) {
-      'account_disconnected' => 'Account Disconnected',
-      'token_expired'        => 'Token Expired',
-      'refresh_failed'       => 'Refresh Failed',
-      'model_unavailable'    => 'Service Unavailable',
-      'api_error'            => 'Connection Error (analysis failed)',
-      _                      => reason,
+      'account_disconnected' => 'Account disconnected',
+      'token_expired' => 'Sign-in expired',
+      'refresh_failed' => 'Sign-in refresh failed',
+      'model_unavailable' => 'Model unavailable',
+      'usage_limit' => 'ChatGPT limit reached',
+      'not_eligible' => 'Plan not available here',
+      'plan_unavailable' => 'ChatGPT busy',
+      'api_error' => 'Couldn\'t reach ChatGPT',
+      _ => reason,
     };
+  }
+
+  String _relativeFuture(DateTime? dt) {
+    if (dt == null) return '-';
+    final diff = dt.difference(DateTime.now());
+    if (diff.inMinutes < 1) return 'Any moment';
+    if (diff.inMinutes < 60) return 'In ${diff.inMinutes}m';
+    if (diff.inHours < 24) return 'In ${diff.inHours}h';
+    return 'In ${diff.inDays}d';
   }
 
   String _relativeTime(DateTime? dt) {
@@ -1113,77 +1489,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return '${diff.inDays}d ago';
   }
 
-  // ── Nutrition Intelligence ─────────────────────────────────────────────────
+  // ── Food Library + Insights & Progress ─────────────────────────────────────
 
-  Widget _buildNutritionIntelligenceCard() {
-    return _Section(
-      title: 'Food Library',
-      child: Column(
-        children: [
-          _InfoRow(
-            icon: Icons.psychology_rounded,
-            label: 'Food Library',
-            value: 'Portion history & custom foods',
-            isEditable: true,
-            isLast: true,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NutritionIntelligenceScreen()),
+  Widget _buildLibraryAndInsightsCard() {
+    return _Group(
+      title: 'Food library & insights',
+      children: [
+        _SettingRow(
+          icon: Icons.psychology_rounded,
+          tint: KColor.saffron,
+          label: 'Food library',
+          value: 'Portion history & custom foods',
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const NutritionIntelligenceScreen(),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  // ── Insights & Progress ────────────────────────────────────────────────────
-
-  Widget _buildInsightsCard() {
-    return ListenableBuilder(
-      listenable: InsightsReportService.instance,
-      builder: (context, _) {
-        final newCount = InsightsReportService.instance.newAchievementCount;
-        return _Section(
-          title: 'Insights & Progress',
-          child: Column(
-            children: [
-              _InfoRow(
-                icon: Icons.insights_rounded,
-                label: 'Insights & Reports',
-                value: newCount > 0 ? '$newCount new' : 'View history & achievements',
-                isEditable: true,
-                isLast: true,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const InsightsScreen()),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+        ),
+        ListenableBuilder(
+          listenable: InsightsReportService.instance,
+          builder: (context, _) {
+            final newCount = InsightsReportService.instance.newAchievementCount;
+            return _SettingRow(
+              icon: Icons.insights_rounded,
+              tint: KColor.textSecondary,
+              label: 'Insights & reports',
+              value: newCount > 0 ? '$newCount new' : 'History and badges',
+              valueColor: newCount > 0 ? KColor.green : null,
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const InsightsScreen())),
+            );
+          },
+        ),
+      ],
     );
   }
 
   // ── About ──────────────────────────────────────────────────────────────────
 
   Widget _buildAboutCard() {
-    return _Section(
+    return _Group(
       title: 'About Kynetix',
-      child: Column(
-        children: const [
-          _InfoRow(
-            icon: Icons.info_outline_rounded,
-            label: 'Version',
-            value: '1.0.0',
-          ),
-          _InfoRow(
-            icon: Icons.restaurant_menu_rounded,
-            label: 'Baseline Formula',
-            value: 'Kynetix Indian Caloric Baseline',
-            isLast: true,
-          ),
-        ],
-      ),
+      children: [
+        _SettingRow(
+          icon: Icons.info_outline_rounded,
+          tint: KColor.textSecondary,
+          label: 'Version',
+          value: '1.0.0',
+        ),
+        _SettingRow(
+          icon: Icons.restaurant_menu_rounded,
+          tint: KColor.ember,
+          label: 'Baseline formula',
+          value: 'Kynetix Indian Caloric Baseline',
+        ),
+      ],
     );
   }
 
@@ -1203,217 +1565,221 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
     final activePlan = _plan;
 
-    return _Section(
-      title: 'Nutrition Targets',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Daily Target Setting',
-            style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold),
+    return _Group(
+      title: 'Nutrition targets',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            KSpacing.lg,
+            KSpacing.lg,
+            KSpacing.md,
           ),
-          const SizedBox(height: 8),
-          Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSourceChip(
-                label: 'System Calculated',
-                selected: !profile.useCustomTargets,
-                onTap: () {
-                  if (profile.useCustomTargets) {
-                    _changeTargetSource(useCustom: false);
-                  }
-                },
-              ),
-              const SizedBox(width: 8),
-              _buildSourceChip(
-                label: 'Custom Targets',
-                selected: profile.useCustomTargets,
-                onTap: () {
-                  if (!profile.useCustomTargets) {
-                    _changeTargetSource(useCustom: true);
-                  }
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Divider(color: Color(0xFF2E2E3E), height: 1),
-          const SizedBox(height: 12),
-
-          if (!profile.useCustomTargets) ...[
-            _InfoRow(
-              icon: Icons.local_fire_department_rounded,
-              label: 'Maintenance Calories',
-              value: '${activePlan.maintenanceCalories.toStringAsFixed(0)} kcal',
-            ),
-            _InfoRow(
-              icon: Icons.bolt_rounded,
-              label: 'Training Day Calories',
-              value: '${activePlan.trainingDayCalories.toStringAsFixed(0)} kcal',
-            ),
-            _InfoRow(
-              icon: Icons.nightlight_round,
-              label: 'Rest Day Calories',
-              value: '${activePlan.restDayCalories.toStringAsFixed(0)} kcal',
-            ),
-            _InfoRow(
-              icon: Icons.egg_outlined,
-              label: 'Daily Protein Target',
-              value: '${activePlan.avgDailyProtein.toStringAsFixed(0)} g',
-              isLast: true,
-            ),
-          ] else ...[
-            _InfoRow(
-              icon: Icons.local_fire_department_rounded,
-              label: 'Maintenance Calories',
-              value: '${(profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories).toStringAsFixed(0)} kcal',
-              isEditable: true,
-              onTap: () => _editCustomTargetValue(
-                title: 'Maintenance Calories',
-                minValue: 800,
-                maxValue: 6000,
-                currentValue: profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories,
-                onSave: (val) {
-                  final updated = profile.copyWith(
-                    customMaintenanceCalories: val,
-                  );
-                  _saveProfile(updated);
-                },
-              ),
-            ),
-            _InfoRow(
-              icon: Icons.bolt_rounded,
-              label: 'Training Day Calories',
-              value: '${(profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories).toStringAsFixed(0)} kcal',
-              isEditable: true,
-              onTap: () => _editCustomTargetValue(
-                title: 'Training Day Calories',
-                minValue: 800,
-                maxValue: 6000,
-                currentValue: profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories,
-                onSave: (val) {
-                  final updated = profile.copyWith(
-                    customTrainingDayCalories: val,
-                  );
-                  _saveProfile(updated);
-                },
-              ),
-            ),
-            _InfoRow(
-              icon: Icons.nightlight_round,
-              label: 'Rest Day Calories',
-              value: '${(profile.customRestDayCalories ?? enginePlan.restDayCalories).toStringAsFixed(0)} kcal',
-              isEditable: true,
-              onTap: () => _editCustomTargetValue(
-                title: 'Rest Day Calories',
-                minValue: 800,
-                maxValue: 6000,
-                currentValue: profile.customRestDayCalories ?? enginePlan.restDayCalories,
-                onSave: (val) {
-                  final updated = profile.copyWith(
-                    customRestDayCalories: val,
-                  );
-                  _saveProfile(updated);
-                },
-              ),
-            ),
-            _InfoRow(
-              icon: Icons.egg_outlined,
-              label: 'Daily Protein Target',
-              value: '${(profile.customProteinTarget ?? enginePlan.avgDailyProtein).toStringAsFixed(0)} g',
-              isEditable: true,
-              onTap: () => _editCustomTargetValue(
-                title: 'Daily Protein Target',
-                minValue: 30,
-                maxValue: 350,
-                currentValue: profile.customProteinTarget ?? enginePlan.avgDailyProtein,
-                onSave: (val) {
-                  final updated = profile.copyWith(
-                    customProteinTarget: val,
-                  );
-                  _saveProfile(updated);
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton.icon(
-                onPressed: _resetToRecommendations,
-                icon: const Icon(Icons.refresh_rounded, size: 16, color: Color(0xFF52B788)),
-                label: const Text(
-                  'Reset to Recommendations',
-                  style: TextStyle(color: Color(0xFF52B788), fontSize: 13, fontWeight: FontWeight.bold),
+              Text('Daily target source', style: KText.label),
+              const SizedBox(height: KSpacing.sm),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: KColor.fg.withValues(
+                    alpha: KColor.isDark ? 0.04 : 0.035,
+                  ),
+                  borderRadius: KRadius.md,
+                  border: Border.all(
+                    color: KColor.fg.withValues(
+                      alpha: KColor.isDark ? 0.07 : 0.08,
+                    ),
+                  ),
                 ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(color: const Color(0xFF52B788).withValues(alpha: 0.3)),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildSourceChip(
+                        label: 'Calculated',
+                        selected: !profile.useCustomTargets,
+                        onTap: () {
+                          if (profile.useCustomTargets) {
+                            _changeTargetSource(useCustom: false);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      _buildSourceChip(
+                        label: 'Custom',
+                        selected: profile.useCustomTargets,
+                        onTap: () {
+                          if (!profile.useCustomTargets) {
+                            _changeTargetSource(useCustom: true);
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-          ],
-          
-          const SizedBox(height: 16),
-          const Divider(color: Color(0xFF2E2E3E), height: 1),
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              const Icon(Icons.cached_rounded, size: 18, color: Color(0xFF9CA3AF)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Calorie Carry-Forward',
-                      style: TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Adjust next day\'s target for yesterday\'s deviations',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                    ),
-                  ],
-                ),
-              ),
-              Switch(
-                value: profile.carryForwardEnabled,
-                activeThumbColor: const Color(0xFF52B788),
-                activeTrackColor: const Color(0xFF52B788).withValues(alpha: 0.2),
-                inactiveThumbColor: const Color(0xFF4B5563),
-                inactiveTrackColor: const Color(0xFF1E1E2C),
-                onChanged: (val) {
-                  _saveProfile(profile.copyWith(carryForwardEnabled: val));
-                },
-              ),
             ],
           ),
+        ),
 
-          if (profile.carryForwardEnabled) ...[
-            const SizedBox(height: 16),
-            const Text(
-              'Carry-forward threshold',
-              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF), fontWeight: FontWeight.bold),
+        if (!profile.useCustomTargets) ...[
+          _SettingRow(
+            icon: Icons.local_fire_department_rounded,
+            tint: KColor.ember,
+            label: 'Maintenance calories',
+            value: '${activePlan.maintenanceCalories.toStringAsFixed(0)} kcal',
+          ),
+          _SettingRow(
+            icon: Icons.bolt_rounded,
+            tint: KColor.saffron,
+            label: 'Training day calories',
+            value: '${activePlan.trainingDayCalories.toStringAsFixed(0)} kcal',
+          ),
+          _SettingRow(
+            icon: Icons.nightlight_round,
+            tint: KColor.textSecondary,
+            label: 'Rest day calories',
+            value: '${activePlan.restDayCalories.toStringAsFixed(0)} kcal',
+          ),
+          _SettingRow(
+            icon: Icons.egg_outlined,
+            tint: KColor.green,
+            label: 'Daily protein target',
+            value: '${activePlan.avgDailyProtein.toStringAsFixed(0)} g',
+          ),
+        ] else ...[
+          _SettingRow(
+            icon: Icons.local_fire_department_rounded,
+            tint: KColor.ember,
+            label: 'Maintenance calories',
+            value:
+                '${(profile.customMaintenanceCalories ?? enginePlan.maintenanceCalories).toStringAsFixed(0)} kcal',
+            isEditable: true,
+            onTap: () => _editCustomTargetValue(
+              title: 'maintenance calories',
+              minValue: 800,
+              maxValue: 6000,
+              currentValue:
+                  profile.customMaintenanceCalories ??
+                  enginePlan.maintenanceCalories,
+              onSave: (val) {
+                final updated = profile.copyWith(
+                  customMaintenanceCalories: val,
+                );
+                _saveProfile(updated);
+              },
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          ),
+          _SettingRow(
+            icon: Icons.bolt_rounded,
+            tint: KColor.saffron,
+            label: 'Training day calories',
+            value:
+                '${(profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories).toStringAsFixed(0)} kcal',
+            isEditable: true,
+            onTap: () => _editCustomTargetValue(
+              title: 'training day calories',
+              minValue: 800,
+              maxValue: 6000,
+              currentValue:
+                  profile.customTrainingDayCalories ??
+                  enginePlan.trainingDayCalories,
+              onSave: (val) {
+                final updated = profile.copyWith(
+                  customTrainingDayCalories: val,
+                );
+                _saveProfile(updated);
+              },
+            ),
+          ),
+          _SettingRow(
+            icon: Icons.nightlight_round,
+            tint: KColor.textSecondary,
+            label: 'Rest day calories',
+            value:
+                '${(profile.customRestDayCalories ?? enginePlan.restDayCalories).toStringAsFixed(0)} kcal',
+            isEditable: true,
+            onTap: () => _editCustomTargetValue(
+              title: 'rest day calories',
+              minValue: 800,
+              maxValue: 6000,
+              currentValue:
+                  profile.customRestDayCalories ?? enginePlan.restDayCalories,
+              onSave: (val) {
+                final updated = profile.copyWith(customRestDayCalories: val);
+                _saveProfile(updated);
+              },
+            ),
+          ),
+          _SettingRow(
+            icon: Icons.egg_outlined,
+            tint: KColor.green,
+            label: 'Daily protein target',
+            value:
+                '${(profile.customProteinTarget ?? enginePlan.avgDailyProtein).toStringAsFixed(0)} g',
+            isEditable: true,
+            onTap: () => _editCustomTargetValue(
+              title: 'daily protein target',
+              minValue: 30,
+              maxValue: 350,
+              currentValue:
+                  profile.customProteinTarget ?? enginePlan.avgDailyProtein,
+              onSave: (val) {
+                final updated = profile.copyWith(customProteinTarget: val);
+                _saveProfile(updated);
+              },
+            ),
+          ),
+          _SettingRow(
+            icon: Icons.refresh_rounded,
+            tint: KColor.danger,
+            label: 'Reset to recommendations',
+            danger: true,
+            onTap: _resetToRecommendations,
+          ),
+        ],
+
+        _SwitchRow(
+          icon: Icons.cached_rounded,
+          tint: KColor.textSecondary,
+          title: 'Calorie carry-forward',
+          subtitle: 'Nudges tomorrow\'s target when today runs over or under',
+          value: profile.carryForwardEnabled,
+          onChanged: (val) {
+            _saveProfile(profile.copyWith(carryForwardEnabled: val));
+          },
+        ),
+
+        if (profile.carryForwardEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              KSpacing.lg,
+              KSpacing.md,
+              KSpacing.lg,
+              KSpacing.lg,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildThresholdChip(100),
-                _buildThresholdChip(150),
-                _buildThresholdChip(200),
-                _buildThresholdChip(250),
-                _buildCustomThresholdChip(),
+                Text('Carry-forward threshold', style: KText.label),
+                const SizedBox(height: KSpacing.sm),
+                Wrap(
+                  spacing: KSpacing.sm,
+                  runSpacing: KSpacing.sm,
+                  children: [
+                    _buildThresholdChip(100),
+                    _buildThresholdChip(150),
+                    _buildThresholdChip(200),
+                    _buildThresholdChip(250),
+                    _buildCustomThresholdChip(),
+                  ],
+                ),
               ],
             ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
 
@@ -1422,29 +1788,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required bool selected,
     required VoidCallback onTap,
   }) {
+    final d = KMotion.of(context, KMotion.standard);
     return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFF52B788).withValues(alpha: 0.12)
-                : const Color(0xFF13131F),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected
-                  ? const Color(0xFF52B788)
-                  : const Color(0xFF2E2E3E),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        label: label,
+        excludeSemantics: true,
+        child: Pressable(
+          onTap: () {
+            KHaptics.select();
+            onTap();
+          },
+          scale: 0.97,
+          borderRadius: KRadius.sm,
+          child: AnimatedContainer(
+            duration: d,
+            curve: KMotion.emphasizedCurve,
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(
+              vertical: KSpacing.sm,
+              horizontal: KSpacing.sm,
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: selected ? const Color(0xFF52B788) : const Color(0xFF6B7280),
+            decoration: BoxDecoration(
+              color: selected ? KColor.ink : Colors.transparent,
+              borderRadius: KRadius.sm,
+            ),
+            alignment: Alignment.center,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedSwitcher(
+                  duration: d,
+                  transitionBuilder: (c, a) =>
+                      ScaleTransition(scale: a, child: c),
+                  child: selected
+                      ? Padding(
+                          key: ValueKey('on'),
+                          padding: EdgeInsets.only(right: 4),
+                          child: Icon(
+                            Icons.check_rounded,
+                            size: 14,
+                            color: KColor.onInk,
+                          ),
+                        )
+                      : const SizedBox.shrink(key: ValueKey('off')),
+                ),
+                Flexible(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: KText.caption.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: selected ? KColor.onInk : KColor.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1454,30 +1855,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildThresholdChip(int kcal) {
     final selected = _profile.carryForwardThreshold == kcal;
-    return GestureDetector(
+    return _ChoicePill(
+      label: '$kcal kcal',
+      selected: selected,
       onTap: () {
         _saveProfile(_profile.copyWith(carryForwardThreshold: kcal));
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF52B788).withValues(alpha: 0.12)
-              : const Color(0xFF13131F),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
-          ),
-        ),
-        child: Text(
-          '$kcal kcal',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: selected ? const Color(0xFF52B788) : const Color(0xFF9CA3AF),
-          ),
-        ),
-      ),
     );
   }
 
@@ -1486,39 +1869,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isPreset = const [100, 150, 200, 250].contains(currentThreshold);
     final selected = !isPreset;
 
-    final label = selected ? 'Custom ($currentThreshold kcal)' : 'Custom...';
+    final label = selected ? 'Custom ($currentThreshold kcal)' : 'Custom…';
 
-    return GestureDetector(
+    return _ChoicePill(
+      label: label,
+      selected: selected,
+      trailingIcon: selected ? Icons.edit_rounded : null,
       onTap: _promptCustomThreshold,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF52B788).withValues(alpha: 0.12)
-              : const Color(0xFF13131F),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: selected ? const Color(0xFF52B788) : const Color(0xFF9CA3AF),
-              ),
-            ),
-            if (selected) ...[
-              const SizedBox(width: 4),
-              const Icon(Icons.edit_rounded, size: 10, color: Color(0xFF52B788)),
-            ],
-          ],
-        ),
-      ),
     );
   }
 
@@ -1526,41 +1883,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF2E2E3E)),
-          ),
-          title: Text(
-            useCustom ? 'Switch to Custom Targets?' : 'Switch to Calculated Targets?',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+        return _KDialog(
+          title: useCustom
+              ? 'Switch to custom targets?'
+              : 'Switch to calculated targets?',
           content: Text(
             useCustom
-                ? 'Your nutrition targets will be determined by values you manually set instead of automatically calculating them from your profile settings.'
-                : 'Your nutrition targets will revert to automatically calculated recommendations matching your weight, height, age, steps, and goal.',
-            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+                ? 'You set your own calorie and protein numbers. Kynetix stops working them out from your profile.'
+                : 'Kynetix works out your targets from your weight, height, age, steps and goal.',
+            style: _dialogBody,
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            ),
-            ElevatedButton(
+            _DialogCancel(onPressed: () => Navigator.pop(ctx)),
+            _DialogConfirm(
+              label: useCustom ? 'Use custom' : 'Use calculated',
               onPressed: () {
                 Navigator.pop(ctx);
-                final updated = _profile.copyWith(
-                  useCustomTargets: useCustom,
-                );
+                final updated = _profile.copyWith(useCustomTargets: useCustom);
                 _saveProfile(updated);
+                _showToast(
+                  useCustom
+                      ? 'Using custom targets.'
+                      : 'Using calculated targets.',
+                  success: true,
+                );
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF52B788),
-                foregroundColor: const Color(0xFF0F0F14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1581,16 +1928,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: KColor.card,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: KColor.border, width: 0.5),
-          ),
-          title: Text(
-            'Edit $title',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+        return _KDialog(
+          title: 'Edit $title',
           content: Form(
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -1599,36 +1938,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Enter a value between ${minValue.toInt()} and ${maxValue.toInt()}.',
-                  style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
+                  'Pick a number from ${minValue.round()} to ${maxValue.round()}.',
+                  style: KText.caption.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: KSpacing.lg),
                 TextFormField(
                   controller: ctrl,
                   autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-                  style: const TextStyle(color: Colors.white, fontSize: 15),
-                  decoration: InputDecoration(
-                    labelText: title.contains('Protein') ? 'Protein (g)' : 'Calories (kcal)',
-                    labelStyle: const TextStyle(color: KColor.textMuted),
-                    filled: true,
-                    fillColor: const Color(0xFF13131F),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: KColor.green, width: 1),
-                    ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                  ],
+                  style: KText.numSmall.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  decoration: _inputDecoration(
+                    label: title.contains('protein')
+                        ? 'Protein (g)'
+                        : 'Calories (kcal)',
                   ),
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) return 'Value required';
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Add a number';
+                    }
                     final numVal = double.tryParse(value);
-                    if (numVal == null) return 'Invalid number';
+                    if (numVal == null) {
+                      return 'That doesn\'t look like a number';
+                    }
                     if (numVal < minValue || numVal > maxValue) {
-                      return 'Must be within ${minValue.toInt()}–${maxValue.toInt()}';
+                      return 'Keep it between ${minValue.round()} and ${maxValue.round()}';
                     }
                     return null;
                   },
@@ -1637,26 +1980,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
-            ),
-            ElevatedButton(
+            _DialogCancel(onPressed: () => Navigator.pop(ctx)),
+            _DialogConfirm(
+              label: 'Save',
               onPressed: () {
                 if (formKey.currentState?.validate() ?? false) {
                   final val = double.tryParse(ctrl.text.trim()) ?? currentValue;
                   Navigator.pop(ctx);
                   _confirmValueChange(title, currentValue, val, onSave);
                 } else {
-                  kHapticMedium();
+                  KHaptics.reject();
                 }
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: KColor.greenDark,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1673,36 +2008,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF2E2E3E)),
-          ),
-          title: Text(
-            'Confirm $title Change',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+        return _KDialog(
+          title: 'Change $title?',
           content: Text(
-            'Are you sure you want to change $title from ${oldVal.toInt()} to ${newVal.toInt()}?',
-            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+            'Going from ${oldVal.round()} to ${newVal.round()}.',
+            style: _dialogBody.copyWith(
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            ),
-            ElevatedButton(
+            _DialogCancel(onPressed: () => Navigator.pop(ctx)),
+            _DialogConfirm(
+              label: 'Save',
               onPressed: () {
                 Navigator.pop(ctx);
                 onSave(newVal);
+                _showToast('Target saved.', success: true);
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF52B788),
-                foregroundColor: const Color(0xFF0F0F14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1714,26 +2036,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF2E2E3E)),
-          ),
-          title: const Text(
-            'Reset Custom Targets?',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          content: const Text(
-            'This will clear all manual targets and switch you back to System Calculated Recommendations. Your custom target history will keep a log of this change.',
-            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+        return _KDialog(
+          title: 'Reset custom targets?',
+          icon: Icons.refresh_rounded,
+          iconColor: KColor.danger,
+          content: Text(
+            'This clears your custom numbers and goes back to calculated targets. Your target history keeps a note of the change.',
+            style: _dialogBody,
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            ),
-            ElevatedButton(
+            _DialogCancel(onPressed: () => Navigator.pop(ctx)),
+            _DialogConfirm(
+              label: 'Reset',
+              danger: true,
               onPressed: () {
                 Navigator.pop(ctx);
                 final updated = _profile.copyWith(
@@ -1744,13 +2059,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   customProteinTarget: null,
                 );
                 _saveProfile(updated);
+                _showToast('Targets reset.', success: true);
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF52B788),
-                foregroundColor: const Color(0xFF0F0F14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Reset', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1759,54 +2069,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _promptCustomThreshold() {
-    final ctrl = TextEditingController(text: _profile.carryForwardThreshold.toString());
+    final ctrl = TextEditingController(
+      text: _profile.carryForwardThreshold.toString(),
+    );
     final formKey = GlobalKey<FormState>();
 
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF2E2E3E)),
-          ),
-          title: const Text(
-            'Custom Threshold',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+        return _KDialog(
+          title: 'Custom threshold',
           content: Form(
             key: formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Enter carry-forward deviation threshold (kcal). Range: 50–1,000 kcal.',
-                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12, height: 1.4),
+                Text(
+                  'How far off target (in kcal) a day can run before tomorrow adjusts. Pick 50-1,000.',
+                  style: KText.caption.copyWith(height: 1.4),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: KSpacing.lg),
                 TextFormField(
                   controller: ctrl,
                   autofocus: true,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                  decoration: InputDecoration(
-                    labelText: 'Threshold (kcal)',
-                    labelStyle: const TextStyle(color: Color(0xFF4B5563)),
-                    filled: true,
-                    fillColor: const Color(0xFF0F0F14),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
+                  style: KText.numSmall.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
+                  decoration: _inputDecoration(label: 'Threshold (kcal)'),
                   validator: (value) {
-                    if (value == null || value.trim().isEmpty) return 'Value required';
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Add a number';
+                    }
                     final val = int.tryParse(value);
-                    if (val == null) return 'Invalid integer';
-                    if (val < 50 || val > 1000) return 'Must be within 50–1,000 kcal';
+                    if (val == null) return 'Use a whole number';
+                    if (val < 50 || val > 1000) {
+                      return 'Keep it between 50 and 1,000 kcal';
+                    }
                     return null;
                   },
                 ),
@@ -1814,24 +2116,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            ),
-            ElevatedButton(
+            _DialogCancel(onPressed: () => Navigator.pop(ctx)),
+            _DialogConfirm(
+              label: 'Save',
               onPressed: () {
                 if (formKey.currentState?.validate() ?? false) {
                   final val = int.parse(ctrl.text.trim());
                   Navigator.pop(ctx);
                   _saveProfile(_profile.copyWith(carryForwardThreshold: val));
+                  _showToast('Threshold saved.', success: true);
+                } else {
+                  KHaptics.reject();
                 }
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF52B788),
-                foregroundColor: const Color(0xFF0F0F14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1839,74 +2136,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ── Account (danger zone) ──────────────────────────────────────────────────
+
+  Widget _buildAccountCard() {
+    return _Group(
+      title: 'Account',
+      danger: true,
+      children: [_buildLogoutButton(), _buildDeleteAccountButton()],
+    );
+  }
+
+  Widget _buildDeleteAccountButton() {
+    return _SettingRow(
+      icon: Icons.delete_forever_rounded,
+      tint: KColor.danger,
+      label: 'Delete account',
+      subtitle: 'Erase your account and all your data',
+      danger: true,
+      onTap: () => Navigator.of(
+        context,
+      ).push(kRiseRoute(builder: (_) => const AccountDeletionScreen())),
+    );
+  }
+
   Widget _buildLogoutButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: OutlinedButton(
-        onPressed: _handleLogout,
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
-          backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.08),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
-            SizedBox(width: 8),
-            Text(
-              'Logout',
-              style: TextStyle(
-                color: Color(0xFFEF4444),
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return _SettingRow(
+      icon: Icons.logout_rounded,
+      tint: KColor.danger,
+      label: 'Log out',
+      subtitle: 'Sign out of Kynetix on this device',
+      danger: true,
+      haptic: false, // _handleLogout fires its own selection tick
+      onTap: _handleLogout,
     );
   }
 
   Future<void> _handleLogout() async {
     kHapticSelect();
-    
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Confirm Logout',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: const Text(
-          'Are you sure you want to log out? Offline data will be cleared, and you will need to sign in again.',
-          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+      builder: (ctx) => _KDialog(
+        title: 'Log out?',
+        icon: Icons.logout_rounded,
+        iconColor: KColor.danger,
+        content: Text(
+          'Offline data on this device gets cleared, and you\'ll need to sign in again.',
+          style: _dialogBody,
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
-            ),
-          ),
-          ElevatedButton(
+          _DialogCancel(onPressed: () => Navigator.pop(ctx, false)),
+          _DialogConfirm(
+            label: 'Log out',
+            danger: true,
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text(
-              'Logout',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
           ),
         ],
       ),
@@ -1919,20 +2202,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: Color(0xFFEF4444)),
-      ),
+      builder: (_) => const _SigningOutDialog(),
     );
 
     try {
       // Sign out using the canonical AuthService signOut sequence
       await const AuthService().signOut();
-      
+
       // 3. Navigate back to AuthGate
       if (!mounted) return;
       // Dismiss loading dialog first
       Navigator.of(context).pop();
-      
+
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AuthGate()),
         (route) => false,
@@ -1942,124 +2223,1064 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         // Dismiss loading dialog
         Navigator.of(context).pop();
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to logout cleanly: $e'),
-            backgroundColor: const Color(0xFFEF4444),
-          ),
-        );
+
+        _showToast('Couldn\'t log out cleanly. Try again in a moment.');
       }
     }
   }
 }
 
-// ─── Section wrapper ──────────────────────────────────────────────────────────
+// ─── Shared styling helpers ───────────────────────────────────────────────────
 
-class _Section extends StatelessWidget {
-  final String? title;
-  final Widget child;
-  const _Section({this.title, required this.child});
+Color _goalColor(String goal) => switch (goal) {
+  kFatLoss => KColor.ember,
+  kMaintenance => KColor.green,
+  kLeanBulk => KColor.cyan,
+  kBulk => KColor.blue,
+  kRecomposition => KColor.violet,
+  _ => KColor.green,
+};
+
+TextStyle get _dialogBody =>
+    KText.body.copyWith(color: KColor.textSecondary, fontSize: 13, height: 1.5);
+
+InputDecoration _inputDecoration({String? label, String? suffix}) {
+  OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+    borderRadius: KRadius.sm,
+    borderSide: c == Colors.transparent
+        ? BorderSide.none
+        : BorderSide(color: c, width: w),
+  );
+  return InputDecoration(
+    labelText: label,
+    labelStyle: KText.caption.copyWith(color: KColor.textMuted),
+    suffixText: suffix,
+    suffixStyle: KText.caption.copyWith(color: KColor.textMuted, fontSize: 14),
+    filled: true,
+    fillColor: KColor.isDark ? KColor.bg : KColor.card,
+    contentPadding: const EdgeInsets.symmetric(
+      horizontal: KSpacing.lg,
+      vertical: 14,
+    ),
+    border: border(Colors.transparent),
+    enabledBorder: border(
+      KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
+    ),
+    errorStyle: KText.caption.copyWith(color: KColor.danger, fontSize: 11),
+    focusedBorder: border(KColor.ink, 1.2),
+    errorBorder: border(KColor.danger.withValues(alpha: 0.6)),
+    focusedErrorBorder: border(KColor.danger, 1.2),
+  );
+}
+
+// ─── Theme mode segmented control ─────────────────────────────────────────────
+// Selected segment is an ink fill with onInk text; state is also carried by
+// the semantics "selected" flag and a filled icon, never colour alone.
+
+class _ThemeModeSegmented extends StatelessWidget {
+  const _ThemeModeSegmented({required this.selected});
+  final ThemeMode selected;
+
+  static const _modes = [ThemeMode.dark, ThemeMode.light, ThemeMode.system];
+
+  static String _label(ThemeMode m) => switch (m) {
+    ThemeMode.system => 'System',
+    ThemeMode.light => 'Light',
+    ThemeMode.dark => 'Dark',
+  };
+
+  static IconData _icon(ThemeMode m, bool on) => switch (m) {
+    ThemeMode.system =>
+      on ? Icons.brightness_auto_rounded : Icons.brightness_auto_outlined,
+    ThemeMode.light =>
+      on ? Icons.light_mode_rounded : Icons.light_mode_outlined,
+    ThemeMode.dark => on ? Icons.dark_mode_rounded : Icons.dark_mode_outlined,
+  };
 
   @override
   Widget build(BuildContext context) {
+    final d = KMotion.of(context, KMotion.quick);
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+        borderRadius: KRadius.md,
+        border: Border.all(
+          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
+        ),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < _modes.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(child: _segment(context, _modes[i], d)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _segment(BuildContext context, ThemeMode m, Duration d) {
+    final on = m == selected;
+    final fg = on ? KColor.onInk : KColor.textSecondary;
+    return Semantics(
+      button: true,
+      selected: on,
+      inMutuallyExclusiveGroup: true,
+      label: '${_label(m)} theme',
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: () {
+          if (on) return;
+          KHaptics.select();
+          KThemeController.instance.set(m);
+        },
+        scale: 0.97,
+        borderRadius: KRadius.sm,
+        child: AnimatedContainer(
+          duration: d,
+          curve: KMotion.emphasizedCurve,
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: on ? KColor.ink : Colors.transparent,
+            borderRadius: KRadius.sm,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(_icon(m, on), size: 16, color: fg),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  _label(m),
+                  maxLines: 1,
+                  style: KText.caption.copyWith(
+                    fontWeight: on ? FontWeight.w700 : FontWeight.w600,
+                    color: fg,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Group (editorial section: heading + ruled rows, no card) ────────────────
+
+class _Group extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+  final bool danger;
+  const _Group({
+    required this.title,
+    required this.children,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) rows.add(const _Hairline(indent: 56));
+      rows.add(children[i]);
+    }
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (title != null) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 8),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            KSpacing.lg,
+            0,
+            KSpacing.lg,
+            KSpacing.xs,
+          ),
+          child: Semantics(
+            header: true,
             child: Text(
-              title!.toUpperCase(),
-              style: KText.label,
+              title,
+              style: KText.h3.copyWith(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0,
+                color: danger ? KColor.danger : KColor.textMuted,
+              ),
             ),
           ),
-        ],
-        KCard(
-          padding: const EdgeInsets.all(16),
-          child: child,
+        ),
+        AnimatedSize(
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
+          alignment: Alignment.topCenter,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: rows,
+          ),
         ),
       ],
     );
   }
 }
 
-// ─── Info row ─────────────────────────────────────────────────────────────────
+class _Hairline extends StatelessWidget {
+  const _Hairline({this.indent = 0});
+  final double indent;
 
-class _InfoRow extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsetsDirectional.only(start: indent, end: KSpacing.lg),
+      child: Container(
+        height: 1,
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.09),
+      ),
+    );
+  }
+}
+
+/// Vertical hairline between the profile numbers.
+class _StatRule extends StatelessWidget {
+  const _StatRule();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
+      child: Container(
+        width: 1,
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.1 : 0.1),
+      ),
+    );
+  }
+}
+
+// ─── Row icon ─────────────────────────────────────────────────────────────────
+// A bare outlined glyph in a fixed 24dp slot: no tinted tile behind it.
+
+class _IconTile extends StatelessWidget {
+  const _IconTile({required this.icon, required this.tint});
   final IconData icon;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: SizedBox(
+        width: 24,
+        height: 24,
+        child: Center(
+          child: Icon(icon, size: KIcons.md, color: tint),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Setting row ──────────────────────────────────────────────────────────────
+
+/// Width of every row's trailing affordance slot (pencil / chevron / empty).
+const double _kTrailingSlot = 20;
+
+class _SettingRow extends StatelessWidget {
+  final IconData icon;
+  final Color tint;
   final String label;
-  final String value;
-  final bool isLast;
+  final String? value;
+  final String? subtitle;
+  final Color? valueColor;
   final bool isEditable;
+  final bool danger;
+  final bool haptic;
   final VoidCallback? onTap;
 
-  const _InfoRow({
+  const _SettingRow({
     required this.icon,
+    required this.tint,
     required this.label,
-    required this.value,
-    this.isLast = false,
+    this.value,
+    this.subtitle,
+    this.valueColor,
     this.isEditable = false,
+    this.danger = false,
+    this.haptic = true,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    Widget content = Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+    final labelColor = danger ? KColor.danger : KColor.textPrimary;
+    final tappable = onTap != null;
+
+    final row = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(KSpacing.lg, 10, KSpacing.lg, 10),
+        child: Row(
+          children: [
+            _IconTile(icon: icon, tint: tint),
+            const SizedBox(width: KSpacing.lg),
+            Expanded(
+              flex: 5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: KText.bodyMedium.copyWith(
+                      color: labelColor,
+                      fontSize: 15,
+                      fontWeight: danger ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: KText.caption.copyWith(
+                        color: KColor.textMuted,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (value != null) ...[
+              const SizedBox(width: KSpacing.md),
+              Flexible(
+                flex: 4,
+                child: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: Text(
+                    value!,
+                    textAlign: TextAlign.end,
+                    style: KText.bodyMedium.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: valueColor ?? KColor.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            // Same-width trailing slot on every row (pencil, chevron or
+            // empty) so editable and read-only values share one right edge.
+            const SizedBox(width: KSpacing.sm),
+            SizedBox(
+              width: _kTrailingSlot,
+              child: tappable
+                  ? ExcludeSemantics(
+                      child: Icon(
+                        isEditable
+                            ? Icons.edit_outlined
+                            : Icons.chevron_right_rounded,
+                        size: isEditable ? 15 : 20,
+                        color: danger ? KColor.danger : KColor.textMuted,
+                      ),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!tappable) return MergeSemantics(child: row);
+
+    final hint = isEditable ? ', edit' : '';
+    return Pressable(
+      onTap: () {
+        if (haptic) KHaptics.select();
+        onTap!();
+      },
+      scale: 0.985,
+      borderRadius: KRadius.md,
+      semanticLabel: value == null ? '$label$hint' : '$label, $value$hint',
+      child: row,
+    );
+  }
+}
+
+// ─── Compact diagnostic row (inside "Connection Details") ─────────────────────
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return MergeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(KSpacing.lg, 7, KSpacing.lg, 7),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: ExcludeSemantics(
+                child: Icon(icon, size: 14, color: KColor.textMuted),
+              ),
+            ),
+            const SizedBox(width: KSpacing.sm),
+            Expanded(
+              flex: 5,
+              child: Text(
+                label,
+                style: KText.caption.copyWith(color: KColor.textMuted),
+              ),
+            ),
+            const SizedBox(width: KSpacing.sm),
+            Flexible(
+              flex: 4,
+              child: Text(
+                value,
+                textAlign: TextAlign.end,
+                style: KText.caption.copyWith(
+                  color: KColor.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Switch row ───────────────────────────────────────────────────────────────
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow({
+    required this.icon,
+    required this.tint,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final Color tint;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    void toggle(bool v) {
+      KHaptics.select();
+      onChanged(v);
+    }
+
+    return MergeSemantics(
+      child: Pressable(
+        onTap: () => toggle(!value),
+        scale: 0.985,
+        borderRadius: KRadius.md,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(KSpacing.lg, 10, KSpacing.sm, 10),
           child: Row(
             children: [
-              Icon(icon, size: 16, color: KColor.textMuted),
-              const SizedBox(width: 10),
+              _IconTile(icon: icon, tint: tint),
+              const SizedBox(width: KSpacing.lg),
               Expanded(
-                child: Text(
-                  label,
-                  style: const TextStyle(fontSize: 13, color: KColor.textSecondary),
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: KText.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: KText.caption.copyWith(
+                        color: KColor.textMuted,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: KSpacing.sm),
+              Switch(
+                value: value,
+                activeThumbColor: KColor.onInk,
+                activeTrackColor: KColor.ink,
+                inactiveThumbColor: KColor.textMuted,
+                inactiveTrackColor: KColor.fg.withValues(
+                  alpha: KColor.isDark ? 0.08 : 0.07,
+                ),
+                trackOutlineColor: WidgetStatePropertyAll(
+                  KColor.fg.withValues(alpha: KColor.isDark ? 0.09 : 0.1),
+                ),
+                onChanged: toggle,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Pill action (Sync / Connect / Disconnect) ────────────────────────────────
+// In-flight progress shows on the control itself, never over the screen.
+
+class _PillAction extends StatelessWidget {
+  const _PillAction({
+    required this.label,
+    required this.busy,
+    required this.onTap,
+    this.color,
+  });
+
+  final String label;
+
+  /// Null = primary ink pill. A semantic colour (e.g. danger) = tinted outline.
+  final Color? color;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = KMotion.of(context, KMotion.quick);
+    final tone = color;
+    final fg = tone ?? KColor.onInk;
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: busy ? '$label, working' : label,
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: onTap == null
+            ? null
+            : () {
+                KHaptics.commit();
+                onTap!();
+              },
+        scale: 0.94,
+        borderRadius: KRadius.pill,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+          child: Center(
+            widthFactor: 1,
+            child: AnimatedContainer(
+              duration: d,
+              constraints: const BoxConstraints(minHeight: 36, minWidth: 72),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: tone == null
+                    ? KColor.ink.withValues(alpha: busy ? 0.5 : 1)
+                    : tone.withValues(alpha: KColor.isDark ? 0.1 : 0.07),
+                borderRadius: KRadius.pill,
+                border: tone == null
+                    ? null
+                    : Border.all(color: tone.withValues(alpha: 0.45)),
+              ),
+              child: AnimatedSwitcher(
+                duration: d,
+                child: busy
+                    ? KSpinner(key: const ValueKey('busy'), size: 16, color: fg)
+                    : Text(
+                        label,
+                        key: ValueKey(label),
+                        style: KText.caption.copyWith(
+                          color: fg,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Choice pill (carry-forward thresholds) ───────────────────────────────────
+
+class _ChoicePill extends StatelessWidget {
+  const _ChoicePill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.trailingIcon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? trailingIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = KMotion.of(context, KMotion.standard);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: () {
+          KHaptics.select();
+          onTap();
+        },
+        scale: 0.94,
+        borderRadius: KRadius.pill,
+        child: AnimatedContainer(
+          duration: d,
+          curve: KMotion.emphasizedCurve,
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? KColor.ink : Colors.transparent,
+            borderRadius: KRadius.pill,
+            border: Border.all(
+              color: selected ? KColor.ink : KColor.fg.withValues(alpha: 0.14),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                Icon(Icons.check_rounded, size: 13, color: KColor.onInk),
+                const SizedBox(width: 4),
+              ],
               Flexible(
                 child: Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                  label,
+                  style: KText.caption.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: selected ? KColor.onInk : KColor.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
                 ),
               ),
-              if (isEditable) ...[
+              if (trailingIcon != null) ...[
                 const SizedBox(width: 4),
-                const Icon(
-                  Icons.edit_rounded,
-                  size: 12,
-                  color: KColor.green,
-                ),
+                Icon(trailingIcon, size: 11, color: KColor.onInk),
               ],
             ],
           ),
         ),
-        if (!isLast) const Divider(color: KColor.divider, height: 1),
-      ],
+      ),
+    );
+  }
+}
+
+// ─── Hero stat tile (animated count) ──────────────────────────────────────────
+
+class _StatTile extends StatelessWidget {
+  const _StatTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.tint,
+    this.decimals = 0,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final double value;
+  final String unit;
+  final Color tint;
+  final int decimals;
+  final VoidCallback? onTap;
+
+  String _fmt(double v) => decimals == 0 ? whole(v) : amount(v);
+
+  @override
+  Widget build(BuildContext context) {
+    final finalText = _fmt(value);
+    // One column of the ruled numbers row: the number large, the unit and
+    // label small underneath. Meaning colour lives on a dot, not a tile.
+    final tile = Padding(
+      padding: const EdgeInsets.fromLTRB(2, KSpacing.md, 2, KSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: value.isFinite ? value : 0),
+            duration: KMotion.of(context, KMotion.slow),
+            curve: KMotion.emphasizedCurve,
+            builder: (context, v, _) => Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: _fmt(v),
+                    style: KText.numMedium.copyWith(fontSize: 19),
+                  ),
+                  TextSpan(
+                    text: ' $unit',
+                    style: KText.caption.copyWith(
+                      color: KColor.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (tint != KColor.textSecondary) ...[
+                KDot(color: tint, size: 5),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  style: KText.caption.copyWith(
+                    fontSize: 11.5,
+                    color: KColor.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
 
-    if (isEditable && onTap != null) {
-      content = GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          kHapticSelect();
-          onTap!();
-        },
-        child: content,
-      );
+    final spoken = '$label $finalText $unit';
+    if (onTap == null) {
+      return Semantics(label: spoken, excludeSemantics: true, child: tile);
     }
+    return Pressable(
+      onTap: () {
+        KHaptics.select();
+        onTap!();
+      },
+      scale: 0.96,
+      borderRadius: KRadius.sm,
+      semanticLabel: '$spoken, edit',
+      child: tile,
+    );
+  }
+}
 
-    return content;
+// ─── AI status skeleton ───────────────────────────────────────────────────────
+
+class _AiStatusSkeleton extends StatelessWidget {
+  const _AiStatusSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Checking ChatGPT status',
+      child: const Padding(
+        padding: EdgeInsets.fromLTRB(
+          KSpacing.lg,
+          KSpacing.md,
+          KSpacing.lg,
+          KSpacing.lg,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                KShimmerBox(
+                  width: 36,
+                  height: 36,
+                  borderRadius: BorderRadius.all(Radius.circular(11)),
+                ),
+                SizedBox(width: KSpacing.md),
+                Expanded(
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: KShimmerBox(
+                      width: 110,
+                      height: 14,
+                      borderRadius: KRadius.sm,
+                    ),
+                  ),
+                ),
+                KShimmerBox(width: 84, height: 32, borderRadius: KRadius.pill),
+              ],
+            ),
+            SizedBox(height: KSpacing.md),
+            KShimmerBox(
+              width: double.infinity,
+              height: 10,
+              borderRadius: KRadius.sm,
+            ),
+            SizedBox(height: 6),
+            FractionallySizedBox(
+              widthFactor: 0.7,
+              child: KShimmerBox(
+                width: double.infinity,
+                height: 10,
+                borderRadius: KRadius.sm,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Sheet option (goal / eating style) ───────────────────────────────────────
+
+class _SheetOption extends StatelessWidget {
+  const _SheetOption({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg, vertical: 3),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        label: label,
+        excludeSemantics: true,
+        child: Pressable(
+          onTap: () {
+            KHaptics.select();
+            onTap();
+          },
+          scale: 0.98,
+          borderRadius: KRadius.md,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 56),
+            padding: const EdgeInsets.symmetric(
+              horizontal: KSpacing.lg,
+              vertical: KSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              color: KColor.card,
+              borderRadius: KRadius.md,
+              border: Border.all(
+                color: selected
+                    ? KColor.ink
+                    : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
+                width: selected ? 1.4 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: KSpacing.md),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: KText.bodyMedium.copyWith(
+                      color: KColor.textPrimary,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: KSpacing.sm),
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                  color: selected ? KColor.ink : KColor.textDisabled,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Dialog chrome ────────────────────────────────────────────────────────────
+
+class _KDialog extends StatelessWidget {
+  const _KDialog({
+    required this.title,
+    required this.content,
+    required this.actions,
+    this.icon,
+    Color? iconColor,
+  }) : _iconColor = iconColor;
+
+  final String title;
+  final Widget content;
+  final List<Widget> actions;
+  final IconData? icon;
+  final Color? _iconColor;
+  Color get iconColor => _iconColor ?? KColor.ink;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: KColor.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: KRadius.xl,
+        side: BorderSide(
+          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.09 : 0.1),
+        ),
+      ),
+      icon: icon == null
+          ? null
+          : Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.12),
+                borderRadius: KRadius.md,
+                border: Border.all(color: iconColor.withValues(alpha: 0.3)),
+              ),
+              child: Icon(icon, color: iconColor, size: 22),
+            ),
+      title: Text(title, style: KText.h2),
+      content: content,
+      actionsPadding: const EdgeInsets.fromLTRB(
+        KSpacing.lg,
+        0,
+        KSpacing.lg,
+        KSpacing.lg,
+      ),
+      actions: actions,
+    );
+  }
+}
+
+class _DialogCancel extends StatelessWidget {
+  const _DialogCancel({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+      child: Text(
+        'Cancel',
+        style: KText.bodyMedium.copyWith(
+          color: KColor.textSecondary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogConfirm extends StatelessWidget {
+  const _DialogConfirm({
+    required this.label,
+    required this.onPressed,
+    this.danger = false,
+  });
+  final String label;
+  final VoidCallback onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = danger ? KColor.danger : KColor.ink;
+    final fg = danger ? Colors.white : KColor.onInk;
+    return FilledButton(
+      onPressed: () {
+        KHaptics.commit();
+        onPressed();
+      },
+      style: FilledButton.styleFrom(
+        backgroundColor: bg,
+        foregroundColor: fg,
+        minimumSize: const Size(88, 48),
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+      ),
+      child: Text(
+        label,
+        style: KText.bodyMedium.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SigningOutDialog extends StatelessWidget {
+  const _SigningOutDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        type: MaterialType.transparency,
+        child: Semantics(
+          liveRegion: true,
+          label: 'Signing out',
+          child: KCard(
+            padding: const EdgeInsets.symmetric(
+              horizontal: KSpacing.xxl,
+              vertical: KSpacing.xl,
+            ),
+            borderRadius: KRadius.xl,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const KSpinner(size: 20),
+                const SizedBox(width: KSpacing.lg),
+                Flexible(
+                  child: Text(
+                    'Signing out…',
+                    style: KText.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2069,32 +3290,26 @@ class _GoalChip extends StatelessWidget {
   final String goal;
   const _GoalChip({required this.goal});
 
-  Color get _color => switch (goal) {
-    kFatLoss => const Color(0xFFFF6B35),
-    kMaintenance => const Color(0xFF52B788),
-    kLeanBulk => const Color(0xFF60A5FA),
-    kBulk => const Color(0xFF3B82F6),
-    kRecomposition => const Color(0xFFA78BFA),
-    _ => const Color(0xFF52B788),
-  };
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: _color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        goal,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: _color,
+    // The goal as a coloured word with a dot: no tinted pill.
+    final color = _goalColor(goal);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        KDot(color: color, size: 7),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            goal,
+            style: KText.bodyMedium.copyWith(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: KColor.textSecondary,
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }

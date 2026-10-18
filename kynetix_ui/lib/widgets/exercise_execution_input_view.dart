@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import 'barbell_plate_calculator.dart';
@@ -37,6 +36,34 @@ class ExecutionModeValidator {
     }
   }
 }
+
+// ─── Local type ramp ──────────────────────────────────────────────────────────
+// Everything derives from KText so the console speaks the design system's
+// voice. Numbers always carry tabular figures so dials never jitter.
+abstract class _InputText {
+  static TextStyle get eyebrow => KText.caption.copyWith(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: KColor.textSecondary,
+        letterSpacing: 0,
+      );
+  static TextStyle get step => KText.numSmall.copyWith(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        color: KColor.textPrimary,
+      );
+  static TextStyle get hint => KText.caption.copyWith(fontSize: 12, color: KColor.textMuted, height: 1.3);
+  static TextStyle get readout => KText.numDisplay.copyWith(fontSize: 34);
+  static TextStyle get readoutSmall => KText.numMedium.copyWith(fontSize: 26);
+  static TextStyle get wheel => KText.numSmall.copyWith(fontSize: 16);
+}
+
+/// Hairline for console wells: a whisper of white on Carbon, the warm paper
+/// border on Paper.
+Color _hairline() => KColor.isDark ? KColor.fg.withValues(alpha: 0.09) : KColor.border;
+
+/// Surface of a recessed console well.
+Color _wellFill() => KColor.isDark ? KColor.card : KColor.cardHigh;
 
 /// Unified execution input interface for WorkoutSessionScreen.
 /// Encapsulates mode-specific selectors (Weight, Bodyweight External Load, Timed Hold, Cardio)
@@ -77,9 +104,10 @@ class ExerciseExecutionInputView extends StatefulWidget {
 }
 
 class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView> {
-  // Live stopwatch for timed holds
+  // Live stopwatch for timed holds. The ticking value lives in a notifier so a
+  // tick repaints only the readout, never the whole console.
   Timer? _stopwatchTimer;
-  int _stopwatchElapsedSeconds = 0;
+  final ValueNotifier<int> _stopwatchElapsed = ValueNotifier<int>(0);
   bool _isStopwatchRunning = false;
 
   late FixedExtentScrollController _weightController;
@@ -134,6 +162,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   @override
   void dispose() {
     _stopwatchTimer?.cancel();
+    _stopwatchElapsed.dispose();
     _weightController.dispose();
     _repsController.dispose();
     _durationController.dispose();
@@ -146,23 +175,21 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       setState(() {
         _isStopwatchRunning = false;
       });
-      widget.onDurationChanged(_stopwatchElapsedSeconds);
-      HapticFeedback.mediumImpact();
+      widget.onDurationChanged(_stopwatchElapsed.value);
+      KHaptics.commit();
     } else {
+      _stopwatchElapsed.value = 0;
       setState(() {
         _isStopwatchRunning = true;
-        _stopwatchElapsedSeconds = 0;
       });
       _stopwatchTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (!mounted) {
           t.cancel();
           return;
         }
-        setState(() {
-          _stopwatchElapsedSeconds++;
-        });
+        _stopwatchElapsed.value++;
       });
-      HapticFeedback.lightImpact();
+      KHaptics.commit();
     }
   }
 
@@ -198,24 +225,18 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Left: Weight dial wheel
             Expanded(
               child: Column(
                 children: [
-                  const Text(
-                    'WEIGHT (KG)',
-                    style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Weight (kg)', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-5', onTap: () => _adjustWeight(-5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-2.5', onTap: () => _adjustWeight(-2.5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-5', onTap: () => _adjustWeight(-5)),
+                    _StepButton(label: '-2.5', onTap: () => _adjustWeight(-2.5)),
+                  ]),
                   const SizedBox(height: 8),
                   _Kynetix3DWheelPicker<double>(
                     controller: _weightController,
@@ -225,14 +246,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     onSelectedItemChanged: _onWeightWheelChanged,
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+2.5', onTap: () => _adjustWeight(2.5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+5', onTap: () => _adjustWeight(5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+2.5', onTap: () => _adjustWeight(2.5)),
+                    _StepButton(label: '+5', onTap: () => _adjustWeight(5)),
+                  ]),
                 ],
               ),
             ),
@@ -242,19 +259,12 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
             Expanded(
               child: Column(
                 children: [
-                  const Text(
-                    'REPS SELECTOR',
-                    style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Reps', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-5', onTap: () => _adjustReps(-5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-1', onTap: () => _adjustReps(-1)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-5', onTap: () => _adjustReps(-5)),
+                    _StepButton(label: '-1', onTap: () => _adjustReps(-1)),
+                  ]),
                   const SizedBox(height: 8),
                   _Kynetix3DWheelPicker<int>(
                     controller: _repsController,
@@ -264,14 +274,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     onSelectedItemChanged: _onRepsWheelChanged,
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+1', onTap: () => _adjustReps(1)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+5', onTap: () => _adjustReps(5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+1', onTap: () => _adjustReps(1)),
+                    _StepButton(label: '+5', onTap: () => _adjustReps(5)),
+                  ]),
                 ],
               ),
             ),
@@ -300,79 +306,60 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Left: External load selector
             Expanded(
               child: Column(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
+                    runSpacing: 4,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
+                          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.06),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Text(
-                          'BODYWEIGHT',
-                          style: TextStyle(color: KColor.green, fontSize: 8.5, fontWeight: FontWeight.bold),
+                        child: Text(
+                          'Bodyweight',
+                          style: _InputText.eyebrow.copyWith(color: KColor.textPrimary),
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '+ LOAD (KG)',
-                        style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                      ),
+                      Text('+ load (kg)', style: _InputText.eyebrow),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-5', onTap: () => _adjustExternalLoad(-5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-2.5', onTap: () => _adjustExternalLoad(-2.5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-5', onTap: () => _adjustExternalLoad(-5)),
+                    _StepButton(label: '-2.5', onTap: () => _adjustExternalLoad(-2.5)),
+                  ]),
                   const SizedBox(height: 8),
-                  Container(
-                    height: 148,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            currentExternal > 0 ? '+${currentExternal.toStringAsFixed(1)} kg' : 'BODYWEIGHT ONLY',
-                            style: TextStyle(
-                              color: currentExternal > 0 ? const Color(0xFF60A5FA) : KColor.green,
-                              fontSize: currentExternal > 0 ? 16 : 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          if (currentExternal > 0)
-                            const Text(
-                              'External Load',
-                              style: TextStyle(color: KColor.textMuted, fontSize: 10),
-                            ),
-                        ],
-                      ),
+                  _ReadoutWell(
+                    height: 164,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          currentExternal > 0 ? '+${currentExternal.toStringAsFixed(1)} kg' : 'Bodyweight only',
+                          textAlign: TextAlign.center,
+                          style: currentExternal > 0
+                              ? _InputText.readoutSmall
+                              : _InputText.eyebrow.copyWith(fontSize: 15, color: KColor.textPrimary),
+                        ),
+                        if (currentExternal > 0)
+                          Text('External load', style: _InputText.hint),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+2.5', onTap: () => _adjustExternalLoad(2.5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+5', onTap: () => _adjustExternalLoad(5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+2.5', onTap: () => _adjustExternalLoad(2.5)),
+                    _StepButton(label: '+5', onTap: () => _adjustExternalLoad(5)),
+                  ]),
                 ],
               ),
             ),
@@ -382,19 +369,12 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
             Expanded(
               child: Column(
                 children: [
-                  const Text(
-                    'REPS SELECTOR',
-                    style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Reps', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-5', onTap: () => _adjustReps(-5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-1', onTap: () => _adjustReps(-1)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-5', onTap: () => _adjustReps(-5)),
+                    _StepButton(label: '-1', onTap: () => _adjustReps(-1)),
+                  ]),
                   const SizedBox(height: 8),
                   _Kynetix3DWheelPicker<int>(
                     controller: _repsController,
@@ -404,14 +384,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     onSelectedItemChanged: _onRepsWheelChanged,
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+1', onTap: () => _adjustReps(1)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+5', onTap: () => _adjustReps(5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+1', onTap: () => _adjustReps(1)),
+                    _StepButton(label: '+5', onTap: () => _adjustReps(5)),
+                  ]),
                 ],
               ),
             ),
@@ -429,63 +405,77 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     final mins = curDuration ~/ 60;
     final secs = curDuration % 60;
     final durStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+    final running = _isStopwatchRunning;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Left: Live Hold Stopwatch Button
             Expanded(
               child: Column(
                 children: [
-                  const Text(
-                    'HOLD STOPWATCH',
-                    style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Hold timer', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  InkWell(
-                    onTap: _toggleStopwatch,
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      height: 154,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _isStopwatchRunning
-                            ? const Color(0xFFEF4444).withValues(alpha: 0.12)
-                            : const Color(0xFF141624),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: _isStopwatchRunning ? const Color(0xFFEF4444) : KColor.border,
-                          width: _isStopwatchRunning ? 1.5 : 0.5,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            _isStopwatchRunning ? Icons.stop_circle_rounded : Icons.play_circle_fill_rounded,
-                            size: 38,
-                            color: _isStopwatchRunning ? const Color(0xFFEF4444) : KColor.green,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _isStopwatchRunning
-                                ? '${(_stopwatchElapsedSeconds ~/ 60).toString().padLeft(2, '0')}:${(_stopwatchElapsedSeconds % 60).toString().padLeft(2, '0')}'
-                                : 'START TIMER',
-                            style: TextStyle(
-                              color: _isStopwatchRunning ? Colors.white : KColor.green,
-                              fontSize: _isStopwatchRunning ? 20 : 12,
-                              fontWeight: FontWeight.bold,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                  Semantics(
+                    button: true,
+                    label: running ? 'Stop the hold timer and use that time' : 'Start the hold timer',
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        onTap: _toggleStopwatch,
+                        borderRadius: KRadius.md,
+                        child: AnimatedContainer(
+                          duration: KMotion.of(context, KMotion.quick),
+                          curve: KMotion.emphasizedCurve,
+                          constraints: const BoxConstraints(minHeight: 154),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          // Running = ink fill: the one live thing on the console.
+                          decoration: BoxDecoration(
+                            color: running ? KColor.ink : _wellFill(),
+                            borderRadius: KRadius.md,
+                            border: Border.all(
+                              color: running ? KColor.ink : _hairline(),
+                              width: 1,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _isStopwatchRunning ? 'Tap to stop & record' : 'Live stopwatch',
-                            style: const TextStyle(color: KColor.textMuted, fontSize: 9.5),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ExcludeSemantics(
+                                child: Icon(
+                                  running ? Icons.stop_circle_rounded : Icons.play_circle_fill_rounded,
+                                  size: 40,
+                                  color: running ? KColor.onInk : KColor.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              if (running)
+                                ValueListenableBuilder<int>(
+                                  valueListenable: _stopwatchElapsed,
+                                  builder: (context, elapsed, _) => Text(
+                                    '${(elapsed ~/ 60).toString().padLeft(2, '0')}:${(elapsed % 60).toString().padLeft(2, '0')}',
+                                    style: _InputText.readout.copyWith(fontSize: 28, color: KColor.onInk),
+                                  ),
+                                )
+                              else
+                                Text(
+                                  'Start timer',
+                                  style: _InputText.eyebrow.copyWith(fontSize: 15, color: KColor.textPrimary),
+                                ),
+                              const SizedBox(height: 4),
+                              Text(
+                                running ? 'Tap to stop, time fills in' : 'Times your hold',
+                                textAlign: TextAlign.center,
+                                style: running
+                                    ? _InputText.hint.copyWith(color: KColor.onInk.withValues(alpha: 0.72))
+                                    : _InputText.hint,
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -498,57 +488,28 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
             Expanded(
               child: Column(
                 children: [
-                  const Text(
-                    'TARGET DURATION',
-                    style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold),
-                  ),
+                  Text('Target duration', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-15s', onTap: () => _adjustDuration(-15)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-5s', onTap: () => _adjustDuration(-5)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-15s', onTap: () => _adjustDuration(-15)),
+                    _StepButton(label: '-5s', onTap: () => _adjustDuration(-5)),
+                  ]),
                   const SizedBox(height: 8),
-                  Container(
+                  _ReadoutWell(
                     height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            durStr,
-                            style: const TextStyle(
-                              color: KColor.green,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                          Text(
-                            '$curDuration seconds',
-                            style: const TextStyle(color: KColor.textMuted, fontSize: 10),
-                          ),
-                        ],
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(durStr, style: _InputText.readout),
+                        Text('$curDuration seconds', style: _InputText.hint),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+5s', onTap: () => _adjustDuration(5)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+15s', onTap: () => _adjustDuration(15)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+5s', onTap: () => _adjustDuration(5)),
+                    _StepButton(label: '+15s', onTap: () => _adjustDuration(15)),
+                  ]),
                 ],
               ),
             ),
@@ -569,45 +530,32 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Left: Duration
             Expanded(
               child: Column(
                 children: [
-                  const Text('DURATION', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                  Text('Duration', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-5m', onTap: () => _adjustDuration(-300)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-1m', onTap: () => _adjustDuration(-60)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-5m', onTap: () => _adjustDuration(-300)),
+                    _StepButton(label: '-1m', onTap: () => _adjustDuration(-60)),
+                  ]),
                   const SizedBox(height: 8),
-                  Container(
+                  _ReadoutWell(
                     height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${curDuration ~/ 60}m ${(curDuration % 60).toString().padLeft(2, '0')}s',
-                        style: const TextStyle(color: KColor.green, fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
+                    child: Text(
+                      '${curDuration ~/ 60}m ${(curDuration % 60).toString().padLeft(2, '0')}s',
+                      textAlign: TextAlign.center,
+                      style: _InputText.readoutSmall,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+1m', onTap: () => _adjustDuration(60)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+5m', onTap: () => _adjustDuration(300)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+1m', onTap: () => _adjustDuration(60)),
+                    _StepButton(label: '+5m', onTap: () => _adjustDuration(300)),
+                  ]),
                 ],
               ),
             ),
@@ -617,42 +565,28 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
             Expanded(
               child: Column(
                 children: [
-                  const Text('DISTANCE', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                  Text('Distance', style: _InputText.eyebrow, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '-500m', onTap: () => _adjustDistance(-500)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '-100m', onTap: () => _adjustDistance(-100)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '-500m', onTap: () => _adjustDistance(-500)),
+                    _StepButton(label: '-100m', onTap: () => _adjustDistance(-100)),
+                  ]),
                   const SizedBox(height: 8),
-                  Container(
+                  _ReadoutWell(
                     height: 100,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141624),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Center(
-                      child: Text(
-                        curMeters >= 1000
-                            ? '${(curMeters / 1000).toStringAsFixed(2)} km'
-                            : '${curMeters.toStringAsFixed(0)} m',
-                        style: const TextStyle(color: Color(0xFF60A5FA), fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
+                    child: Text(
+                      curMeters >= 1000
+                          ? '${(curMeters / 1000).toStringAsFixed(2)} km'
+                          : '${curMeters.toStringAsFixed(0)} m',
+                      textAlign: TextAlign.center,
+                      style: _InputText.readoutSmall,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepButton(label: '+100m', onTap: () => _adjustDistance(100)),
-                      const SizedBox(width: 4),
-                      _StepButton(label: '+500m', onTap: () => _adjustDistance(500)),
-                    ],
-                  ),
+                  _StepRow(children: [
+                    _StepButton(label: '+100m', onTap: () => _adjustDistance(100)),
+                    _StepButton(label: '+500m', onTap: () => _adjustDistance(500)),
+                  ]),
                 ],
               ),
             ),
@@ -673,7 +607,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       _isInternalUpdating = true;
       widget.onWeightChanged(w);
       _isInternalUpdating = false;
-      HapticFeedback.selectionClick();
+      KHaptics.select();
     }
   }
 
@@ -685,7 +619,18 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
       _isInternalUpdating = true;
       widget.onRepsChanged(r);
       _isInternalUpdating = false;
-      HapticFeedback.selectionClick();
+      KHaptics.select();
+    }
+  }
+
+  /// Glide the dial to [idx]; jumps under reduced motion.
+  void _animateWheel(FixedExtentScrollController controller, int idx) {
+    if (!controller.hasClients) return;
+    final d = KMotion.of(context, const Duration(milliseconds: 200));
+    if (d == Duration.zero) {
+      controller.jumpToItem(idx);
+    } else {
+      controller.animateToItem(idx, duration: d, curve: KMotion.emphasizedCurve);
     }
   }
 
@@ -695,10 +640,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     widget.onWeightChanged(next);
     _isInternalUpdating = false;
     final idx = (next / 0.5).round().clamp(0, 700);
-    if (_weightController.hasClients) {
-      _weightController.animateToItem(idx, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
-    }
-    HapticFeedback.selectionClick();
+    _animateWheel(_weightController, idx);
+    KHaptics.select();
   }
 
   void _adjustReps(int delta) {
@@ -707,31 +650,73 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     widget.onRepsChanged(next);
     _isInternalUpdating = false;
     final idx = (next - 1).clamp(0, 99);
-    if (_repsController.hasClients) {
-      _repsController.animateToItem(idx, duration: const Duration(milliseconds: 200), curve: Curves.easeOutCubic);
-    }
-    HapticFeedback.selectionClick();
+    _animateWheel(_repsController, idx);
+    KHaptics.select();
   }
 
   void _adjustExternalLoad(double delta) {
     final current = widget.externalLoadKg ?? 0.0;
     final next = (current + delta).clamp(0.0, 150.0);
     widget.onExternalLoadChanged(next);
-    HapticFeedback.selectionClick();
+    KHaptics.select();
   }
 
   void _adjustDuration(int deltaSeconds) {
     final cur = widget.durationSeconds ?? 60;
     final next = (cur + deltaSeconds).clamp(5, 7200);
     widget.onDurationChanged(next);
-    HapticFeedback.selectionClick();
+    KHaptics.select();
   }
 
   void _adjustDistance(double deltaMeters) {
     final cur = widget.distanceMeters ?? 2000.0;
     final next = (cur + deltaMeters).clamp(50.0, 50000.0);
     widget.onDistanceChanged(next);
-    HapticFeedback.selectionClick();
+    KHaptics.select();
+  }
+}
+
+/// A row of quick-adjust buttons that reflows onto a second line instead of
+/// overflowing when the column is narrow or the text scale is large.
+class _StepRow extends StatelessWidget {
+  final List<Widget> children;
+  const _StepRow({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    // Side by side, equal widths: the step buttons used to wrap into a tall
+    // column because each one stretched to the full dial width.
+    return Row(
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(child: children[i]),
+        ],
+      ],
+    );
+  }
+}
+
+/// Recessed well that frames a read-only value (load, duration, distance).
+class _ReadoutWell extends StatelessWidget {
+  final double height;
+  final Widget child;
+  const _ReadoutWell({required this.height, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(minHeight: height),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _wellFill(),
+        borderRadius: KRadius.md,
+        border: Border.all(color: _hairline(), width: 1),
+      ),
+      child: child,
+    );
   }
 }
 
@@ -743,23 +728,24 @@ class _StepButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1B1D2E),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: KColor.border, width: 0.5),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 10.5,
-            fontWeight: FontWeight.bold,
+    // 48dp minimum for sweaty, mid-set thumbs.
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: KRadius.sm,
+        splashColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.10),
+        highlightColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: KColor.isDark ? KColor.cardHigh : KColor.card,
+            borderRadius: KRadius.sm,
+            border: Border.all(color: _hairline(), width: 1),
           ),
+          child: Text(label, style: _InputText.step),
         ),
       ),
     );
@@ -769,14 +755,14 @@ class _StepButton extends StatelessWidget {
 /// Premium 3D cylindrical wheel picker utilizing Flutter's native [ListWheelScrollView].
 ///
 /// Features:
-/// - Selected item centered, prominently magnified (~1.42×) with Kynetix green accent.
+/// - Selected item centered, prominently magnified (~1.42×) in full-strength ink.
 /// - Immediately adjacent items are progressively smaller (~0.90×, 0.52 opacity).
 /// - Second-nearest items are even smaller (~0.72×, 0.22 opacity).
 /// - Farther items progressively fade down to 0.04 into top/bottom cylinder depth gradients.
 /// - Smooth continuous interpolation during scrolling, not only after scroll completion.
 /// - Fixed-extent snapping physics with natural inertia and flings.
-/// - Center framing lens with subtle green border and glassmorphic highlight.
-/// - Zero heavy per-frame calculations for 60+ FPS scrolling smoothness.
+/// - Center framing lens drawn with theme hairlines.
+/// - Isolated behind a RepaintBoundary so wheel scrolling never re-rasters the console.
 class _Kynetix3DWheelPicker<T> extends StatelessWidget {
   final FixedExtentScrollController controller;
   final List<T> items;
@@ -792,172 +778,167 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
     required this.selectedItem,
     required this.labelBuilder,
     required this.onSelectedItemChanged,
-    this.height = 148.0,
-    this.itemExtent = 36.0,
+    this.height = 164.0,
+    this.itemExtent = 40.0,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0xFF141624),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Cylindrical center selection lens highlight
-          IgnorePointer(
-            child: Container(
-              height: itemExtent + 4,
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: KColor.green.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.symmetric(
-                  horizontal: BorderSide(
-                    color: KColor.green.withValues(alpha: 0.35),
+    return RepaintBoundary(
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          color: _wellFill(),
+          borderRadius: KRadius.md,
+          border: Border.all(color: _hairline(), width: 1),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Cylindrical center selection lens highlight
+            IgnorePointer(
+              child: Container(
+                height: itemExtent + 4,
+                margin: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: KColor.isDark
+                      ? KColor.fg.withValues(alpha: 0.07)
+                      : KColor.card,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.12),
                     width: 1.0,
                   ),
+                  boxShadow: KColor.isDark ? null : KShadow.card,
                 ),
               ),
             ),
-          ),
 
-          // Native 3D ListWheelScrollView with cylindrical perspective & momentum physics
-          ListWheelScrollView.useDelegate(
-            controller: controller,
-            itemExtent: itemExtent,
-            physics: const FixedExtentScrollPhysics(),
-            perspective: 0.0035,
-            diameterRatio: 1.25,
-            squeeze: 1.04,
-            useMagnifier: false,
-            onSelectedItemChanged: onSelectedItemChanged,
-            childDelegate: ListWheelChildBuilderDelegate(
-              builder: (context, index) {
-                if (index < 0 || index >= items.length) return null;
-                final item = items[index];
+            // Native 3D ListWheelScrollView with cylindrical perspective & momentum physics
+            ListWheelScrollView.useDelegate(
+              controller: controller,
+              itemExtent: itemExtent,
+              physics: const FixedExtentScrollPhysics(),
+              perspective: 0.0035,
+              diameterRatio: 1.25,
+              squeeze: 1.04,
+              useMagnifier: false,
+              onSelectedItemChanged: onSelectedItemChanged,
+              childDelegate: ListWheelChildBuilderDelegate(
+                builder: (context, index) {
+                  if (index < 0 || index >= items.length) return null;
+                  final label = labelBuilder(items[index]);
 
-                return AnimatedBuilder(
-                  animation: controller,
-                  builder: (context, child) {
-                    double delta = 0.0;
-                    if (controller.hasClients) {
-                      final offset = controller.offset;
-                      delta = (index * itemExtent - offset) / itemExtent;
-                    } else {
-                      delta = (index - controller.initialItem).toDouble();
-                    }
+                  return AnimatedBuilder(
+                    animation: controller,
+                    builder: (context, child) {
+                      double delta = 0.0;
+                      if (controller.hasClients) {
+                        final offset = controller.offset;
+                        delta = (index * itemExtent - offset) / itemExtent;
+                      } else {
+                        delta = (index - controller.initialItem).toDouble();
+                      }
 
-                    final absDelta = delta.abs();
+                      final absDelta = delta.abs();
 
-                    // Continuous smooth scale, opacity and color interpolation:
-                    // Center (0.0): ~1.42x magnification, KColor.green, 1.0 opacity, boldest weight
-                    // Immediately adjacent (1.0): ~0.90x, white70, 0.52 opacity, medium bold
-                    // Second-nearest (2.0): ~0.72x, muted slate, 0.22 opacity
-                    // Farther (>2.0): progressively fading down to 0.04 into cylinder depth
-                    final double scale;
-                    final double opacity;
-                    final Color textColor;
-                    final FontWeight fontWeight;
+                      // Continuous smooth scale, opacity and color interpolation:
+                      // Center (0.0): ~1.42x magnification, full ink, 1.0 opacity, boldest weight
+                      // Immediately adjacent (1.0): ~0.90x, secondary ink, 0.52 opacity
+                      // Second-nearest (2.0): ~0.72x, muted ink, 0.22 opacity
+                      // Farther (>2.0): progressively fading down to 0.04 into cylinder depth
+                      final double scale;
+                      final double opacity;
+                      final Color textColor;
+                      final FontWeight fontWeight;
 
-                    if (absDelta <= 1.0) {
-                      final t = (1.0 - absDelta).clamp(0.0, 1.0);
-                      final smoothT = Curves.easeOutCubic.transform(t);
-                      scale = 0.90 + (1.42 - 0.90) * smoothT;
-                      opacity = (0.52 + (1.0 - 0.52) * smoothT).clamp(0.0, 1.0);
-                      textColor = Color.lerp(const Color(0xFF94A3B8), KColor.green, smoothT)!;
-                      fontWeight = smoothT > 0.5 ? FontWeight.w900 : FontWeight.w700;
-                    } else if (absDelta <= 2.0) {
-                      final t = (2.0 - absDelta).clamp(0.0, 1.0);
-                      final smoothT = Curves.easeOutCubic.transform(t);
-                      scale = 0.72 + (0.90 - 0.72) * smoothT;
-                      opacity = (0.22 + (0.52 - 0.22) * smoothT).clamp(0.0, 1.0);
-                      textColor = Color.lerp(const Color(0xFF64748B), const Color(0xFF94A3B8), smoothT)!;
-                      fontWeight = FontWeight.w600;
-                    } else {
-                      final t = (3.0 - absDelta).clamp(0.0, 1.0);
-                      scale = 0.58 + (0.72 - 0.58) * t;
-                      opacity = (0.04 + (0.22 - 0.04) * t).clamp(0.0, 1.0);
-                      textColor = const Color(0xFF64748B);
-                      fontWeight = FontWeight.w500;
-                    }
+                      if (absDelta <= 1.0) {
+                        final t = (1.0 - absDelta).clamp(0.0, 1.0);
+                        final smoothT = Curves.easeOutCubic.transform(t);
+                        scale = 0.90 + (1.42 - 0.90) * smoothT;
+                        opacity = (0.52 + (1.0 - 0.52) * smoothT).clamp(0.0, 1.0);
+                        textColor = Color.lerp(KColor.textSecondary, KColor.textPrimary, smoothT)!;
+                        fontWeight = smoothT > 0.5 ? FontWeight.w800 : FontWeight.w700;
+                      } else if (absDelta <= 2.0) {
+                        final t = (2.0 - absDelta).clamp(0.0, 1.0);
+                        final smoothT = Curves.easeOutCubic.transform(t);
+                        scale = 0.72 + (0.90 - 0.72) * smoothT;
+                        opacity = (0.22 + (0.52 - 0.22) * smoothT).clamp(0.0, 1.0);
+                        textColor = Color.lerp(KColor.textMuted, KColor.textSecondary, smoothT)!;
+                        fontWeight = FontWeight.w600;
+                      } else {
+                        final t = (3.0 - absDelta).clamp(0.0, 1.0);
+                        scale = 0.58 + (0.72 - 0.58) * t;
+                        opacity = (0.04 + (0.22 - 0.04) * t).clamp(0.0, 1.0);
+                        textColor = KColor.textMuted;
+                        fontWeight = FontWeight.w500;
+                      }
 
-                    return Center(
-                      child: Opacity(
-                        opacity: opacity,
-                        child: Transform.scale(
-                          scale: scale,
-                          child: Text(
-                            labelBuilder(item),
-                            style: TextStyle(
-                              color: textColor,
-                              fontSize: 13.5,
-                              fontWeight: fontWeight,
-                              letterSpacing: absDelta < 0.4 ? 0.2 : 0.0,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                      return Center(
+                        child: Opacity(
+                          opacity: opacity,
+                          child: Transform.scale(
+                            scale: scale,
+                            child: Text(
+                              label,
+                              style: _InputText.wheel.copyWith(
+                                color: textColor,
+                                fontWeight: fontWeight,
+                                letterSpacing: absDelta < 0.4 ? -0.4 : 0.0,
+                              ),
+                              maxLines: 1,
+                              softWrap: false,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
-              childCount: items.length,
+                      );
+                    },
+                  );
+                },
+                childCount: items.length,
+              ),
             ),
-          ),
 
-          // Top cylinder depth fade
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 32,
-            child: IgnorePointer(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFF141624),
-                      Colors.transparent,
-                    ],
+            // Top cylinder depth fade
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 32,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [_wellFill(), _wellFill().withValues(alpha: 0)],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // Bottom cylinder depth fade
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 32,
-            child: IgnorePointer(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Color(0xFF141624),
-                      Colors.transparent,
-                    ],
+            // Bottom cylinder depth fade
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 32,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [_wellFill(), _wellFill().withValues(alpha: 0)],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

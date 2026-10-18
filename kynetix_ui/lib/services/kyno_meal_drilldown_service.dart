@@ -2,6 +2,7 @@ import '../models/day_log.dart';
 import '../models/kyno_fitness_snapshot.dart';
 import 'kyno_context_service.dart';
 import 'kyno_historical_analysis_service.dart';
+import '../ui/k_format.dart';
 
 /// Single historical meal record extracted directly from DayLog.
 class HistoricalMealRecord {
@@ -68,7 +69,7 @@ class HistoricalMealRecord {
   }
 
   String get summaryString =>
-      '$mealName (${section.name.toUpperCase()} at $formattedTime) – ${calories.toStringAsFixed(0)} kcal, ${protein.toStringAsFixed(0)}g P, ${carbs.toStringAsFixed(0)}g C, ${fat.toStringAsFixed(0)}g F';
+      '$mealName (${section.name.toUpperCase()} at $formattedTime) to ${calories.toStringAsFixed(0)} kcal, ${protein.toStringAsFixed(0)}g P, ${carbs.toStringAsFixed(0)}g C, ${fat.toStringAsFixed(0)}g F';
 }
 
 /// Service dedicated to retrieving exact historical DayLog meal entries and
@@ -115,12 +116,12 @@ class KynoMealDrilldownService {
     if (meals.isEmpty) {
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Yesterday Meal Log',
+        title: 'Yesterday meal log',
         detail: 'No meals were logged in your DayLog records for yesterday (${targetDate.month}/${targetDate.day}).',
       ));
       insights.add(KynoInsightItem(
         type: KynoInformationType.unknown,
-        title: 'Calorie Breakdown',
+        title: 'Calorie breakdown',
         detail: 'Cannot identify calorie contributors because no meals were logged for this date.',
       ));
       return KynoAnalysisResult(
@@ -141,12 +142,12 @@ class KynoMealDrilldownService {
 
     // FACT: Cites exact meals with name, timestamp, and macros
     final mealLines = meals.map((m) =>
-        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}" – ${m.calories.toStringAsFixed(0)} kcal (${m.protein.toStringAsFixed(0)}g P, ${m.carbs.toStringAsFixed(0)}g C, ${m.fat.toStringAsFixed(0)}g F)'
+        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}", ${m.calories.toStringAsFixed(0)} kcal (${m.protein.toStringAsFixed(0)}g P, ${m.carbs.toStringAsFixed(0)}g C, ${m.fat.toStringAsFixed(0)}g F)'
     ).join('\n');
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: 'Yesterday Meal Log (${meals.length} meals logged)',
+      title: 'Yesterday meal log (${plural(meals.length, 'meal')} logged)',
       detail: '$mealLines\nTotal Logged: ${totalCal.toStringAsFixed(0)} kcal, ${totalPro.toStringAsFixed(0)}g protein.',
     ));
 
@@ -168,14 +169,14 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Calorie Distribution Math',
+      title: 'Calorie distribution math',
       detail: calcLines.join('\n'),
     ));
 
     // INFERENCE: Objective, non-moralizing explanation relative to goal
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Energy Context',
+      title: 'Energy context',
       detail: delta > 0
           ? 'The higher calorie total was primarily driven by the energy density of "${highestCal.mealName}" at ${highestCal.formattedTime}. In the context of your configured daily calorie target, single-day calorie fluctuations are normal and do not compromise long-term adaptation.'
           : 'Yesterday\'s calorie distribution was anchored across your logged meals without an overall surplus.',
@@ -184,7 +185,7 @@ class KynoMealDrilldownService {
     // RECOMMENDATION: Constructive guidance aligned with user targets
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
-      title: 'Target Alignment',
+      title: 'Target alignment',
       detail: delta > 250
           ? 'If you want to stay closer to your ${targetCal.toStringAsFixed(0)} kcal target, consider moderating portion sizes or carbohydrate and fat density for higher-energy meals like "${highestCal.mealName}".'
           : 'Maintain your current meal balance and continue logging consistently.',
@@ -193,7 +194,7 @@ class KynoMealDrilldownService {
     // UNKNOWN: Unmeasured variables
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Variables',
+      title: 'Untracked variables',
       detail: 'Cooking oils, exact sauce quantities, non-exercise physical activity, and precise metabolic expenditure are not tracked.',
     ));
 
@@ -218,7 +219,7 @@ class KynoMealDrilldownService {
     // FACT: Longitudinal average & yesterday's exact protein records
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: 'Protein Intake History',
+      title: 'Protein intake history',
       detail: '• 14-Day Average: ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g / day across ${snapshot.nutritionDaysIn14DayWindow} logged days.\n'
           '• Configured Target: ${targetPro.toStringAsFixed(0)}g / day.\n'
           '• Days below 75% target: ${snapshot.lowProteinDaysLast14Days} of last ${snapshot.nutritionDaysIn14DayWindow} logged days.',
@@ -226,12 +227,12 @@ class KynoMealDrilldownService {
 
     if (meals.isNotEmpty) {
       final mealFacts = meals.map((m) =>
-          '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}" – ${m.protein.toStringAsFixed(0)}g protein (${m.calories.toStringAsFixed(0)} kcal)'
+          '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}", ${m.protein.toStringAsFixed(0)}g protein (${m.calories.toStringAsFixed(0)} kcal)'
       ).join('\n');
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Recent Meal Protein Drill-Down (${targetDate.month}/${targetDate.day})',
+        title: 'Recent meal protein drill-down (${targetDate.month}/${targetDate.day})',
         detail: mealFacts,
       ));
 
@@ -244,15 +245,15 @@ class KynoMealDrilldownService {
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Protein Opportunity Math',
+        title: 'Protein opportunity math',
         detail: '• Yesterday\'s protein total: ${yesterdayPro.toStringAsFixed(0)}g vs ${targetPro.toStringAsFixed(0)}g target (${yesterdayDeficit.toStringAsFixed(0)}g deficit).\n'
             '• High-protein anchor meals (≥30g): ${anchorMeals.length} logged.\n'
-            '• Low-protein meals (<15g): ${lowProMeals.length} of ${meals.length} meals.',
+            '• Low-protein meals (<15g): ${lowProMeals.length} of ${plural(meals.length, 'meal')}.',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.inference,
-        title: 'Deficit Analysis',
+        title: 'Deficit analysis',
         detail: lowProMeals.isNotEmpty
             ? 'The primary reason for not hitting your protein target is that several logged meals (such as ${lowProMeals.map((m) => '"${m.mealName}" (${m.protein.toStringAsFixed(0)}g)').join(', ')}) contained minimal protein relative to their energy content. Without dedicated protein anchors at each meal, reaching ${targetPro.toStringAsFixed(0)}g requires high volume later in the day.'
             : 'Your logged meals had moderate protein density, but total meal frequency was insufficient to accumulate ${targetPro.toStringAsFixed(0)}g.',
@@ -260,26 +261,26 @@ class KynoMealDrilldownService {
     } else {
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Longitudinal Adherence Math',
+        title: 'Longitudinal adherence math',
         detail: '• Average daily protein deficit: ${(targetPro - snapshot.avgProteinLast14Days).clamp(0.0, 999.0).toStringAsFixed(0)}g / day (${(snapshot.proteinAdherencePct14Days * 100).toInt()}% adherence).',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.inference,
-        title: 'Protein Adherence Pattern',
-        detail: 'Consistent shortfalls across recorded days indicate that current meal routines lack regular 30–40g protein servings.',
+        title: 'Protein adherence pattern',
+        detail: 'Consistent shortfalls across recorded days indicate that current meal routines lack regular 30-40g protein servings.',
       ));
     }
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
-      title: 'Actionable Adjustment',
-      detail: 'Aim for 30–40g of protein per main meal (e.g. adding Greek yogurt, whey, eggs, poultry, tofu, or fish) rather than relying on snacks to catch up.',
+      title: 'Actionable adjustment',
+      detail: 'Aim for 30-40g of protein per main meal (e.g. adding Greek yogurt, whey, eggs, poultry, tofu, or fish) rather than relying on snacks to catch up.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Variables',
+      title: 'Untracked variables',
       detail: 'Protein bioavailability, digestive absorption, and unlogged amino acid supplements are not recorded.',
     ));
 
@@ -288,8 +289,8 @@ class KynoMealDrilldownService {
       headline: 'Drill-down on protein deficit and meal opportunities:',
       insights: insights,
       recommendedChanges: [
-        'Anchor each primary meal with at least 30–40g of high-quality protein.',
-        'Review low-protein snacks to see where 15–20g protein can be added.',
+        'Anchor each primary meal with at least 30-40g of high-quality protein.',
+        'Review low-protein snacks to see where 15-20g protein can be added.',
       ],
     );
   }
@@ -303,12 +304,12 @@ class KynoMealDrilldownService {
     if (meals.isEmpty) {
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Meal Log Record',
+        title: 'Meal log record',
         detail: 'No meals were logged in your DayLog for yesterday (${targetDate.month}/${targetDate.day}).',
       ));
       insights.add(KynoInsightItem(
         type: KynoInformationType.unknown,
-        title: 'Late Night Intake',
+        title: 'Late night intake',
         detail: 'Cannot determine if anything was eaten late because no meal entries were logged for this date.',
       ));
       return KynoAnalysisResult(
@@ -330,20 +331,20 @@ class KynoMealDrilldownService {
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Logged Late-Night Meals (${lateMeals.length} logged after 8:00 PM)',
+        title: 'Logged late-night meals (${lateMeals.length} logged after 8:00 PM)',
         detail: lateLines,
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Late Evening Nutrition Sum',
+        title: 'Late evening nutrition sum',
         detail: 'Total late-night intake: ${lateCal.toStringAsFixed(0)} kcal, ${latePro.toStringAsFixed(0)}g protein across ${lateMeals.length} logged items.',
       ));
 
       // Non-moralizing explanation
       insights.add(KynoInsightItem(
         type: KynoInformationType.inference,
-        title: 'Contextual Alignment',
+        title: 'Contextual alignment',
         detail: 'Eating late is neither inherently beneficial nor harmful for body composition. Energy balance across the full 24-hour cycle determines weight changes. This late meal contributed ${lateCal.toStringAsFixed(0)} kcal toward your daily total.',
       ));
 
@@ -356,27 +357,27 @@ class KynoMealDrilldownService {
       final lastMeal = meals.last;
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Logged Meal Timing',
+        title: 'Logged meal timing',
         detail: 'No meals were logged after 8:00 PM yesterday (${targetDate.month}/${targetDate.day}).\n'
             'Your last recorded meal was "${lastMeal.mealName}" at ${lastMeal.formattedTime} [${lastMeal.section.name.toUpperCase()}], containing ${lastMeal.calories.toStringAsFixed(0)} kcal and ${lastMeal.protein.toStringAsFixed(0)}g protein.',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Late Night Intake Math',
+        title: 'Late night intake math',
         detail: '0 kcal and 0g protein logged after 8:00 PM.',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.inference,
-        title: 'Logged Pattern',
+        title: 'Logged pattern',
         detail: 'Your logged intake for yesterday concluded at ${lastMeal.formattedTime}.',
       ));
     }
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Factors',
+      title: 'Untracked factors',
       detail: 'Any unlogged snacks, beverages, or eating that occurred without recording in Kynetix remain untracked.',
     ));
 
@@ -398,12 +399,12 @@ class KynoMealDrilldownService {
     if (meals.isEmpty) {
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Meal Log Record',
+        title: 'Meal log record',
         detail: 'No meals were logged in your DayLog for yesterday (${targetDate.month}/${targetDate.day}).',
       ));
       insights.add(KynoInsightItem(
         type: KynoInformationType.unknown,
-        title: 'Nutrition History',
+        title: 'Nutrition history',
         detail: 'Intake for this date was not recorded in the application.',
       ));
       return KynoAnalysisResult(
@@ -414,7 +415,7 @@ class KynoMealDrilldownService {
     }
 
     final chronologicalLines = meals.map((m) =>
-        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}" – ${m.calories.toStringAsFixed(0)} kcal | ${m.protein.toStringAsFixed(0)}g P | ${m.carbs.toStringAsFixed(0)}g C | ${m.fat.toStringAsFixed(0)}g F'
+        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}", ${m.calories.toStringAsFixed(0)} kcal | ${m.protein.toStringAsFixed(0)}g P | ${m.carbs.toStringAsFixed(0)}g C | ${m.fat.toStringAsFixed(0)}g F'
     ).join('\n');
 
     final totalCal = meals.fold(0.0, (s, m) => s + m.calories);
@@ -424,13 +425,13 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: 'Chronological Meal Record (${meals.length} meals)',
+      title: 'Chronological meal record (${plural(meals.length, 'meal')})',
       detail: chronologicalLines,
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Daily Macronutrient Totals',
+      title: 'Daily macronutrient totals',
       detail: '• Total Calories: ${totalCal.toStringAsFixed(0)} kcal\n'
           '• Protein: ${totalPro.toStringAsFixed(0)}g\n'
           '• Carbohydrates: ${totalCarb.toStringAsFixed(0)}g\n'
@@ -439,13 +440,13 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Meal Structure',
+      title: 'Meal structure',
       detail: 'Intake was distributed across ${meals.length} logged sessions from ${meals.first.formattedTime} to ${meals.last.formattedTime}.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Nutrients',
+      title: 'Untracked nutrients',
       detail: 'Micronutrients, water intake, and condiment additions not entered in the DayLog are untracked.',
     ));
 
@@ -469,7 +470,7 @@ class KynoMealDrilldownService {
     // FACT: Multi-day calorie pattern and target
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: '14-Day Calorie Pattern',
+      title: '14-day calorie pattern',
       detail: '• 14-Day Average: ${avgCal.toStringAsFixed(0)} kcal / day across ${snapshot.nutritionDaysIn14DayWindow} logged days.\n'
           '• Configured Daily Target: ${targetCal.toStringAsFixed(0)} kcal / day.\n'
           '• Current Logged Weight: ${snapshot.userWeightKg != null ? "${snapshot.userWeightKg!.toStringAsFixed(1)} kg" : "unrecorded"}.',
@@ -483,7 +484,7 @@ class KynoMealDrilldownService {
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Recent High-Energy Meal Drill-Down',
+        title: 'Recent high-energy meal drill-down',
         detail: '• "${topMeal.mealName}" at ${topMeal.formattedTime} [${topMeal.section.name.toUpperCase()}]: ${topMeal.calories.toStringAsFixed(0)} kcal, ${topMeal.protein.toStringAsFixed(0)}g P, ${topMeal.carbs.toStringAsFixed(0)}g C, ${topMeal.fat.toStringAsFixed(0)}g F.',
       ));
     }
@@ -503,14 +504,14 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Energy Balance Math',
+      title: 'Energy balance math',
       detail: calcLines.join('\n'),
     ));
 
     // INFERENCE: Non-moralizing explanation
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Weight Assessment',
+      title: 'Weight assessment',
       detail: delta > 150
           ? 'Your logged records show an average daily surplus of +${delta.toStringAsFixed(0)} kcal over the past fortnight. Weight gain is consistent with sustained positive energy balance. In the context of your configured daily calorie target, a moderate surplus supports muscle hypertrophy when paired with progressive resistance training.'
           : 'If your logged intake shows a deficit but scale weight is increasing, short-term scale fluctuations are frequently driven by water retention, sodium intake, glycogen storage, or unlogged energy intake rather than structural fat gain.',
@@ -518,15 +519,15 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
-      title: 'Target Alignment',
+      title: 'Target alignment',
       detail: delta > 0
-          ? 'If weight gain exceeds your target rate, reduce daily intake by 200–300 kcal toward your configured daily calorie target, keeping protein high at ${snapshot.targetDailyProtein.toStringAsFixed(0)}g.'
+          ? 'If weight gain exceeds your target rate, reduce daily intake by 200-300 kcal toward your configured daily calorie target, keeping protein high at ${snapshot.targetDailyProtein.toStringAsFixed(0)}g.'
           : 'Track body weight consistently under identical morning conditions and monitor weekly rolling averages.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Variables',
+      title: 'Untracked variables',
       detail: 'Non-exercise physical activity (NEAT), daily sodium fluctuations, fluid balance, and unlogged foods are not tracked.',
     ));
 
@@ -546,7 +547,7 @@ class KynoMealDrilldownService {
     if (meals.isEmpty) {
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Yesterday Meal Log',
+        title: 'Yesterday meal log',
         detail: 'No meals were logged in your DayLog records for yesterday (${targetDate.month}/${targetDate.day}).',
       ));
       insights.add(KynoInsightItem(
@@ -571,12 +572,12 @@ class KynoMealDrilldownService {
 
     // FACT: Day summary and specific meals
     final mealBulletList = meals.map((m) =>
-        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}" – ${m.calories.toStringAsFixed(0)} kcal, ${m.protein.toStringAsFixed(0)}g P'
+        '• ${m.formattedTime} [${m.section.name.toUpperCase()}]: "${m.mealName}", ${m.calories.toStringAsFixed(0)} kcal, ${m.protein.toStringAsFixed(0)}g P'
     ).join('\n');
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: 'Yesterday Intake Summary (${meals.length} meals logged)',
+      title: 'Yesterday intake summary (${plural(meals.length, 'meal')} logged)',
       detail: '$mealBulletList\n\nTotals: ${totalCal.toStringAsFixed(0)} kcal, ${totalPro.toStringAsFixed(0)}g P, ${totalCarb.toStringAsFixed(0)}g C, ${totalFat.toStringAsFixed(0)}g F.',
     ));
 
@@ -588,7 +589,7 @@ class KynoMealDrilldownService {
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Target Comparison Math',
+      title: 'Target comparison math',
       detail: '• Calories: ${totalCal.toStringAsFixed(0)} / ${targetCal.toStringAsFixed(0)} kcal ($calPct%, ${calDelta >= 0 ? "+${calDelta.toStringAsFixed(0)}" : calDelta.toStringAsFixed(0)} kcal)\n'
           '• Protein: ${totalPro.toStringAsFixed(0)} / ${targetPro.toStringAsFixed(0)}g ($proPct%, ${proDelta >= 0 ? "+${proDelta.toStringAsFixed(0)}" : proDelta.toStringAsFixed(0)}g)',
     ));
@@ -602,21 +603,21 @@ class KynoMealDrilldownService {
     // INFERENCE: Explains the result using specific meals without moralizing
     insights.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Nutritional Assessment',
+      title: 'Nutritional assessment',
       detail: 'Your day was anchored by "${topPro.mealName}" at ${topPro.formattedTime}, which contributed ${topPro.protein.toStringAsFixed(0)}g protein. The largest energy contributor was "${topCal.mealName}" at ${topCal.formattedTime} (${topCal.calories.toStringAsFixed(0)} kcal). In the context of your configured daily calorie target, yesterday was ${proPct >= 85 ? "well-aligned with" : "below"} your protein target.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
-      title: 'Next Step',
+      title: 'Next step',
       detail: proPct < 85
-          ? 'Carry forward the positive meal habits and add one more 20–30g protein anchor today.'
+          ? 'Carry forward the positive meal habits and add one more 20-30g protein anchor today.'
           : 'Maintain your current nutrition routine and training recovery.',
     ));
 
     insights.add(KynoInsightItem(
       type: KynoInformationType.unknown,
-      title: 'Untracked Variables',
+      title: 'Untracked variables',
       detail: 'Hydration status, electrolyte intake, and micronutrient distribution are not tracked.',
     ));
 

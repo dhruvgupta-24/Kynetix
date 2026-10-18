@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
 import '../models/workout_session.dart';
@@ -80,8 +81,8 @@ class CoachService {
       if (remainCal > 200) {
         out.add(CoachInsight(
           type:       CoachInsightType.info,
-          message:    'Protein is in a workable range.',
-          actionHint: 'You have ~${remainCal.toInt()} kcal left — use it without pressure.',
+          message:    'Protein is in a good place.',
+          actionHint: 'About ${remainCal.round()} kcal left. Eat them however you like.',
         ));
       }
     }
@@ -91,23 +92,23 @@ class CoachService {
     if (calRat > 1.12) {
       out.add(CoachInsight(
         type:       CoachInsightType.overGoal,
-        message:    '${cal.toInt()} kcal — over your daily target.',
+        message:    '${cal.round()} kcal, over today\'s target.',
         actionHint: proRat >= 0.85
-            ? 'Both macros are done. Skip unnecessary snacking.'
-            : 'Keep the rest of the day light and protein-only.',
+            ? 'Protein is done too. No stress, tomorrow\'s a fresh page.'
+            : 'If you eat again, keep it light and high in protein.',
       ));
     } else if (calRat > 0.97 && proRat >= 0.85) {
       out.add(const CoachInsight(
         type:       CoachInsightType.info,
         message:    'Calories are almost at target.',
-        actionHint: 'Avoid heavy carb meals now — lean protein is fine.',
+        actionHint: 'If you\'re still hungry, go for lean protein over a heavy carb meal.',
       ));
     } else if (calRat > 0.97 && proRat < 0.80) {
       // Calories at limit but protein still low — classic mess-food trap
       out.add(CoachInsight(
         type:       CoachInsightType.balance,
-        message:    'Calories are mostly covered but protein is still light at ${pro.toInt()}g.',
-        actionHint: 'Use any remaining food budget on whey, curd, or egg whites only.',
+        message:    'Calories are mostly covered, but protein is light at ${pro.round()} g.',
+        actionHint: 'Spend what\'s left on whey, curd or egg whites.',
       ));
     }
 
@@ -115,7 +116,7 @@ class CoachService {
       out.add(const CoachInsight(
         type: CoachInsightType.balance,
         message: 'Protein is the bottleneck now.',
-        actionHint: 'Skip another heavy carb meal. Finish with lean protein.',
+        actionHint: 'Skip another heavy carb meal and finish with lean protein.',
       ));
     }
 
@@ -123,7 +124,7 @@ class CoachService {
       out.add(const CoachInsight(
         type: CoachInsightType.info,
         message: 'You usually leave too much protein for late evening.',
-        actionHint: 'Fix it earlier today so dinner doesn’t have to do all the work.',
+        actionHint: 'Get some in earlier today so dinner doesn\'t have to do all the work.',
       ));
     }
 
@@ -133,8 +134,8 @@ class CoachService {
       // late-logging, likely genuinely under-eaten.
       out.add(CoachInsight(
         type:       CoachInsightType.underEaten,
-        message:    '${cal.toInt()} kcal so far — there\'s still room.',
-        actionHint: 'Add a proper meal. Don\'t chase a too-low calorie day.',
+        message:    '${cal.round()} kcal so far. There\'s still room.',
+        actionHint: 'Have a proper meal. A very low day isn\'t the goal.',
       ));
     }
 
@@ -143,8 +144,16 @@ class CoachService {
       final wi = _workoutInsight(
         pro: pro, cal: cal, proRat: proRat, calRat: calRat,
         target: target, hour: hour, workout: todayWorkout,
+        plan: proteinPlan,
       );
-      if (wi != null) out.insert(0, wi);
+      if (wi != null) {
+        // One protein recommendation per day: the training-day note already
+        // carries the numbers, so drop any other protein note.
+        if (wi.type == CoachInsightType.protein) {
+          out.removeWhere((i) => i.type == CoachInsightType.protein);
+        }
+        out.insert(0, wi);
+      }
     }
 
     // ─ Limit to 2 insights — highest-signal wins ────────────────────────────
@@ -165,36 +174,39 @@ class CoachService {
     required DayTarget target,
     required int    hour,
     required WorkoutSession workout,
+    required _ProteinPlan plan,
   }) {
-    // Priority 1: protein is critically low on a training day → recovery warning
+    // Priority 1: protein is critically low on a training day → recovery note.
+    // Uses the same floor and ideal as every other protein note.
     if (proRat < 0.65) {
       return CoachInsight(
         type:       CoachInsightType.protein,
-        message:    'Training day — protein is at ${pro.toInt()}g, which is too low.',
-        actionHint: 'Recovery and muscle retention both suffer. Hit at least ${(target.protein * 0.85).toInt()}g today.',
+        message:    'You trained today and protein is at ${pro.round()} g.',
+        actionHint: 'Aim for at least ${plan.minimumTarget.round()} g by tonight; '
+            '${plan.idealTarget.round()} g is ideal. One protein-heavy meal does most of it.',
       );
     }
     if (workout.totalSets >= 12 && calRat < 0.7) {
-      return CoachInsight(
+      return const CoachInsight(
         type: CoachInsightType.underEaten,
-        message: 'You trained properly today but calories are still too low.',
-        actionHint: 'Dinner should cover recovery — don’t leave this as a low-fuel training day.',
+        message: 'Solid session, but calories are still low.',
+        actionHint: 'Let dinner cover recovery so this isn\'t a low-fuel training day.',
       );
     }
     // Priority 2: calorie deficit is severe late in the day → under-fueling
     if (calRat < 0.55 && hour >= 15) {
       return CoachInsight(
         type:       CoachInsightType.underEaten,
-        message:    'You trained but have only consumed ${cal.toInt()} kcal today.',
-        actionHint: 'Under-fueling on training days slows recovery. Eat a proper meal — prioritize protein.',
+        message:    'You trained, and you\'re at ${cal.round()} kcal so far.',
+        actionHint: 'Under-fuelling slows recovery. Have a proper meal with protein in it.',
       );
     }
     // Priority 3: positive signal when diet aligns with training
     if (proRat >= 0.88 && calRat >= 0.80 && calRat <= 1.05) {
       return const CoachInsight(
         type:       CoachInsightType.info,
-        message:    'Training day fueling looks solid.',
-        actionHint: 'Calories and protein are both on track. Prioritise sleep and recovery tonight.',
+        message:    'Training-day fuel looks solid.',
+        actionHint: 'Calories and protein are both on track. Sleep well tonight.',
       );
     }
     return null;
@@ -217,8 +229,8 @@ class CoachService {
       // Too late to do much — be honest about it
       return CoachInsight(
         type:    CoachInsightType.protein,
-        message: 'Ended at ${pro.toInt()}g protein. Minimum today was ~${minimum.toInt()}g.',
-        actionHint: 'Make tomorrow\'s breakfast protein-heavy to compensate.',
+        message: 'Finished at ${pro.round()} g protein, under the ${minimum.round()} g floor.',
+        actionHint: 'Make tomorrow\'s breakfast protein-heavy.',
       );
     }
 
@@ -226,18 +238,18 @@ class CoachService {
       // Mathematically very hard to close gap this day
       return CoachInsight(
         type:       CoachInsightType.protein,
-        message:    'You’re at ${pro.toInt()}g. Try to salvage at least ~${minimum.toInt()}g today.',
-        actionHint: 'Ideal finish is ~${target.toInt()}–${stretch.toInt()}g, but focus on one protein-heavy meal now.',
+        message:    'You\'re at ${pro.round()} g protein. Aim for at least ${minimum.round()} g today.',
+        actionHint: 'One protein-heavy meal now does the most. ${target.round()} g is ideal.',
       );
     }
 
     return CoachInsight(
       type:       CoachInsightType.protein,
-      message:    'You’re at ${pro.toInt()}g. Try to reach at least ${minimum.toInt()}g today.',
+      message:    'You\'re at ${pro.round()} g protein. Aim for at least ${minimum.round()} g today.',
       actionHint: calRat > 0.80
-          ? 'Remaining budget: use it entirely on high-protein foods.'
-          : 'Ideal finish today: ~${target.toInt()}–${stretch.toInt()}g. '
-            'Next ${mealsLeft > 1 ? "$mealsLeft meals" : "meal"}: ~${protPerMeal.toInt()}g each.',
+          ? 'Spend what\'s left of your calories on protein: dal, paneer, curd or whey.'
+          : '${target.round()} g is ideal. That\'s about ${protPerMeal.round()} g '
+            '${mealsLeft > 1 ? 'in each of your next $mealsLeft meals' : 'in your next meal'}.',
     );
   }
 
@@ -253,14 +265,14 @@ class CoachService {
       // One shot left
       return CoachInsight(
         type:       CoachInsightType.protein,
-        message:    'You’re at ${pro.toInt()}g. Try to finish at least ${target.toInt()}g today.',
-        actionHint: 'One protein-focused meal (whey + tofu or paneer) closes it.',
+        message:    'You\'re at ${pro.round()} g protein. Aim for at least ${target.round()} g today.',
+        actionHint: 'One protein-focused meal, like paneer or whey with curd, closes it.',
       );
     }
     return CoachInsight(
       type:       CoachInsightType.protein,
-      message:    'You’re at ${pro.toInt()}g. Minimum useful finish today: ~${target.toInt()}g.',
-      actionHint: 'Ideal finish: ~${ideal.toInt()}g. ~${protPerMeal.toInt()}g per remaining meal keeps you on track.',
+      message:    'You\'re at ${pro.round()} g protein. Aim for at least ${target.round()} g today.',
+      actionHint: '${ideal.round()} g is ideal. About ${protPerMeal.round()} g per meal from here keeps you on track.',
     );
   }
 
@@ -288,8 +300,13 @@ class CoachService {
       _              => 1.55,
     };
     final minimum = (weight * baseMinPerKg).clamp(target.protein * 0.72, target.protein * 0.92).toDouble();
-    final ideal = (weight * idealPerKg).clamp(minimum + 8, target.protein * 1.02).toDouble();
-    final stretch = (ideal + 10).clamp(ideal, target.protein * 1.1).toDouble();
+    // clamp() throws when lower > upper, which happens for small targets
+    // (e.g. a 70 g custom target): keep the upper bound >= the lower bound.
+    final idealLo = minimum + 8;
+    final idealHi = math.max(idealLo, target.protein * 1.02);
+    final ideal = (weight * idealPerKg).clamp(idealLo, idealHi).toDouble();
+    final stretchHi = math.max(ideal, target.protein * 1.1);
+    final stretch = (ideal + 10).clamp(ideal, stretchHi).toDouble();
     final remaining = (ideal - currentProtein).clamp(0, 300).toDouble();
     final recoverable = mealsLeft == 0 ? false : (remaining / mealsLeft) <= 38;
     return _ProteinPlan(
@@ -317,12 +334,12 @@ class CoachService {
     // Rough typical meal slots: breakfast, lunch, evening snack, dinner, late
     // Remaining slot estimate based on time:
     final slotsLeft = switch (hour) {
-      < 10  => 4, // morning — breakfast + lunch + snack + dinner ahead
-      < 13  => 3, // late morning — lunch + snack + dinner
-      < 16  => 2, // afternoon — snack + dinner
-      < 20  => 1, // evening — dinner
-      < 23  => 1, // night — late meal possible
-      _     => 0, // very late — nothing realistic left
+      < 10  => 4, // morning, breakfast + lunch + snack + dinner ahead
+      < 13  => 3, // late morning, lunch + snack + dinner
+      < 16  => 2, // afternoon, snack + dinner
+      < 20  => 1, // evening, dinner
+      < 23  => 1, // night, late meal possible
+      _     => 0, // very late, nothing realistic left
     };
 
     // Cap: don't claim more slots than is realistic given meals already logged.

@@ -1,4 +1,3 @@
-import 'dart:convert';
 
 typedef Goal = String;
 const kFatLoss       = 'Fat Loss / Cut';
@@ -39,7 +38,7 @@ enum PortionAnchor {
   String get aiHint => switch (this) {
     carbAnchored  =>
       'User eats a fixed roti/rice amount and uses sabzi or dal as a condiment '
-      '(~2–3 tbsp per roti). Do NOT assume a full katori of dal/sabzi unless '
+      '(~2-3 tbsp per roti). Do NOT assume a full katori of dal/sabzi unless '
       'the user explicitly mentions a large serving.',
     curryAnchored =>
       'User eats until the dal/sabzi runs out, treating it as the main dish. '
@@ -175,6 +174,9 @@ class UserProfile {
     List<TargetChangeRecord>? targetChangeHistory,
     bool? carryForwardEnabled,
     int? carryForwardThreshold,
+    // Null can't mean "clear" above; this resets the eating style to
+    // "Not specified" and keeps every other field.
+    bool clearPortionAnchor = false,
   }) => UserProfile(
     name:              name ?? this.name,
     age:               age ?? this.age,
@@ -184,7 +186,7 @@ class UserProfile {
     workoutDaysMin:    workoutDaysMin ?? this.workoutDaysMin,
     workoutDaysMax:    workoutDaysMax ?? this.workoutDaysMax,
     goal:              goal ?? this.goal,
-    portionAnchor:     portionAnchor ?? this.portionAnchor,
+    portionAnchor:     clearPortionAnchor ? null : (portionAnchor ?? this.portionAnchor),
     averageDailySteps: averageDailySteps ?? this.averageDailySteps,
     healthSyncEnabled: healthSyncEnabled ?? this.healthSyncEnabled,
     lastHealthSyncAt:  lastHealthSyncAt ?? this.lastHealthSyncAt,

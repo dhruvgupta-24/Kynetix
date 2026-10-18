@@ -1,3 +1,4 @@
+import '../ui/k_format.dart';
 import 'dart:math' show min;
 import '../models/day_log.dart';
 import '../models/day_status.dart';
@@ -18,7 +19,7 @@ class AchievementRegistry {
     ),
     'logged_7_days': (
       title: 'Consistency Champion',
-      description: 'Tracked your meals for 7 days. Keeping the habit alive!',
+      description: 'Logged meals 7 days running. The habit is sticking.',
       emoji: '📅',
       category: AchievementCategory.consistency,
     ),
@@ -36,13 +37,13 @@ class AchievementRegistry {
     ),
     'protein_target_3_row': (
       title: 'Fuel Streak',
-      description: 'Hit your daily protein goal 3 days in a row!',
+      description: 'Hit your protein goal 3 days in a row.',
       emoji: '⚡',
       category: AchievementCategory.nutrition,
     ),
     'protein_target_7_row': (
       title: 'Protein Powerhouse',
-      description: 'Met your daily protein target 7 days in a row!',
+      description: 'Hit your protein target 7 days in a row.',
       emoji: '🔋',
       category: AchievementCategory.nutrition,
     ),
@@ -54,13 +55,13 @@ class AchievementRegistry {
     ),
     'perfect_week': (
       title: 'Perfect Week',
-      description: 'Hit both calorie and protein targets every single day Mon–Sun!',
+      description: 'Hit calories and protein every day, Monday to Sunday.',
       emoji: '✨',
       category: AchievementCategory.nutrition,
     ),
     'gym_3_row': (
       title: 'Workout Streak',
-      description: 'Logged workouts 3 days in a row. Dedication in action!',
+      description: 'Trained 3 days in a row. Solid run.',
       emoji: '💪',
       category: AchievementCategory.training,
     ),
@@ -84,19 +85,19 @@ class AchievementRegistry {
     ),
     'first_monthly_report': (
       title: 'Milestone Review',
-      description: 'Generated your first monthly review. Let\'s see your progress!',
+      description: 'Your first monthly review is ready.',
       emoji: '📈',
       category: AchievementCategory.milestone,
     ),
     'improvement_month': (
       title: 'Steady Progress',
-      description: 'Showed a positive monthly calorie trend. Keep stepping up!',
+      description: 'Your calories trended the right way this month.',
       emoji: '🚀',
       category: AchievementCategory.milestone,
     ),
     'pb_protein_day': (
       title: 'Protein Peak',
-      description: 'Recorded your highest protein intake in a single day!',
+      description: 'Your highest protein day so far.',
       emoji: '🥩',
       category: AchievementCategory.milestone,
     ),
@@ -434,7 +435,7 @@ class InsightsEngine {
         final mag = -proteinDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.proteinConsistency,
-          message: 'Protein consistency dropped ${(mag * 100).round()}% this week — consider adding a protein-rich meal earlier in the day.',
+          message: 'Protein consistency dropped ${(mag * 100).round()}% this week, consider adding a protein-rich meal earlier in the day.',
           magnitude: mag,
         ));
       }
@@ -442,7 +443,7 @@ class InsightsEngine {
         final mag = -qualityDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.mealQuality,
-          message: 'Meal quality dipped ${mag.round()} points vs last week — more whole foods may help.',
+          message: 'Meal quality dipped ${mag.round()} points vs last week, more whole foods may help.',
           magnitude: mag,
         ));
       }
@@ -450,7 +451,7 @@ class InsightsEngine {
         final mag = -loggingDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.loggingConsistency,
-          message: 'Logging was less consistent this week — even rough estimates keep the trend data accurate.',
+          message: 'Logging was less consistent this week, even rough estimates keep the trend data accurate.',
           magnitude: mag,
         ));
       }
@@ -459,7 +460,7 @@ class InsightsEngine {
         final mag = -gymAttendanceDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.gymAttendance,
-          message: 'Fewer sessions this week than last — recovery weeks are fine if intentional.',
+          message: 'Fewer sessions this week than last, recovery weeks are fine if intentional.',
           magnitude: mag,
         ));
       }
@@ -650,12 +651,12 @@ class InsightsEngine {
     final int trainingConsistencyScore = ((gymDaysCount / targetForConsistency) * 100).round().clamp(0, 100);
 
     if (trainingConsistencyScore >= 90) {
-      consistencySuccesses.add('Trained $gymDaysCount days, matching your target of ${actualExpected.toStringAsFixed(0)} days.');
+      consistencySuccesses.add('Trained ${plural(gymDaysCount, 'day')}, matching your target of ${actualExpected.toStringAsFixed(0)} days.');
       coachingWhatWentWell.add('Workout consistency matched or exceeded your target.');
     } else if (trainingConsistencyScore >= 70) {
-      consistencySuccesses.add('Trained $gymDaysCount days out of target ${actualExpected.toStringAsFixed(0)} days.');
+      consistencySuccesses.add('Trained ${plural(gymDaysCount, 'day')} out of target ${actualExpected.toStringAsFixed(0)} days.');
     } else {
-      consistencyIssues.add('Trained $gymDaysCount days, falling short of your target of ${actualExpected.toStringAsFixed(0)} days.');
+      consistencyIssues.add('Trained ${plural(gymDaysCount, 'day')}, falling short of your target of ${actualExpected.toStringAsFixed(0)} days.');
       coachingNeedsImprovement.add('Workout frequency was below recommended target.');
       coachingRecommendations.add('Plan workout slots in advance next week to meet your $actualExpected-day target.');
     }
@@ -910,7 +911,7 @@ class InsightsEngine {
       coachingWhatWentWell.add('Consistent training structure.');
     }
     if (coachingNeedsImprovement.isEmpty) {
-      coachingNeedsImprovement.add('No major training issues detected. Excellent job!');
+      coachingNeedsImprovement.add('No training issues this week. Keep it rolling.');
     }
     if (coachingRecommendations.isEmpty) {
       coachingRecommendations.add('Maintain current training volume and recovery spacing.');
@@ -1225,7 +1226,7 @@ class InsightsEngine {
         final mag = -proteinDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.proteinConsistency,
-          message: 'Protein consistency dropped ${(mag * 100).round()}% this month — consider adding a protein-rich meal earlier in the day.',
+          message: 'Protein consistency dropped ${(mag * 100).round()}% this month, consider adding a protein-rich meal earlier in the day.',
           magnitude: mag,
         ));
       }
@@ -1233,7 +1234,7 @@ class InsightsEngine {
         final mag = -qualityDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.mealQuality,
-          message: 'Meal quality dipped ${mag.round()} points vs last month — more whole foods may help.',
+          message: 'Meal quality dipped ${mag.round()} points vs last month, more whole foods may help.',
           magnitude: mag,
         ));
       }
@@ -1241,7 +1242,7 @@ class InsightsEngine {
         final mag = -loggingDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.loggingConsistency,
-          message: 'Logging was less consistent this month — even rough estimates keep the trend data accurate.',
+          message: 'Logging was less consistent this month, even rough estimates keep the trend data accurate.',
           magnitude: mag,
         ));
       }
@@ -1250,7 +1251,7 @@ class InsightsEngine {
         final mag = -gymAttendanceDelta;
         regressions.add(RegressionAlert(
           type: RegressionType.gymAttendance,
-          message: 'Fewer sessions this month than last — recovery weeks are fine if intentional.',
+          message: 'Fewer sessions this month than last, recovery weeks are fine if intentional.',
           magnitude: mag,
         ));
       }

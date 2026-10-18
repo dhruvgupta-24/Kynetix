@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
@@ -12,12 +11,22 @@ import '../services/workout_service.dart';
 import '../services/persistence_service.dart';
 import '../widgets/exercise_picker_sheet.dart';
 import '../widgets/kyno_stage_slot.dart';
-import '../widgets/barbell_plate_calculator.dart';
 import '../widgets/exercise_execution_input_view.dart';
 import '../widgets/exercise_progression_chart.dart';
 import '../services/wakelock_service.dart';
-import '../services/superset_flow_service.dart';
 import '../services/kyno_progression_engine.dart';
+import '../services/rest_timer_prefs.dart';
+import '../services/rest_timer_notifications.dart';
+import '../services/previous_set_lookup.dart';
+import '../services/pr_classifier.dart';
+import '../services/superset_advance.dart';
+import '../services/warmup_calculator.dart';
+import '../widgets/pr_celebration.dart';
+import '../widgets/workout_share_card.dart';
+import '../widgets/muscle_body_map.dart';
+import '../data/form_cues.dart';
+import '../widgets/workout_session_sheets.dart';
+import 'package:flutter/services.dart' show HapticFeedback, SystemSound, SystemSoundType;
 
 // ─── WorkoutSessionScreen ─────────────────────────────────────────────────────
 //
@@ -32,6 +41,41 @@ import '../services/kyno_progression_engine.dart';
 //   6. Anatomical vector torso custom painted silhouette.
 //   7. Non-blocking sliding PR toasts.
 //   8. State isolation at the page level for locked 60 FPS.
+//
+// Performance contract (Ember Night overhaul):
+//   - Ticking values (rest timer, floating rewards) live in ValueNotifiers and
+//     rebuild only their own leaf, never this 5k-line state.
+//   - The dock is measured only when its size can actually change (first
+//     layout, MediaQuery changes, SizeChangedLayoutNotification).
+//   - Celebrations are painter-driven (`repaint: controller`), bounded and
+//     skippable with a tap.
+
+// ─── Local type ramp ─────────────────────────────────────────────────────────
+// Every style on this screen derives from KText. Numbers (weights, reps,
+// timers, scores) always use tabular figures so values never jitter.
+abstract class _WsText {
+  static TextStyle get title => KText.h1.copyWith(fontSize: 24, height: 1.15);
+  static TextStyle get body => KText.body.copyWith(fontSize: 14, height: 1.45);
+  static TextStyle get bodySmall => KText.caption.copyWith(fontSize: 13, height: 1.4);
+  static TextStyle get meta => KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary);
+  static TextStyle get button => KText.bodyMedium.copyWith(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.1);
+  static TextStyle get chip => KText.caption.copyWith(fontSize: 13, fontWeight: FontWeight.w600);
+  static TextStyle get num => KText.numSmall.copyWith(fontSize: 14);
+  /// The hero readout: weight and reps you are about to lift.
+  static TextStyle get numHero => KText.numDisplay.copyWith(fontSize: 64, height: 1.0, letterSpacing: -2.6);
+  static TextStyle get timer => KText.numMedium.copyWith(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.8);
+  static TextStyle get dialogTitle => KText.h2;
+  static TextStyle get dialogBody => KText.body.copyWith(fontSize: 14, color: KColor.textSecondary);
+}
+
+/// Theme hairline: a whisper of white on Carbon, the warm paper border on Paper.
+Color _hairline() => KColor.isDark ? KColor.fg.withValues(alpha: 0.09) : KColor.border;
+
+/// Dialog chrome shared by the session's confirmations.
+ShapeBorder _dialogShape() => RoundedRectangleBorder(
+      borderRadius: KRadius.xl,
+      side: BorderSide(color: _hairline(), width: 1),
+    );
 
 class WorkoutSessionScreen extends StatefulWidget {
   final SplitDay splitDay;
@@ -75,9 +119,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (targetIndex < 0 || targetIndex >= _sessionExercises.length) return;
     if (_selectedIndex == targetIndex && !_isPageAnimating) return;
     _cancelPendingAutoAdvance();
-    if (_selectedIndex != targetIndex) {
-      _cancelRestTimer();
-    }
+    // Rest belongs to the session, not the page: moving to the next exercise
+    // (by hand, auto-advance or a superset hop) keeps the countdown running.
     if (!_pageController.hasClients) {
       setState(() => _selectedIndex = targetIndex);
       return;
@@ -88,11 +131,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     }
     _isPageAnimating = true;
     debugPrint('[WORKOUT_NAV] Navigating to index $targetIndex');
-    _pageController.animateToPage(
-      targetIndex,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    ).then((_) {
+    _animateToPage(targetIndex, const Duration(milliseconds: 300)).then((_) {
       if (mounted) {
         _isPageAnimating = false;
       }
@@ -102,6 +141,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
     });
   }
+  /// Page transition honouring reduced motion (jump instead of animate).
+  Future<void> _animateToPage(int index, Duration duration) {
+    final d = KMotion.of(context, duration);
+    if (d == Duration.zero) {
+      _pageController.jumpToPage(index);
+      return Future<void>.value();
+    }
+    return _pageController.animateToPage(index, duration: d, curve: KMotion.emphasizedCurve);
+  }
+
   double _dockHeight = 160.0;
 
   // Active exercises
@@ -132,70 +181,219 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   final Map<String, bool> _temporaryAdditions = {};
 
   final _service = WorkoutService.instance;
+
+  // History-derived page inputs. They read only stored sessions and the saved
+  // split (never this live session), yet each scans the whole history, and the
+  // page builder ran all of them on every session rebuild (each logged set,
+  // rest start/stop). Cached here and dropped whenever WorkoutService changes.
+  _SplitDayRecs? _splitRecsCache;
+  final Map<String, List<({DateTime date, ExerciseEntry entry})>> _historyCache = {};
+
+  void _onServiceChanged() {
+    _splitRecsCache = null;
+    _historyCache.clear();
+    _priorSetsCache.clear();
+  }
+
+  /// Every set of [exerciseId] from sessions before this one (record checks).
+  final Map<String, List<SetEntry>> _priorSetsCache = {};
+  List<SetEntry> _priorSetsFor(String exerciseId) => _priorSetsCache[exerciseId] ??= [
+        for (final s in _service.sessions)
+          if (s.date.isBefore(widget.date))
+            for (final e in s.entries)
+              if (e.exercise.id == exerciseId) ...e.sets,
+      ];
+
+  /// Warm-up ramps queued from the exercise menu: the head of each list is
+  /// loaded in the dials; logging a warm-up advances to the next step.
+  final Map<String, List<WarmUpStep>> _warmUpPlans = {};
+
+  _SplitDayRecs get _splitRecs => _splitRecsCache ??= _SplitDayRecs(
+        substitutions: _service.getRecurringSubstitutions(widget.splitDay.name),
+        skips: _service.getRecurringSkips(widget.splitDay.name),
+        reorders: _service.getReorderRecommendations(widget.splitDay.name),
+        additions: _service.getRecurringAdditions(widget.splitDay.name),
+      );
+
+  List<({DateTime date, ExerciseEntry entry})> _historyForCached(String exerciseId) =>
+      _historyCache[exerciseId] ??= _service.historyFor(exerciseId, limit: 15);
   late DateTime _startTime;
 
-  // Floating text particles tracker
-  final List<_FloatingTextData> _floatingTexts = [];
+  // Floating text particles tracker. A notifier so spawning/expiring a reward
+  // pill rebuilds only the overlay, not the session tree.
+  final ValueNotifier<List<_FloatingTextData>> _floatingTexts =
+      ValueNotifier<List<_FloatingTextData>>(const []);
   final ValueNotifier<int> _scoreNotifier = ValueNotifier<int>(0);
-  double _scoreCompletion = 0.0;
-  double _scoreVolume = 0.0;
-  double _scoreSets = 0.0;
-  double _scorePrs = 0.0;
-  int _e1rmPrsCount = 0;
 
   // Rest Timer State
-  int _restSecondsRemaining = 0;
+  // The per-second countdown lives in a ValueNotifier: a tick rebuilds only the
+  // timer readout (ValueListenableBuilder), never this whole session tree.
+  // `_isRestTimerActive` changes only on start/stop, so setState runs twice per
+  // rest period instead of once per second.
+  final ValueNotifier<int> _restSecondsRemaining = ValueNotifier<int>(0);
   Timer? _restTimer;
   bool _isRestTimerActive = false;
   int? _lastCountdownHapticSec;
+  // Wall-clock anchors: the countdown is derived from these, so a tick that
+  // arrives late (app backgrounded, a janky frame) never drifts the rest.
+  int _restTotalSeconds = 0;
+  DateTime? _restEndsAt;
+  /// Exercise whose rest is running (its remembered duration is what the
+  /// picker edits).
+  String? _restExerciseId;
+  /// Pending pulses of the rest-over haptic pattern; cancelled on dispose.
+  final List<Timer> _restOverPulses = [];
+  AppLifecycleState _lifecycle = AppLifecycleState.resumed;
 
-  void _startRestTimer({int durationSeconds = 90}) {
-    debugPrint('[WORKOUT_TIMER] Started rest timer: ${durationSeconds}s');
+  bool get _appInForeground => _lifecycle == AppLifecycleState.resumed;
+
+  int _restRemainingNow() {
+    final end = _restEndsAt;
+    if (end == null) return 0;
+    final ms = end.difference(DateTime.now()).inMilliseconds;
+    return ms <= 0 ? 0 : (ms / 1000).ceil();
+  }
+
+  void _startRestTimer({required Exercise forExercise, int? durationSeconds}) {
+    final seconds = durationSeconds ?? RestTimerPrefs.instance.durationFor(forExercise);
+    debugPrint('[WORKOUT_TIMER] Started rest timer: ${seconds}s');
     _restTimer?.cancel();
+    _cancelRestOverPulses();
     _lastCountdownHapticSec = null;
+    _restExerciseId = forExercise.id;
+    _restTotalSeconds = seconds;
+    _restEndsAt = DateTime.now().add(Duration(seconds: seconds));
+    _restSecondsRemaining.value = seconds;
     setState(() {
-      _restSecondsRemaining = durationSeconds;
       _isRestTimerActive = true;
     });
+    // First rest of the account: ask for notifications once, without waiting.
+    unawaited(RestTimerNotifications.instance.requestPermissionOnce());
+    // One tick a second. The count is resynced from the wall-clock end time
+    // whenever the app returns to the foreground (see
+    // didChangeAppLifecycleState), so a suspended app never drifts the rest.
     _restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      if (_restSecondsRemaining <= 1) {
+      final remaining = _restSecondsRemaining.value - 1;
+      if (remaining <= 0) {
         timer.cancel();
         _restTimer = null;
+        _restSecondsRemaining.value = 0;
         setState(() {
-          _restSecondsRemaining = 0;
           _isRestTimerActive = false;
         });
-        HapticFeedback.heavyImpact();
-        debugPrint('[WORKOUT_TIMER] Rest timer completed');
-      } else {
-        setState(() {
-          _restSecondsRemaining--;
-        });
-        if (_restSecondsRemaining <= 3 &&
-            _restSecondsRemaining >= 1 &&
-            _lastCountdownHapticSec != _restSecondsRemaining) {
-          _lastCountdownHapticSec = _restSecondsRemaining;
-          HapticFeedback.selectionClick();
-        }
+        _onRestOver();
+        return;
+      }
+      _restSecondsRemaining.value = remaining;
+      if (remaining <= 3 && _lastCountdownHapticSec != remaining && _appInForeground) {
+        _lastCountdownHapticSec = remaining;
+        KHaptics.select();
       }
     });
   }
 
+  /// Rest is over: felt (a strong three-pulse pattern), heard (a short system
+  /// sound) and, when the phone is in a pocket, seen as a notification naming
+  /// the next set.
+  void _onRestOver() {
+    debugPrint('[WORKOUT_TIMER] Rest timer completed');
+    _restEndsAt = null;
+    if (_appInForeground) {
+      _cancelRestOverPulses();
+      KHaptics.milestone();
+      if (KHaptics.enabled) {
+        _restOverPulses
+          ..add(Timer(const Duration(milliseconds: 170), HapticFeedback.heavyImpact))
+          ..add(Timer(const Duration(milliseconds: 340), HapticFeedback.heavyImpact));
+      }
+      SystemSound.play(SystemSoundType.alert);
+      SystemSound.play(SystemSoundType.click);
+      unawaited(RestTimerNotifications.instance.cancelPending());
+    } else {
+      unawaited(RestTimerNotifications.instance.showRestOver(nextLine: _restNextLine()));
+    }
+  }
+
+  void _cancelRestOverPulses() {
+    for (final t in _restOverPulses) {
+      t.cancel();
+    }
+    _restOverPulses.clear();
+  }
+
+  /// "Next: Bench Press set 3, target 62.5 kg × 8" for the notification.
+  String _restNextLine() {
+    if (_sessionExercises.isEmpty) return 'Time for your next set.';
+    var idx = _selectedIndex.clamp(0, _sessionExercises.length - 1);
+    // If the page in view is finished, point at the next unfinished one.
+    for (var i = idx; i < _sessionExercises.length; i++) {
+      final e = buildEntry(_sessionExercises[i]);
+      if (!e.isSkipped && !e.isCompleted) {
+        idx = i;
+        break;
+      }
+    }
+    final ex = _sessionExercises[idx];
+    final mode = ex.effectiveExecutionMode;
+    final done = (_sets[ex.id] ?? const <SetEntry>[]).where((s) => s.isMainWorkingSet).length;
+    final weight = switch (mode) {
+      ExerciseExecutionMode.weightReps => _weightSelections[ex.id],
+      ExerciseExecutionMode.weightedBodyweight => _externalLoadSelections[ex.id],
+      _ => null,
+    };
+    return restNextLine(
+      exerciseName: ex.name,
+      setNumber: done + 1,
+      weight: weight,
+      reps: mode == ExerciseExecutionMode.timed || mode == ExerciseExecutionMode.cardio ? null : _repsSelections[ex.id],
+      fmt: amount,
+    );
+  }
+
   void _adjustRestTimer(int deltaSeconds) {
-    if (!_isRestTimerActive) return;
-    setState(() {
-      _restSecondsRemaining = (_restSecondsRemaining + deltaSeconds).clamp(5, 600);
-    });
-    HapticFeedback.selectionClick();
+    if (!_isRestTimerActive || _restEndsAt == null) return;
+    final next = (_restSecondsRemaining.value + deltaSeconds).clamp(5, 600);
+    _restTotalSeconds += next - _restSecondsRemaining.value;
+    _restEndsAt = DateTime.now().add(Duration(seconds: next));
+    _restSecondsRemaining.value = next;
+    _lastCountdownHapticSec = null;
+    KHaptics.select();
+  }
+
+  /// Tap on the countdown: pick this exercise's rest (30 s to 5 min). The
+  /// choice is remembered for the exercise and applied to the running rest.
+  Future<void> _editRestDuration({Exercise? forExercise}) async {
+    if (_sessionExercises.isEmpty) return;
+    final ex = forExercise ??
+        _sessionExercises.where((e) => e.id == _restExerciseId).firstOrNull ??
+        _currentExercise;
+    final picked = await showRestPickerSheet(
+      context,
+      exerciseName: ex.name,
+      currentSeconds: RestTimerPrefs.instance.durationFor(ex),
+    );
+    if (picked == null || !mounted) return;
+    await RestTimerPrefs.instance.setDuration(ex.id, picked);
+    if (!mounted) return;
+    if (_isRestTimerActive && _restExerciseId == ex.id) {
+      // Keep the time already rested; the new length applies from the start.
+      final elapsed = _restTotalSeconds - _restSecondsRemaining.value;
+      final next = (picked - elapsed).clamp(1, 600);
+      _restTotalSeconds = picked;
+      _restEndsAt = DateTime.now().add(Duration(seconds: next));
+      _restSecondsRemaining.value = next;
+    }
+    _spawnFloatingText('Rest for ${ex.name}: ${restLabel(picked)}');
+    setState(() {});
   }
 
   void _skipRestTimer() {
     _cancelRestTimer();
-    HapticFeedback.lightImpact();
+    KHaptics.commit();
   }
 
   void _cancelRestTimer() {
@@ -203,9 +401,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _restTimer?.cancel();
     _restTimer = null;
     _lastCountdownHapticSec = null;
+    _restEndsAt = null;
+    // Also drops the scheduled "Rest over" alarm.
+    unawaited(RestTimerNotifications.instance.cancelPending());
     if (_isRestTimerActive) {
+      _restSecondsRemaining.value = 0;
       setState(() {
-        _restSecondsRemaining = 0;
         _isRestTimerActive = false;
       });
     }
@@ -213,7 +414,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   // PR Celebration State (Non-blocking)
   bool _showPrToast = false;
+  String _prToastTitle = '';
   String _prToastMsg = '';
+  /// Bumped per record; re-keys the one-shot spark burst.
+  int _prEpoch = 0;
   Timer? _prToastTimer;
 
   // Completion State
@@ -225,8 +429,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _service.addListener(_onServiceChanged);
     WakelockService.instance.enable();
     _loadRpeSetting();
+    // Remembered per-exercise rest lengths for this account.
+    unawaited(RestTimerPrefs.instance.load());
 
     final draft = widget.draftSession;
     if (draft != null) {
@@ -276,7 +483,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
 
       _restoreState().then((_) {
-        _updateLiveScore();
+        // The score notifier is disposed with the screen.
+        if (mounted) _updateLiveScore();
       });
     } else {
       _startTime = DateTime.now();
@@ -302,7 +510,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
       // Clear recovery state to make sure it's fresh
       SharedPreferences.getInstance().then((prefs) {
-        prefs.remove('kynetix_workout_recovery');
+        prefs.remove(WorkoutService.instance.recoveryPrefKey);
       });
       _updateLiveScore();
     }
@@ -331,26 +539,77 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _service.removeListener(_onServiceChanged);
     _cancelPendingAutoAdvance();
     _restTimer?.cancel();
+    _cancelRestOverPulses();
+    unawaited(RestTimerNotifications.instance.cancelAll());
+    _restSecondsRemaining.dispose();
     _prToastTimer?.cancel();
     WakelockService.instance.disable();
     _pageController.dispose();
     _scoreNotifier.dispose();
+    _floatingTexts.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycle = state;
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _saveRecoveryState();
     }
+    final endsAt = _restEndsAt;
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      // Pocketed mid-rest: hand the countdown to the system chronometer.
+      if (_isRestTimerActive && endsAt != null) {
+        unawaited(RestTimerNotifications.instance.showCountdown(
+          endsAt: endsAt,
+          nextLine: _restNextLine(),
+        ));
+        // Armed with the alarm manager: fires even if Android freezes the
+        // app before the in-app timer reaches zero.
+        unawaited(RestTimerNotifications.instance.scheduleRestOver(
+          endsAt: endsAt,
+          nextLine: _restNextLine(),
+        ));
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // Back in the app: the in-app bar takes over again.
+      unawaited(RestTimerNotifications.instance.cancelAll());
+      if (_isRestTimerActive && _restEndsAt != null) {
+        _restSecondsRemaining.value = max(1, _restRemainingNow());
+      }
+    }
+  }
+
+  // Dock measurement is scheduled only when the dock's size can change: on the
+  // first frame and on MediaQuery changes (didChangeDependencies), and when the
+  // dock itself reports a new size (SizeChangedLayoutNotification). Never per
+  // build. `_dockMeasureScheduled` coalesces bursts into one post-frame read.
+  bool _dockMeasureScheduled = false;
+
+  void _scheduleDockMeasure() {
+    if (_dockMeasureScheduled) return;
+    _dockMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _dockMeasureScheduled = false;
+      _measureDock();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Size, text scale, safe-area or keyboard insets changed (or first build).
+    _scheduleDockMeasure();
   }
 
   void _measureDock() {
     if (!mounted) return;
-    if (WidgetsBinding.instance.runtimeType.toString().contains('Test')) return;
+    // The dock is not mounted while the keyboard is up; keep the last height.
+    if (MediaQuery.viewInsetsOf(this.context).bottom > 0) return;
     final context = _dockKey.currentContext;
     if (context != null) {
       final renderBox = context.findRenderObject() as RenderBox?;
@@ -391,13 +650,14 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       'durationSelections': _durationSelections,
       'distanceSelections': _distanceSelections,
     };
-    await prefs.setString('kynetix_workout_recovery', jsonEncode(recoveryData));
+    await prefs.setString(WorkoutService.instance.recoveryPrefKey, jsonEncode(recoveryData));
     _saveDraftSessionState();
   }
 
   Future<void> _restoreState() async {
     final prefs = await SharedPreferences.getInstance();
-    final recoveryJson = prefs.getString('kynetix_workout_recovery');
+    final recoveryJson = prefs.getString(WorkoutService.instance.recoveryPrefKey);
+    if (!mounted) return;
     if (recoveryJson != null) {
       try {
         final data = jsonDecode(recoveryJson) as Map<String, dynamic>;
@@ -412,7 +672,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           _selectedIndex = _sessionExercises.isEmpty
               ? 0
               : (data['selectedIndex'] as int? ?? 0).clamp(0, _sessionExercises.length - 1);
-          
+
           final setTypeMap = data['setTypeSelections'] as Map<String, dynamic>?;
           if (setTypeMap != null) {
             setTypeMap.forEach((k, v) {
@@ -576,8 +836,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _skipReasons[exerciseId] = reason;
       _sets[exerciseId] = []; // Clear sets on skip
     });
-    _spawnFloatingText('Exercise Skipped');
-    HapticFeedback.mediumImpact();
+    _spawnFloatingText('Skipped for today');
+    KHaptics.commit();
     _updateLiveScore();
     _saveRecoveryState();
   }
@@ -587,7 +847,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _skippedExercises[exerciseId] = false;
       _skipReasons.remove(exerciseId);
     });
-    HapticFeedback.lightImpact();
+    KHaptics.commit();
     _updateLiveScore();
     _saveRecoveryState();
   }
@@ -612,27 +872,27 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final replacedIds = _substitutedForIds.values.toList();
     final replacementMap = _substitutedForIds.map((repId, origId) => MapEntry(origId, repId));
     final currentIdx = _selectedIndex;
-    final displayedXofY = 'EXERCISE ${currentIdx + 1} OF $headerTotalCount';
+    final displayedXofY = 'Exercise ${currentIdx + 1} of $headerTotalCount';
 
-    print('\n=================== EXERCISE REPLACEMENT RUNTIME AUDIT TRACE ($action) ===================');
-    print('  - Original workout exercise count: $originalWorkoutCount');
-    print('  - Active exercise count:           $activeCount');
-    print('  - Navigation exercise count:       $navCount');
-    print('  - Progress exercise count:         $progressCount');
-    print('  - Header total count:              $headerTotalCount');
-    print('  - Exercise IDs in active list:     $activeIds');
-    print('  - Exercise IDs in master workout list: $masterIds');
-    print('  - Exercise IDs marked as replaced: $replacedIds');
-    print('  - Replacement mapping (old -> new): $replacementMap');
-    print('  - Current exercise index:          $currentIdx');
-    print('  - Displayed "X of Y":              $displayedXofY');
-    print('========================================================================================\n');
+    debugPrint('\n=================== EXERCISE REPLACEMENT RUNTIME AUDIT TRACE ($action) ===================');
+    debugPrint('  - Original workout exercise count: $originalWorkoutCount');
+    debugPrint('  - Active exercise count:           $activeCount');
+    debugPrint('  - Navigation exercise count:       $navCount');
+    debugPrint('  - Progress exercise count:         $progressCount');
+    debugPrint('  - Header total count:              $headerTotalCount');
+    debugPrint('  - Exercise IDs in active list:     $activeIds');
+    debugPrint('  - Exercise IDs in master workout list: $masterIds');
+    debugPrint('  - Exercise IDs marked as replaced: $replacedIds');
+    debugPrint('  - Replacement mapping (old -> new): $replacementMap');
+    debugPrint('  - Current exercise index:          $currentIdx');
+    debugPrint('  - Displayed "X of Y":              $displayedXofY');
+    debugPrint('========================================================================================\n');
   }
 
   void _replaceExercise(String originalId, Exercise replacement) {
     final idx = _sessionExercises.indexWhere((e) => e.id == originalId);
     if (idx == -1) return;
-    
+
     final originalEx = _sessionExercises[idx];
     final repId = replacement.id;
 
@@ -645,11 +905,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _rpeSelections[repId] = 8.0;
       _weightSelections[repId] = 40.0;
       _repsSelections[repId] = 10;
-      
+
       _substitutedExercises[repId] = true;
       _substitutedForIds[repId] = originalId;
       _substitutedForNames[repId] = originalEx.name;
-      
+
       // Replace IN-PLACE in the single canonical active exercise list
       _sessionExercises[idx] = replacement;
       _selectedIndex = idx;
@@ -658,16 +918,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _printReplacementRuntimeAuditTrace('REPLACE_EXERCISE');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_pageController.hasClients) {
-        _pageController.animateToPage(
-          _selectedIndex,
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeOutCubic,
-        );
+      if (mounted && _pageController.hasClients) {
+        _animateToPage(_selectedIndex, const Duration(milliseconds: 400));
       }
     });
-    _spawnFloatingText('Substituted');
-    HapticFeedback.mediumImpact();
+    _spawnFloatingText('Swapped in');
+    KHaptics.commit();
     _updateLiveScore();
     _saveRecoveryState();
   }
@@ -704,7 +960,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           _pageController.jumpToPage(_selectedIndex);
         }
       });
-      HapticFeedback.lightImpact();
+      KHaptics.commit();
       _updateLiveScore();
       _saveRecoveryState();
     }
@@ -718,12 +974,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     );
 
     if (!mounted || picked == null) return;
-    
+
     final relIdx = _sessionExercises.indexOf(relativeTo);
     if (relIdx == -1) return;
-    
+
     final insertIdx = before ? relIdx : relIdx + 1;
-    
+
     setState(() {
       _sessionExercises.insert(insertIdx, picked);
       _sets[picked.id] = [];
@@ -756,13 +1012,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _showReorderSheet() {
-    showModalBottomSheet(
+    showKSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (context) {
         return _ReorderExercisesSheet(
           exercises: _sessionExercises,
@@ -773,7 +1024,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               }
               final Exercise item = _sessionExercises.removeAt(oldIndex);
               _sessionExercises.insert(newIndex, item);
-              
+
               if (_selectedIndex == oldIndex) {
                 _selectedIndex = newIndex;
               } else if (oldIndex < _selectedIndex && newIndex >= _selectedIndex) {
@@ -804,18 +1055,20 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
       return day;
     }).toList();
-    
+
     final updatedSplit = currentSplit.copyWith(days: days);
     await _service.saveSplit(updatedSplit);
-    
+    // The split is saved; the user may have left the session meanwhile.
+    if (!mounted) return;
+
     // Track recommendation acceptance
     _service.trackRecommendationAccepted(exercise.id, widget.splitDay.name);
-    
+
     setState(() {
       _temporaryAdditions[exercise.id] = false;
     });
-    
-    _spawnFloatingText('Added to ${widget.splitDay.name}!');
+
+    _spawnFloatingText('Added to ${widget.splitDay.name}');
   }
 
   Future<void> _replaceExercisePermanently(Exercise original, Exercise replacement) async {
@@ -831,10 +1084,12 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
       return day;
     }).toList();
-    
+
     final updatedSplit = currentSplit.copyWith(days: days);
     await _service.saveSplit(updatedSplit);
-    
+    // The split is saved; the user may have left the session meanwhile.
+    if (!mounted) return;
+
     setState(() {
       final idx = _sessionExercises.indexWhere((e) => e.id == replacement.id);
       if (idx != -1) {
@@ -848,7 +1103,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _repsSelections.remove(original.id);
       _rpeSelections.remove(original.id);
       _setTypeSelections.remove(original.id);
-      
+
       _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
     });
 
@@ -858,7 +1113,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
     });
 
-    _spawnFloatingText('Updated split permanently!');
+    _spawnFloatingText('Split updated');
     await _saveRecoveryState();
   }
 
@@ -871,9 +1126,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
       return day;
     }).toList();
-    
+
     final updatedSplit = currentSplit.copyWith(days: days);
     await _service.saveSplit(updatedSplit);
+    // The split is saved; the user may have left the session meanwhile.
+    if (!mounted) return;
 
     setState(() {
       _sessionExercises.removeWhere((e) => e.id == exercise.id);
@@ -884,7 +1141,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _setTypeSelections.remove(exercise.id);
       _skippedExercises.remove(exercise.id);
       _skipReasons.remove(exercise.id);
-      
+
       _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
     });
 
@@ -894,7 +1151,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
     });
 
-    _spawnFloatingText('Removed permanently!');
+    _spawnFloatingText('Removed from your split');
     await _saveRecoveryState();
   }
 
@@ -906,9 +1163,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
       return day;
     }).toList();
-    
+
     final updatedSplit = currentSplit.copyWith(days: days);
     await _service.saveSplit(updatedSplit);
+    // The split is saved; the user may have left the session meanwhile.
+    if (!mounted) return;
 
     setState(() {
       final newOrderIds = newOrder.map((e) => e.id).toList();
@@ -929,7 +1188,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
     });
 
-    _spawnFloatingText('Reordered split sequence!');
+    _spawnFloatingText('Split order saved');
     await _saveRecoveryState();
   }
 
@@ -985,9 +1244,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       final targetSets = entry.exercise.targetSets;
       final targetRepMin = entry.exercise.targetRepMin;
       final workingSets = entry.sets.where((s) => s.isMainWorkingSet).toList();
-      
+
       final setRatio = targetSets > 0 ? entry.completedWorkingSetsCount / targetSets : 1.0;
-      
+
       double totalSetRepScore = 0.0;
       for (final s in workingSets) {
         if (targetRepMin > 0) {
@@ -997,7 +1256,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         }
       }
       final repRatio = targetSets > 0 ? totalSetRepScore / targetSets : 1.0;
-      
+
       final ratioEx = (setRatio < repRatio ? setRatio : repRatio).clamp(0.0, 1.0);
       totalRatio += ratioEx;
     }
@@ -1006,24 +1265,19 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   void _updateLiveScore() {
     if (_sessionExercises.isEmpty) {
-      _scoreCompletion = 0.0;
-      _scoreVolume = 0.0;
-      _scoreSets = 0.0;
-      _scorePrs = 0.0;
-      _e1rmPrsCount = 0;
       _scoreNotifier.value = 0;
       return;
     }
-    
+
     // 1. Completion of exercises (up to 30 points) using rep midpoint ratio
     final avgCompletionRatio = _completionProgress;
     final completionScore = avgCompletionRatio * 30.0;
-    
+
     // 2. Volume score (up to 30 points) based on primary working volume only
     final currentVolume = _primaryWorkingVolume;
     final lastVolume = widget.previousSession?.primaryWorkingVolume ?? 2000.0;
     final volumeScore = lastVolume > 0 ? (currentVolume / lastVolume * 30.0).clamp(0.0, 30.0) : 15.0;
-    
+
     // 3. Set completion score (up to 25 points) based on primary working sets vs target
     double loggedSetsScore = 0.0;
     int activeExercises = 0;
@@ -1036,27 +1290,20 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       loggedSetsScore += (logged / target).clamp(0.0, 1.0);
     }
     final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25.0 : 25.0;
-    
+
     // 4. PRs score (up to 15 points) based on e1RM PRs from primary working sets
     int prCount = 0;
     _sets.forEach((exId, list) {
       for (final s in list) {
         if (s.isMainWorkingSet) {
           final previousBest = _service.bestSetBefore(exId, widget.date);
-          if (previousBest != null && s.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01) {
+          if (WorkoutService.beatsPreviousBest(s, previousBest)) {
             prCount++;
           }
         }
       }
     });
     final prScore = (prCount * 5.0).clamp(0.0, 15.0);
-
-    // Save breakdown values
-    _scoreCompletion = completionScore;
-    _scoreVolume = volumeScore;
-    _scoreSets = setsScore;
-    _scorePrs = prScore;
-    _e1rmPrsCount = prCount;
 
     _scoreNotifier.value = (completionScore + volumeScore + setsScore + prScore).round().clamp(0, 100);
   }
@@ -1084,10 +1331,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       distanceMeters: distance,
     );
     if (validationError != null) {
+      // Rejected input: acknowledged (icon + text + haptic), never punished.
+      KHaptics.reject();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(validationError),
-          backgroundColor: Colors.redAccent,
+          content: Row(
+            children: [
+              Icon(Icons.error_outline_rounded, color: KColor.danger, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(validationError, style: KText.bodyMedium)),
+            ],
+          ),
+          backgroundColor: KColor.cardHigh,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: KRadius.md,
+            side: BorderSide(color: KColor.danger.withValues(alpha: 0.5)),
+          ),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -1106,12 +1366,20 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       distanceMeters: mode == ExerciseExecutionMode.cardio ? distance : null,
     );
 
-    // Check for PR milestone
-    final previousBest = _service.bestSetBefore(ex.id, widget.date);
-    final isPr = previousBest == null || newSet.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+    // Record check against earlier sessions and the sets already done today,
+    // so a record celebrates once, not on every heavy set after it. Never on
+    // the first-ever log of an exercise (nothing to beat).
+    final earlierToday = List<SetEntry>.of(_sets[ex.id] ?? const <SetEntry>[]);
+    final prResult = PrClassifier.classify(
+      set: newSet,
+      history: _priorSetsFor(ex.id),
+      earlierToday: earlierToday,
+    );
+    final isPr = prResult.isPr;
 
     setState(() {
       (_sets[ex.id] ??= []).add(newSet);
+      _advanceWarmUpPlan(ex, newSet);
     });
 
     _updateLiveScore();
@@ -1119,53 +1387,67 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
     String floatMsg;
     if (mode == ExerciseExecutionMode.timed) {
-      floatMsg = '+1 Set\n${duration ?? 0}s hold';
+      floatMsg = 'Set logged. Breathe.\n${duration ?? 0}s hold';
     } else if (mode == ExerciseExecutionMode.cardio) {
       final distStr = (distance ?? 0) >= 1000
           ? '${((distance ?? 0) / 1000).toStringAsFixed(1)}km'
           : '${(distance ?? 0).toStringAsFixed(0)}m';
-      floatMsg = '+1 Set\n$distStr';
+      floatMsg = 'Set logged. Breathe.\n$distStr';
     } else if (mode == ExerciseExecutionMode.bodyweightReps || mode == ExerciseExecutionMode.weightedBodyweight) {
       final ext = externalLoad ?? 0.0;
       floatMsg = ext > 0
-          ? '+1 Set\nBW + ${ext.toStringAsFixed(1)}kg × $r'
-          : '+1 Set\nBW × $r';
+          ? 'Set logged. Breathe.\nBW + ${ext.toStringAsFixed(1)}kg × $r'
+          : 'Set logged. Breathe.\nBW × $r';
     } else {
-      floatMsg = '+1 Set\n+${(w * r).toStringAsFixed(0)} kg';
+      floatMsg = 'Set logged. Breathe.\n+${(w * r).toStringAsFixed(0)} kg';
     }
 
     _spawnFloatingText(floatMsg);
-    HapticFeedback.mediumImpact();
 
+    // Exactly one haptic per logged set: a PR is the milestone, otherwise the
+    // set itself is a commit. Never both.
     if (isPr) {
-      HapticFeedback.heavyImpact();
-      _triggerPRNotification(w, r, newSet.estimatedOneRepMax);
+      KHaptics.milestone();
+      _triggerPRNotification(prResult, ex.name);
+    } else {
+      KHaptics.commit();
     }
 
-    // Start rest timer on set completion
-    _startRestTimer(durationSeconds: ex.type == ExerciseType.barbellCompound ? 90 : 60);
+    // Superset: mid-round, go straight to the partner exercise with no rest;
+    // the rest runs once the round closes.
+    final supersetStep = SupersetAdvance.afterSet(
+      logged: ex,
+      allExercises: _sessionExercises,
+      entriesMap: {for (final e in _sessionExercises) e.id: buildEntry(e)},
+    );
 
-    // Superset round auto-navigation
-    if (ex.supersetGroupId != null && ex.supersetGroupId!.isNotEmpty) {
-      final status = SupersetFlowService.getStatusForGroup(
-        supersetGroupId: ex.supersetGroupId!,
-        allExercises: _sessionExercises,
-        entriesMap: {for (final e in _sessionExercises) e.id: buildEntry(e)},
+    // Rest on set completion, unless the next set is a drop (straight into
+    // it) or the superset round is still going.
+    final nextType = _setTypeSelections[ex.id] ?? SetType.normal;
+    if (!supersetStep.skipRest && RestTimerPrefs.shouldStartRest(nextSetType: nextType)) {
+      final remembered = RestTimerPrefs.instance.durationFor(ex);
+      _startRestTimer(
+        forExercise: ex,
+        // Warm-ups are light: cap their rest at a minute.
+        durationSeconds: type == SetType.warmUp ? min(remembered, 60) : remembered,
       );
-      if (status != null && !status.isCompleted && status.nextExercise != null) {
-        final nextEx = status.nextExercise!;
-        final nextIdx = _sessionExercises.indexWhere((e) => e.id == nextEx.id);
-        if (nextIdx != -1 && nextIdx != _selectedIndex && !_isPageAnimating) {
-          debugPrint('[WORKOUT_NAV] Superset round scheduling advance to index $nextIdx: ${nextEx.name}');
-          _cancelPendingAutoAdvance();
-          _pendingAutoAdvanceTimer = Timer(const Duration(milliseconds: 500), () {
-            _pendingAutoAdvanceTimer = null;
-            if (mounted) {
-              _navigateToExercise(nextIdx);
-            }
-          });
-          return;
-        }
+    } else if (_isRestTimerActive) {
+      _cancelRestTimer();
+    }
+
+    final nextEx = supersetStep.goTo;
+    if (nextEx != null) {
+      final nextIdx = _sessionExercises.indexWhere((e) => e.id == nextEx.id);
+      if (nextIdx != -1 && nextIdx != _selectedIndex && !_isPageAnimating) {
+        debugPrint('[WORKOUT_NAV] Superset round scheduling advance to index $nextIdx: ${nextEx.name}');
+        _cancelPendingAutoAdvance();
+        _pendingAutoAdvanceTimer = Timer(const Duration(milliseconds: 500), () {
+          _pendingAutoAdvanceTimer = null;
+          if (mounted) {
+            _navigateToExercise(nextIdx);
+          }
+        });
+        return;
       }
     }
 
@@ -1207,17 +1489,111 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     });
   }
 
-  void _triggerPRNotification(double weight, int reps, double e1rm) {
+  void _triggerPRNotification(PrResult result, String exerciseName) {
     _prToastTimer?.cancel();
+    final copy = prBannerCopy(result, exerciseName: exerciseName);
     setState(() {
       _showPrToast = true;
-      _prToastMsg = '🏆 NEW PERSONAL RECORD!\n${weight.toStringAsFixed(weight == weight.truncateToDouble() ? 0 : 1)} kg × $reps reps (e1RM: ${e1rm.toStringAsFixed(1)} kg)';
+      _prToastTitle = copy.title;
+      _prToastMsg = copy.detail;
+      _prEpoch++;
     });
-    _prToastTimer = Timer(const Duration(seconds: 4), () {
+    _prToastTimer = Timer(const Duration(milliseconds: 4500), () {
       if (mounted) {
         setState(() => _showPrToast = false);
       }
     });
+  }
+
+  // ── Warm-ups ─────────────────────────────────────────────────────────────
+
+  /// Exercise menu → "Add warm-up sets": asks for today's working weight
+  /// (prefilled), then queues the ramp. Each warm-up loads into the dials as
+  /// a warm-up set; logging it moves to the next step, and after the last
+  /// one the dials return to the working weight.
+  Future<void> _addWarmUpSets(Exercise ex) async {
+    final suggested = WarmUpCalculator.suggestWorkingWeight(
+      todaySets: _sets[ex.id] ?? const [],
+      lastSessionSets: _service.lastEntryFor(ex.id, widget.splitDay.name)?.sets ?? const [],
+      fallback: _weightSelections[ex.id],
+    );
+    final plan = await showWarmUpSheet(context, exercise: ex, suggestedWorkingWeight: suggested);
+    if (!mounted || plan == null || plan.steps.isEmpty) return;
+    setState(() {
+      _warmUpPlans[ex.id] = List.of(plan.steps);
+      _warmUpWorkingWeight[ex.id] = plan.workingWeight;
+      _loadWarmUpStep(ex.id);
+    });
+    _spawnFloatingText('${plural(plan.steps.length, 'warm-up set')} queued');
+    KHaptics.commit();
+    _queueRecoverySave();
+  }
+
+  /// Working weight the ramp was built for (kept so the dials return to it).
+  final Map<String, double> _warmUpWorkingWeight = {};
+
+  void _loadWarmUpStep(String exId) {
+    final plan = _warmUpPlans[exId];
+    if (plan == null || plan.isEmpty) return;
+    _weightSelections[exId] = plan.first.weight;
+    _repsSelections[exId] = plan.first.reps;
+    _setTypeSelections[exId] = SetType.warmUp;
+  }
+
+  /// Called inside setState after a set lands.
+  void _advanceWarmUpPlan(Exercise ex, SetEntry logged) {
+    final plan = _warmUpPlans[ex.id];
+    if (plan == null || plan.isEmpty || logged.setType != SetType.warmUp) return;
+    plan.removeAt(0);
+    if (plan.isNotEmpty) {
+      _loadWarmUpStep(ex.id);
+    } else {
+      _warmUpPlans.remove(ex.id);
+      final working = _warmUpWorkingWeight.remove(ex.id);
+      if (working != null && working > 0) _weightSelections[ex.id] = working;
+      _setTypeSelections[ex.id] = SetType.normal;
+    }
+  }
+
+  /// "Log all": records every queued warm-up at once, ahead of today's
+  /// working sets, and returns the dials to the working weight.
+  void _logAllWarmUps(Exercise ex) {
+    final plan = _warmUpPlans[ex.id];
+    if (plan == null || plan.isEmpty) return;
+    setState(() {
+      final list = _sets[ex.id] ??= [];
+      final insertAt = list.takeWhile((s) => s.setType == SetType.warmUp).length;
+      list.insertAll(insertAt, plan.map((s) => s.toSetEntry()));
+      _warmUpPlans.remove(ex.id);
+      final working = _warmUpWorkingWeight.remove(ex.id);
+      if (working != null && working > 0) _weightSelections[ex.id] = working;
+      _setTypeSelections[ex.id] = SetType.normal;
+    });
+    _spawnFloatingText('Warm-ups logged');
+    KHaptics.commit();
+    _updateLiveScore();
+    _saveRecoveryState();
+  }
+
+  /// One tap on last session's ghost value loads it into the dials.
+  void _copyPreviousSet(Exercise ex, SetEntry prev) {
+    setState(() {
+      if (prev.weight > 0) _weightSelections[ex.id] = prev.weight;
+      if (prev.reps > 0) _repsSelections[ex.id] = prev.reps;
+      if (prev.externalLoadKg != null) _externalLoadSelections[ex.id] = prev.externalLoadKg;
+    });
+    KHaptics.select();
+    _queueRecoverySave();
+  }
+
+  void _clearWarmUpPlan(String exId) {
+    setState(() {
+      _warmUpPlans.remove(exId);
+      final working = _warmUpWorkingWeight.remove(exId);
+      if (working != null && working > 0) _weightSelections[exId] = working;
+      _setTypeSelections[exId] = SetType.normal;
+    });
+    KHaptics.select();
   }
 
   void _adjustInputValue(
@@ -1230,6 +1606,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     int? durationSeconds,
     double? distanceMeters,
   }) {
+    // Queuing a drop right after a set: straight into it, no rest.
+    if (setType == SetType.dropSet &&
+        _setTypeSelections[exId] != SetType.dropSet &&
+        _isRestTimerActive &&
+        _restExerciseId == exId) {
+      _cancelRestTimer();
+    }
+    // Leaving a drop chain (drop → working/warm-up) after logging the drops:
+    // that's when the rest the drop skipped should run.
+    final lastLogged = _sets[exId]?.lastOrNull;
+    if (_setTypeSelections[exId] == SetType.dropSet &&
+        setType != SetType.dropSet &&
+        lastLogged?.setType == SetType.dropSet &&
+        !_isRestTimerActive) {
+      final ex = _sessionExercises.where((e) => e.id == exId).firstOrNull;
+      if (ex != null) _startRestTimer(forExercise: ex);
+    }
     _weightSelections[exId] = weight;
     _repsSelections[exId] = reps;
     _rpeSelections[exId] = rpe;
@@ -1244,7 +1637,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     setState(() {
       _sets[exId]!.removeAt(index);
     });
-    HapticFeedback.selectionClick();
+    KHaptics.select();
     _updateLiveScore();
     _saveRecoveryState();
   }
@@ -1254,7 +1647,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final setsList = _sets[exId];
     if (setsList == null || setsList.isEmpty) return;
     final last = setsList.last;
-    
+
     setState(() {
       setsList.add(
         SetEntry(
@@ -1265,15 +1658,29 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         ),
       );
     });
-    _spawnFloatingText('+1 Set\n+${last.volume.toStringAsFixed(0)} kg');
-    HapticFeedback.lightImpact();
+    _spawnFloatingText('Set added\n+${last.volume.toStringAsFixed(0)} kg');
+    KHaptics.commit();
     _updateLiveScore();
     _saveRecoveryState();
   }
 
   // ── Completion Screen & Finish ───────────────────────────────────────────
 
+  /// True from the Finish tap until the save resolves, so a second tap (or a
+  /// tap landing before the dialog route is up) can never save twice.
+  bool _finishInFlight = false;
+
   Future<void> _finish() async {
+    if (_finishInFlight || _isSaving) return;
+    _finishInFlight = true;
+    try {
+      await _finishInner();
+    } finally {
+      _finishInFlight = false;
+    }
+  }
+
+  Future<void> _finishInner() async {
     final entries = _sessionExercises
         .map((ex) => ExerciseEntry(
               exercise: ex,
@@ -1290,42 +1697,39 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         .toList();
 
     if (entries.isEmpty) {
-      _showSnack('Log at least one set or skip/substitute an exercise before finishing.');
+      _showSnack('Log a set first, or skip or swap an exercise, then finish.');
       return;
     }
 
     final statusResult = await showDialog<WorkoutStatus>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: KColor.border, width: 0.5),
-        ),
+        backgroundColor: KColor.surface,
+        shape: _dialogShape(),
         actionsOverflowDirection: VerticalDirection.down,
-        title: const Text('End Workout Session', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'Choose how you want to save this session. If you intentionally cut it short, choose Partial.',
-          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+        title: Text('End this workout?', style: _WsText.dialogTitle),
+        content: Text(
+          'Save it as complete, or as partial if you cut it short on purpose.',
+          style: _WsText.dialogBody,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+            child: Text('Keep going', style: _WsText.button.copyWith(color: KColor.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(WorkoutStatus.partial),
-            child: const Text('Finish As Partial', style: TextStyle(color: Color(0xFFFFB347))),
+            child: Text('Save as partial', style: _WsText.button.copyWith(color: KColor.warning)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(WorkoutStatus.completed),
-            child: const Text('Finish Workout', style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.bold)),
+            child: Text('Finish workout', style: _WsText.button.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w800)),
           ),
         ],
       ),
     );
 
-    if (statusResult == null) return;
+    if (statusResult == null || !mounted) return;
 
     setState(() => _isSaving = true);
 
@@ -1350,24 +1754,42 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       }
     }
 
-    await _service.saveSession(session);
-    await _service.clearDraftSession();
-
-    // Save logs integration
-    final log = logFor(widget.date);
-    if (log.gymDay?.didGym != true) {
-      if (log.gymDay != null) {
-        log.gymDay = log.gymDay!.withGym(true);
-      } else {
-        log.gymDay = const GymDay(didGym: true);
-      }
-      await PersistenceService.saveDay(widget.date);
+    try {
+      await _service.saveSession(session);
+    } catch (e) {
+      // Nothing was cleared: the draft and recovery copy still hold every set,
+      // so the user can simply tap Finish again.
+      debugPrint('[WORKOUT_FINISH] Save failed: $e');
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      _showSnack('Couldn\'t save your workout. Your sets are safe, so tap Finish to try again.');
+      return;
     }
 
-    // Reset draft and recovery values
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('kynetix_workout_recovery');
+    try {
+      await _service.clearDraftSession();
 
+      // Save logs integration
+      final log = logFor(widget.date);
+      if (log.gymDay?.didGym != true) {
+        if (log.gymDay != null) {
+          log.gymDay = log.gymDay!.withGym(true);
+        } else {
+          log.gymDay = const GymDay(didGym: true);
+        }
+        await PersistenceService.saveDay(widget.date);
+      }
+
+      // Reset draft and recovery values
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(WorkoutService.instance.recoveryPrefKey);
+    } catch (e) {
+      // The session itself is saved; housekeeping failures must not strand the
+      // user on a spinner.
+      debugPrint('[WORKOUT_FINISH] Post-save cleanup failed: $e');
+    }
+
+    if (!mounted) return;
     _cancelRestTimer();
     WakelockService.instance.disable();
 
@@ -1376,7 +1798,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _completedSessionSummary = session;
       _showCompletionScreen = true;
     });
-    HapticFeedback.heavyImpact();
+    // A finished workout is a genuine milestone (DESIGN_SYSTEM.md, Haptics).
+    KHaptics.milestone();
   }
 
   Future<void> _confirmDiscard() async {
@@ -1384,7 +1807,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _cancelRestTimer();
       WakelockService.instance.disable();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('kynetix_workout_recovery');
+      await prefs.remove(WorkoutService.instance.recoveryPrefKey);
       await _service.clearDraftSession();
       if (mounted) Navigator.of(context).pop();
       return;
@@ -1392,26 +1815,26 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: KColor.surface,
+        shape: _dialogShape(),
         actionsOverflowDirection: VerticalDirection.down,
-        title: const Text('Pause Workout?', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'Do you want to save this as a draft and resume later, or discard it entirely?',
-          style: TextStyle(color: Color(0xFF9CA3AF)),
+        title: Text('Pause workout?', style: _WsText.dialogTitle),
+        content: Text(
+          'Save a draft and pick up where you left off, or discard this session.',
+          style: _WsText.dialogBody,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop('cancel'),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+            child: Text('Keep going', style: _WsText.button.copyWith(color: KColor.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop('discard'),
-            child: const Text('Discard', style: TextStyle(color: Color(0xFFF87171))),
+            child: Text('Discard', style: _WsText.button.copyWith(color: KColor.danger)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop('save'),
-            child: const Text('Save & Leave', style: TextStyle(color: Color(0xFF52B788))),
+            child: Text('Save and leave', style: _WsText.button.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w800)),
           ),
         ],
       ),
@@ -1423,7 +1846,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       WakelockService.instance.disable();
       _isDiscarding = true;
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('kynetix_workout_recovery');
+      await prefs.remove(WorkoutService.instance.recoveryPrefKey);
       await _service.clearDraftSession();
       if (mounted) Navigator.of(context).pop();
     } else if (result == 'save') {
@@ -1436,12 +1859,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   void _spawnFloatingText(String text) {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
-    setState(() {
-      _floatingTexts.add(_FloatingTextData(id: id, text: text));
-    });
+    _floatingTexts.value = [..._floatingTexts.value, _FloatingTextData(id: id, text: text)];
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) {
-        setState(() => _floatingTexts.removeWhere((t) => t.id == id));
+        _floatingTexts.value = _floatingTexts.value.where((t) => t.id != id).toList();
       }
     });
   }
@@ -1449,9 +1870,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   void _showSnack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
-        backgroundColor: const Color(0xFF1E1E2C),
+        content: Text(msg, style: KText.bodyMedium.copyWith(color: KColor.onInk)),
+        backgroundColor: KColor.ink,
         behavior: SnackBarBehavior.floating,
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.md),
       ),
     );
   }
@@ -1464,7 +1886,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     );
 
     if (!mounted || picked == null) return;
-    
+
     setState(() {
       _sessionExercises.add(picked);
       _sets[picked.id] = [];
@@ -1492,27 +1914,27 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E2C),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: KColor.surface,
+          shape: _dialogShape(),
           actionsOverflowDirection: VerticalDirection.down,
-          title: const Text('Remove exercise?', style: TextStyle(color: Colors.white)),
+          title: Text('Remove exercise?', style: _WsText.dialogTitle),
           content: Text(
-            'You logged sets for "${ex.name}". Removing it will discard those sets for today.',
-            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+            'You\'ve logged sets for ${ex.name}. Removing it drops those sets from today.',
+            style: _WsText.dialogBody,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF9CA3AF))),
+              child: Text('Cancel', style: _WsText.button.copyWith(color: KColor.textSecondary)),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Remove', style: TextStyle(color: Color(0xFFF87171), fontWeight: FontWeight.bold)),
+              child: Text('Remove exercise', style: _WsText.button.copyWith(color: KColor.danger)),
             ),
           ],
         ),
       );
-      if (confirmed != true) return;
+      if (confirmed != true || !mounted) return;
     }
 
     setState(() {
@@ -1534,12 +1956,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _openHistory(Exercise ex) {
-    showModalBottomSheet(
+    showKSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      isScrollControlled: false,
       builder: (context) => _ExerciseHistorySheet(
         exercise: ex,
         splitDayName: widget.splitDay.name,
@@ -1551,11 +1970,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   @override
   Widget build(BuildContext context) {
-    if (!WidgetsBinding.instance.runtimeType.toString().contains('Test') &&
-        MediaQuery.of(context).viewInsets.bottom == 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _measureDock());
-    }
+    // Computed once per build and shared by the glow and the progress bar.
     final progress = _completionProgress;
+    final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return PopScope(
       canPop: false,
@@ -1565,13 +1982,14 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0C0C14),
+        backgroundColor: KColor.bg,
         body: Stack(
           children: [
-            // Ambient evolving glows (RepaintBoundary keeps it isolated)
+            // Quiet ambient light. Painted once per progress stage from plain
+            // radial gradients (no blur, no loop), isolated in its own layer.
             Positioned.fill(
               child: RepaintBoundary(
-                child: _AmbientBackgroundGlow(progress: progress),
+                child: _AmbientBackgroundGlow(progress: progress, isDark: KColor.isDark),
               ),
             ),
 
@@ -1579,7 +1997,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               child: Column(
                 children: [
                   _buildSessionAppBar(),
-                  _buildWorkoutProgressBar(),
+                  // A PR opens a strip under the header and pushes the page
+                  // down; it never covers the header or the readout.
+                  _PRToastWidget(
+                    isVisible: _showPrToast,
+                    title: _prToastTitle,
+                    message: _prToastMsg,
+                    epoch: _prEpoch,
+                  ),
+                  _buildWorkoutProgressBar(progress),
                   Expanded(
                     child: _sessionExercises.isEmpty
                         ? _buildEmptyState()
@@ -1596,7 +2022,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                             }
                             _cancelPendingAutoAdvance();
                             _cancelRestTimer();
-                            HapticFeedback.selectionClick();
+                            KHaptics.select();
                             setState(() => _selectedIndex = index);
                             _queueRecoverySave();
                           },
@@ -1604,16 +2030,17 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                             final ex = _sessionExercises[index];
                             final setsList = _sets[ex.id] ?? [];
                             final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
-                            final history = _service.historyFor(ex.id, limit: 15);
+                            final history = _historyForCached(ex.id);
+                            final recs = _splitRecs;
 
-                            final recurringSubs = _service.getRecurringSubstitutions(widget.splitDay.name);
+                            final recurringSubs = recs.substitutions;
                             final subMatch = recurringSubs.where((s) => s.original.id == ex.id).firstOrNull;
                             final replacementEx = subMatch?.replacement;
 
-                            final recurringSkips = _service.getRecurringSkips(widget.splitDay.name);
+                            final recurringSkips = recs.skips;
                             final isRecSkip = recurringSkips.any((s) => s.exercise.id == ex.id);
 
-                            final reorderRecs = _service.getReorderRecommendations(widget.splitDay.name);
+                            final reorderRecs = recs.reorders;
                             final reorderOrder = reorderRecs.isNotEmpty ? reorderRecs.first.newOrder : null;
 
                             return _ExerciseWorkoutPage(
@@ -1647,12 +2074,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                                 _exerciseNotes[ex.id] = notes;
                                 _queueRecoverySave();
                               },
-                              dockHeight: MediaQuery.of(context).viewInsets.bottom > 0 ? 0.0 : _dockHeight,
+                              dockHeight: keyboardUp ? 0.0 : _dockHeight,
                               sessionNotes: _sessionNotes,
                               onSessionNotesChange: (notes) {
-                                setState(() {
-                                  _sessionNotes = notes;
-                                });
+                                // Read only when pages mount and on save, so a
+                                // keystroke needs no rebuild of the session.
+                                if (_sessionNotes == notes) return;
+                                _sessionNotes = notes;
                                 _queueRecoverySave();
                               },
                               initialScrollOffset: _scrollOffsets[ex.id] ?? 0.0,
@@ -1673,9 +2101,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               isSubstitution: _substitutedExercises[ex.id] ?? false,
                               substitutedForName: _substitutedForNames[ex.id],
                               isTemporaryAddition: _temporaryAdditions[ex.id] ?? false,
-                              isRecurringAddition: _service
-                                  .getRecurringAdditions(widget.splitDay.name)
-                                  .any((re) => re.exercise.id == ex.id),
+                              isRecurringAddition: recs.additions.any((re) => re.exercise.id == ex.id),
                               splitDayName: widget.splitDay.name,
                               onSkipExercise: (reason) => _skipExercise(ex.id, reason),
                               onUndoSkip: () => _undoSkip(ex.id),
@@ -1691,6 +2117,13 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               onReplacePermanently: () => _replaceExercisePermanently(ex, replacementEx!),
                               onRemovePermanently: () => _removeExercisePermanently(ex),
                               onApplyReorder: () => _applyReorderPermanently(reorderOrder!),
+                              warmUpPlan: _warmUpPlans[ex.id],
+                              onAddWarmUps: () => _addWarmUpSets(ex),
+                              onLogAllWarmUps: () => _logAllWarmUps(ex),
+                              onClearWarmUps: () => _clearWarmUpPlan(ex.id),
+                              restSeconds: RestTimerPrefs.instance.durationFor(ex),
+                              onEditRest: () => _editRestDuration(forExercise: ex),
+                              onCopyPrevious: (prev) => _copyPreviousSet(ex, prev),
                             );
                           },
                         );
@@ -1701,18 +2134,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
               ),
             ),
 
-            // Floating Rest Timer Bar
-            _buildFloatingRestTimer(),
-
-            // Pinned Bottom Command Center Dock
-            if (MediaQuery.of(context).viewInsets.bottom == 0)
+            // Pinned Bottom Command Center Dock. It reports its own size
+            // changes, so it is re-measured only when it actually resizes.
+            if (!keyboardUp)
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: KeyedSubtree(
-                  key: _dockKey,
-                  child: _BottomDockWidget(
+                child: NotificationListener<SizeChangedLayoutNotification>(
+                  onNotification: (_) {
+                    _scheduleDockMeasure();
+                    return true;
+                  },
+                  child: SizeChangedLayoutNotifier(
+                    child: KeyedSubtree(
+                      key: _dockKey,
+                      child: _BottomDockWidget(
+                    restBar: _isRestTimerActive ? _buildRestTimerBar() : null,
                     exercises: _sessionExercises,
                     originalSplitExerciseCount: widget.splitDay.exercises.length,
                     sets: _sets,
@@ -1728,18 +2166,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                     onRemoveExercise: () => _removeExerciseFromSession(_selectedIndex),
                     onSelectExercise: (index) => _navigateToExercise(index),
                   ),
+                    ),
+                  ),
                 ),
               ),
 
             // Drifting particles overlay
             IgnorePointer(
-              child: _buildFloatingTextOverlay(),
-            ),
-
-            // Non-blocking PR Celebration sliding toast
-            _PRToastWidget(
-              isVisible: _showPrToast,
-              message: _prToastMsg,
+              child: RepaintBoundary(
+                child: _buildFloatingTextOverlay(),
+              ),
             ),
 
             // Fullscreen completion finish screen
@@ -1748,11 +2184,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 session: _completedSessionSummary,
                 previousSession: widget.previousSession,
                 score: _scoreNotifier.value,
-                scoreCompletion: _scoreCompletion,
-                scoreVolume: _scoreVolume,
-                scoreSets: _scoreSets,
-                scorePrs: _scorePrs,
-                e1rmPrsCount: _e1rmPrsCount,
                 duration: DateTime.now().difference(_startTime),
                 onDone: () => Navigator.of(context).pop(true),
               ),
@@ -1762,225 +2193,229 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     );
   }
 
-  Widget _buildFloatingRestTimer() {
-    if (!_isRestTimerActive || _restSecondsRemaining <= 0) return const SizedBox.shrink();
-    final mins = _restSecondsRemaining ~/ 60;
-    final secs = _restSecondsRemaining % 60;
-    final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  /// Glanceable rest copy: a nudge before the final working set, otherwise
+  /// just "Rest up".
+  String _restLabel() {
+    if (_sessionExercises.isEmpty || _selectedIndex >= _sessionExercises.length) return 'Rest up';
+    final ex = _currentExercise;
+    final done = (_sets[ex.id] ?? const <SetEntry>[]).where((s) => s.isMainWorkingSet).length;
+    return ex.targetSets - done == 1 ? 'Last set, make it count' : 'Rest up';
+  }
 
-    return Positioned(
-      left: 16,
-      right: 16,
-      bottom: _dockHeight + 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF141628),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: KColor.green.withValues(alpha: 0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
+  /// Rest countdown, shown at the top of the dock while resting. Only the
+  /// readout listens to the per-second tick.
+  Widget _buildRestTimerBar() {
+    final readout = ValueListenableBuilder<int>(
+      valueListenable: _restSecondsRemaining,
+      builder: (context, remaining, _) {
+        final mins = remaining ~/ 60;
+        final secs = remaining % 60;
+        final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+        return Semantics(
+          label: 'Rest time remaining $mins minutes $secs seconds',
+          excludeSemantics: true,
+          child: Text(timeStr, style: _WsText.timer.copyWith(color: KColor.textPrimary)),
+        );
+      },
+    );
+
+    final labelColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KIcon(KIcons.timer, size: KIcons.sm, color: KColor.textSecondary),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _restLabel(),
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                softWrap: false,
+                style: _WsText.meta.copyWith(fontWeight: FontWeight.w600),
+              ),
             ),
           ],
         ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            readout,
+            const SizedBox(width: 6),
+            Icon(Icons.edit_rounded, size: 14, color: KColor.textMuted),
+          ],
+        ),
+      ],
+    );
+    // Tap the countdown to set this exercise's rest (remembered per exercise).
+    final label = Semantics(
+      button: true,
+      hint: 'Change rest length',
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: _editRestDuration,
+          borderRadius: KRadius.sm,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Align(alignment: AlignmentDirectional.centerStart, widthFactor: 1, child: labelColumn),
+          ),
+        ),
+      ),
+    );
+
+    final buttons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildRestTimerBtn('-15s', () => _adjustRestTimer(-15), semantic: 'Subtract 15 seconds of rest'),
+        const SizedBox(width: 6),
+        _buildRestTimerBtn('+15s', () => _adjustRestTimer(15), semantic: 'Add 15 seconds of rest'),
+        const SizedBox(width: 6),
+        _buildRestTimerBtn('Skip', _skipRestTimer, semantic: 'Skip rest', emphasized: true),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        // Narrow or large text: stack the controls under the countdown.
+        if (c.maxWidth < 300 * scale) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: KColor.green,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'REST',
-                style: TextStyle(
-                  color: KColor.green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                timeStr,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(width: 12),
-              _buildRestTimerBtn('-15s', () => _adjustRestTimer(-15)),
-              const SizedBox(width: 6),
-              _buildRestTimerBtn('+30s', () => _adjustRestTimer(30)),
-              const SizedBox(width: 8),
-              InkWell(
-                onTap: _skipRestTimer,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'SKIP',
-                    style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
+              label,
+              const SizedBox(height: 6),
+              Align(alignment: AlignmentDirectional.centerEnd, child: buttons),
             ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: label),
+            const SizedBox(width: 8),
+            buttons,
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRestTimerBtn(String label, VoidCallback onTap, {required String semantic, bool emphasized = false}) {
+    return Semantics(
+      button: true,
+      label: semantic,
+      excludeSemantics: true,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: KRadius.pill,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            alignment: Alignment.center,
+            // Skip is the ink action; the adjusters stay quiet.
+            decoration: BoxDecoration(
+              color: emphasized ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.05),
+              borderRadius: KRadius.pill,
+            ),
+            child: Text(
+              label,
+              style: _WsText.num.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: emphasized ? KColor.onInk : KColor.textPrimary,
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildRestTimerBtn(String label, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E2034),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFF2E3248)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-        ),
-      ),
-    );
-  }
-
+  /// Session header: one aligned row. Close sits in a 48dp slot on the left,
+  /// the day's name and live meta take the middle, Finish anchors the right.
+  /// No wrapping, so nothing drifts off-centre at any width or text scale.
   Widget _buildSessionAppBar() {
+    final metaStyle = _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: KColor.textSecondary);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      padding: const EdgeInsets.fromLTRB(4, 6, 16, 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
-                onPressed: _confirmDiscard,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.splitDay.name.toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 6,
-                      children: [
-                        _LiveTimerWidget(startedAt: _startTime),
-                        const Text('•', style: TextStyle(color: KColor.textMuted)),
-                        Text(
-                          '$_totalSets sets',
-                          style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                        ),
-                        const Text('•', style: TextStyle(color: KColor.textMuted)),
-                        _AnimatedCountUpText(
-                          value: _totalVolume,
-                          suffix: ' kg',
-                          style: const TextStyle(color: KColor.textSecondary, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          IconButton(
+            tooltip: 'Pause or leave workout',
+            icon: Icon(Icons.close_rounded, color: KColor.textPrimary, size: KIcons.lg),
+            onPressed: _confirmDiscard,
+            style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
           ),
-          Wrap(
-            spacing: 10,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              ValueListenableBuilder<int>(
-                valueListenable: _scoreNotifier,
-                builder: (context, score, child) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Row(
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    widget.splitDay.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    style: KText.h3.copyWith(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                // Live meta, spaced by layout rather than middle dots.
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 2,
+                  children: [
+                    // Live dot (train violet, no glow) beside the timer; separate
+                    // Wrap items so large text can reflow instead of overflowing.
+                    Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.bolt_rounded, color: KColor.amber, size: 16),
-                        const SizedBox(width: 4),
-                        _AnimatedCountUpText(
-                          value: score,
-                          prefix: 'SCORE: ',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
+                        KDot(color: KColor.violet),
+                        const SizedBox(width: 6),
+                        Flexible(child: _LiveTimerWidget(startedAt: _startTime)),
                       ],
                     ),
-                  );
-                },
-              ),
-              ElevatedButton(
-                onPressed: _isSaving ? null : _finish,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: KColor.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  elevation: 0,
+                    Text(plural(_totalSets, 'set'), style: metaStyle),
+                    _AnimatedCountUpText(value: _totalVolume, suffix: ' kg', style: metaStyle),
+                  ],
                 ),
-                child: _isSaving
-                    ? const SizedBox(
-                        width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('Finish', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-              ),
-            ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: _isSaving ? null : _finish,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: KColor.ink,
+              foregroundColor: KColor.onInk,
+              disabledBackgroundColor: KColor.ink.withValues(alpha: 0.4),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              minimumSize: const Size(72, 48),
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+              elevation: 0,
+            ),
+            child: _isSaving
+                ? KSpinner(size: 16, color: KColor.onInk, semanticsLabel: 'Saving your workout')
+                : Text('Finish', style: _WsText.button.copyWith(color: KColor.onInk)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildWorkoutProgressBar() {
-    final progress = _completionProgress.clamp(0.0, 1.0);
+  Widget _buildWorkoutProgressBar(double rawProgress) {
+    final progress = rawProgress.clamp(0.0, 1.0);
     final percent = (progress * 100).round();
+    final done = progress >= 1.0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1991,38 +2426,57 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'WORKOUT PROGRESS',
-                style: TextStyle(
-                  color: KColor.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
+              Expanded(
+                child: Text('Workout progress', style: _WsText.meta.copyWith(fontWeight: FontWeight.w600)),
               ),
-              Text(
-                '$percent%',
-                key: const Key('workout_progress_percent_text'),
-                style: const TextStyle(
-                  color: KColor.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
+              const SizedBox(width: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Live score rides quietly beside the percentage.
+                  ValueListenableBuilder<int>(
+                    valueListenable: _scoreNotifier,
+                    builder: (context, score, _) => Semantics(
+                      label: 'Workout score $score',
+                      excludeSemantics: true,
+                      child: _AnimatedCountUpText(
+                        value: score,
+                        prefix: 'Score ',
+                        style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: KColor.textMuted),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  if (done) ...[
+                    Icon(Icons.check_rounded, color: KColor.green, size: 15),
+                    const SizedBox(width: 3),
+                  ],
+                  Text(
+                    '$percent%',
+                    key: const Key('workout_progress_percent_text'),
+                    style: _WsText.num.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: done ? KColor.green : KColor.textPrimary,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 6),
           ClipRRect(
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: KRadius.pill,
             child: SizedBox(
-              height: 4,
+              height: 6,
+              // Train-world violet while in progress, jade once the session is done
+              // (paired with the check glyph above, so colour is never the only signal).
               child: LinearProgressIndicator(
                 key: const Key('workout_progress_bar'),
                 value: progress,
-                minHeight: 4,
-                backgroundColor: const Color(0xFF1E1E2F),
-                valueColor: const AlwaysStoppedAnimation<Color>(KColor.green),
+                minHeight: 6,
+                backgroundColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.07),
+                valueColor: AlwaysStoppedAnimation<Color>(done ? KColor.green : KColor.violet),
               ),
             ),
           ),
@@ -2032,13 +2486,24 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   Widget _buildFloatingTextOverlay() {
-    return Stack(
-      children: _floatingTexts.map((data) {
-        return _FloatingTextWidget(
-          key: ValueKey(data.id),
-          text: data.text,
+    return ValueListenableBuilder<List<_FloatingTextData>>(
+      valueListenable: _floatingTexts,
+      builder: (context, texts, _) {
+        if (texts.isEmpty) return const SizedBox.shrink();
+        // Confirmation rises just above the dock, never over the readout.
+        return Padding(
+          padding: EdgeInsets.only(bottom: _dockHeight + 12),
+          child: Stack(
+          children: [
+            for (final data in texts)
+              _FloatingTextWidget(
+                key: ValueKey(data.id),
+                text: data.text,
+              ),
+          ],
+        ),
         );
-      }).toList(),
+      },
     );
   }
 
@@ -2051,50 +2516,43 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(26),
               decoration: BoxDecoration(
-                color: KColor.green.withValues(alpha: 0.1),
+                color: KColor.isDark ? KColor.card : KColor.cardHigh,
                 shape: BoxShape.circle,
+                border: Border.all(color: _hairline()),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.fitness_center_rounded,
-                color: KColor.green,
-                size: 64,
+                color: KColor.textSecondary,
+                size: 56,
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Empty Workout Session',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.5,
-              ),
+            Text(
+              'Empty workout',
+              textAlign: TextAlign.center,
+              style: KText.h1.copyWith(fontSize: 24),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Add your first exercise to start tracking your sets, weight, reps, and RPE.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: KColor.textSecondary,
-                fontSize: 14,
-                height: 1.5,
-              ),
+              style: KText.body.copyWith(color: KColor.textSecondary),
             ),
             const SizedBox(height: 32),
-            SizedBox(
-              width: 200,
-              height: 48,
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 220, minHeight: 56),
               child: ElevatedButton.icon(
                 key: const Key('center_add_exercise_button'),
                 onPressed: _addExerciseToSession,
-                icon: const Icon(Icons.add_rounded, color: Colors.white),
-                label: const Text('Add Exercise', style: TextStyle(fontWeight: FontWeight.bold)),
+                icon: Icon(Icons.add_rounded, color: KColor.onInk),
+                label: Text('Add exercise', style: _WsText.button.copyWith(color: KColor.onInk)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: KColor.green,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: KColor.ink,
+                  foregroundColor: KColor.onInk,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
                   elevation: 0,
                 ),
               ),
@@ -2108,53 +2566,59 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
 // ─── Ambient Glow Background ──────────────────────────────────────────────
 
+/// Static ambient light for the session: a faint train-violet key light
+/// top-right and a jade bounce that grows as the session completes. Pure
+/// radial gradients painted once per progress step (bucketed so a set log does
+/// not repaint it unless the stage changes) — no blurred shadows, no ticker.
+/// Paper gets roughly half the strength so the page stays warm white.
 class _AmbientBackgroundGlow extends StatelessWidget {
   final double progress;
-  const _AmbientBackgroundGlow({required this.progress});
+  final bool isDark;
+  const _AmbientBackgroundGlow({required this.progress, required this.isDark});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: progress < 0.3
-              ? [const Color(0xFF0C0C14), const Color(0xFF130F1F)]
-              : progress < 0.7
-                  ? [const Color(0xFF0C0C14), const Color(0xFF0F1528)]
-                  : [const Color(0xFF0C0C14), const Color(0xFF0C1F18)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+    // 0..4 stages; repaint only when the stage changes.
+    final stage = (progress.clamp(0.0, 1.0) * 4).floor();
+    return CustomPaint(
+      painter: _AmbientGlowPainter(
+        stage: stage,
+        isDark: isDark,
+        base: KColor.bg,
+        keyLight: KColor.violet,
+        bounce: KColor.green,
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -120,
-            right: -120,
-            child: AnimatedContainer(
-              duration: const Duration(seconds: 1),
-              width: 320,
-              height: 320,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: progress < 0.3
-                        ? const Color(0xFF6366F1).withValues(alpha: 0.08)
-                        : progress < 0.7
-                            ? const Color(0xFF3B82F6).withValues(alpha: 0.08)
-                            : const Color(0xFF10B981).withValues(alpha: 0.08),
-                    blurRadius: 120,
-                    spreadRadius: 40,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+      isComplex: false,
+      willChange: false,
     );
   }
+}
+
+class _AmbientGlowPainter extends CustomPainter {
+  _AmbientGlowPainter({
+    required this.stage,
+    required this.isDark,
+    required this.base,
+    required this.keyLight,
+    required this.bounce,
+  });
+
+  final int stage;
+  final bool isDark;
+  final Color base, keyLight, bounce;
+
+  final Paint _base = Paint();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Graphite: a flat ground, no light field.
+    _base.color = base;
+    canvas.drawRect(Offset.zero & size, _base);
+  }
+
+  @override
+  bool shouldRepaint(covariant _AmbientGlowPainter old) =>
+      old.stage != stage || old.isDark != isDark || old.base != base || old.keyLight != keyLight || old.bounce != bounce;
 }
 
 // ─── Single Page Exercise View ──────────────────────────────────────────────
@@ -2212,6 +2676,15 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onRemovePermanently;
   final VoidCallback onApplyReorder;
 
+  // Warm-up ramp, rest length and last-session ghost values.
+  final List<WarmUpStep>? warmUpPlan;
+  final VoidCallback onAddWarmUps;
+  final VoidCallback onLogAllWarmUps;
+  final VoidCallback onClearWarmUps;
+  final int restSeconds;
+  final VoidCallback onEditRest;
+  final ValueChanged<SetEntry> onCopyPrevious;
+
   const _ExerciseWorkoutPage({
     super.key,
     required this.exercise,
@@ -2261,6 +2734,13 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.onReplacePermanently,
     required this.onRemovePermanently,
     required this.onApplyReorder,
+    this.warmUpPlan,
+    required this.onAddWarmUps,
+    required this.onLogAllWarmUps,
+    required this.onClearWarmUps,
+    required this.restSeconds,
+    required this.onEditRest,
+    required this.onCopyPrevious,
   });
 
   @override
@@ -2273,10 +2753,21 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   late TextEditingController _sessionNotesController;
 
   late double _selectedWeight;
+
+  bool get _isBodyweight {
+    final m = widget.exercise.effectiveExecutionMode;
+    return m == ExerciseExecutionMode.bodyweightReps || m == ExerciseExecutionMode.weightedBodyweight;
+  }
   late int _selectedReps;
+
+  /// Bumped on every weight/reps dial change. Only the dial readout, the plate
+  /// stack and the input view listen, so spinning a wheel (one callback per
+  /// detent) no longer rebuilds the hero, journal and cues of this page.
+  final ValueNotifier<int> _dialTick = ValueNotifier<int>(0);
   double? _selectedRpe;
   late SetType _selectedSetType;
-  bool _showGlowPulse = false;
+  /// Bumped each time a set lands; keys the console's one-shot jade pulse.
+  int _pulseEpoch = 0;
   bool _showCues = false;
   late KynoProgressionAdvice _progressionAdvice;
 
@@ -2349,16 +2840,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     }
 
     if (widget.sets.length > oldWidget.sets.length) {
-      setState(() {
-        _showGlowPulse = true;
-      });
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted) {
-          setState(() {
-            _showGlowPulse = false;
-          });
-        }
-      });
+      // didUpdateWidget is always followed by build, so no setState is needed.
+      // The new epoch re-keys a one-shot tween (no timers).
+      _pulseEpoch++;
     }
   }
 
@@ -2367,16 +2851,14 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     _scrollController.dispose();
     _notesController.dispose();
     _sessionNotesController.dispose();
+    _dialTick.dispose();
     super.dispose();
   }
 
   void _showActionsMenu() {
-    showModalBottomSheet(
+    showKSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      isScrollControlled: false,
       builder: (context) => _ExerciseActionsSheet(
         exercise: widget.exercise,
         isSkipped: widget.isSkipped,
@@ -2389,6 +2871,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
         onAddBefore: () => widget.onAddExtraExercise(widget.exercise, true),
         onAddAfter: () => widget.onAddExtraExercise(widget.exercise, false),
         onUndoReplacement: widget.onUndoReplacement,
+        onAddWarmUps: widget.onAddWarmUps,
+        restSeconds: widget.restSeconds,
+        onEditRest: widget.onEditRest,
       ),
     );
   }
@@ -2398,42 +2883,45 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       decoration: BoxDecoration(
-        color: const Color(0xFF141624).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: KColor.border, width: 0.5),
+        color: KColor.card,
+        borderRadius: KRadius.lg,
+        border: Border.all(color: _hairline(), width: 1),
+        boxShadow: KShadow.card,
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             isSub ? Icons.swap_horiz_rounded : Icons.block_rounded,
-            color: isSub ? KColor.blue : KColor.danger,
+            color: isSub ? KColor.textSecondary : KColor.danger,
             size: 44,
           ),
           const SizedBox(height: 12),
           Text(
-            isSub ? 'EXERCISE SUBSTITUTED' : 'EXERCISE SKIPPED',
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            isSub ? 'Swapped out' : 'Skipped for today',
+            textAlign: TextAlign.center,
+            style: KText.h3.copyWith(fontSize: 17, letterSpacing: 0.4),
           ),
           const SizedBox(height: 6),
           Text(
-            isSub 
-                ? 'Replaced by another exercise in this session.' 
-                : 'Reason: ${widget.skipReason ?? "Not specified"}',
+            isSub
+                ? 'Another exercise took its place today.'
+                : 'Reason: ${widget.skipReason ?? "none given"}',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: KColor.textMuted, fontSize: 12),
+            style: _WsText.body.copyWith(color: KColor.textMuted),
           ),
           const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: isSub ? widget.onUndoReplacement : widget.onUndoSkip,
             icon: const Icon(Icons.refresh_rounded, size: 16),
-            label: Text(isSub ? 'Undo Substitution' : 'Re-enable Exercise'),
+            label: Text(isSub ? 'Undo swap' : 'Bring it back', style: _WsText.button.copyWith(color: KColor.onInk)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E1E2C),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              side: const BorderSide(color: Color(0xFF3E3E50), width: 0.5),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              backgroundColor: KColor.ink,
+              foregroundColor: KColor.onInk,
+              elevation: 0,
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              minimumSize: const Size(0, 52),
             ),
           ),
         ],
@@ -2452,7 +2940,16 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               flex: 5,
               child: SingleChildScrollView(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
-                child: _buildHeroSection(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildTitleRow(),
+                    const SizedBox(height: 12),
+                    _buildStatsStrip(),
+                    const SizedBox(height: 14),
+                    _buildInsightsSection(),
+                  ],
+                ),
               ),
             ),
             Expanded(
@@ -2470,32 +2967,18 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           controller: _scrollController,
           padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
           children: [
-            _buildHeroSection(),
+            _buildTitleRow(),
             const SizedBox(height: 14),
             _buildSkippedBanner(),
+            const SizedBox(height: 14),
+            _buildInsightsSection(),
           ],
         );
       }
     }
 
-    final leftCol = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeroSection(),
-      ],
-    );
-
     final consolePanel = _buildDialConsolePanel();
     final journal = _buildLoggedSetsAndSessionNotesJournal();
-
-    final rightCol = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        consolePanel,
-        const SizedBox(height: 12),
-        journal,
-      ],
-    );
 
     if (widget.isWideLayout) {
       return Row(
@@ -2505,7 +2988,16 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             flex: 5,
             child: SingleChildScrollView(
               padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
-              child: leftCol,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTitleRow(),
+                  const SizedBox(height: 12),
+                  _buildStatsStrip(),
+                  const SizedBox(height: 14),
+                  _buildInsightsSection(),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -2513,22 +3005,38 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             child: SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
-              child: rightCol,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  consolePanel,
+                  const SizedBox(height: 12),
+                  journal,
+                ],
+              ),
             ),
           ),
         ],
       );
-    } else {
-      return ListView(
-        controller: _scrollController,
-        padding: EdgeInsets.fromLTRB(16, 12, 16, widget.dockHeight + 16.0),
-        children: [
-          leftCol,
-          const SizedBox(height: 14),
-          rightCol,
-        ],
-      );
     }
+
+    // Phone: the set you're about to lift comes first, right under the name.
+    // History and Kyno's context follow; nothing important hides under the
+    // dock because the list pads by the dock's measured height.
+    return ListView(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(16, 8, 16, widget.dockHeight + 16.0),
+      children: [
+        _buildTitleRow(),
+        const SizedBox(height: 12),
+        consolePanel,
+        const SizedBox(height: 16),
+        _buildStatsStrip(),
+        const SizedBox(height: 16),
+        journal,
+        const SizedBox(height: 16),
+        _buildInsightsSection(),
+      ],
+    );
   }
 
   Widget _buildLoggedSetsAndSessionNotesJournal() {
@@ -2538,55 +3046,72 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     final dropVol = groups.where((g) => g.isWorkingSet).fold(0.0, (s, g) => s + g.subSetsVolume);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF141624).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: KColor.border, width: 0.5),
+        color: KColor.card,
+        borderRadius: KRadius.lg,
+        border: Border.all(color: _hairline(), width: 1),
+        boxShadow: KShadow.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               Text(
-                'LOGGED SETS ($workingSetsCount)',
-                style: const TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                'Logged sets ($workingSetsCount)',
+                style: KText.h3.copyWith(fontSize: 15),
               ),
               if (groups.isNotEmpty)
                 Text(
                   dropVol > 0
                       ? 'Vol: ${totalVol.toStringAsFixed(0)} kg (Drop: ${dropVol.toStringAsFixed(0)} kg)'
                       : 'Volume: ${totalVol.toStringAsFixed(0)} kg',
-                  style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: _WsText.num.copyWith(fontSize: 13, color: KColor.textSecondary),
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          
+          const SizedBox(height: 6),
+
           if (groups.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
               child: Center(
                 child: Text(
-                  'No sets logged yet. Complete a set below to begin.',
-                  style: TextStyle(color: KColor.textMuted, fontSize: 12),
+                  'No sets yet. Log your first one below.',
+                  textAlign: TextAlign.center,
+                  style: _WsText.body.copyWith(color: KColor.textMuted),
                 ),
               ),
             )
           else ...[
-            ListView.separated(
+            Builder(builder: (context) {
+            // Same answer for every row: look it up once, not per set.
+            final previousBest = WorkoutService.instance.bestSetBefore(widget.exercise.id, DateTime.now());
+            return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: groups.length,
-              separatorBuilder: (context, index) => const Divider(color: KColor.border, height: 1),
+              separatorBuilder: (context, index) => Divider(color: _hairline(), height: 1),
               itemBuilder: (context, groupIdx) {
                 final group = groups[groupIdx];
                 final mainSet = group.mainSet;
-                final previousBest = WorkoutService.instance.bestSetBefore(widget.exercise.id, DateTime.now());
-                final isPr = previousBest == null || mainSet.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+                final isPr = WorkoutService.beatsPreviousBest(mainSet, previousBest);
                 final mainFlatIdx = widget.sets.indexOf(mainSet);
+
+                final isWarmUp = mainSet.setType == SetType.warmUp;
+                // Same set last session (matched by type and order), as a hint.
+                final prevForRow = PreviousSetLookup.forLoggedSet(
+                  previousSets: widget.lastEntry?.sets ?? const [],
+                  todaySets: widget.sets,
+                  indexInToday: mainFlatIdx,
+                );
+                // Completed working sets glow jade; PRs are saffron; warm-ups stay quiet.
+                final badgeColor = isPr ? KColor.saffron : (isWarmUp ? KColor.textMuted : KColor.green);
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2595,22 +3120,19 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                     children: [
                       Row(
                         children: [
-                          // Set number badge
+                          // Set number badge with a jade (or saffron PR) check ring
                           Container(
-                            width: 24,
-                            height: 24,
+                            width: 32,
+                            height: 32,
                             decoration: BoxDecoration(
-                              color: isPr ? KColor.amber.withValues(alpha: 0.15) : const Color(0xFF13131F),
+                              color: badgeColor.withValues(alpha: KColor.isDark ? 0.14 : 0.10),
                               shape: BoxShape.circle,
+                              border: Border.all(color: badgeColor.withValues(alpha: 0.55), width: 1),
                             ),
                             alignment: Alignment.center,
                             child: Text(
                               '${groupIdx + 1}',
-                              style: TextStyle(
-                                color: isPr ? KColor.amber : KColor.textSecondary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                              ),
+                              style: _WsText.num.copyWith(fontSize: 14, fontWeight: FontWeight.w700, color: badgeColor),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -2619,69 +3141,61 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        '${mainSet.weight.toStringAsFixed(mainSet.weight == mainSet.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${mainSet.reps} reps',
-                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                      decoration: BoxDecoration(
-                                        color: _setTypeColor(mainSet.setType).withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(5),
-                                      ),
-                                      child: Text(
-                                        mainSet.setType.shortLabel,
-                                        style: TextStyle(
-                                          color: _setTypeColor(mainSet.setType),
-                                          fontSize: 8,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                Text(
+                                  '${mainSet.weight.toStringAsFixed(mainSet.weight == mainSet.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${plural(mainSet.reps, 'rep')}',
+                                  style: _WsText.num.copyWith(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  widget.enableRpeTracking && mainSet.rpe != null
-                                      ? 'RPE ${mainSet.rpe} • ${mainSet.volume.toStringAsFixed(0)} kg volume'
-                                      : '${mainSet.volume.toStringAsFixed(0)} kg volume',
-                                  style: const TextStyle(color: KColor.textMuted, fontSize: 10),
+                                  [
+                                    if (mainSet.setType == SetType.warmUp) 'Warm-up set',
+                                    if (mainSet.setType == SetType.dropSet) 'Drop set',
+                                    if (widget.enableRpeTracking && mainSet.rpe != null) 'RPE ${amount(mainSet.rpe!)}',
+                                    '${whole(mainSet.volume)} kg volume',
+                                    if (prevForRow != null) 'last ${PreviousSetLookup.format(prevForRow)}',
+                                  ].join(', '),
+                                  style: _WsText.bodySmall.copyWith(
+                                    fontSize: 13,
+                                    color: mainSet.setType == SetType.normal ? KColor.textSecondary : _setTypeColor(mainSet.setType),
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                           if (isPr) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: KColor.amber.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: KColor.amber.withValues(alpha: 0.3), width: 0.5),
-                              ),
-                              child: const Row(
+                            Semantics(
+                              label: 'Personal record',
+                              excludeSemantics: true,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.workspace_premium_rounded, color: KColor.amber, size: 10),
-                                  SizedBox(width: 3),
-                                  Text('PR', style: TextStyle(color: KColor.amber, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                                  KIcon(KIcons.record, size: KIcons.sm, color: KColor.saffron),
+                                  const SizedBox(width: 3),
+                                  Text('PR', style: _WsText.chip.copyWith(color: KColor.saffron, fontWeight: FontWeight.w700)),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 4),
                           ],
-                          GestureDetector(
-                            onTap: () {
-                              if (mainFlatIdx != -1) {
-                                widget.onRemoveSet(mainFlatIdx);
-                              }
-                            },
-                            child: const Icon(Icons.remove_circle_rounded, color: Color(0xFF3B3B4F), size: 18),
+                          Semantics(
+                            button: true,
+                            label: 'Remove set ${groupIdx + 1}',
+                            excludeSemantics: true,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                if (mainFlatIdx != -1) {
+                                  widget.onRemoveSet(mainFlatIdx);
+                                }
+                              },
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: Icon(Icons.remove_circle_rounded, color: KColor.textMuted, size: 22),
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -2697,49 +3211,49 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                               return Padding(
                                 padding: const EdgeInsets.only(left: 20, top: 4, bottom: 4),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  padding: const EdgeInsets.fromLTRB(12, 0, 0, 0),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF191B2A),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: KColor.amber.withValues(alpha: 0.25), width: 0.5),
+                                    color: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.03),
+                                    borderRadius: KRadius.sm,
+                                    border: Border(left: BorderSide(color: KColor.saffron.withValues(alpha: 0.7), width: 2)),
                                   ),
                                   child: Row(
                                     children: [
-                                      const Text(
+                                      Text(
                                         '↳',
-                                        style: TextStyle(color: KColor.amber, fontSize: 14, fontWeight: FontWeight.bold),
+                                        style: KText.bodyMedium.copyWith(color: KColor.saffron, fontSize: 14, fontWeight: FontWeight.w700),
                                       ),
                                       const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                        decoration: BoxDecoration(
-                                          color: KColor.amber.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          group.subSets.length > 1 ? 'DROP ${d + 1}' : 'DROP',
-                                          style: const TextStyle(
-                                            color: KColor.amber,
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
+                                      Text(
+                                        group.subSets.length > 1 ? 'Drop set ${d + 1}' : 'Drop set',
+                                        style: _WsText.chip.copyWith(color: KColor.saffron),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          '${drop.weight.toStringAsFixed(drop.weight == drop.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${drop.reps} reps  (${drop.volume.toStringAsFixed(0)} kg)',
-                                          style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700),
+                                          '${drop.weight.toStringAsFixed(drop.weight == drop.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${plural(drop.reps, 'rep')}  (${drop.volume.toStringAsFixed(0)} kg)',
+                                          style: _WsText.num.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
                                         ),
                                       ),
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (dropFlatIdx != -1) {
-                                            widget.onRemoveSet(dropFlatIdx);
-                                          }
-                                        },
-                                        child: const Icon(Icons.close_rounded, color: Color(0xFF55556E), size: 16),
+                                      Semantics(
+                                        button: true,
+                                        label: 'Remove drop set',
+                                        excludeSemantics: true,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () {
+                                            if (dropFlatIdx != -1) {
+                                              widget.onRemoveSet(dropFlatIdx);
+                                            }
+                                          },
+                                          child: SizedBox(
+                                            width: 48,
+                                            height: 48,
+                                            child: Center(
+                                              child: Icon(Icons.close_rounded, color: KColor.textMuted, size: 18),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -2753,22 +3267,23 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   ),
                 );
               },
-            ),
+            );
+            }),
             const SizedBox(height: 12),
           ],
-          
-          const Divider(color: KColor.border, height: 1),
+
+          Divider(color: _hairline(), height: 1),
           const SizedBox(height: 12),
-          
+
           // Unified Session Notes at the bottom of the list
           Row(
             children: [
-              const Icon(Icons.edit_note_rounded, color: KColor.textSecondary, size: 18),
+              Icon(Icons.edit_note_rounded, color: KColor.textSecondary, size: 18),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'WORKOUT SESSION NOTES',
-                  style: const TextStyle(color: KColor.textMuted, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                  'Session notes',
+                  style: _WsText.meta.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -2777,10 +3292,11 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           TextField(
             controller: _sessionNotesController,
             maxLines: 2,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-            decoration: const InputDecoration(
-              hintText: 'Add general notes about energy levels, injuries, rest cycles...',
-              hintStyle: TextStyle(color: KColor.textMuted, fontSize: 11),
+            style: _WsText.body.copyWith(color: KColor.textPrimary),
+            cursorColor: KColor.textPrimary,
+            decoration: InputDecoration(
+              hintText: 'Energy, niggles, rest, anything worth remembering',
+              hintStyle: _WsText.bodySmall.copyWith(color: KColor.textMuted),
               border: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.zero,
@@ -2791,160 +3307,194 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     );
   }
 
-  // ── Exercise Info & Bezier Sparkline ──────────────────────────────────────
+  // ── Exercise title, stats strip and Kyno insights ────────────────────────
 
-  Widget _buildHeroSection() {
-    final lastStr = widget.lastEntry != null 
-        ? WorkoutService.instance.lastSessionDisplay(widget.lastEntry).replaceAll('Last: ', '') 
-        : 'None';
+  String get _exTypeLabel => switch (widget.exercise.type) {
+        ExerciseType.barbellCompound => 'Barbell compound',
+        ExerciseType.dumbbell => 'Dumbbell',
+        ExerciseType.cableMachine => 'Cable machine',
+        ExerciseType.isolation => 'Isolation',
+        ExerciseType.bodyweight => 'Bodyweight',
+      };
+
+  /// Name, muscle group and the two page actions. The muscle mark comes from
+  /// the shared icon language.
+  Widget _buildTitleRow() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.isSubstitution && widget.substitutedForName != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      KIcon(Icons.swap_horiz_rounded, size: KIcons.sm, color: KColor.violet),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Replacing ${widget.substitutedForName}',
+                          style: _WsText.meta.copyWith(color: KColor.violet, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Text(widget.exercise.name, style: _WsText.title),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      widget.exercise.muscleGroup,
+                      style: _WsText.meta.copyWith(fontWeight: FontWeight.w600, color: KColor.textPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(_exTypeLabel, style: _WsText.meta),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'Exercise history',
+          icon: Icon(Icons.insights_rounded, color: KColor.textPrimary, size: 22),
+          onPressed: widget.onOpenHistory,
+        ),
+        IconButton(
+          tooltip: 'Exercise actions',
+          icon: Icon(Icons.tune_rounded, color: KColor.textSecondary, size: 22),
+          onPressed: _showActionsMenu,
+        ),
+      ],
+    );
+  }
+
+  /// Last / Typical / Best / Today. A brand-new exercise has none of these,
+  /// so it gets one honest line instead of a row of blanks.
+  Widget _buildStatsStrip() {
+    String kg(double w) => amount(w);
+    final lastStr = widget.lastEntry != null
+        ? WorkoutService.instance.lastSessionDisplay(widget.lastEntry).replaceAll('Last: ', '')
+        : '';
     final bestVal = WorkoutService.instance.bestSetEver(widget.exercise.id);
-    final bestStr = bestVal != null 
-        ? '${bestVal.weight.toStringAsFixed(bestVal.weight == bestVal.weight.truncateToDouble() ? 0 : 1)}kg × ${bestVal.reps}' 
-        : 'None';
-    final currentStr = widget.sets.isNotEmpty 
-        ? widget.sets.map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}×${s.reps}').join(', ')
-        : 'None';
+    final bestStr = bestVal != null ? '${kg(bestVal.weight)} kg × ${bestVal.reps}' : '';
+    final currentStr = widget.sets.map((s) => '${kg(s.weight)}×${s.reps}').join(', ');
 
-
-    // Calculate typical trends from history
+    // Typical working weight and rep range from history.
     double totalSetsCount = 0;
     int sessionsWithSetsCount = 0;
-    List<int> workingRepsList = [];
-    List<double> workingWeightsList = [];
+    final workingRepsList = <int>[];
+    final workingWeightsList = <double>[];
     for (final h in widget.history) {
       final entry = h.entry;
-      if (entry.isSkipped) continue;
-      final sets = entry.sets;
-      if (sets.isEmpty) continue;
-      totalSetsCount += sets.length;
+      if (entry.isSkipped || entry.sets.isEmpty) continue;
+      totalSetsCount += entry.sets.length;
       sessionsWithSetsCount++;
-      for (final s in sets) {
+      for (final s in entry.sets) {
         if (s.isMainWorkingSet) {
           workingRepsList.add(s.reps);
           workingWeightsList.add(s.weight);
         }
       }
     }
-    double typicalSets = 0;
-    int typicalRepMin = 0;
-    int typicalRepMax = 0;
-    double typicalWeight = 0.0;
-    if (sessionsWithSetsCount > 0) {
-      typicalSets = totalSetsCount / sessionsWithSetsCount;
-    }
-    if (workingRepsList.isNotEmpty) {
-      workingRepsList.sort();
-      typicalRepMin = workingRepsList.first;
-      typicalRepMax = workingRepsList.last;
-    }
+    String typicalStr = '';
     if (workingWeightsList.isNotEmpty) {
-      typicalWeight = workingWeightsList.reduce((a, b) => a + b) / workingWeightsList.length;
-    }
-
-    final typicalSetsStr = typicalSets > 0 ? '${typicalSets.toStringAsFixed(0)} sets' : '';
-    final typicalWeightStr = typicalWeight > 0 ? '${typicalWeight.toStringAsFixed(typicalWeight == typicalWeight.truncateToDouble() ? 0 : 1)}kg' : '';
-    final typicalRepsStr = (typicalRepMin > 0 && typicalRepMax > 0)
-        ? (typicalRepMin == typicalRepMax ? '$typicalRepMin reps' : '$typicalRepMin-$typicalRepMax reps')
-        : '';
-    String typicalTrendStr = 'None';
-    if (typicalWeightStr.isNotEmpty) {
-      typicalTrendStr = '$typicalWeightStr × $typicalRepsStr';
-      if (typicalSetsStr.isNotEmpty) {
-        typicalTrendStr += ' ($typicalSetsStr)';
+      workingRepsList.sort();
+      final lo = workingRepsList.first;
+      final hi = workingRepsList.last;
+      final w = workingWeightsList.reduce((a, b) => a + b) / workingWeightsList.length;
+      final reps = lo == hi ? '$lo' : '$lo-$hi';
+      typicalStr = '${kg(w)} kg × $reps';
+      if (sessionsWithSetsCount > 0) {
+        typicalStr += ', ${plural((totalSetsCount / sessionsWithSetsCount).round(), 'set')}';
       }
     }
 
+    final strip = BoxDecoration(
+      border: Border(
+        top: BorderSide(color: _hairline()),
+        bottom: BorderSide(color: _hairline()),
+      ),
+    );
 
-    String exTypeLabel = switch (widget.exercise.type) {
-      ExerciseType.barbellCompound => 'Barbell Compound',
-      ExerciseType.dumbbell => 'Dumbbell',
-      ExerciseType.cableMachine => 'Cable Machine',
-      ExerciseType.isolation => 'Isolation',
-      ExerciseType.bodyweight => 'Bodyweight',
-    };
+    final firstTime = lastStr.isEmpty && bestStr.isEmpty && typicalStr.isEmpty;
+    if (firstTime) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: strip,
+        child: Row(
+          children: [
+            KIcon(KIcons.baseline, size: KIcons.sm, color: KColor.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                    text: 'First time: ',
+                    style: _WsText.body.copyWith(fontWeight: FontWeight.w700, color: KColor.textPrimary),
+                  ),
+                  TextSpan(
+                    text: 'find your working weight',
+                    style: _WsText.body.copyWith(color: KColor.textSecondary),
+                  ),
+                ]),
+              ),
+            ),
+            if (currentStr.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              Flexible(child: _buildHeroStatCol('Today', currentStr, KColor.textPrimary, expand: false)),
+            ],
+          ],
+        ),
+      );
+    }
 
     return Container(
-      padding: EdgeInsets.zero,
-      decoration: const BoxDecoration(
-        color: Colors.transparent,
-      ),
-      child: Column(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: strip,
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (widget.isSubstitution)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: KColor.blue.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '🔄 REPLACING ${widget.substitutedForName?.toUpperCase()}',
-                            style: const TextStyle(color: KColor.blue, fontSize: 8.5, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    Text(
-                      widget.exercise.name,
-                      style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900),
-                    ),
-                    Text(
-                      '${widget.exercise.muscleGroup} • $exTypeLabel',
-                      style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.insights_rounded, color: KColor.green, size: 22),
-                    onPressed: widget.onOpenHistory,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.tune_rounded, color: KColor.textSecondary, size: 22),
-                    onPressed: _showActionsMenu,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // Single Bounded Kyno Stage (~195px): Demonstration GIF (2 loops) -> AnimatedSwitcher -> Smart Progression Card
-          KynoStageSlot(
-            exercise: widget.exercise,
-            advice: _progressionAdvice,
-          ),
+          _buildHeroStatCol('Last session', lastStr, KColor.textPrimary),
+          _buildHeroStatCol('Typical', typicalStr, KColor.textPrimary),
+          _buildHeroStatCol('Best', bestStr, KColor.saffron),
+          _buildHeroStatCol('Today', currentStr, KColor.textPrimary),
+        ],
+      ),
+    );
+  }
+
+  /// Kyno's stage (demo and progression advice), the progression chart and
+  /// any split suggestions. Context, so it sits below the controls.
+  Widget _buildInsightsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        KynoStageSlot(
+          exercise: widget.exercise,
+          advice: _progressionAdvice,
+        ),
+        // A first-timer has no curve to draw; the stats strip already says so.
+        if (widget.history.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildHeroStatCol('Last Session', lastStr, KColor.textSecondary),
-              _buildHeroStatCol('Typical Trend', typicalTrendStr, KColor.blue),
-              _buildHeroStatCol('Lifetime Best', bestStr, KColor.amber),
-              _buildHeroStatCol('Current Session', currentStr, KColor.green),
-            ],
-          ),
-          const SizedBox(height: 10),
           ExerciseProgressionChart(
             history: widget.history,
             exerciseName: widget.exercise.name,
           ),
-          if (_hasContextualPrompts) ...[
-            const SizedBox(height: 8),
-            _buildContextualPrompts(),
-          ],
         ],
-      ),
+        if (_hasContextualPrompts) ...[
+          const SizedBox(height: 8),
+          _buildContextualPrompts(),
+        ],
+      ],
     );
   }
 
@@ -2959,304 +3509,382 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       children: [
         if (widget.isRecurringAddition && widget.isTemporaryAddition) ...[
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: KColor.green.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: KColor.green.withValues(alpha: 0.15), width: 1.0),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome_rounded, color: KColor.green, size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'RECURRING TEMPORARY ADDITION',
-                      style: TextStyle(color: KColor.green, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'You added ${widget.exercise.name} in several recent ${widget.splitDayName} sessions. Add it permanently to this split program?',
-                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: widget.onAddPermanently,
-                  style: TextButton.styleFrom(
-                    backgroundColor: KColor.green.withValues(alpha: 0.12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Add Permanently', style: TextStyle(color: KColor.green, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
+          _buildPromptCard(
+            tone: KColor.green,
+            title: 'You keep adding this',
+            body: 'You\'ve added ${widget.exercise.name} to your last few ${widget.splitDayName} sessions. Make it part of the split?',
+            actionLabel: 'Add to split',
+            onAction: widget.onAddPermanently,
           ),
         ],
 
         if (widget.recurringSubstitutionReplacement != null) ...[
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: KColor.blue.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: KColor.blue.withValues(alpha: 0.15), width: 1.0),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome_rounded, color: KColor.blue, size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'RECURRING SUBSTITUTION DETECTED',
-                      style: TextStyle(color: KColor.blue, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Replace ${widget.exercise.name} with ${widget.recurringSubstitutionReplacement!.name} in your split?',
-                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: widget.onReplacePermanently,
-                  style: TextButton.styleFrom(
-                    backgroundColor: KColor.blue.withValues(alpha: 0.12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Replace Permanently', style: TextStyle(color: KColor.blue, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
+          _buildPromptCard(
+            tone: KColor.violet,
+            title: 'You keep swapping this',
+            body: 'You keep doing ${widget.recurringSubstitutionReplacement!.name} instead of ${widget.exercise.name}. Swap it in your split?',
+            actionLabel: 'Swap in split',
+            onAction: widget.onReplacePermanently,
           ),
         ],
 
         if (widget.isRecurringSkip) ...[
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: KColor.danger.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: KColor.danger.withValues(alpha: 0.15), width: 1.0),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome_rounded, color: KColor.danger, size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'FREQUENT SKIP DETECTED',
-                      style: TextStyle(color: KColor.danger, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'You frequently skip ${widget.exercise.name}. Remove it from this split?',
-                  style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: widget.onRemovePermanently,
-                  style: TextButton.styleFrom(
-                    backgroundColor: KColor.danger.withValues(alpha: 0.12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Remove Permanently', style: TextStyle(color: KColor.danger, fontSize: 11.5, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
+          _buildPromptCard(
+            tone: KColor.danger,
+            title: 'You often skip this',
+            body: '${widget.exercise.name} keeps getting skipped. Drop it from this split?',
+            actionLabel: 'Remove from split',
+            onAction: widget.onRemovePermanently,
           ),
         ],
 
         if (widget.reorderRecommendation != null && widget.exercise.id == widget.reorderRecommendation!.first.id) ...[
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFB347).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFFFB347).withValues(alpha: 0.15), width: 1.0),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFB347), size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'REORDER SEQUENCING DETECTED',
-                      style: TextStyle(color: Color(0xFFFFB347), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Update exercise order to match your actual training sequence?',
-                  style: TextStyle(color: Colors.white, fontSize: 11, height: 1.3),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: widget.onApplyReorder,
-                  style: TextButton.styleFrom(
-                    backgroundColor: const Color(0xFFFFB347).withValues(alpha: 0.12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Update Order', style: TextStyle(color: Color(0xFFFFB347), fontSize: 11.5, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
+          _buildPromptCard(
+            tone: KColor.violet,
+            title: 'Your order has changed',
+            body: 'You\'ve been training in a different order. Save it to your split?',
+            actionLabel: 'Update order',
+            onAction: widget.onApplyReorder,
           ),
         ],
       ],
     );
   }
 
-  Widget _buildHeroStatCol(String title, String val, Color highlight) {
-    return Expanded(
+  /// Kyno's contextual suggestion card: tinted surface, sparkle glyph, eyebrow
+  /// title, one sentence and a single tonal action. The tone is paired with a
+  /// distinct title, so colour is never the only signal.
+  Widget _buildPromptCard({
+    required Color tone,
+    required String title,
+    required String body,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      decoration: BoxDecoration(
+        color: KColor.card,
+        borderRadius: KRadius.md,
+        border: Border.all(color: _hairline(), width: 1.0),
+        boxShadow: KShadow.card,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded, color: tone, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: KText.h3.copyWith(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           Text(
-            val,
-            style: TextStyle(color: highlight, fontSize: 12, fontWeight: FontWeight.bold),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+            body,
+            style: _WsText.body.copyWith(color: KColor.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: onAction,
+            style: TextButton.styleFrom(
+              foregroundColor: tone == KColor.danger ? KColor.danger : KColor.textPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: KRadius.pill,
+                side: BorderSide(
+                  color: tone == KColor.danger
+                      ? KColor.danger.withValues(alpha: 0.5)
+                      : KColor.fg.withValues(alpha: KColor.isDark ? 0.18 : 0.2),
+                ),
+              ),
+              minimumSize: const Size(0, 48),
+            ),
+            child: Text(
+              actionLabel,
+              style: _WsText.chip.copyWith(
+                fontSize: 14,
+                color: tone == KColor.danger ? KColor.danger : KColor.textPrimary,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
+
+  Widget _buildHeroStatCol(String title, String val, Color highlight, {bool expand = true}) {
+    final empty = val.isEmpty;
+    final col = Padding(
+      padding: const EdgeInsetsDirectional.only(end: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: _WsText.bodySmall.copyWith(fontSize: 12, color: KColor.textMuted)),
+          const SizedBox(height: 4),
+          Semantics(
+            label: empty ? 'none yet' : null,
+            child: Text(
+              empty ? '-' : val,
+              style: _WsText.num.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: empty ? KColor.textMuted : highlight,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return expand ? Expanded(child: col) : col;
+  }
+
   // Cues and silhouette are integrated directly inside Unified Console card
 
   // ── Wheel Dials selectors (Change 1) ──────────────────────────────────────
 
-  Widget _buildDialConsolePanel() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: _showGlowPulse ? KColor.green : KColor.border,
-          width: _showGlowPulse ? 2.0 : 0.8,
+  /// Kyno's target for today, e.g. "72.5 × 8–10", parsed from the
+  /// progression engine's "72.5 kg • 4 sets • 8–10 reps". Null when it has
+  /// no concrete number (first sessions, timed work).
+  String? get _kynoTarget {
+    final t = _progressionAdvice.todayTarget;
+    final w = RegExp(r'(\d+(?:\.\d+)?)\s*kg').firstMatch(t);
+    final r = RegExp(r'(\d+(?:\s*[--]\s*\d+)?)\s*reps?').firstMatch(t);
+    if (w == null || r == null) return null;
+    final wv = double.tryParse(w.group(1)!);
+    if (wv == null || wv <= 0) return null;
+    return '${amount(wv)} × ${r.group(1)!.replaceAll(' ', '')}';
+  }
+
+  Widget _buildGhostRow() {
+    final prev = PreviousSetLookup.forNextSet(
+      previousSets: widget.lastEntry?.sets ?? const [],
+      todaySets: widget.sets,
+      nextType: _selectedSetType,
+    );
+    final kyno = _selectedSetType == SetType.normal ? _kynoTarget : null;
+    if (prev == null && kyno == null) return const SizedBox.shrink();
+    final ordinal = widget.sets.where((s) => s.setType == _selectedSetType).length + 1;
+    final setWord = switch (_selectedSetType) {
+      SetType.warmUp => 'warm-up $ordinal',
+      SetType.dropSet => 'drop $ordinal',
+      SetType.normal => 'set $ordinal',
+    };
+    final ghostStyle = _WsText.bodySmall.copyWith(
+      color: KColor.textSecondary,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          if (prev != null)
+            Semantics(
+              button: true,
+              label: 'Last time, $setWord: ${PreviousSetLookup.format(prev).replaceAll('×', 'for')} reps. Double tap to use it.',
+              excludeSemantics: true,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const Key('ghost_previous_set'),
+                  onTap: () => widget.onCopyPrevious(prev),
+                  borderRadius: KRadius.pill,
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: KRadius.pill,
+                      border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.16)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.history_rounded, size: 15, color: KColor.textMuted),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text.rich(
+                            TextSpan(children: [
+                              TextSpan(text: 'Last $setWord  '),
+                              TextSpan(
+                                text: PreviousSetLookup.format(prev),
+                                style: ghostStyle.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w700),
+                              ),
+                            ]),
+                            style: ghostStyle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(Icons.north_west_rounded, size: 13, color: KColor.textMuted),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (kyno != null)
+            Semantics(
+              label: "Kyno's target: ${kyno.replaceAll('×', 'for')} reps",
+              excludeSemantics: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  KDot(color: KColor.kyno, size: 6),
+                  const SizedBox(width: 6),
+                  Text('Kyno  ', style: ghostStyle.copyWith(color: KColor.textMuted)),
+                  Text(kyno, style: ghostStyle.copyWith(fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Queued warm-ups: the current one is in the dials; "Log all" records the
+  /// rest at once.
+  Widget _buildWarmUpQueue() {
+    final plan = widget.warmUpPlan!;
+    final chipStyle = _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w600);
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        decoration: BoxDecoration(
+          color: KColor.tint(KColor.train),
+          borderRadius: KRadius.md,
+          border: Border.all(color: KColor.train.withValues(alpha: 0.3)),
         ),
-        boxShadow: _showGlowPulse
-            ? [
-                BoxShadow(
-                  color: KColor.green.withValues(alpha: 0.25),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                )
-              ]
-            : [],
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    plan.length == 1 ? 'Last warm-up' : '${plan.length} warm-ups to go',
+                    style: _WsText.meta.copyWith(fontWeight: FontWeight.w700, color: KColor.textPrimary),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 2,
+                    children: [
+                      for (var i = 0; i < plan.length; i++)
+                        Text(
+                          '${amount(plan[i].weight)}×${plan[i].reps}',
+                          style: chipStyle.copyWith(
+                            color: i == 0 ? KColor.train : KColor.textSecondary,
+                            fontWeight: i == 0 ? FontWeight.w800 : FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: widget.onLogAllWarmUps,
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: KColor.textPrimary),
+              child: Text('Log all', style: _WsText.chip.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w700)),
+            ),
+            IconButton(
+              tooltip: 'Clear warm-ups',
+              onPressed: widget.onClearWarmUps,
+              icon: Icon(Icons.close_rounded, size: 18, color: KColor.textMuted),
+              style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDialConsolePanel() {
+    // The console's border pulses jade once when a set lands (the
+    // completed-set colour). The pulse is a keyed one-shot overlay, so the
+    // console itself (and its wheel state) is never rebuilt or remounted.
+    final console = Container(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      decoration: BoxDecoration(
+        color: KColor.isDark ? KColor.surface : KColor.card,
+        borderRadius: KRadius.xl,
+        border: Border.all(color: _hairline(), width: 1),
+        boxShadow: KShadow.card,
       ),
       child: Column(
         children: [
-          // Large digital readout header
-          Wrap(
-            alignment: WrapAlignment.center,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 14,
-            children: [
-              Text(
-                '${_selectedWeight.toStringAsFixed(1)} kg',
-                style: const TextStyle(
-                  color: KColor.green,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  fontFeatures: [FontFeature.tabularFigures()],
+          // Hero readout, plate stack and dials: the only parts of the page
+          // that depend on the dial values, rebuilt alone on each detent.
+          ValueListenableBuilder<int>(
+            valueListenable: _dialTick,
+            builder: (context, _, _) => Column(
+              children: [
+          // Hero readout: the set you are about to lift, as big as the screen allows.
+          Semantics(
+            label: _isBodyweight
+                ? 'Next set: bodyweight for ${plural(_selectedReps, 'rep')}'
+                : 'Next set: ${amount(_selectedWeight)} kilograms for ${plural(_selectedReps, 'rep')}',
+            excludeSemantics: true,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                Text.rich(
+                  TextSpan(children: [
+                    // Bodyweight lifts read "BW"; the added load lives in the dial below.
+                    TextSpan(text: _isBodyweight ? 'BW' : amount(_selectedWeight), style: _WsText.numHero),
+                    if (!_isBodyweight) TextSpan(
+                      text: ' kg',
+                      style: _WsText.num.copyWith(fontSize: 18, fontWeight: FontWeight.w600, color: KColor.textSecondary),
+                    ),
+                  ]),
                 ),
-              ),
-              const Text('×', style: TextStyle(color: KColor.textMuted, fontSize: 22)),
-              Text(
-                '$_selectedReps reps',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('×', style: KText.h2.copyWith(color: KColor.textMuted, fontSize: 24)),
                 ),
-              ),
-            ],
+                Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: '$_selectedReps', style: _WsText.numHero),
+                    TextSpan(
+                      text: ' reps',
+                      style: _WsText.num.copyWith(fontSize: 18, fontWeight: FontWeight.w600, color: KColor.textSecondary),
+                    ),
+                  ]),
+                ),
+              ],
+            ),
           ),
 
-          // Contextual Barbell Plate Breakdown
-          if (widget.exercise.type == ExerciseType.barbellCompound && _selectedWeight >= 20.0) ...[
-            const SizedBox(height: 8),
-            BarbellPlateStackView(targetWeightKg: _selectedWeight),
-          ],
-
-          // Ghost Previous Performance Indicator
-          Builder(
-            builder: (context) {
-              final nextSetIdx = widget.sets.length;
-              final lastSets = widget.lastEntry?.sets ?? [];
-              final prevSet = nextSetIdx < lastSets.length ? lastSets[nextSetIdx] : null;
-              if (prevSet == null) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.history_rounded, size: 13, color: Color(0xFF9CA3AF)),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          'Last time: ${prevSet.weight.toStringAsFixed(1)} kg × ${prevSet.reps} reps (Set ${nextSetIdx + 1})',
-                          style: const TextStyle(
-                            color: Color(0xFF9CA3AF),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+              ],
+            ),
           ),
+
+          // Warm-up ramp queue, then last session's value for this set
+          // (tap to load it) and Kyno's target beside it.
+          if (widget.warmUpPlan != null && widget.warmUpPlan!.isNotEmpty) _buildWarmUpQueue(),
+          _buildGhostRow(),
           const SizedBox(height: 14),
 
           // Execution Mode Input View (Standard, Bodyweight, Timed, Cardio)
-          ExerciseExecutionInputView(
+          ValueListenableBuilder<int>(
+            valueListenable: _dialTick,
+            builder: (context, _, _) => ExerciseExecutionInputView(
             exercise: widget.exercise,
             selectedWeight: _selectedWeight,
             selectedReps: _selectedReps,
@@ -3264,11 +3892,15 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             durationSeconds: widget.initialDurationSeconds,
             distanceMeters: widget.initialDistanceMeters,
             onWeightChanged: (w) {
-              setState(() => _selectedWeight = w);
+              if (w == _selectedWeight) return;
+              _selectedWeight = w;
+              _dialTick.value++;
               widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, _selectedSetType);
             },
             onRepsChanged: (r) {
-              setState(() => _selectedReps = r);
+              if (r == _selectedReps) return;
+              _selectedReps = r;
+              _dialTick.value++;
               widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, _selectedSetType);
             },
             onExternalLoadChanged: (load) {
@@ -3281,9 +3913,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               widget.onDistanceChange?.call(dist);
             },
           ),
+          ),
 
           const SizedBox(height: 16),
-          const Divider(color: KColor.border, height: 1),
+          Divider(color: _hairline(), height: 1),
           const SizedBox(height: 12),
 
           // Set Type Selector Segmented chips
@@ -3296,9 +3929,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, type);
             },
           ),
-          const SizedBox(height: 16),
-          const Divider(color: KColor.border, height: 1),
           const SizedBox(height: 12),
+          Divider(color: _hairline(), height: 1),
+          const SizedBox(height: 4),
 
           // Collapsible Cues & Advanced Metrics button
           InkWell(
@@ -3306,10 +3939,12 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               setState(() {
                 _showCues = !_showCues;
               });
-              HapticFeedback.selectionClick();
+              KHaptics.select();
             },
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
+            borderRadius: KRadius.sm,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
               child: Wrap(
                 alignment: WrapAlignment.center,
@@ -3320,18 +3955,14 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   Icon(
                     _showCues ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                     color: KColor.textSecondary,
-                    size: 16,
+                    size: 20,
                   ),
                   Text(
                     widget.enableRpeTracking
-                        ? (_showCues ? 'HIDE CUES, ANATOMY & ADVANCED METRICS' : 'SHOW CUES, ANATOMY & ADVANCED METRICS')
-                        : (_showCues ? 'HIDE CUES & ANATOMY' : 'SHOW CUES & ANATOMY'),
-                    style: const TextStyle(
-                      color: KColor.textSecondary,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
+                        ? (_showCues ? 'Hide form, notes and RPE' : 'Form, notes and RPE')
+                        : (_showCues ? 'Hide form and notes' : 'Form and notes'),
+                    textAlign: TextAlign.center,
+                    style: _WsText.meta.copyWith(fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -3346,40 +3977,54 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // One line of form, said the way a spotter would say it,
+                  // beside the muscle it should be felt in. Lifts with no
+                  // specific cue show only the muscle.
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      SizedBox(
-                        width: 44,
-                        height: 60,
-                        child: CustomPaint(
-                          painter: _AnatomicalSilhouettePainter(widget.exercise.muscleGroup),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
+                      if (MuscleThumb.canShow(widget.exercise.muscleGroup)) ...[
+                        MuscleThumb(widget.exercise.muscleGroup, height: 56),
+                        const SizedBox(width: 14),
+                      ],
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('EXECUTION CUES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 3),
-                            Text(
-                              widget.exercise.notes?.trim().isNotEmpty == true
-                                  ? widget.exercise.notes!.trim()
-                                  : 'Maintain alignment, control the eccentric phase, and focus on the stretch-mediated hypertrophy.',
-                              style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.35, fontStyle: FontStyle.italic),
-                            ),
-                          ],
-                        ),
+                        child: Builder(builder: (context) {
+                          final cue = formCueFor(widget.exercise.name);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                MuscleThumb.canShow(widget.exercise.muscleGroup)
+                                    ? 'Feel it in your ${widget.exercise.muscleGroup.toLowerCase()}'
+                                    : widget.exercise.muscleGroup,
+                                style: _WsText.meta,
+                              ),
+                              if (cue != null) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  cue,
+                                  key: const Key('form_cue_line'),
+                                  style: KText.h3.copyWith(
+                                    fontFamily: KText.displayFamily,
+                                    fontSize: 16,
+                                    height: 1.3,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        }),
                       ),
                     ],
                   ),
                   if (widget.enableRpeTracking) ...[
                     const SizedBox(height: 12),
-                    const Divider(color: KColor.border, height: 1),
+                    Divider(color: _hairline(), height: 1),
                     const SizedBox(height: 12),
-                    const Align(
+                    Align(
                       alignment: Alignment.centerLeft,
-                      child: Text('RATE OF PERCEIVED EXERTION (RPE)', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
+                      child: Text('Effort (RPE)', style: _WsText.meta.copyWith(fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -3387,32 +4032,42 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                         final isSel = _selectedRpe == val;
                         return Expanded(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                            child: GestureDetector(
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                setState(() {
-                                  _selectedRpe = val;
-                                });
-                                widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: isSel ? KColor.green : const Color(0xFF13131F),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: isSel ? KColor.green : KColor.border,
-                                    width: 0.5,
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Semantics(
+                              button: true,
+                              selected: isSel,
+                              label: 'RPE ${val.toString().replaceAll('.0', '')}',
+                              excludeSemantics: true,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  KHaptics.select();
+                                  setState(() {
+                                    _selectedRpe = val;
+                                  });
+                                  widget.onInputChange(_selectedWeight, _selectedReps, val, _selectedSetType);
+                                },
+                                child: AnimatedContainer(
+                                  duration: KMotion.of(context, KMotion.instant),
+                                  constraints: const BoxConstraints(minHeight: 48),
+                                  alignment: Alignment.center,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSel ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+                                    borderRadius: KRadius.sm,
+                                    border: Border.all(
+                                      color: isSel ? KColor.ink : _hairline(),
+                                      width: 1,
+                                    ),
                                   ),
-                                ),
-                                child: Text(
-                                  val.toString().replaceAll('.0', ''),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: isSel ? Colors.white : KColor.textSecondary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
+                                  child: Text(
+                                    val.toString().replaceAll('.0', ''),
+                                    textAlign: TextAlign.center,
+                                    style: _WsText.num.copyWith(
+                                      fontSize: 14,
+                                      fontWeight: isSel ? FontWeight.w800 : FontWeight.w600,
+                                      color: isSel ? KColor.onInk : KColor.textSecondary,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3424,17 +4079,18 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   ],
 
                   const SizedBox(height: 12),
-                  const Divider(color: KColor.border, height: 1),
+                  Divider(color: _hairline(), height: 1),
                   const SizedBox(height: 10),
-                  const Text('EXERCISE NOTES', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
+                  Text('Exercise notes', style: _WsText.meta.copyWith(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: _notesController,
                     maxLines: 2,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: const InputDecoration(
-                      hintText: 'Tap to add setup details (e.g., seat height, machine settings)...',
-                      hintStyle: TextStyle(color: KColor.textMuted, fontSize: 11),
+                    style: _WsText.body.copyWith(color: KColor.textPrimary),
+                    cursorColor: KColor.textPrimary,
+                    decoration: InputDecoration(
+                      hintText: 'Setup details: seat height, pin, grip width',
+                      hintStyle: _WsText.bodySmall.copyWith(color: KColor.textMuted),
                       border: InputBorder.none,
                       isDense: true,
                       contentPadding: EdgeInsets.zero,
@@ -3444,10 +4100,39 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               ),
             ),
             crossFadeState: _showCues ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 200),
+            duration: KMotion.of(context, KMotion.quick),
+            sizeCurve: KMotion.emphasizedCurve,
           ),
         ],
       ),
+    );
+
+    return Stack(
+      children: [
+        console,
+        // One-shot jade border pulse; re-keyed per logged set, settles to nothing.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: TweenAnimationBuilder<double>(
+              key: ValueKey(_pulseEpoch),
+              tween: Tween(begin: _pulseEpoch == 0 ? 0.0 : 1.0, end: 0.0),
+              duration: KMotion.of(context, KMotion.slow),
+              curve: KMotion.decelerate,
+              builder: (context, v, _) => v <= 0.001
+                  ? const SizedBox.shrink()
+                  : DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: KRadius.xl,
+                        border: Border.all(
+                          color: KColor.green.withValues(alpha: v),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -3457,8 +4142,8 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   Color _setTypeColor(SetType type) => switch (type) {
     SetType.normal => KColor.green,
-    SetType.warmUp => KColor.textMuted,
-    SetType.dropSet => KColor.amber,
+    SetType.warmUp => KColor.textSecondary,
+    SetType.dropSet => KColor.saffron,
   };
 }
 
@@ -3531,9 +4216,9 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
     if (key != null && key.currentContext != null) {
       _scrollController.position.ensureVisible(
         key.currentContext!.findRenderObject()!,
-        duration: const Duration(milliseconds: 150),
+        duration: KMotion.of(context, KMotion.quick),
         alignment: 0.5,
-        curve: Curves.easeInOut,
+        curve: KMotion.emphasizedCurve,
       );
     }
     _updateScrollIndicators();
@@ -3554,27 +4239,34 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
         mainAxisSize: MainAxisSize.min,
         children: visibleOptions.map((type) {
           final isSelected = widget.selected == type;
-          return GestureDetector(
+          return Semantics(
             key: _chipKeys[type],
-            onTap: () {
-              HapticFeedback.selectionClick();
-              widget.onChanged(type);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              margin: const EdgeInsets.only(right: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? KColor.green : const Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: isSelected ? KColor.green : const Color(0xFF3E3E50), width: 0.5),
-              ),
-              child: Text(
-                type.label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : KColor.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
+            button: true,
+            selected: isSelected,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                KHaptics.select();
+                widget.onChanged(type);
+              },
+              child: AnimatedContainer(
+                duration: KMotion.of(context, KMotion.quick),
+                curve: KMotion.emphasizedCurve,
+                constraints: const BoxConstraints(minHeight: 48, minWidth: 72),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                margin: const EdgeInsetsDirectional.only(end: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? KColor.ink : Colors.transparent,
+                  borderRadius: KRadius.pill,
+                ),
+                child: Text(
+                  type.label,
+                  style: _WsText.chip.copyWith(
+                    fontSize: 14,
+                    color: isSelected ? KColor.onInk : KColor.textSecondary,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
               ),
             ),
@@ -3604,11 +4296,11 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: const Color(0xFF141624).withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+        borderRadius: KRadius.pill,
+        border: Border.all(color: _hairline(), width: 1),
       ),
       child: Center(
         widthFactor: 1.0,
@@ -3633,8 +4325,10 @@ class _BottomDockWidget extends StatelessWidget {
   final VoidCallback onAddExercise;
   final VoidCallback onRemoveExercise;
   final ValueChanged<int> onSelectExercise;
+  final Widget? restBar;
 
   const _BottomDockWidget({
+    this.restBar,
     required this.exercises,
     required this.originalSplitExerciseCount,
     required this.sets,
@@ -3651,11 +4345,6 @@ class _BottomDockWidget extends StatelessWidget {
     required this.onSelectExercise,
   });
 
-  String _truncateName(String name, int maxLen) {
-    if (name.length <= maxLen) return name;
-    return '${name.substring(0, maxLen - 1)}…';
-  }
-
   @override
   Widget build(BuildContext context) {
     final currentWorkoutCount = exercises.length;
@@ -3668,49 +4357,39 @@ class _BottomDockWidget extends StatelessWidget {
     final displayedNumber = selectedIndex + 1;
     final displayedTotal = exercises.length;
 
-    print('=== WORKOUT SESSION STATE TRACE ===');
-    print('  - originalSplitExerciseCount: $originalSplitExerciseCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: widget.splitDay.exercises.length, line: 1402)');
-    print('  - currentWorkoutExerciseCount: $currentWorkoutCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, getter: _activeSessionExercises.length, line: 115)');
-    print('  - completedExerciseCount: $completedCount (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3538)');
-    print('  - activeExerciseIndex: $activeIndex (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _selectedIndex, line: 95)');
-    print('  - displayedExerciseNumber: $displayedNumber (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
-    print('  - displayedTotalExercises: $displayedTotal (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
-    print('  - skippedExercises: ${skippedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _skippedExercises, line: 85)');
-    print('  - replacedExercises: ${substitutedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _substitutedExercises, line: 86)');
-    print('  - temporaryExercises: ${temporaryAdditions?.entries.where((e) => e.value).map((e) => e.key).toList() ?? []} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _temporaryAdditions, line: 87)');
-    print('  - removedExercises: ${originalSplitExerciseCount - currentWorkoutCount} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, method: _removeExerciseFromSession, line: 1198)');
-    print('====================================');
+    // Debug-only trace: compiled out of profile/release so the dock build stays
+    // cheap on the hot path (it rebuilds on every set log and page change).
+    assert(() {
+      debugPrint('=== WORKOUT SESSION STATE TRACE ===');
+      debugPrint('  - originalSplitExerciseCount: $originalSplitExerciseCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: widget.splitDay.exercises.length, line: 1402)');
+      debugPrint('  - currentWorkoutExerciseCount: $currentWorkoutCount (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, getter: _activeSessionExercises.length, line: 115)');
+      debugPrint('  - completedExerciseCount: $completedCount (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3538)');
+      debugPrint('  - activeExerciseIndex: $activeIndex (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _selectedIndex, line: 95)');
+      debugPrint('  - displayedExerciseNumber: $displayedNumber (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
+      debugPrint('  - displayedTotalExercises: $displayedTotal (file: lib/screens/workout_session_screen.dart, class: _BottomDockWidget, method: build, line: 3766)');
+      debugPrint('  - skippedExercises: ${skippedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _skippedExercises, line: 85)');
+      debugPrint('  - replacedExercises: ${substitutedExercises.entries.where((e) => e.value).map((e) => e.key).toList()} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _substitutedExercises, line: 86)');
+      debugPrint('  - temporaryExercises: ${temporaryAdditions?.entries.where((e) => e.value).map((e) => e.key).toList() ?? []} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, field: _temporaryAdditions, line: 87)');
+      debugPrint('  - removedExercises: ${originalSplitExerciseCount - currentWorkoutCount} (file: lib/screens/workout_session_screen.dart, class: _WorkoutSessionScreenState, method: _removeExerciseFromSession, line: 1198)');
+      debugPrint('====================================');
+      return true;
+    }());
 
     if (exercises.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0C0C14).withValues(alpha: 0.95),
-          border: const Border(top: BorderSide(color: Color(0xFF1E1E2F), width: 0.8)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.5),
-              blurRadius: 20,
-              offset: const Offset(0, -6),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              key: const Key('bottom_add_exercise_button'),
-              onPressed: onAddExercise,
-              icon: const Icon(Icons.add_rounded, color: Colors.white),
-              label: const Text('Add Exercise', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 0.5)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: KColor.green,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                elevation: 0,
-              ),
+      return _DockShell(
+        child: SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: ElevatedButton.icon(
+            key: const Key('bottom_add_exercise_button'),
+            onPressed: onAddExercise,
+            icon: Icon(Icons.add_rounded, color: KColor.onInk),
+            label: Text('Add exercise', style: _WsText.button.copyWith(fontSize: 16, color: KColor.onInk)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: KColor.ink,
+              foregroundColor: KColor.onInk,
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+              elevation: 0,
             ),
           ),
         ),
@@ -3729,232 +4408,374 @@ class _BottomDockWidget extends StatelessWidget {
     final prevName = hasPrev ? exercises[selectedIndex - 1].name : '';
     final nextName = hasNext ? exercises[selectedIndex + 1].name : '';
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C0C14).withValues(alpha: 0.95),
-        border: const Border(top: BorderSide(color: Color(0xFF1E1E2F), width: 0.8)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
-            blurRadius: 20,
-            offset: const Offset(0, -6),
+    return _DockShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 0. Rest timer lives inside the dock, so it never floats over the
+          // page; the page pads by the dock's measured height.
+          if (restBar != null) ...[
+            restBar!,
+            Divider(color: _hairline(), height: 13),
+          ],
+          // 2. Where you are: position on the left, previous / next on the
+          // right. Names live in the capsules below, so nothing is truncated.
+          SizedBox(
+            height: 48,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Exercise ${selectedIndex + 1} of ${exercises.length}',
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    style: _WsText.meta.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: hasPrev ? 'Previous: $prevName' : 'No previous exercise',
+                  onPressed: hasPrev ? onPrevious : null,
+                  icon: Icon(Icons.chevron_left_rounded, size: KIcons.lg),
+                  color: KColor.textPrimary,
+                  disabledColor: KColor.textDisabled,
+                ),
+                IconButton(
+                  tooltip: hasNext ? 'Next: $nextName' : 'No next exercise',
+                  onPressed: hasNext ? onNext : null,
+                  icon: Icon(Icons.chevron_right_rounded, size: KIcons.lg),
+                  color: KColor.textPrimary,
+                  disabledColor: KColor.textDisabled,
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 1. Interactive Progress Capsules Row
-            SizedBox(
-              height: 34,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                itemCount: exercises.length,
-                itemBuilder: (context, idx) {
-                  final ex = exercises[idx];
-                  final exSets = sets[ex.id] ?? [];
-                  final isSkippedEx = skippedExercises[ex.id] ?? false;
-                  final wsets = exSets.where((s) => s.isMainWorkingSet).length;
-                  final isSelected = idx == selectedIndex;
-                  final isCompleted = wsets >= ex.targetSets;
 
-                  Color borderCol = const Color(0xFF2E2E3E);
-                  Color textCol = KColor.textMuted;
+          // 1. Interactive Progress Capsules Row
+          SizedBox(
+            height: 48,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: exercises.length,
+              itemBuilder: (context, idx) {
+                final ex = exercises[idx];
+                final exSets = sets[ex.id] ?? [];
+                final isSkippedEx = skippedExercises[ex.id] ?? false;
+                final wsets = exSets.where((s) => s.isMainWorkingSet).length;
+                final isSelected = idx == selectedIndex;
+                final isCompleted = wsets >= ex.targetSets;
 
-                  if (isSelected) {
-                    borderCol = KColor.green;
-                    textCol = Colors.white;
-                  }
+                // Selected = ink outline; completed = jade check; skipped = block glyph.
+                final Color borderCol = isSelected
+                    ? KColor.textPrimary
+                    : (isCompleted && !isSkippedEx ? KColor.green.withValues(alpha: 0.45) : _hairline());
+                final textCol = isSelected ? KColor.textPrimary : KColor.textSecondary;
 
-                  return GestureDetector(
+                return Semantics(
+                  button: true,
+                  selected: isSelected,
+                  label: '${ex.name}${isSkippedEx ? ', skipped' : (isCompleted ? ', complete' : '')}',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () {
-                      HapticFeedback.selectionClick();
+                      KHaptics.select();
                       onSelectExercise(idx);
                     },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    // 48dp hit row; the visible capsule is 36dp, centred.
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: AnimatedContainer(
+                      duration: KMotion.of(context, KMotion.quick),
+                      curve: KMotion.emphasizedCurve,
+                      margin: const EdgeInsetsDirectional.only(end: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isSelected ? KColor.green.withValues(alpha: 0.15) : const Color(0xFF161622),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: borderCol, width: isSelected ? 1.5 : 0.8),
+                        color: isSelected
+                            ? KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.06)
+                            : Colors.transparent,
+                        borderRadius: KRadius.pill,
+                        border: Border.all(color: borderCol, width: isSelected ? 1.4 : 1),
                       ),
                       child: Row(
                         children: [
                           if (isSkippedEx) ...[
-                            const Icon(Icons.block_rounded, color: KColor.textMuted, size: 12),
+                            Icon(Icons.block_rounded, color: KColor.textMuted, size: 14),
                             const SizedBox(width: 4),
                           ] else if (isCompleted) ...[
-                            const Icon(Icons.check_circle_rounded, color: KColor.green, size: 12),
+                            Icon(Icons.check_circle_rounded, color: KColor.green, size: 14),
                             const SizedBox(width: 4),
                           ],
                           Text(
-                            _truncateName(ex.name, 14),
-                            style: TextStyle(
+                            ex.name,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: _WsText.chip.copyWith(
                               color: textCol,
-                              fontSize: 11,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  );
-                },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 2),
+
+          // 3. Command Center Action Row: Add Exercise, Log Set, Delete Exercise
+          Row(
+            children: [
+              // Add Exercise Button (Thumb size)
+              _DockIconButton(
+                icon: Icons.playlist_add_rounded,
+                color: KColor.textPrimary,
+                tooltip: 'Add exercise',
+                onPressed: onAddExercise,
               ),
-            ),
-            const SizedBox(height: 12),
+              const SizedBox(width: 8),
 
-            // 2. Exercise Navigation Row (Pill Buttons with Prev/Next Names)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // Main "Log Set" CTA - UNLOCKED REGARDLESS OF COMPLETION!
+              Expanded(
+                child: _LogSetButton(
+                  exerciseId: activeEx.id,
+                  loggedCount: loggedList.length,
+                  isSkipped: isSkipped,
+                  targetMet: activeWsets >= activeEx.targetSets,
+                  onPressed: canLog ? onLogSet : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Delete/Remove Exercise Button
+              _DockIconButton(
+                icon: Icons.delete_outline_rounded,
+                color: KColor.danger,
+                tooltip: 'Remove exercise from session',
+                onPressed: onRemoveExercise,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The dock's surface: an opaque raised sheet (no BackdropFilter, so content
+/// scrolling beneath it never forces a blur pass) with a top hairline and
+/// generous rounded shoulders. Carbon separates by hairline alone; Paper adds
+/// a soft warm shadow cast upward.
+class _DockShell extends StatelessWidget {
+  final Widget child;
+  const _DockShell({required this.child});
+
+  static const _radius = BorderRadius.vertical(top: Radius.circular(28));
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          // Opaque in both themes: nothing should ghost through the dock.
+          color: KColor.isDark ? KColor.surface : KColor.card,
+          borderRadius: _radius,
+          border: Border(
+            top: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.12 : 0.08), width: 1),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Previous Exercise Button
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: hasPrev
-                        ? TextButton.icon(
-                            onPressed: onPrevious,
-                            icon: const Icon(Icons.chevron_left_rounded, color: KColor.textSecondary, size: 18),
-                            label: Text(
-                              _truncateName(prevName, 12),
-                              style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ),
-
-                // Active Exercise Short Stats
-                Text(
-                  'EXERCISE ${selectedIndex + 1} OF ${exercises.length}',
-                  style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6),
-                ),
-
-                // Next Exercise Button
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: hasNext
-                        ? Directionality(
-                            textDirection: TextDirection.rtl,
-                            child: TextButton.icon(
-                              onPressed: onNext,
-                              icon: const Icon(Icons.chevron_right_rounded, color: KColor.textSecondary, size: 18),
-                              label: Text(
-                                _truncateName(nextName, 12),
-                                style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ),
+                child,
               ],
             ),
-            const SizedBox(height: 12),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-            // 3. Command Center Action Row: Add Exercise, Log Set, Delete Exercise
-            Row(
-              children: [
-                // Add Exercise Button (Thumb size)
-                Container(
-                  width: 48,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E2C),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.playlist_add_rounded, color: Colors.white, size: 24),
-                    onPressed: onAddExercise,
+/// Square secondary dock action (add / remove exercise), 56dp thumb target.
+class _DockIconButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _DockIconButton({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.04),
+        borderRadius: KRadius.pill,
+        border: Border.all(color: _hairline(), width: 1),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, color: color, size: 23),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
+/// Primary "Log set n" CTA: a 56dp ink pill, the one solid action on screen.
+///
+/// Moment declaration — set logged:
+///   trigger: logged-set count for the same exercise increases
+///   change:  button pops (scale 1 → 1.06 → 1) from the point of action and
+///            flashes jade with a check glyph, then settles back to ink
+///   duration role: KMotion.slow (pop in the first ~35%)
+///   haptic:  commit (fired once by `_logSet`, never from this animation)
+///   reduced motion: no pop/flash; the label, journal row and jade set badge
+///            still update instantly.
+class _LogSetButton extends StatefulWidget {
+  final String exerciseId;
+  final int loggedCount;
+  final bool isSkipped;
+  final bool targetMet;
+  final VoidCallback? onPressed;
+
+  const _LogSetButton({
+    required this.exerciseId,
+    required this.loggedCount,
+    required this.isSkipped,
+    required this.targetMet,
+    required this.onPressed,
+  });
+
+  @override
+  State<_LogSetButton> createState() => _LogSetButtonState();
+}
+
+class _LogSetButtonState extends State<_LogSetButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _pop;
+  late final Animation<double> _scale;
+  bool _flashing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pop = AnimationController(vsync: this, duration: KMotion.slow)
+      ..addStatusListener((status) {
+        final flashing = status == AnimationStatus.forward;
+        if (flashing != _flashing && mounted) setState(() => _flashing = flashing);
+      });
+    _scale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.06).chain(CurveTween(curve: KMotion.decelerate)),
+        weight: 35,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.06, end: 1.0).chain(CurveTween(curve: KMotion.emphasizedCurve)),
+        weight: 65,
+      ),
+    ]).animate(_pop);
+  }
+
+  @override
+  void didUpdateWidget(covariant _LogSetButton old) {
+    super.didUpdateWidget(old);
+    if (old.exerciseId != widget.exerciseId) {
+      // Page change: resolve any running flourish to its end state.
+      _pop.value = 0;
+      return;
+    }
+    if (widget.loggedCount > old.loggedCount) {
+      final d = KMotion.of(context, KMotion.slow);
+      if (d == Duration.zero) return; // reduced motion: end state only
+      _pop.duration = d;
+      _pop.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pop.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final skipped = widget.isSkipped;
+    // The flash is the only moment the pill leaves ink: jade = "set saved".
+    final flash = _flashing && !skipped;
+    final Color fill = skipped ? KColor.cardHigh : (flash ? KColor.green : KColor.ink);
+    final Color ink = skipped ? KColor.textMuted : (flash ? KColor.onAccent : KColor.onInk);
+
+    final IconData icon = skipped
+        ? Icons.block_rounded
+        : ((_flashing || widget.targetMet) ? Icons.check_circle_rounded : Icons.add_task_rounded);
+
+    return ScaleTransition(
+      scale: _scale,
+      child: AnimatedContainer(
+        duration: KMotion.of(context, KMotion.quick),
+        curve: KMotion.emphasizedCurve,
+        height: 56,
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: KRadius.pill,
+          boxShadow: (skipped || KColor.isDark) ? null : KShadow.card,
+        ),
+        child: ElevatedButton(
+          onPressed: widget.onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            disabledBackgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            foregroundColor: ink,
+            disabledForegroundColor: ink,
+            overlayColor: ink,
+            elevation: 0,
+            minimumSize: const Size.fromHeight(56),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: ink),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  skipped ? 'Skipped today' : 'Log set ${widget.loggedCount + 1}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _WsText.button.copyWith(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: ink,
+                    letterSpacing: -0.2,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                const SizedBox(width: 8),
-
-                // Main "Log Set" CTA - UNLOCKED REGARDLESS OF COMPLETION!
-                Expanded(
-                  child: SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: canLog ? onLogSet : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isSkipped
-                            ? const Color(0xFF1F1F2E)
-                            : (activeWsets >= activeEx.targetSets
-                                ? const Color(0xFF15803D)
-                                : KColor.green),
-                        foregroundColor: Colors.white,
-                        shadowColor: KColor.green.withValues(alpha: 0.4),
-                        elevation: isSkipped ? 0 : 8,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide.none,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            isSkipped
-                                ? Icons.block_rounded
-                                : (activeWsets >= activeEx.targetSets
-                                    ? Icons.check_circle_rounded
-                                    : Icons.add_task_rounded),
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              isSkipped
-                                  ? 'EXERCISE SKIPPED'
-                                  : 'LOG SET ${loggedList.length + 1}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                // Delete/Remove Exercise Button
-                Container(
-                  width: 48,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E2C),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF3E3E50), width: 0.5),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF87171), size: 22),
-                    onPressed: onRemoveExercise,
-                  ),
-                ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3975,6 +4796,9 @@ class _ExerciseActionsSheet extends StatelessWidget {
   final VoidCallback onAddBefore;
   final VoidCallback onAddAfter;
   final VoidCallback onUndoReplacement;
+  final VoidCallback onAddWarmUps;
+  final int restSeconds;
+  final VoidCallback onEditRest;
 
   const _ExerciseActionsSheet({
     required this.exercise,
@@ -3988,46 +4812,65 @@ class _ExerciseActionsSheet extends StatelessWidget {
     required this.onAddBefore,
     required this.onAddAfter,
     required this.onUndoReplacement,
+    required this.onAddWarmUps,
+    required this.restSeconds,
+    required this.onEditRest,
   });
 
   @override
   Widget build(BuildContext context) {
+    final rampable = exercise.type != ExerciseType.bodyweight &&
+        exercise.effectiveExecutionMode == ExerciseExecutionMode.weightReps;
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Text(
-              'ACTIONS: ${exercise.name.toUpperCase()}',
-              style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFF2E2E3E)),
+          KSheetHeader(exercise.name, subtitle: 'What do you want to do?'),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: _hairline()),
           if (!isSkipped) ...[
             ListTile(
-              leading: const Icon(Icons.block_rounded, color: KColor.danger),
-              title: const Text('Skip Exercise', style: TextStyle(color: Colors.white, fontSize: 13.5)),
-              subtitle: const Text('Remove from active sets for today', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+              leading: Icon(Icons.block_rounded, color: KColor.danger),
+              title: Text('Skip exercise', style: _ActionText.title),
+              subtitle: Text('Sit this one out today', style: _ActionText.subtitle),
               onTap: () {
                 Navigator.of(context).pop();
                 _showSkipReasonsSheet(context);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.swap_horiz_rounded, color: KColor.blue),
-              title: const Text('Replace Exercise (Substitute)', style: TextStyle(color: Colors.white, fontSize: 13.5)),
-              subtitle: const Text('Substitute with another exercise', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+              leading: Icon(Icons.swap_horiz_rounded, color: KColor.textPrimary),
+              title: Text('Swap exercise', style: _ActionText.title),
+              subtitle: Text('Pick something else for today', style: _ActionText.subtitle),
               onTap: () {
                 Navigator.of(context).pop();
                 onReplace();
               },
             ),
+            if (rampable)
+              ListTile(
+                leading: Icon(Icons.stacked_line_chart_rounded, color: KColor.train),
+                title: Text('Add warm-up sets', style: _ActionText.title),
+                subtitle: Text('Ramp up to your working weight', style: _ActionText.subtitle),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onAddWarmUps();
+                },
+              ),
+            ListTile(
+              leading: Icon(Icons.timer_outlined, color: KColor.textPrimary),
+              title: Text('Rest timer: ${restLabel(restSeconds)}', style: _ActionText.title),
+              subtitle: Text('Remembered for this exercise', style: _ActionText.subtitle),
+              onTap: () {
+                Navigator.of(context).pop();
+                onEditRest();
+              },
+            ),
           ] else ...[
             ListTile(
-              leading: const Icon(Icons.refresh_rounded, color: KColor.green),
-              title: Text(isSubstitution ? 'Undo Substitution' : 'Re-enable Exercise', style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+              leading: Icon(Icons.refresh_rounded, color: KColor.textPrimary),
+              title: Text(isSubstitution ? 'Undo swap' : 'Bring it back', style: _ActionText.title),
               onTap: () {
                 Navigator.of(context).pop();
                 if (isSubstitution) {
@@ -4039,25 +4882,25 @@ class _ExerciseActionsSheet extends StatelessWidget {
             ),
           ],
           ListTile(
-            leading: const Icon(Icons.reorder_rounded, color: KColor.textSecondary),
-            title: const Text('Reorder Exercises', style: TextStyle(color: Colors.white, fontSize: 13.5)),
-            subtitle: const Text('Drag and drop the exercise sequence', style: TextStyle(color: KColor.textMuted, fontSize: 11)),
+            leading: Icon(Icons.reorder_rounded, color: KColor.textSecondary),
+            title: Text('Reorder exercises', style: _ActionText.title),
+            subtitle: Text('Drag them into the order you train', style: _ActionText.subtitle),
             onTap: () {
               Navigator.of(context).pop();
               onReorder();
             },
           ),
           ListTile(
-            leading: const Icon(Icons.arrow_upward_rounded, color: KColor.textSecondary),
-            title: const Text('Add Exercise Before', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+            leading: Icon(Icons.arrow_upward_rounded, color: KColor.textSecondary),
+            title: Text('Add exercise before', style: _ActionText.title),
             onTap: () {
               Navigator.of(context).pop();
               onAddBefore();
             },
           ),
           ListTile(
-            leading: const Icon(Icons.arrow_downward_rounded, color: KColor.textSecondary),
-            title: const Text('Add Exercise After', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+            leading: Icon(Icons.arrow_downward_rounded, color: KColor.textSecondary),
+            title: Text('Add exercise after', style: _ActionText.title),
             onTap: () {
               Navigator.of(context).pop();
               onAddAfter();
@@ -4070,12 +4913,9 @@ class _ExerciseActionsSheet extends StatelessWidget {
   }
 
   void _showSkipReasonsSheet(BuildContext context) {
-    showModalBottomSheet(
+    showKSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E2C),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      isScrollControlled: false,
       builder: (context) {
         final reasons = [
           'Equipment Busy',
@@ -4089,16 +4929,11 @@ class _ExerciseActionsSheet extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Text(
-                  'SELECT SKIP REASON: ${exercise.name.toUpperCase()}',
-                  style: const TextStyle(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                ),
-              ),
-              const Divider(height: 1, color: Color(0xFF2E2E3E)),
+              KSheetHeader(exercise.name, subtitle: 'Why skip it today? No judgement.'),
+              const SizedBox(height: 10),
+              Divider(height: 1, color: _hairline()),
               ...reasons.map((r) => ListTile(
-                title: Text(r, style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+                title: Text(r, style: _ActionText.title),
                 onTap: () {
                   Navigator.of(context).pop();
                   onSkip(r);
@@ -4111,6 +4946,11 @@ class _ExerciseActionsSheet extends StatelessWidget {
       },
     );
   }
+}
+
+abstract class _ActionText {
+  static TextStyle get title => KText.bodyMedium.copyWith(fontSize: 16, color: KColor.textPrimary);
+  static TextStyle get subtitle => KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary);
 }
 
 // ─── Reorder Exercises Bottom Sheet ─────────────────────────────────────────
@@ -4146,25 +4986,9 @@ class _ReorderExercisesSheetState extends State<_ReorderExercisesSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 20, 16, 10),
-            child: Row(
-              children: [
-                Icon(Icons.drag_indicator_rounded, color: KColor.blue, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'DRAG & DROP TO REORDER WORKOUT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFF2E2E3E)),
+          const KSheetHeader('Reorder exercises', subtitle: 'Drag them into the order you train.'),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: _hairline()),
           Expanded(
             child: ReorderableListView.builder(
               itemCount: _localExercises.length,
@@ -4182,9 +5006,9 @@ class _ReorderExercisesSheetState extends State<_ReorderExercisesSheet> {
                 final ex = _localExercises[idx];
                 return ListTile(
                   key: ValueKey(ex.id),
-                  title: Text(ex.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                  subtitle: Text(ex.muscleGroup, style: const TextStyle(color: KColor.textMuted, fontSize: 11)),
-                  trailing: const Icon(Icons.drag_handle_rounded, color: KColor.textSecondary),
+                  title: Text(ex.name, style: _ActionText.title),
+                  subtitle: Text(ex.muscleGroup, style: _ActionText.subtitle),
+                  trailing: Icon(Icons.drag_handle_rounded, color: KColor.textSecondary),
                 );
               },
             ),
@@ -4197,220 +5021,126 @@ class _ReorderExercisesSheetState extends State<_ReorderExercisesSheet> {
 
 // ─── Non-Blocking PR Toast (Change 4) ───────────────────────────────────────
 
+/// Live PR banner in the Train accent. Names the record type (estimated 1RM,
+/// heaviest for the reps, most reps at the weight) and plays one ~700 ms spark
+/// burst from its badge (skipped under reduced motion). The milestone haptic
+/// fires once in `_logSet` on the commit frame, never here.
+/// Personal-record strip. Opens inline under the header (pushing content down,
+/// covering nothing) and closes after a few seconds. Saffron is the PR colour;
+/// the word "record" and the glyph carry the meaning too.
 class _PRToastWidget extends StatelessWidget {
   final bool isVisible;
+  final String title;
   final String message;
-  const _PRToastWidget({required this.isVisible, required this.message});
+  /// Re-keys the one-shot spark burst, so each record plays it once.
+  final int epoch;
+  const _PRToastWidget({
+    required this.isVisible,
+    required this.title,
+    required this.message,
+    required this.epoch,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutBack,
-      top: isVisible ? 60 : -100,
-      left: 16,
-      right: 16,
-      child: IgnorePointer(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E2C),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: KColor.amber, width: 1.0),
-            boxShadow: [
-              BoxShadow(
-                color: KColor.amber.withValues(alpha: 0.15),
-                blurRadius: 15,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              const Text('🏆', style: TextStyle(fontSize: 22)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  message,
-                  style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.bold),
+    final accent = KColor.train;
+    return AnimatedSize(
+      duration: KMotion.of(context, KMotion.standard),
+      curve: KMotion.emphasizedCurve,
+      alignment: Alignment.topCenter,
+      // The spark burst may spill past the strip for its 700 ms.
+      clipBehavior: Clip.none,
+      child: !isVisible
+          ? const SizedBox(width: double.infinity)
+          : Semantics(
+              liveRegion: true,
+              label: 'New personal record. $title. $message',
+              excludeSemantics: true,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 14, 12),
+                  decoration: BoxDecoration(
+                    color: KColor.tint(accent, dark: 0.14, light: 0.08),
+                    borderRadius: KRadius.md,
+                    border: Border.all(color: accent.withValues(alpha: 0.5), width: 1),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Badge with the one-shot spark burst behind it.
+                      SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            Positioned(
+                              left: -70,
+                              top: -70,
+                              width: 180,
+                              height: 180,
+                              child: PrBurst(key: ValueKey(epoch), color: accent),
+                            ),
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                              alignment: Alignment.center,
+                              child: KIcon(KIcons.record, size: KIcons.md, color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'New personal record',
+                              style: KText.caption.copyWith(fontSize: 12, fontWeight: FontWeight.w700, color: accent),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              title,
+                              style: KText.bodyMedium.copyWith(fontSize: 16, fontWeight: FontWeight.w800, color: KColor.textPrimary, height: 1.2),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              message,
+                              style: KText.caption.copyWith(
+                                fontSize: 13,
+                                color: KColor.textSecondary,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 }
 
-// ─── Anatomical Vector Silhouette Painter ────────────────────────────────────
+class _SplitDayRecs {
+  const _SplitDayRecs({
+    required this.substitutions,
+    required this.skips,
+    required this.reorders,
+    required this.additions,
+  });
 
-class _AnatomicalSilhouettePainter extends CustomPainter {
-  final String muscleGroup;
-  _AnatomicalSilhouettePainter(this.muscleGroup);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paintBase = Paint()
-      ..color = const Color(0xFF161622)
-      ..style = PaintingStyle.fill;
-
-    final paintOutline = Paint()
-      ..color = const Color(0xFF2E2E3E)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
-    final paintActive = Paint()
-      ..color = KColor.green.withValues(alpha: 0.15)
-      ..style = PaintingStyle.fill;
-
-    final paintActiveOutline = Paint()
-      ..color = KColor.green
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final w = size.width;
-    final h = size.height;
-    final cx = w / 2;
-
-    // 1. Head
-    canvas.drawCircle(Offset(cx, h * 0.1), w * 0.12, paintBase);
-    canvas.drawCircle(Offset(cx, h * 0.1), w * 0.12, paintOutline);
-
-    // 2. Neck
-    final neckPath = Path()
-      ..moveTo(cx - w * 0.04, h * 0.15)
-      ..lineTo(cx + w * 0.04, h * 0.15)
-      ..lineTo(cx + w * 0.04, h * 0.2)
-      ..lineTo(cx - w * 0.04, h * 0.2)
-      ..close();
-    canvas.drawPath(neckPath, paintBase);
-    canvas.drawPath(neckPath, paintOutline);
-
-    // 3. Torso
-    final torsoPath = Path()
-      ..moveTo(cx - w * 0.22, h * 0.22) // Left Shoulder
-      ..lineTo(cx + w * 0.22, h * 0.22) // Right Shoulder
-      ..lineTo(cx + w * 0.16, h * 0.5)  // Right Waist
-      ..lineTo(cx - w * 0.16, h * 0.5)  // Left Waist
-      ..close();
-    canvas.drawPath(torsoPath, paintBase);
-    canvas.drawPath(torsoPath, paintOutline);
-
-    // 4. Hips
-    final hipsPath = Path()
-      ..moveTo(cx - w * 0.16, h * 0.5)
-      ..lineTo(cx + w * 0.16, h * 0.5)
-      ..lineTo(cx + w * 0.18, h * 0.58)
-      ..lineTo(cx - w * 0.18, h * 0.58)
-      ..close();
-    canvas.drawPath(hipsPath, paintBase);
-    canvas.drawPath(hipsPath, paintOutline);
-
-    // 5. Left Arm
-    final leftArmPath = Path()
-      ..moveTo(cx - w * 0.22, h * 0.22)
-      ..lineTo(cx - w * 0.32, h * 0.38)
-      ..lineTo(cx - w * 0.28, h * 0.52)
-      ..lineTo(cx - w * 0.22, h * 0.5)
-      ..lineTo(cx - w * 0.24, h * 0.38)
-      ..lineTo(cx - w * 0.18, h * 0.26)
-      ..close();
-    canvas.drawPath(leftArmPath, paintBase);
-    canvas.drawPath(leftArmPath, paintOutline);
-
-    // 6. Right Arm
-    final rightArmPath = Path()
-      ..moveTo(cx + w * 0.22, h * 0.22)
-      ..lineTo(cx + w * 0.32, h * 0.38)
-      ..lineTo(cx + w * 0.28, h * 0.52)
-      ..lineTo(cx + w * 0.22, h * 0.5)
-      ..lineTo(cx + w * 0.24, h * 0.38)
-      ..lineTo(cx + w * 0.18, h * 0.26)
-      ..close();
-    canvas.drawPath(rightArmPath, paintBase);
-    canvas.drawPath(rightArmPath, paintOutline);
-
-    // 7. Left Leg
-    final leftLegPath = Path()
-      ..moveTo(cx - w * 0.16, h * 0.58)
-      ..lineTo(cx - w * 0.02, h * 0.58)
-      ..lineTo(cx - w * 0.04, h * 0.95)
-      ..lineTo(cx - w * 0.14, h * 0.95)
-      ..close();
-    canvas.drawPath(leftLegPath, paintBase);
-    canvas.drawPath(leftLegPath, paintOutline);
-
-    // 8. Right Leg
-    final rightLegPath = Path()
-      ..moveTo(cx + w * 0.02, h * 0.58)
-      ..lineTo(cx + w * 0.16, h * 0.58)
-      ..lineTo(cx + w * 0.14, h * 0.95)
-      ..lineTo(cx + w * 0.04, h * 0.95)
-      ..close();
-    canvas.drawPath(rightLegPath, paintBase);
-    canvas.drawPath(rightLegPath, paintOutline);
-
-    // Highlight target muscle group
-    final normalized = muscleGroup.toLowerCase();
-    
-    if (normalized.contains('chest')) {
-      final chestPath = Path()
-        ..moveTo(cx - w * 0.18, h * 0.24)
-        ..lineTo(cx + w * 0.18, h * 0.24)
-        ..lineTo(cx + w * 0.14, h * 0.34)
-        ..lineTo(cx - w * 0.14, h * 0.34)
-        ..close();
-      canvas.drawPath(chestPath, paintActive);
-      canvas.drawPath(chestPath, paintActiveOutline);
-    } else if (normalized.contains('back') || normalized.contains('lat')) {
-      final backPath = Path()
-        ..moveTo(cx - w * 0.16, h * 0.26)
-        ..lineTo(cx + w * 0.16, h * 0.26)
-        ..lineTo(cx + w * 0.12, h * 0.44)
-        ..lineTo(cx - w * 0.12, h * 0.44)
-        ..close();
-      canvas.drawPath(backPath, paintActive);
-      canvas.drawPath(backPath, paintActiveOutline);
-    } else if (normalized.contains('arm') || normalized.contains('bicep') || normalized.contains('tricep')) {
-      canvas.drawPath(leftArmPath, paintActive);
-      canvas.drawPath(leftArmPath, paintActiveOutline);
-      canvas.drawPath(rightArmPath, paintActive);
-      canvas.drawPath(rightArmPath, paintActiveOutline);
-    } else if (normalized.contains('shoulder') || normalized.contains('delt')) {
-      final leftShoulder = Path()
-        ..moveTo(cx - w * 0.24, h * 0.22)
-        ..lineTo(cx - w * 0.16, h * 0.22)
-        ..lineTo(cx - w * 0.2, h * 0.3)
-        ..close();
-      final rightShoulder = Path()
-        ..moveTo(cx + w * 0.16, h * 0.22)
-        ..lineTo(cx + w * 0.24, h * 0.22)
-        ..lineTo(cx + w * 0.2, h * 0.3)
-        ..close();
-      canvas.drawPath(leftShoulder, paintActive);
-      canvas.drawPath(leftShoulder, paintActiveOutline);
-      canvas.drawPath(rightShoulder, paintActive);
-      canvas.drawPath(rightShoulder, paintActiveOutline);
-    } else if (normalized.contains('leg') || normalized.contains('quad') || normalized.contains('hamstring') || normalized.contains('glute') || normalized.contains('calf')) {
-      canvas.drawPath(leftLegPath, paintActive);
-      canvas.drawPath(leftLegPath, paintActiveOutline);
-      canvas.drawPath(rightLegPath, paintActive);
-      canvas.drawPath(rightLegPath, paintActiveOutline);
-    } else if (normalized.contains('core') || normalized.contains('abs')) {
-      final absPath = Path()
-        ..moveTo(cx - w * 0.12, h * 0.36)
-        ..lineTo(cx + w * 0.12, h * 0.36)
-        ..lineTo(cx + w * 0.14, h * 0.48)
-        ..lineTo(cx - w * 0.14, h * 0.48)
-        ..close();
-      canvas.drawPath(absPath, paintActive);
-      canvas.drawPath(absPath, paintActiveOutline);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  final List<({Exercise original, Exercise replacement, int count, int totalSessions})> substitutions;
+  final List<({Exercise exercise, int count, int totalSessions})> skips;
+  final List<({List<Exercise> newOrder, int count})> reorders;
+  final List<({Exercise exercise, int count, int totalSessions})> additions;
 }
 
 // ─── Live Timer Stateful Widget ─────────────────────────────────────────────
@@ -4425,6 +5155,7 @@ class _LiveTimerWidget extends StatefulWidget {
 
 class _LiveTimerWidgetState extends State<_LiveTimerWidget> {
   Stream<int>? _ticker;
+  static TextStyle get _style => KText.numSmall.copyWith(fontSize: 13, color: KColor.textPrimary);
 
   @override
   void initState() {
@@ -4441,34 +5172,21 @@ class _LiveTimerWidgetState extends State<_LiveTimerWidget> {
       final diff = now.difference(widget.startedAt);
       final mins = diff.inMinutes.toString().padLeft(2, '0');
       final secs = (diff.inSeconds % 60).toString().padLeft(2, '0');
-      return Text(
-        '$mins:$secs',
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-          fontFeatures: [FontFeature.tabularFigures()],
-        ),
-      );
+      return Text('$mins:$secs', style: _style);
     }
 
-    return StreamBuilder<int>(
-      stream: _ticker,
-      builder: (context, snapshot) {
-        final now = DateTime.now();
-        final diff = now.difference(widget.startedAt);
-        final mins = diff.inMinutes.toString().padLeft(2, '0');
-        final secs = (diff.inSeconds % 60).toString().padLeft(2, '0');
-        return Text(
-          '$mins:$secs',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 12,
-            fontFeatures: [FontFeature.tabularFigures()],
-          ),
-        );
-      },
+    // The stream ticks once a second and rebuilds only this Text.
+    return RepaintBoundary(
+      child: StreamBuilder<int>(
+        stream: _ticker,
+        builder: (context, snapshot) {
+          final now = DateTime.now();
+          final diff = now.difference(widget.startedAt);
+          final mins = diff.inMinutes.toString().padLeft(2, '0');
+          final secs = (diff.inSeconds % 60).toString().padLeft(2, '0');
+          return Text('$mins:$secs', style: _style);
+        },
+      ),
     );
   }
 }
@@ -4511,9 +5229,23 @@ class _FloatingTextWidgetState extends State<_FloatingTextWidget>
     _position = Tween<Offset>(
       begin: const Offset(0.0, 0.2),
       end: const Offset(0.0, -0.6),
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(parent: _controller, curve: KMotion.decelerate));
+  }
 
-    _controller.forward();
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (KMotion.reduced(context)) {
+      // Reduced motion: hold the pill still and fully visible; the parent
+      // removes it after its lifetime, so it still reads as feedback.
+      _controller.value = 0.4;
+    } else {
+      _controller.forward();
+    }
   }
 
   @override
@@ -4524,84 +5256,38 @@ class _FloatingTextWidgetState extends State<_FloatingTextWidget>
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          return Opacity(
-            opacity: _opacity.value.clamp(0.0, 1.0),
-            child: FractionalTranslation(
-              translation: _position.value,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [KColor.green, Color(0xFF1B6A47)]),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(color: KColor.green.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
-                  ],
-                ),
-                child: Text(
-                  widget.text,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
-                ),
+    // Transitions drive opacity/offset at the render layer: the pill itself is
+    // built once, not once per frame.
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: FadeTransition(
+        opacity: _opacity,
+        child: SlideTransition(
+          position: _position,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              color: KColor.ink,
+              borderRadius: KRadius.pill,
+              boxShadow: KColor.isDark ? null : KShadow.card,
+            ),
+            child: Text(
+              widget.text,
+              textAlign: TextAlign.center,
+              style: KText.bodyMedium.copyWith(
+                color: KColor.onInk,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
 }
-
-// ─── Confetti Physics & Celebrations overlay ────────────────────────────────
-
-class _ConfettiParticle {
-  double x, y;
-  double vx, vy;
-  Color color;
-  double size;
-  double rotation;
-  double rotationSpeed;
-
-  _ConfettiParticle({
-    required this.x, required this.y,
-    required this.vx, required this.vy,
-    required this.color, required this.size,
-    required this.rotation, required this.rotationSpeed,
-  });
-
-  void update() {
-    x += vx;
-    y += vy;
-    vy += 0.2; // gravity
-    vx *= 0.98; // friction
-    rotation += rotationSpeed;
-  }
-}
-
-class _ConfettiPainter extends CustomPainter {
-  final List<_ConfettiParticle> particles;
-  _ConfettiPainter(this.particles);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    for (final p in particles) {
-      paint.color = p.color;
-      canvas.save();
-      canvas.translate(p.x, p.y);
-      canvas.rotate(p.rotation);
-      canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: p.size, height: p.size * 1.5), paint);
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
 
 // ─── Single exercise history display sheet ──────────────────────────────────
 
@@ -4619,31 +5305,41 @@ class _ExerciseHistorySheet extends StatelessWidget {
     final note = svc.exerciseProgressNote(exercise, splitDayName);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          const KDragHandle(),
+          const SizedBox(height: 8),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(exercise.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
-                    Text(exercise.muscleGroup, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
+                    Text(exercise.name, style: KText.h2),
+                    Text(exercise.muscleGroup, style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary)),
                     const SizedBox(height: 3),
-                    Text(trend, style: const TextStyle(color: KColor.green, fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    Text(trend, style: KText.caption.copyWith(fontSize: 13, color: KColor.textPrimary, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
               if (best != null) ...[
+                const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text('Best 1RM', style: TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
-                    Text('${best.estimatedOneRepMax.toStringAsFixed(1)} kg', style: const TextStyle(color: KColor.amber, fontSize: 16, fontWeight: FontWeight.w900)),
-                    Text('(${best.weight.toStringAsFixed(0)}×${best.reps})', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                    Text('Best 1RM', style: _WsText.bodySmall.copyWith(fontSize: 12, color: KColor.textMuted)),
+                    Text(
+                      '${best.estimatedOneRepMax.toStringAsFixed(1)} kg',
+                      style: KText.numMedium.copyWith(fontSize: 24, color: KColor.saffron),
+                    ),
+                    Text(
+                      '(${best.weight.toStringAsFixed(0)}×${best.reps})',
+                      style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: KColor.textSecondary),
+                    ),
                   ],
                 ),
               ],
@@ -4654,18 +5350,18 @@ class _ExerciseHistorySheet extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFF13131F),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF2E2E3E)),
+              color: KColor.isDark ? KColor.card : KColor.cardHigh,
+              borderRadius: KRadius.md,
+              border: Border(left: BorderSide(color: KColor.violet, width: 2)),
             ),
-            child: Text(note, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12.5, height: 1.35)),
+            child: Text(note, style: KText.body.copyWith(fontSize: 14, height: 1.45, color: KColor.textSecondary)),
           ),
           const SizedBox(height: 16),
           if (history.isEmpty)
-            const Center(
+            Center(
               child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text('No history yet', style: TextStyle(color: Color(0xFF4B5563))),
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text('No history yet. Your first set starts it.', style: KText.body.copyWith(color: KColor.textMuted)),
               ),
             )
           else ...[
@@ -4693,35 +5389,59 @@ class _HistoryRow extends StatelessWidget {
         .join(', ');
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF13131F),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF2E2E3E)),
+        color: KColor.card,
+        borderRadius: KRadius.sm,
+        border: Border.all(color: _hairline(), width: 1),
       ),
       child: Row(
         children: [
-          Text(dateStr, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11.5, fontWeight: FontWeight.bold)),
+          Text(dateStr, style: _WsText.num.copyWith(fontSize: 13, color: KColor.textSecondary)),
           const SizedBox(width: 12),
-          Expanded(child: Text(setsStr, style: const TextStyle(color: Colors.white, fontSize: 12.5))),
-          Text('${entry.totalVolume.toStringAsFixed(0)} kg', style: const TextStyle(color: Color(0xFF4B5563), fontSize: 10.5)),
+          Expanded(
+            child: Text(setsStr, style: _WsText.num.copyWith(fontSize: 15, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${entry.totalVolume.toStringAsFixed(0)} kg',
+            style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: KColor.textSecondary),
+          ),
         ],
       ),
     );
   }
 }
 
-// ─── Custom Fullscreen Completion Dashboard ──────────────────────────────────
+// ─── Session scoreboard (completion screen) ─────────────────────────────────
+//
+// One bold moment: the session's real numbers on the Train jewel, then the
+// receipt (new bests, the work, the muscles hit). No confetti, no badges.
+//
+// Moment declaration, workout complete:
+//   trigger: overlay mounts after a successful save
+//   change:  the jewel lifts in, the volume counts up from zero, the score
+//            cells rise one after another; the receipt rows follow
+//   duration role: KMotion.celebrate, plays once
+//   haptic:  milestone, fired once by `_finish` on the commit frame
+//   skip:    any pointer-down jumps to the end state
+//   reduced motion: everything is in its final place on the first frame
+
+/// A record set today, with what it beat.
+class _SessionBest {
+  const _SessionBest(this.name, this.set, this.previous);
+  final String name;
+  final SetEntry set;
+  final SetEntry? previous;
+}
+
+String _liftLabel(SetEntry s) =>
+    s.weight > 0 ? '${amount(s.weight)} kg × ${s.reps}' : 'BW × ${s.reps}';
 
 class _WorkoutCompletionOverlay extends StatefulWidget {
   final WorkoutSession session;
   final WorkoutSession? previousSession;
   final int score;
-  final double scoreCompletion;
-  final double scoreVolume;
-  final double scoreSets;
-  final double scorePrs;
-  final int e1rmPrsCount;
   final Duration duration;
   final VoidCallback onDone;
 
@@ -4729,11 +5449,6 @@ class _WorkoutCompletionOverlay extends StatefulWidget {
     required this.session,
     this.previousSession,
     required this.score,
-    required this.scoreCompletion,
-    required this.scoreVolume,
-    required this.scoreSets,
-    required this.scorePrs,
-    required this.e1rmPrsCount,
     required this.duration,
     required this.onDone,
   });
@@ -4744,319 +5459,525 @@ class _WorkoutCompletionOverlay extends StatefulWidget {
 
 class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _celebrationController;
-  final List<_ConfettiParticle> _confetti = [];
-  final Random _rand = Random();
+  late final AnimationController _intro;
+  bool _introStarted = false;
+  late final List<_SessionBest> _bests;
 
   @override
   void initState() {
     super.initState();
-    _celebrationController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 4),
-    )..addListener(() {
-        setState(() {
-          for (final p in _confetti) {
-            p.update();
-          }
-        });
-      });
+    _intro = AnimationController(vsync: this, duration: KMotion.celebrate);
+    _bests = _findBests(widget.session);
+  }
 
-    final colors = [
-      Colors.red, Colors.blue, Colors.green, Colors.yellow,
-      Colors.pink, Colors.purple, Colors.orange, const Color(0xFFFFB347),
-    ];
+  /// One line per exercise: its best working set today, if it beat every
+  /// earlier session's best (the same rule as the live PR count).
+  static List<_SessionBest> _findBests(WorkoutSession session) {
+    final out = <_SessionBest>[];
+    for (final e in session.entries) {
+      if (e.isSkipped) continue;
+      final prev = WorkoutService.instance.bestSetBefore(e.exercise.id, session.date);
+      SetEntry? best;
+      for (final s in e.sets) {
+        if (!s.isMainWorkingSet || !WorkoutService.beatsPreviousBest(s, prev)) continue;
+        if (best == null || s.estimatedOneRepMax > best.estimatedOneRepMax) best = s;
+      }
+      if (best != null) out.add(_SessionBest(e.exercise.name, best, prev));
+    }
+    return out;
+  }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final size = MediaQuery.of(context).size;
-      for (int i = 0; i < 60; i++) {
-        _confetti.add(_ConfettiParticle(
-          x: 0,
-          y: size.height * 0.9,
-          vx: _rand.nextDouble() * 12 + 6,
-          vy: -(_rand.nextDouble() * 18 + 12),
-          color: colors[_rand.nextInt(colors.length)],
-          size: _rand.nextDouble() * 8 + 6,
-          rotation: _rand.nextDouble() * pi * 2,
-          rotationSpeed: _rand.nextDouble() * 0.2 - 0.1,
-        ));
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_introStarted) {
+      _introStarted = true;
+      if (KMotion.reduced(context)) {
+        _intro.value = 1;
+      } else {
+        _intro.forward();
       }
-      for (int i = 0; i < 60; i++) {
-        _confetti.add(_ConfettiParticle(
-          x: size.width,
-          y: size.height * 0.9,
-          vx: -(_rand.nextDouble() * 12 + 6),
-          vy: -(_rand.nextDouble() * 18 + 12),
-          color: colors[_rand.nextInt(colors.length)],
-          size: _rand.nextDouble() * 8 + 6,
-          rotation: _rand.nextDouble() * pi * 2,
-          rotationSpeed: _rand.nextDouble() * 0.2 - 0.1,
-        ));
-      }
-      _celebrationController.forward();
-    });
+    }
+  }
+
+  void _skipIntro() {
+    if (_intro.isAnimating) _intro.value = 1;
   }
 
   @override
   void dispose() {
-    _celebrationController.dispose();
+    _intro.dispose();
     super.dispose();
   }
+
+  WorkoutSession? get _prev {
+    final p = widget.previousSession;
+    if (p == null || p.id == widget.session.id || p.totalVolume <= 0) return null;
+    return p;
+  }
+
+  static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String get _dateLabel {
+    final d = widget.session.date;
+    return '${_weekdays[d.weekday - 1]} ${d.day} ${_months[d.month - 1]}';
+  }
+
+  /// The headline, said like a training partner would say it.
+  String _verdict(double volume) {
+    final day = widget.session.splitDayName.trim();
+    if (_bests.length == 1) return 'New best on ${_bests.first.name}.';
+    if (_bests.length > 1) return '${_bests.length} new bests. Big day.';
+    final prev = _prev;
+    if (prev == null) return day.isEmpty ? 'First one on the books.' : 'First $day on the books.';
+    final diff = volume - prev.totalVolume;
+    if (diff > prev.totalVolume * 0.02) return 'More than last time. Keep stacking.';
+    if (diff < -prev.totalVolume * 0.02) return 'Lighter than last time. You still showed up.';
+    return 'Matched last time, kilo for kilo.';
+  }
+
+  String? _volumeDelta(double volume) {
+    final prev = _prev;
+    if (prev == null) return null;
+    final diff = (volume - prev.totalVolume).round();
+    if (diff > 0) return '+${thousands(diff)} kg on last time';
+    if (diff < 0) return '${thousands(-diff)} kg under last time';
+    return 'Same as last time';
+  }
+
+  Animation<double> _phase(double begin, double end, [Curve curve = KMotion.decelerate]) =>
+      CurvedAnimation(parent: _intro, curve: Interval(begin, end, curve: curve));
 
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
-    final totalSets = session.totalSets;
-    final totalVol = session.totalVolume;
-    final minStr = '${widget.duration.inMinutes}m';
-    
-    // Performance delta calculations
-    double deltaPct = 0.0;
-    if (widget.previousSession != null) {
-      final prevVol = widget.previousSession!.totalVolume;
-      if (prevVol > 0) {
-        deltaPct = ((totalVol - prevVol) / prevVol) * 100;
-      }
-    }
+    final volume = session.totalVolume;
+    final sets = session.totalSets;
+    final minutes = widget.duration.inMinutes;
+    final prev = _prev;
+    final worked = session.entries.where((e) => !e.isSkipped && e.sets.isNotEmpty).toList();
+    // A bodyweight-only session moved no plates: count reps instead of "0 kg".
+    final byReps = volume <= 0;
+    final reps = worked.fold<int>(0, (n, e) => n + e.sets.fold<int>(0, (m, s) => m + s.reps));
+    final heroValue = byReps ? reps.toDouble() : volume;
+    final muscles = worked.map((e) => e.exercise.muscleGroup).toSet().toList();
+    final mappable = muscles.where(MuscleThumb.canShow).toSet();
 
-    final prCount = session.entries.fold(0, (sum, entry) {
-      int count = 0;
-      for (final s in entry.sets) {
-        final prevBest = WorkoutService.instance.bestSetBefore(entry.exercise.id, session.date);
-        if (prevBest == null || s.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01) {
-          count++;
-        }
-      }
-      return sum + count;
-    });
+    final heroIn = _phase(0.0, 0.45);
+    final countUp = _phase(0.08, 0.85, Curves.easeOutCubic);
 
-    final muscles = session.entries.map((e) => e.exercise.muscleGroup).toSet().toList();
-
-    return Container(
-      color: const Color(0xFF0C0C14),
-      child: Stack(
-        children: [
-          // Background glowing accents
-          Positioned(
-            bottom: -50,
-            left: -50,
-            right: -50,
-            child: Container(
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: KColor.green.withValues(alpha: 0.12),
-                    blurRadius: 120,
-                    spreadRadius: 50,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          SafeArea(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                const Text('🔥', style: TextStyle(fontSize: 48)),
-                const SizedBox(height: 10),
-                const Text(
-                  'MISSION ACCOMPLISHED',
-                  style: TextStyle(color: KColor.green, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.5),
-                ),
-                Text(
-                  session.splitDayName.toUpperCase(),
-                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 20),
-                
-                // Dashboard Share Card
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: KColor.surface,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: KColor.border, width: 1.0),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 15, offset: const Offset(0, 8)),
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _skipIntro(),
+      child: ColoredBox(
+        color: KColor.bg,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          KIcon(KIcons.done, size: KIcons.sm, color: KColor.green),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text('Saved to your log', style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.w600)),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(_dateLabel, style: KText.caption.copyWith(color: KColor.textSecondary)),
                         ],
                       ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      const SizedBox(height: 14),
+
+                      // The scoreboard.
+                      AnimatedBuilder(
+                        animation: heroIn,
+                        builder: (context, child) => Opacity(
+                          opacity: heroIn.value,
+                          child: Transform.translate(
+                            offset: Offset(0, 24 * (1 - heroIn.value)),
+                            child: Transform.scale(scale: 0.96 + 0.04 * heroIn.value, child: child),
+                          ),
+                        ),
+                        child: KHeroSurface(
+                          key: const Key('session_scoreboard'),
+                          tone: KTone.train,
+                          padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('KYNETIX FLAGSHIP PERFORMANCE', style: TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-                              Text('${session.date.day}/${session.date.month}/${session.date.year}', style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text(
+                                session.splitDayName,
+                                style: KText.bodyMedium.copyWith(color: KHeroInk.secondary, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _verdict(volume),
+                                style: KText.display.copyWith(color: KHeroInk.primary, fontSize: 26, height: 1.12),
+                              ),
+                              const SizedBox(height: 22),
+                              Semantics(
+                                label: '${thousands(volume)} kilograms moved',
+                                excludeSemantics: true,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    Flexible(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.centerLeft,
+                                        child: AnimatedBuilder(
+                                          animation: countUp,
+                                          builder: (context, _) => Text(
+                                            thousands(heroValue * countUp.value),
+                                            style: KText.display.copyWith(
+                                              color: KHeroInk.primary,
+                                              fontSize: 76,
+                                              height: 0.95,
+                                              letterSpacing: -3.2,
+                                              fontFeatures: const [FontFeature.tabularFigures()],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(byReps ? 'reps' : 'kg', style: KText.display.copyWith(color: KHeroInk.secondary, fontSize: 22)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 18,
+                                    height: 3,
+                                    decoration: BoxDecoration(
+                                      borderRadius: KRadius.pill,
+                                      gradient: LinearGradient(colors: KGradient.train),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      byReps ? 'Bodyweight, all of it' : (_volumeDelta(volume) ?? 'Moved today'),
+                                      style: KText.bodyMedium.copyWith(color: KHeroInk.secondary),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+                              Container(height: 1, color: KHeroInk.rule),
+                              const SizedBox(height: 16),
+                              IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    _scoreCell(0, '$minutes', 'min', prev?.durationMinutes == null ? null : 'was ${prev!.durationMinutes}'),
+                                    _cellRule(),
+                                    _scoreCell(1, '$sets', sets == 1 ? 'set' : 'sets', prev == null ? null : 'was ${prev.totalSets}'),
+                                    _cellRule(),
+                                    _scoreCell(2, '${_bests.length}', _bests.length == 1 ? 'PR' : 'PRs', null),
+                                    _cellRule(),
+                                    _scoreCell(3, '${widget.score}', 'score', null),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
-                          const SizedBox(height: 18),
-                          
-                          // 2x2 Stats Dashboard Grid
-                          Row(
+                        ),
+                      ),
+
+                      if (_bests.isNotEmpty) ...[
+                        const SizedBox(height: 28),
+                        KReveal(index: 2, delay: const Duration(milliseconds: 500), child: Text('New bests', style: KText.h1.copyWith(fontSize: 22))),
+                        const SizedBox(height: 10),
+                        for (final (i, b) in _bests.indexed)
+                          KReveal(
+                            index: 3 + i,
+                            delay: const Duration(milliseconds: 500),
+                            child: _BestRow(best: b),
+                          ),
+                      ],
+
+                      if (worked.isNotEmpty) ...[
+                        const SizedBox(height: 28),
+                        KReveal(index: 3, delay: const Duration(milliseconds: 600), child: Text('The work', style: KText.h1.copyWith(fontSize: 22))),
+                        const SizedBox(height: 6),
+                        for (final (i, e) in worked.indexed)
+                          KReveal(
+                            index: 4 + i,
+                            delay: const Duration(milliseconds: 600),
+                            child: _ReceiptRow(entry: e),
+                          ),
+                      ],
+
+                      if (mappable.isNotEmpty) ...[
+                        const SizedBox(height: 28),
+                        KReveal(
+                          index: 6,
+                          delay: const Duration(milliseconds: 700),
+                          child: Row(
                             children: [
-                              _buildMetricCol(
-                                'WORKOUT SCORE',
-                                Row(
+                              SizedBox(
+                                width: 132,
+                                child: MuscleBodyMap(
+                                  view: BodyView.sideBySide,
+                                  highlightedMuscles: mappable,
+                                  height: 128,
+                                ),
+                              ),
+                              const SizedBox(width: KSpacing.lg),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    _AnimatedCountUpText(
-                                      value: widget.score,
-                                      style: const TextStyle(color: KColor.amber, fontSize: 16, fontWeight: FontWeight.w900),
-                                    ),
-                                    const Text(
-                                      ' / 100',
-                                      style: TextStyle(color: KColor.textMuted, fontSize: 13, fontWeight: FontWeight.bold),
+                                    Text('Hit today', style: KText.h1.copyWith(fontSize: 20)),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      muscles.join(', '),
+                                      style: KText.body.copyWith(color: KColor.textSecondary),
                                     ),
                                   ],
                                 ),
                               ),
-                              _buildMetricCol(
-                                'ACCUMULATED VOLUME',
-                                _AnimatedCountUpText(
-                                  value: totalVol,
-                                  suffix: ' kg',
-                                  style: const TextStyle(color: KColor.green, fontSize: 16, fontWeight: FontWeight.w900),
-                                ),
-                              ),
                             ],
                           ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              _buildMetricCol(
-                                'SETS COMPLETED',
-                                _AnimatedCountUpText(
-                                  value: totalSets,
-                                  suffix: ' sets',
-                                  style: const TextStyle(color: KColor.blue, fontSize: 16, fontWeight: FontWeight.w900),
-                                ),
-                              ),
-                              _buildMetricCol(
-                                'SESSION DURATION',
-                                Text(
-                                  minStr,
-                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
-                                ),
-                              ),
-                            ],
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          const Divider(color: KColor.border, height: 1),
-                          const SizedBox(height: 18),
-                          
-                          // Achievements Summary
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildCompletionBadge('💪 $totalSets working sets'),
-                              if (prCount > 0)
-                                _buildCompletionBadge('🏆 $prCount PRs Hit!'),
-                              if (deltaPct > 0)
-                                _buildCompletionBadge('📈 +${deltaPct.toStringAsFixed(0)}% volume'),
-                            ],
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          const Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text('MUSCLES TRAINED', style: TextStyle(color: KColor.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold, letterSpacing: 0.4)),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: muscles.map((m) => KChip(m)).toList(),
-                          ),
-                          _ScoreBreakdownPanel(
-                            scoreCompletion: widget.scoreCompletion,
-                            scoreVolume: widget.scoreVolume,
-                            scoreSets: widget.scoreSets,
-                            scorePrs: widget.scorePrs,
-                            e1rmPrsCount: widget.e1rmPrsCount,
-                            session: session,
-                            previousSession: widget.previousSession,
-                          ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                
-                // Sticky CTA
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: widget.onDone,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: KColor.green,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+
+              // Share the card, or done.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('share_workout_button'),
+                        onPressed: () => showWorkoutShareSheet(
+                          context,
+                          WorkoutShareData.fromSession(
+                            session,
+                            duration: widget.duration,
+                            prCount: _bests.length,
+                            isPr: (id, s) => WorkoutService.beatsPreviousBest(
+                              s,
+                              WorkoutService.instance.bestSetBefore(id, session.date),
+                            ),
+                          ),
+                        ),
+                        icon: Icon(Icons.ios_share_rounded, size: 18, color: KColor.textPrimary),
+                        label: Text('Share', style: _WsText.button.copyWith(fontSize: 16, color: KColor.textPrimary)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: KColor.textPrimary,
+                          side: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.22 : 0.24)),
+                          shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+                          minimumSize: const Size.fromHeight(56),
+                        ),
                       ),
-                      child: const Text('Log Workout & Continue', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: widget.onDone,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: KColor.ink,
+                          foregroundColor: KColor.onInk,
+                          shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+                          minimumSize: const Size.fromHeight(56),
+                          elevation: 0,
+                        ),
+                        child: Text('Done', style: _WsText.button.copyWith(fontSize: 16, color: KColor.onInk)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cellRule() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Container(width: 1, color: KHeroInk.rule),
+      );
+
+  /// One scoreboard cell: a big number, its unit, and last time's number
+  /// when there is one. Cells rise in one after another.
+  Widget _scoreCell(int i, String value, String unit, String? was) {
+    final a = _phase(0.3 + i * 0.1, 0.7 + i * 0.075);
+    return Expanded(
+      child: AnimatedBuilder(
+        animation: a,
+        builder: (context, child) => Opacity(
+          opacity: a.value,
+          child: Transform.translate(offset: Offset(0, 10 * (1 - a.value)), child: child),
+        ),
+        child: Semantics(
+          label: '$value $unit${was == null ? '' : ', $was'}',
+          excludeSemantics: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: KText.display.copyWith(
+                    color: KHeroInk.primary,
+                    fontSize: 32,
+                    height: 1.0,
+                    letterSpacing: -1.2,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-              ],
+              ),
+              const SizedBox(height: 4),
+              Text(unit, style: KText.caption.copyWith(color: KHeroInk.secondary)),
+              if (was != null)
+                Text(was, style: KText.caption.copyWith(color: KHeroInk.muted, fontSize: 11)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A new best: the lift, today's set big, and the set it beat.
+class _BestRow extends StatelessWidget {
+  const _BestRow({required this.best});
+  final _SessionBest best;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _hairline()))),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: KRadius.pill,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: KGradient.train,
+              ),
             ),
           ),
-          
-          // Confetti painter
-          IgnorePointer(
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: _ConfettiPainter(_confetti),
-            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(best.name, style: KText.bodyMedium.copyWith(fontSize: 15, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _liftLabel(best.set),
+                style: KText.display.copyWith(fontSize: 22, fontFeatures: const [FontFeature.tabularFigures()]),
+              ),
+              if (best.previous != null)
+                Text(
+                  'beat ${_liftLabel(best.previous!)}',
+                  style: KText.caption.copyWith(color: KColor.textMuted),
+                ),
+            ],
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildMetricCol(String title, Widget valueChild) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: const Color(0xFF13131F),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(color: KColor.textMuted, fontSize: 8.5, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            valueChild,
-          ],
-        ),
+/// One exercise on the receipt: name, working sets, the top set, and a
+/// dotted perforation below.
+class _ReceiptRow extends StatelessWidget {
+  const _ReceiptRow({required this.entry});
+  final ExerciseEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final working = entry.sets.where((s) => s.isMainWorkingSet).toList();
+    SetEntry? top;
+    for (final s in working) {
+      if (top == null || s.estimatedOneRepMax > top.estimatedOneRepMax) top = s;
+    }
+    final timed = top?.durationSeconds != null;
+    final value = top == null
+        ? plural(entry.sets.length, 'set')
+        : timed
+            ? '${top.durationSeconds! ~/ 60}:${(top.durationSeconds! % 60).toString().padLeft(2, '0')}'
+            : _liftLabel(top);
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(entry.exercise.name, style: KText.bodyMedium.copyWith(fontSize: 15)),
+                    Text(plural(working.length, 'working set'), style: KText.caption.copyWith(color: KColor.textMuted)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                value,
+                style: KText.numSmall.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // The perforation between lines of a printed receipt.
+          SizedBox(
+            height: 2,
+            child: CustomPaint(painter: _LeaderPainter(KColor.fg.withValues(alpha: 0.2))),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildCompletionBadge(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF13131F),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-      ),
-    );
+/// A dotted rule, like the perforation on a printed receipt.
+class _LeaderPainter extends CustomPainter {
+  _LeaderPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = color;
+    for (var x = 1.0; x < size.width; x += 5) {
+      canvas.drawCircle(Offset(x, size.height / 2), 0.9, p);
+    }
   }
+
+  @override
+  bool shouldRepaint(_LeaderPainter old) => old.color != color;
 }
 
 // ─── Animated Count-Up Text Widget ──────────────────────────────────────────
@@ -5089,7 +6010,7 @@ class _AnimatedCountUpTextState extends State<_AnimatedCountUpText> with SingleT
     _oldValue = widget.value;
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: KMotion.slow,
     );
     _animation = Tween<double>(begin: widget.value.toDouble(), end: widget.value.toDouble()).animate(_controller);
   }
@@ -5099,6 +6020,7 @@ class _AnimatedCountUpTextState extends State<_AnimatedCountUpText> with SingleT
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value) {
       _oldValue = oldWidget.value;
+      _controller.duration = KMotion.of(context, KMotion.slow);
       _controller.reset();
       _animation = Tween<double>(
         begin: _oldValue.toDouble(),
@@ -5116,6 +6038,8 @@ class _AnimatedCountUpTextState extends State<_AnimatedCountUpText> with SingleT
 
   @override
   Widget build(BuildContext context) {
+    // Count-ups always render tabular figures so digits never jitter while counting.
+    final style = widget.style.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
@@ -5123,175 +6047,9 @@ class _AnimatedCountUpTextState extends State<_AnimatedCountUpText> with SingleT
         final valStr = currentVal.toStringAsFixed(0);
         return Text(
           '${widget.prefix}$valStr${widget.suffix}',
-          style: widget.style,
+          style: style,
         );
       },
-    );
-  }
-}
-
-// ─── Score Breakdown Panel Widget ───────────────────────────────────────────
-
-class _ScoreBreakdownPanel extends StatefulWidget {
-  final double scoreCompletion;
-  final double scoreVolume;
-  final double scoreSets;
-  final double scorePrs;
-  final int e1rmPrsCount;
-  final WorkoutSession session;
-  final WorkoutSession? previousSession;
-
-  const _ScoreBreakdownPanel({
-    required this.scoreCompletion,
-    required this.scoreVolume,
-    required this.scoreSets,
-    required this.scorePrs,
-    required this.e1rmPrsCount,
-    required this.session,
-    this.previousSession,
-  });
-
-  @override
-  State<_ScoreBreakdownPanel> createState() => _ScoreBreakdownPanelState();
-}
-
-class _ScoreBreakdownPanelState extends State<_ScoreBreakdownPanel> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    int totalPlannedWorkingSets = 0;
-    int completedWorkingSets = 0;
-    for (final entry in widget.session.entries) {
-      if (entry.isSkipped) continue;
-      totalPlannedWorkingSets += entry.exercise.targetSets;
-      completedWorkingSets += entry.sets.where((s) => s.isMainWorkingSet).length;
-    }
-
-    final currentVol = widget.session.primaryWorkingVolume;
-    final prevVol = widget.previousSession?.primaryWorkingVolume ?? 0.0;
-    double volDiffPct = 0.0;
-    if (prevVol > 0) {
-      volDiffPct = ((currentVol - prevVol) / prevVol) * 100;
-    }
-
-    double loggedSetsScore = 0.0;
-    int activeExercises = 0;
-    for (final entry in widget.session.entries) {
-      if (entry.isSkipped) continue;
-      activeExercises++;
-      final logged = entry.sets.where((s) => s.isMainWorkingSet).length;
-      final target = entry.exercise.targetSets > 0 ? entry.exercise.targetSets : 3;
-      loggedSetsScore += (logged / target).clamp(0.0, 1.0);
-    }
-    final adherencePct = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 100 : 100.0;
-
-    final totalScore = (widget.scoreCompletion + widget.scoreVolume + widget.scoreSets + widget.scorePrs).round().clamp(0, 100);
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF13131F),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E2E3E), width: 1.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  'WORKOUT SCORE: $totalScore / 100',
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _expanded = !_expanded;
-                  });
-                },
-                child: Text(
-                  _expanded ? 'Hide Details ▲' : 'Tap for Details ▼',
-                  style: const TextStyle(color: KColor.blue, fontSize: 11, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _buildRow('├─ Completion:', '${widget.scoreCompletion.toStringAsFixed(1)} / 30'),
-          _buildRow('├─ Volume:', '${widget.scoreVolume.toStringAsFixed(1)} / 30'),
-          _buildRow('├─ Sets:', '${widget.scoreSets.toStringAsFixed(1)} / 25'),
-          _buildRow('└─ PR Bonus:', '${widget.scorePrs.toStringAsFixed(1)} / 15'),
-          
-          if (_expanded) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0),
-              child: Divider(color: Color(0xFF2E2E3E), thickness: 0.5),
-            ),
-            _buildDetailSection(
-              'Completion',
-              '$completedWorkingSets of $totalPlannedWorkingSets planned working sets completed',
-            ),
-            const SizedBox(height: 6),
-            _buildDetailSection(
-              'Volume',
-              '${currentVol.toStringAsFixed(0)} kg vs ${prevVol.toStringAsFixed(0)} kg previous (${volDiffPct >= 0 ? "+" : ""}${volDiffPct.toStringAsFixed(1)}%)',
-            ),
-            const SizedBox(height: 6),
-            _buildDetailSection(
-              'Sets',
-              '${adherencePct.toStringAsFixed(0)}% adherence to planned sets',
-            ),
-            const SizedBox(height: 6),
-            _buildDetailSection(
-              'PR Bonus',
-              '${widget.e1rmPrsCount} e1RM PRs achieved',
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRow(String title, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(color: KColor.textSecondary, fontSize: 11.5, fontFamily: 'monospace'),
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontFamily: 'monospace', fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailSection(String title, String detail) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '  • $title:',
-          style: const TextStyle(color: KColor.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-        ),
-        Text(
-          '    $detail',
-          style: const TextStyle(color: Colors.white, fontSize: 11),
-        ),
-      ],
     );
   }
 }

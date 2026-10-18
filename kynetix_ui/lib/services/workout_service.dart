@@ -2,11 +2,14 @@ import 'dart:convert';
 import 'dart:math' show max;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/day_log.dart';
 import '../models/workout_split.dart';
 import '../models/workout_session.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/recovery_service.dart';
 import 'nutrition_target_engine.dart';
+import 'persistence_service.dart';
+import 'internal/scoped_prefs.dart';
 
 // ─── ACWR / Fatigue Analytics ─────────────────────────────────────────────────
 
@@ -99,6 +102,59 @@ class ProgressionRecommendation {
 //   • progressionHint() only analyses isMainWorkingSet sets (excludes warm-ups).
 //   • Sessions are pruned at 200 entries (oldest first).
 
+/// Where a day's training plan came from, strongest first.
+enum DayPlanSource {
+  /// A workout was logged (or is in progress) that day.
+  session,
+
+  /// The user picked Yes/No or a split day on the day screen.
+  manual,
+
+  /// The weekly split schedule.
+  split,
+}
+
+/// What a day is, training-wise: the one answer every screen uses
+/// (Nutrition day screen, Train tab, targets, Kyno, widget).
+class DayPlan {
+  const DayPlan({
+    required this.isTraining,
+    required this.source,
+    this.name,
+    this.splitDay,
+  });
+
+  final bool isTraining;
+  final DayPlanSource source;
+
+  /// "Push", "Chest + Triceps", … Null on rest days.
+  final String? name;
+
+  /// The configured split day matching [name], when there is one.
+  final SplitDay? splitDay;
+
+  bool get isRest => !isTraining;
+
+  /// "Push day" / "Rest day" (sentence case, for UI).
+  String get label {
+    if (!isTraining) return 'Rest day';
+    final n = name;
+    if (n == null || n.isEmpty || n == 'Custom Workout') return 'Training day';
+    return n.toLowerCase().endsWith('day') ? n : '$n day';
+  }
+}
+
+/// A workout-store write waiting in [WorkoutService]'s write chain. [key] is
+/// fixed when it is queued; [payload] is filled when the write starts, or
+/// earlier if the session ends first.
+class _PendingWorkoutWrite {
+  _PendingWorkoutWrite(this.key, {required this.alsoLegacy});
+  final String key;
+  final bool alsoLegacy;
+  String? payload;
+  late final Future<void> done;
+}
+
 class WorkoutService extends ChangeNotifier {
   WorkoutService._();
   static final WorkoutService instance = WorkoutService._();
@@ -108,6 +164,17 @@ class WorkoutService extends ChangeNotifier {
 
   String? _currentUserId;
   String get _currentPrefKey => _currentUserId != null ? '${_kData}_$_currentUserId' : _kData;
+
+  // Crash-recovery copy of the live session and Health-derived recovery
+  // inputs. Stored per user like everything else (see [ScopedPrefs]).
+  static const _kRecovery = 'kynetix_workout_recovery';
+  static const _kSleepHours = 'kynetix_sleep_hours_v1';
+  static const _kHrvRmssd = 'kynetix_hrv_rmssd_v1';
+  static const _kHrvBaseline = 'kynetix_hrv_baseline_v1';
+  static const _kReadinessHistory = 'kynetix_readiness_history_v1';
+
+  /// The signed-in user's crash-recovery key for the live workout screen.
+  String get recoveryPrefKey => ScopedPrefs.key(_kRecovery, _currentUserId);
 
   WorkoutSplit? _split;
   List<WorkoutSession> _sessions = [];
@@ -132,9 +199,30 @@ class WorkoutService extends ChangeNotifier {
   double? _hrvBaseline;
 
   // ── Write-queue fields ────────────────────────────────────────────────────
-  // Prevents concurrent _persist() calls from overwriting each other.
-  bool _persisting = false;
-  bool _pendingPersist = false;
+  // Every _persist() joins one ordered chain, so writes never race. A call
+  // that arrives while a write is still queued (not yet started) shares it.
+  // Null when idle: a write then starts at once instead of chaining on an old
+  // (possibly other-zone) future.
+  Future<void>? _writeTail;
+  _PendingWorkoutWrite? _queuedWrite;
+
+  /// Test seam: replaces the SharedPreferences write (to simulate failures).
+  @visibleForTesting
+  static Future<void> Function(String key, String json)? debugWriteOverride;
+
+  // ── Deleted-session tombstones ────────────────────────────────────────────
+  // Ids the user deleted on this device. Cloud hydration never re-adds them,
+  // and re-sends the cloud delete for any that are still in the cloud (e.g.
+  // the first delete ran offline). Kept per user, newest last.
+  static const _kDeletedSessionIds = 'workout_deleted_session_ids_v1';
+  static const _maxDeletedSessionIds = 500;
+  final List<String> _deletedSessionIds = [];
+
+  /// True if the user deleted session [id] on this device.
+  bool isSessionDeleted(String id) => _deletedSessionIds.contains(id);
+
+  /// Ids the user deleted on this device (oldest first).
+  List<String> get deletedSessionIds => List.unmodifiable(_deletedSessionIds);
 
   // ── Public read API ──────────────────────────────────────────────────────
 
@@ -172,10 +260,71 @@ class WorkoutService extends ChangeNotifier {
 
   // ── Split day queries ────────────────────────────────────────────────────
 
-  /// SplitDay for today (weekday), or null if rest/no split.
+  /// Today's split day after the user's own pick on the day screen: null on
+  /// a rest day (scheduled or chosen), the picked day when they switched.
   SplitDay? get todaySplitDay {
-    final d = split.dayFor(DateTime.now().weekday);
-    return (d != null && !d.isRestDay) ? d : null;
+    final plan = planFor(DateTime.now());
+    if (plan.isRest) return null;
+    final name = plan.name;
+    if (plan.splitDay != null) return plan.splitDay;
+    // Picked a type that isn't in the split ("Cardio"): a custom session.
+    if (name != null && name.isNotEmpty) return customWorkoutDay(name: name);
+    return splitDayFor(DateTime.now());
+  }
+
+  /// The single answer to "what is this day, training-wise?".
+  ///
+  /// Precedence: a logged session (or today's draft) > the user's pick on the
+  /// day screen > the weekly split.
+  DayPlan planFor(DateTime date, {DayLog? log}) {
+    final session = sessionFor(date);
+    if (session != null && !session.isEmpty) {
+      return DayPlan(
+        isTraining: true,
+        source: DayPlanSource.session,
+        name: session.splitDayName,
+        splitDay: _splitDayNamed(session.splitDayName),
+      );
+    }
+    final draft = _draftSession;
+    if (draft != null && _dateKey(draft.date) == _dateKey(date)) {
+      return DayPlan(
+        isTraining: true,
+        source: DayPlanSource.session,
+        name: draft.splitDayName,
+        splitDay: _splitDayNamed(draft.splitDayName),
+      );
+    }
+    final gym = (log ?? dayLogStore[dateKey(date)])?.gymDay;
+    if (gym != null && gym.manual) {
+      if (!gym.didGym) {
+        return const DayPlan(isTraining: false, source: DayPlanSource.manual);
+      }
+      final name = gym.splitDayName ?? gym.workoutType?.displayName;
+      return DayPlan(
+        isTraining: true,
+        source: DayPlanSource.manual,
+        name: name,
+        splitDay: name == null ? splitDayFor(date) : _splitDayNamed(name),
+      );
+    }
+    final scheduled = splitDayFor(date);
+    if (scheduled == null) {
+      return const DayPlan(isTraining: false, source: DayPlanSource.split);
+    }
+    return DayPlan(
+      isTraining: true,
+      source: DayPlanSource.split,
+      name: scheduled.name,
+      splitDay: scheduled,
+    );
+  }
+
+  SplitDay? _splitDayNamed(String name) {
+    for (final d in split.days) {
+      if (!d.isRestDay && d.name == name) return d;
+    }
+    return null;
   }
 
   List<WorkoutSession> sessionsForSplitDay(String splitDayName) =>
@@ -378,9 +527,7 @@ class WorkoutService extends ChangeNotifier {
         final top =
             entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
         if (top == null) continue;
-        final previousBest = bestSetBefore(entry.exercise.id, session.date);
-        if (previousBest == null ||
-            top.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01) {
+        if (isPersonalRecord(top, entry.exercise.id, session.date)) {
           return (
             title: 'New PR on ${entry.exercise.name}',
             detail:
@@ -623,14 +770,12 @@ class WorkoutService extends ChangeNotifier {
             }
             if (origExercise != null) break;
           }
-          if (origExercise == null) {
-            origExercise = Exercise(
-              id: origId,
-              name: e.substitutedForExerciseName ?? 'Unknown Exercise',
-              muscleGroup: e.exercise.muscleGroup,
-              type: e.exercise.type,
-            );
-          }
+          origExercise ??= Exercise(
+            id: origId,
+            name: e.substitutedForExerciseName ?? 'Unknown Exercise',
+            muscleGroup: e.exercise.muscleGroup,
+            type: e.exercise.type,
+          );
 
           originalMap[key] = origExercise;
           replacementMap[key] = e.exercise;
@@ -748,6 +893,16 @@ class WorkoutService extends ChangeNotifier {
     return best;
   }
 
+  /// The one PR rule: a set is a personal record only when it beats an
+  /// earlier best. A first-ever set sets the baseline; it is not a PR.
+  static bool beatsPreviousBest(SetEntry set, SetEntry? previousBest) =>
+      previousBest != null &&
+      set.estimatedOneRepMax > previousBest.estimatedOneRepMax + 0.01;
+
+  /// Whether [set] is a PR for [exerciseId] against sessions before [date].
+  bool isPersonalRecord(SetEntry set, String exerciseId, DateTime date) =>
+      beatsPreviousBest(set, bestSetBefore(exerciseId, date));
+
   SetEntry? bestSetBefore(String exerciseId, DateTime beforeDate) {
     SetEntry? best;
     for (final s in _sessions) {
@@ -840,7 +995,7 @@ class WorkoutService extends ChangeNotifier {
     Exercise exercise,
   ) {
     if (lastEntry == null || lastEntry.isEmpty) {
-      return '💡 First time — start light and focus on form to establish a baseline.';
+      return '💡 First time, start light and focus on form to establish a baseline.';
     }
 
     // Prioritise true working sets. Fall back to superset working sets if needed.
@@ -852,7 +1007,7 @@ class WorkoutService extends ChangeNotifier {
         : lastEntry.sets.where((s) => s.isMainWorkingSet).toList();
     if (sets.isEmpty) {
       // Last session had only warm-ups logged — treat as first time
-      return '💡 No working sets last time — find your working weight baseline today.';
+      return '💡 No working sets last time, find your working weight baseline today.';
     }
 
     final topW = sets.map((s) => s.weight).reduce(max);
@@ -944,10 +1099,15 @@ class WorkoutService extends ChangeNotifier {
         final firstWeight = workingSets[0].weight;
         final isFixed = workingSets.every((s) => s.weight == firstWeight);
 
-        if (isAsc) ascendingCount++;
-        else if (isDesc) descendingCount++;
-        else if (isTopSet) topSetBackOffCount++;
-        else if (isFixed) fixedCount++;
+        if (isAsc) {
+          ascendingCount++;
+        } else if (isDesc) {
+          descendingCount++;
+        } else if (isTopSet) {
+          topSetBackOffCount++;
+        } else if (isFixed) {
+          fixedCount++;
+        }
       } else {
         // Single set session can count as fixed weight by default
         fixedCount++;
@@ -1275,14 +1435,14 @@ class WorkoutService extends ChangeNotifier {
   void trackRecommendationAccepted(String exerciseId, String splitDayName) {
     final key = '$splitDayName:$exerciseId';
     _additionAcceptedCounts[key] = (_additionAcceptedCounts[key] ?? 0) + 1;
-    _persist();
+    _persist().ignore();
     notifyListeners();
   }
 
   void trackRecommendationIgnored(String exerciseId, String splitDayName) {
     final key = '$splitDayName:$exerciseId';
     _additionIgnoredCounts[key] = (_additionIgnoredCounts[key] ?? 0) + 1;
-    _persist();
+    _persist().ignore();
     notifyListeners();
   }
 
@@ -1323,6 +1483,8 @@ class WorkoutService extends ChangeNotifier {
   Future<void> saveSession(WorkoutSession session) async {
     _sessions.removeWhere((s) => s.id == session.id);
     _sessions.add(session);
+    // Saving a session again (e.g. Undo) brings it back for good.
+    if (_deletedSessionIds.remove(session.id)) _persistDeletedIds().ignore();
 
     if (_sessions.length > _maxSessions) {
       _sessions = _sessions.reversed
@@ -1338,7 +1500,12 @@ class WorkoutService extends ChangeNotifier {
       _draftStartedAt = null;
     }
 
-    await _persist();
+    // The caller only drops its draft / recovery copy once this landed on
+    // disk, so a failed write must reach it.
+    await _persist(rethrowErrors: true);
+    if (!session.isEmpty && _recordSessionOnDay(session.date, session.splitDayName)) {
+      await PersistenceService.saveDayLogsAndSync(session.date);
+    }
     NutritionTargetEngine.instance.refreshTargetForDate(session.date).ignore();
     notifyListeners();
     
@@ -1353,13 +1520,84 @@ class WorkoutService extends ChangeNotifier {
     if (matches.isEmpty) return;
     final sessionDate = matches.first.date;
     _sessions.removeWhere((s) => s.id == id);
+    _deletedSessionIds
+      ..remove(id)
+      ..add(id);
+    if (_deletedSessionIds.length > _maxDeletedSessionIds) {
+      _deletedSessionIds.removeRange(
+          0, _deletedSessionIds.length - _maxDeletedSessionIds);
+    }
+    await _persistDeletedIds();
     await _persist();
+    if (_clearSessionFromDay(sessionDate, matches.first.splitDayName)) {
+      await PersistenceService.saveDayLogsAndSync(sessionDate);
+    }
     NutritionTargetEngine.instance.refreshTargetForDate(sessionDate).ignore();
     notifyListeners();
+
+    // Delete the cloud copy too, or hydration would bring it back. If this
+    // fails (offline), the tombstone keeps it hidden and the next hydration
+    // retries the delete.
+    final uid = _currentUserId;
+    if (uid != null) {
+      try {
+        CloudSyncService.instance
+            .deleteWorkoutSessions({id}, expectedUserId: uid)
+            .catchError((_) => false)
+            .ignore();
+      } catch (_) {}
+    }
   }
 
-  Future<void> bulkImportCloudSessions(List<WorkoutSession> importedSessions) async {
+  Future<void> _persistDeletedIds() async {
+    final key = ScopedPrefs.key(_kDeletedSessionIds, _currentUserId);
+    final ids = List<String>.of(_deletedSessionIds);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(key, ids);
+    } catch (e) {
+      debugPrint('[WorkoutService] deleted-id persist error: $e');
+    }
+  }
+
+  /// The day screen shows what was actually trained: a saved session sets the
+  /// day's pick (Push → Push, even if the split said Pull).
+  bool _recordSessionOnDay(DateTime date, String splitDayName) {
+    final log = logFor(date);
+    final gym = log.gymDay;
+    if (gym != null && gym.manual && gym.didGym && gym.splitDayName == splitDayName) return false;
+    log.gymDay = (gym ?? const GymDay.unpicked()).withSession(splitDayName);
+    return true;
+  }
+
+  /// Deleting the day's last session drops the pick it made, so the day goes
+  /// back to the split (or another remaining session).
+  bool _clearSessionFromDay(DateTime date, String splitDayName) {
+    final remaining = sessionsForDate(date).where((s) => !s.isEmpty).toList();
+    final log = dayLogStore[dateKey(date)];
+    final gym = log?.gymDay;
+    if (log == null || gym == null) return false;
+    if (remaining.isNotEmpty) {
+      log.gymDay = gym.withSession(remaining.first.splitDayName);
+      return true;
+    }
+    if (gym.manual && gym.didGym && gym.splitDayName == splitDayName) {
+      log.gymDay = gym.withoutPick();
+      return true;
+    }
+    return false;
+  }
+
+  /// [stillCurrent] (cloud hydration) must still hold when the merge starts;
+  /// otherwise the sessions belong to a session that has ended and are
+  /// dropped.
+  Future<void> bulkImportCloudSessions(
+    List<WorkoutSession> importedSessions, {
+    bool Function()? stillCurrent,
+  }) async {
+    if (stillCurrent != null && !stillCurrent()) return;
     for (final session in importedSessions) {
+      if (isSessionDeleted(session.id)) continue;
       _sessions.removeWhere((s) => s.id == session.id);
       _sessions.add(session);
     }
@@ -1411,11 +1649,17 @@ class WorkoutService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// One tap from the Train tab: start on the Developer's Choice. Saved as this
+  /// user's own copy, so later edits stay theirs.
+  Future<void> adoptDevelopersChoice() => saveSplit(developersChoiceSplit);
+
   Future<void> loadSplitAndCustomExercisesFromCloud(
     WorkoutSplit cloudSplit,
     List<Exercise> cloudCustomExercises, {
     DateTime? cloudUpdatedAt,
+    bool Function()? stillCurrent,
   }) async {
+    if (stillCurrent != null && !stillCurrent()) return;
     _split = cloudSplit;
     _customExercises = cloudCustomExercises;
     _setupDone = true;
@@ -1428,6 +1672,7 @@ class WorkoutService extends ChangeNotifier {
 
   /// Load for specific authenticated user
   Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
+    _materializeQueuedWrite();
     _currentUserId = userId;
     _ready = false;
     await init(prefsOverride: prefsOverride);
@@ -1435,6 +1680,10 @@ class WorkoutService extends ChangeNotifier {
 
   /// Flush in-memory state without deleting persisted disk stores
   void clearMemory() {
+    // A write still waiting in the chain keeps the state it was asked to save
+    // (and its key), not the empty state below.
+    _materializeQueuedWrite();
+    _deletedSessionIds.clear();
     _split = null;
     _sessions = [];
     _customExercises = [];
@@ -1454,9 +1703,16 @@ class WorkoutService extends ChangeNotifier {
 
   Future<void> init({SharedPreferences? prefsOverride}) async {
     if (_ready) return;
+    // Never read the store while a write for it is still queued.
+    await flushPendingWrites();
     try {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
-      final raw = prefs.getString(_currentPrefKey) ?? prefs.getString(_kData);
+      _deletedSessionIds
+        ..clear()
+        ..addAll(prefs.getStringList(
+                ScopedPrefs.key(_kDeletedSessionIds, _currentUserId)) ??
+            const []);
+      final raw = ScopedPrefs.getString(prefs, _kData, _currentUserId);
       if (raw != null) {
         final data = jsonDecode(raw) as Map<String, dynamic>;
         // Load each field independently so a corrupted session list doesn't
@@ -1473,7 +1729,7 @@ class WorkoutService extends ChangeNotifier {
           try {
             _split = WorkoutSplit.fromJson(data['split'] as Map<String, dynamic>);
           } catch (e) {
-            debugPrint('[WorkoutService] split parse error: $e — keeping default');
+            debugPrint('[WorkoutService] split parse error: $e, keeping default');
           }
         }
         try {
@@ -1482,7 +1738,7 @@ class WorkoutService extends ChangeNotifier {
               .toList();
           debugPrint('[WorkoutService] Loaded ${_sessions.length} sessions for user: $_currentUserId (key: $_currentPrefKey)');
         } catch (e) {
-          debugPrint('[WorkoutService] sessions parse error: $e — starting with empty list');
+          debugPrint('[WorkoutService] sessions parse error: $e, starting with empty list');
           _sessions = [];
         }
         try {
@@ -1497,7 +1753,7 @@ class WorkoutService extends ChangeNotifier {
           try {
             _draftSession = WorkoutSession.fromJson(data['draftSession'] as Map<String, dynamic>);
           } catch (e) {
-            debugPrint('[WorkoutService] draftSession parse error: $e — ignoring');
+            debugPrint('[WorkoutService] draftSession parse error: $e, ignoring');
           }
         }
         if (data['draftStartedAt'] != null) {
@@ -1532,7 +1788,8 @@ class WorkoutService extends ChangeNotifier {
 
         // Fallback: If draftSession was not in data, check kynetix_workout_recovery
         if (_draftSession == null) {
-          final recoveryJson = prefs.getString('kynetix_workout_recovery');
+          final recoveryJson =
+              ScopedPrefs.getString(prefs, _kRecovery, _currentUserId);
           if (recoveryJson != null) {
             try {
               final rData = jsonDecode(recoveryJson) as Map<String, dynamic>;
@@ -1590,13 +1847,14 @@ class WorkoutService extends ChangeNotifier {
           }
         }
       }
-      _sleepHours = prefs.getDouble('kynetix_sleep_hours_v1');
-      _hrvRmssd = prefs.getDouble('kynetix_hrv_rmssd_v1');
-      _hrvBaseline = prefs.getDouble('kynetix_hrv_baseline_v1');
+      _sleepHours = ScopedPrefs.getDouble(prefs, _kSleepHours, _currentUserId);
+      _hrvRmssd = ScopedPrefs.getDouble(prefs, _kHrvRmssd, _currentUserId);
+      _hrvBaseline =
+          ScopedPrefs.getDouble(prefs, _kHrvBaseline, _currentUserId);
     } catch (e) {
       // Only a total JSON decode failure reaches here — individual field
       // failures are caught above, preserving setup config.
-      debugPrint('[WorkoutService] load error: $e — starting fresh');
+      debugPrint('[WorkoutService] load error: $e, starting fresh');
       _split = null;
       _sessions = [];
       _customExercises = [];
@@ -1613,7 +1871,10 @@ class WorkoutService extends ChangeNotifier {
   /// Must be called during account switching (owner ID mismatch) so stale local
   /// data from a previous user is not shown to the newly authenticated user.
   Future<void> clearAll() async {
+    // Land queued writes first so none can recreate the keys removed below.
+    await flushPendingWrites();
     _lastWorkoutsChangedAt = DateTime.now();
+    _deletedSessionIds.clear();
     _split = null;
     _sessions = [];
     _customExercises = [];
@@ -1631,10 +1892,14 @@ class WorkoutService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_currentPrefKey);
       await prefs.remove(_kData);
-      await prefs.remove('kynetix_sleep_hours_v1');
-      await prefs.remove('kynetix_hrv_rmssd_v1');
-      await prefs.remove('kynetix_hrv_baseline_v1');
-      await prefs.remove('kynetix_workout_recovery');
+      await prefs.remove(ScopedPrefs.key(_kSleepHours, _currentUserId));
+      await prefs.remove(ScopedPrefs.key(_kHrvRmssd, _currentUserId));
+      await prefs.remove(ScopedPrefs.key(_kHrvBaseline, _currentUserId));
+      await prefs.remove(recoveryPrefKey);
+      await prefs.remove(_kSleepHours);
+      await prefs.remove(_kHrvRmssd);
+      await prefs.remove(_kHrvBaseline);
+      await prefs.remove(_kRecovery);
     } catch (e) {
       debugPrint('[WorkoutService] Clear data failed: $e');
     }
@@ -1650,19 +1915,7 @@ class WorkoutService extends ChangeNotifier {
 
   // ── Persistence ──────────────────────────────────────────────────────────
 
-  Future<void> _persist() async {
-    _lastWorkoutsChangedAt = DateTime.now();
-    // Write-queue: if already persisting, set pending flag and return.
-    // The in-flight persist will re-run once it finishes, picking up the
-    // latest state — preventing concurrent writes from racing.
-    if (_persisting) {
-      _pendingPersist = true;
-      return;
-    }
-    _persisting = true;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final jsonStr = jsonEncode({
+  String _encodeState() => jsonEncode({
         'setupDone': _setupDone,
         'split': split.toJson(),
         'splitUpdatedAt': _splitUpdatedAt.toIso8601String(),
@@ -1674,21 +1927,67 @@ class WorkoutService extends ChangeNotifier {
         'additionAcceptedCounts': _additionAcceptedCounts,
         'additionIgnoredCounts': _additionIgnoredCounts,
       });
-      await prefs.setString(_currentPrefKey, jsonStr);
-      if (_currentUserId == null) {
-        await prefs.setString(_kData, jsonStr);
-      }
-    } catch (e) {
-      debugPrint('[WorkoutService] persist error: $e');
-    } finally {
-      _persisting = false;
-      if (_pendingPersist) {
-        _pendingPersist = false;
-        // One deferred re-persist to capture any writes that arrived during
-        // the in-flight write.
-        await _persist();
-      }
+
+  /// Freezes the queued write's payload now (before the in-memory state is
+  /// flushed), so it still saves this user's data under this user's key.
+  void _materializeQueuedWrite() {
+    final queued = _queuedWrite;
+    if (queued != null) queued.payload ??= _encodeState();
+  }
+
+  /// Completes once every write requested so far has finished (or failed).
+  Future<void> flushPendingWrites() => _writeTail ?? Future<void>.value();
+
+  Future<void> _runWrite(_PendingWorkoutWrite write) async {
+    // Started: later calls queue a new write with the newer state.
+    if (identical(_queuedWrite, write)) _queuedWrite = null;
+    final jsonStr = write.payload ?? _encodeState();
+    final override = debugWriteOverride;
+    if (override != null) {
+      await override(write.key, jsonStr);
+      return;
     }
+    final prefs = await SharedPreferences.getInstance();
+    final ok = await prefs.setString(write.key, jsonStr);
+    if (write.alsoLegacy) await prefs.setString(_kData, jsonStr);
+    if (!ok) throw StateError('workout store write was rejected');
+  }
+
+  /// Queues a write of the current state. The storage key is fixed now; the
+  /// state is encoded when the write starts (or when the session ends, see
+  /// [clearMemory]), so a burst of calls becomes one write. Errors are logged;
+  /// they only reach the caller with [rethrowErrors] (unawaited callers stay
+  /// safe either way).
+  Future<void> _persist({bool rethrowErrors = false}) {
+    _lastWorkoutsChangedAt = DateTime.now();
+    // Nothing loaded (signed out / mid-switch): writing now would replace the
+    // stored data with an empty state.
+    if (!_ready) return Future<void>.value();
+    final key = _currentPrefKey;
+    final queued = _queuedWrite;
+    final Future<void> done;
+    if (queued != null && queued.key == key && queued.payload == null) {
+      done = queued.done;
+    } else {
+      final write =
+          _PendingWorkoutWrite(key, alsoLegacy: _currentUserId == null);
+      final busy = _writeTail;
+      if (busy == null) {
+        write.done = _runWrite(write);
+      } else {
+        _queuedWrite = write;
+        write.done = busy.then((_) => _runWrite(write));
+      }
+      final tail = write.done.catchError((Object e) {
+        debugPrint('[WorkoutService] persist error: $e');
+      });
+      _writeTail = tail;
+      tail.whenComplete(() {
+        if (identical(_writeTail, tail)) _writeTail = null;
+      }).ignore();
+      done = write.done;
+    }
+    return rethrowErrors ? done : done.catchError((Object _) {});
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1725,20 +2024,24 @@ class WorkoutService extends ChangeNotifier {
     _hrvBaseline = hrvBaseline;
 
     final prefs = await SharedPreferences.getInstance();
+    final uid = _currentUserId;
+    final sleepKey = ScopedPrefs.key(_kSleepHours, uid);
+    final rmssdKey = ScopedPrefs.key(_kHrvRmssd, uid);
+    final baselineKey = ScopedPrefs.key(_kHrvBaseline, uid);
     if (sleepHours != null) {
-      await prefs.setDouble('kynetix_sleep_hours_v1', sleepHours);
+      await prefs.setDouble(sleepKey, sleepHours);
     } else {
-      await prefs.remove('kynetix_sleep_hours_v1');
+      await prefs.remove(sleepKey);
     }
     if (hrvRmssd != null) {
-      await prefs.setDouble('kynetix_hrv_rmssd_v1', hrvRmssd);
+      await prefs.setDouble(rmssdKey, hrvRmssd);
     } else {
-      await prefs.remove('kynetix_hrv_rmssd_v1');
+      await prefs.remove(rmssdKey);
     }
     if (hrvBaseline != null) {
-      await prefs.setDouble('kynetix_hrv_baseline_v1', hrvBaseline);
+      await prefs.setDouble(baselineKey, hrvBaseline);
     } else {
-      await prefs.remove('kynetix_hrv_baseline_v1');
+      await prefs.remove(baselineKey);
     }
 
     try {
@@ -1749,7 +2052,8 @@ class WorkoutService extends ChangeNotifier {
       ));
       final score = report.overallReadiness;
       
-      final historyRaw = prefs.getString('kynetix_readiness_history_v1');
+      final historyRaw =
+          ScopedPrefs.getString(prefs, _kReadinessHistory, uid);
       final Map<String, dynamic> history = historyRaw != null ? jsonDecode(historyRaw) : {};
       
       history[_dateKey(DateTime.now())] = score;
@@ -1760,7 +2064,8 @@ class WorkoutService extends ChangeNotifier {
           history.remove(keys[i]);
         }
       }
-      await prefs.setString('kynetix_readiness_history_v1', jsonEncode(history));
+      await prefs.setString(
+          ScopedPrefs.key(_kReadinessHistory, uid), jsonEncode(history));
     } catch (e) {
       debugPrint('[WorkoutService] Error updating readiness score history: $e');
     }
@@ -2027,7 +2332,8 @@ class WorkoutService extends ChangeNotifier {
   /// Returns true if the readiness score has been low (< 0.6) for the last 3 consecutive days.
   Future<bool> hasRecoveryDeterioration() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('kynetix_readiness_history_v1');
+    final raw =
+        ScopedPrefs.getString(prefs, _kReadinessHistory, _currentUserId);
     if (raw == null) return false;
     
     final map = jsonDecode(raw) as Map<String, dynamic>;

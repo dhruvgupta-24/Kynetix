@@ -183,7 +183,7 @@ class DayStatusEngine {
         DayOutcome.unlogged => const DayOutcomeResult(
             outcome:    DayOutcome.unlogged,
             label:      'No meals logged',
-            emoji:      '—',
+            emoji:      '-',
             color:      Color(0xFF4B5563),
             isPositive: false,
             note:       '',

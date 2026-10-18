@@ -1,81 +1,86 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/app_theme.dart';
 import 'screens/auth_gate.dart';
 import 'screens/reset_password_screen.dart';
-import 'services/meal_memory.dart';
-import 'services/personal_nutrition_memory.dart';
-import 'services/persistence_service.dart';
-import 'services/workout_service.dart';
 import 'services/exercise_library_service.dart';
 import 'config/supabase_secrets.dart';
-import 'services/user_session_coordinator.dart';
+import 'services/health_service.dart';
+import 'services/persistence_service.dart';
 import 'services/global_food_service.dart';
+import 'services/error_reporter.dart';
 
 Future<void> main() async {
   final stopwatch = Stopwatch()..start();
   WidgetsFlutterBinding.ensureInitialized();
+  // Release builds: silence the app's ~400 debug log lines. They cost real
+  // time in hot paths, and may contain personal data.
+  if (kReleaseMode) debugPrint = (String? message, {int? wrapWidth}) {};
 
-  // Immersive dark status bar
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor:          Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor:        KColor.bg,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
+  // Edge-to-edge: content runs under the status and gesture bars. Bar icon
+  // brightness follows the active palette (set by KThemeScope).
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Bundled font licence (SIL OFL 1.1) — listed on the app's licence page.
+  LicenseRegistry.addLicense(() async* {
+    final ofl = await rootBundle.loadString('assets/fonts/inter/OFL.txt');
+    yield LicenseEntryWithLineBreaks(const ['Inter', 'Inter Tight'], ofl);
+  });
 
-  final setupBindingTime = stopwatch.elapsedMilliseconds;
-  debugPrint('[Startup Profile] Flutter binding setup took: ${setupBindingTime} ms');
-
-  // Initialize Supabase Auth & Backend Connection
+  // Only what the first frame truly needs blocks runApp:
+  //  • the theme preference (System / Light / Dark) so there is no flash, and
+  //  • Supabase, because AuthGate routes on its restored session.
+  // Both run in parallel.
+  final themeLoad = KThemeController.instance.load();
   await Supabase.initialize(
     url: SupabaseSecrets.url,
     anonKey: SupabaseSecrets.anonKey,
   );
+  await themeLoad;
+  debugPrint('[Startup Profile] Theme + Supabase ready in ${stopwatch.elapsedMilliseconds} ms');
 
-  final supabaseInitTime = stopwatch.elapsedMilliseconds - setupBindingTime;
-  debugPrint('[Startup Profile] Supabase client initialization took: ${supabaseInitTime} ms');
+  // Crash/error reporting (privacy-scrubbed, in-house client_errors table).
+  ErrorReporter.instance.install();
 
-  // 1. Concurrently initialize global, user-independent services
-  final serviceStart = stopwatch.elapsedMilliseconds;
-  await Future.wait([
-    Health().configure(),
-    ExerciseLibraryService.instance.initialize(),
-    GlobalFoodService.instance.init(),
-  ]);
-  final servicesTime = stopwatch.elapsedMilliseconds - serviceStart;
-  debugPrint('[Startup Profile] Concurrently loaded global services (Health, Exercise Library, Global Foods) in: ${servicesTime} ms');
-
-  // 2. AUTH-FIRST LIFECYCLE:
-  // Check if an authenticated user session already exists.
-  final prefs = await SharedPreferences.getInstance();
-  final devUserId = kDebugMode ? prefs.getString('dev_auto_login_user_id') : null;
-  final startupSession = Supabase.instance.client.auth.currentSession;
-  debugPrint('[main] startup session: ${startupSession != null ? "VALID (user: ${startupSession.user.email ?? startupSession.user.id})" : (devUserId != null ? "DEV SESSION ($devUserId)" : "NULL — user must sign in")}');
-
-  if (startupSession != null) {
-    debugPrint('[main] 🔐 Restoring authenticated user (${startupSession.user.id}). Initializing scoped services...');
-    await UserSessionCoordinator.instance.initializeForUser(startupSession.user.id);
-  } else if (devUserId != null) {
-    debugPrint('[main] 🛠️ Restoring debug dev session ($devUserId). Initializing scoped services...');
-    await UserSessionCoordinator.instance.initializeForUser(devUserId);
-  } else {
-    debugPrint('[main] 🛑 No authenticated session at boot — user-specific data load deferred until sign-in.');
+  // Debug-only dev auto-login: AuthGate recognises it by the cached owner id.
+  if (kDebugMode && Supabase.instance.client.auth.currentSession == null) {
+    final prefs = await SharedPreferences.getInstance();
+    final devUserId = prefs.getString('dev_auto_login_user_id');
+    if (devUserId != null && devUserId.isNotEmpty) {
+      debugPrint('[main] 🛠️ Restoring debug dev session ($devUserId).');
+      await PersistenceService.setCachedOwnerId(devUserId);
+    }
   }
 
-  debugPrint('[Startup Profile] Total main initialization took: ${stopwatch.elapsedMilliseconds} ms');
-
-
-
+  // User data is NOT loaded here: the signed-in gate shows the branded loader
+  // and runs UserSessionCoordinator.initializeForUser itself, so a new user
+  // still onboards and nobody ever sees another account's (or stale) data.
   runApp(const KynetixApp());
+  debugPrint('[Startup Profile] runApp at ${stopwatch.elapsedMilliseconds} ms');
+
+  _warmUpGlobalServices(stopwatch);
+}
+
+/// User-independent services that no first screen needs synchronously. They
+/// start once the first frame is on screen and run in parallel; each is
+/// memoised, so a screen that needs one earlier simply awaits the same load.
+void _warmUpGlobalServices(Stopwatch stopwatch) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final start = stopwatch.elapsedMilliseconds;
+    Future.wait<void>([
+      GlobalFoodService.instance.init(),
+      ExerciseLibraryService.instance.initialize(),
+      HealthService.ensureConfigured(),
+    ]).then((_) {
+      debugPrint('[Startup Profile] Global services warmed in '
+          '${stopwatch.elapsedMilliseconds - start} ms (after first frame)');
+    }, onError: (Object e) {
+      debugPrint('[Startup Profile] Global service warm-up failed (non-fatal): $e');
+    });
+  });
 }
 
 class KynetixApp extends StatefulWidget {
@@ -94,7 +99,7 @@ class _KynetixAppState extends State<KynetixApp> {
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (data.event == AuthChangeEvent.passwordRecovery) {
         _navigatorKey.currentState?.push(
-          MaterialPageRoute(builder: (_) => const ResetPasswordScreen()),
+          kRiseRoute(builder: (_) => const ResetPasswordScreen()),
         );
       }
     });
@@ -102,89 +107,251 @@ class _KynetixAppState extends State<KynetixApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: _navigatorKey,
-      title: 'Kynetix',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: KColor.greenDark,
-          brightness: Brightness.dark,
-          surface: KColor.surface,
-        ),
-        useMaterial3: true,
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-        scaffoldBackgroundColor: KColor.bg,
-        // Consistent slide-up transitions on all MaterialPageRoutes
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: _KSlideUpTransitionBuilder(),
-            TargetPlatform.iOS:     CupertinoPageTransitionsBuilder(),
-          },
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.04),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: KColor.green, width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: KColor.danger, width: 1),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: KColor.danger, width: 1.5),
-          ),
-          hintStyle: const TextStyle(color: KColor.textMuted),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: KColor.greenDark,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            textStyle: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.3,
-            ),
-          ),
-        ),
+    return KThemeScope(
+      builder: (context, palette) => MaterialApp(
+        navigatorKey: _navigatorKey,
+        title: 'Kynetix',
+        debugShowCheckedModeBanner: false,
+        theme: buildKynetixTheme(palette),
+        themeAnimationDuration: Duration.zero,
+        home: const AuthGate(),
       ),
-      home: const AuthGate(),
     );
   }
 }
 
-// ─── Slide-up + fade transition ───────────────────────────────────────────────
+/// The app-wide Material theme, derived from the KColor / KText tokens so every
+/// stock widget (sheets, dialogs, snackbars, switches, inputs…) already looks
+/// like Kynetix before a screen styles anything. Primary actions are monochrome
+/// ink; colour is kept for meaning (calories, protein, training, errors).
+ThemeData buildKynetixTheme([KPalette? palette]) {
+  final p = palette ?? KColor.palette;
+  final dark = p.isDark;
+  final hair = p.fg.withValues(alpha: dark ? 0.08 : 0.09);
 
-class _KSlideUpTransitionBuilder extends PageTransitionsBuilder {
-  const _KSlideUpTransitionBuilder();
+  final scheme = ColorScheme(
+    brightness: p.brightness,
+    primary: p.ink,
+    onPrimary: p.onInk,
+    primaryContainer: Color.alphaBlend(p.green.withValues(alpha: 0.18), p.card),
+    onPrimaryContainer: p.textPrimary,
+    secondary: p.green,
+    onSecondary: p.onAccent,
+    secondaryContainer: Color.alphaBlend(p.violet.withValues(alpha: 0.18), p.card),
+    onSecondaryContainer: p.textPrimary,
+    tertiary: p.violet,
+    onTertiary: p.onAccent,
+    error: p.danger,
+    onError: dark ? const Color(0xFF2B0710) : Colors.white,
+    surface: p.surface,
+    onSurface: p.textPrimary,
+    onSurfaceVariant: p.textSecondary,
+    surfaceContainerLowest: p.bg,
+    surfaceContainerLow: p.surface,
+    surfaceContainer: p.card,
+    surfaceContainerHigh: p.cardHigh,
+    surfaceContainerHighest: p.border,
+    outline: p.border,
+    outlineVariant: p.divider,
+    shadow: p.shadow,
+    scrim: Colors.black,
+    inverseSurface: p.textPrimary,
+    onInverseSurface: p.bg,
+    inversePrimary: p.green,
+  );
 
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route, BuildContext context,
-    Animation<double> animation, Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    final slide = Tween<Offset>(
-      begin: const Offset(0, 0.04),
-      end:   Offset.zero,
-    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+  final base = (dark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
+        fontFamily: KText.family,
+        bodyColor: p.textPrimary,
+        displayColor: p.textPrimary,
+      );
+  TextStyle? tight(TextStyle? s, double ls) =>
+      s?.copyWith(fontWeight: FontWeight.w700, letterSpacing: ls);
+  final textTheme = base.copyWith(
+    displayLarge: tight(base.displayLarge, -2),
+    displayMedium: tight(base.displayMedium, -1.6),
+    displaySmall: tight(base.displaySmall, -1.2),
+    headlineLarge: tight(base.headlineLarge, -1),
+    headlineMedium: tight(base.headlineMedium, -0.8),
+    headlineSmall: tight(base.headlineSmall, -0.6),
+  );
 
-    return FadeTransition(
-      opacity: CurvedAnimation(parent: animation, curve: const Interval(0.0, 0.7)),
-      child: SlideTransition(position: slide, child: child),
-    );
-  }
+  OutlineInputBorder field(Color c, [double w = 1]) => OutlineInputBorder(
+        borderRadius: KRadius.md,
+        borderSide: BorderSide(color: c, width: w),
+      );
+  const buttonText = TextStyle(
+    fontFamily: KText.family,
+    fontSize: 15.5,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.1,
+  );
+
+  return ThemeData(
+    useMaterial3: true,
+    brightness: p.brightness,
+    fontFamily: KText.family,
+    colorScheme: scheme,
+    textTheme: textTheme,
+    scaffoldBackgroundColor: p.bg,
+    canvasColor: p.surface,
+    splashFactory: InkSparkle.splashFactory,
+    pageTransitionsTheme: kPageTransitions,
+    dividerTheme: DividerThemeData(color: p.divider, thickness: 1, space: 1),
+    iconTheme: IconThemeData(color: p.textSecondary),
+    appBarTheme: AppBarTheme(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      foregroundColor: p.textPrimary,
+      titleTextStyle: KText.h2,
+    ),
+    cardTheme: CardThemeData(
+      color: p.card,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: KRadius.lg,
+        side: BorderSide(color: hair),
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: p.surface,
+      modalBackgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      modalElevation: 0,
+      showDragHandle: false,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+        side: BorderSide(color: hair),
+      ),
+      modalBarrierColor: Colors.black.withValues(alpha: dark ? 0.6 : 0.32),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: KRadius.xl,
+        side: BorderSide(color: hair),
+      ),
+      titleTextStyle: KText.h2,
+      contentTextStyle: KText.body.copyWith(color: p.textSecondary),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: p.ink,
+      contentTextStyle: KText.bodyMedium.copyWith(fontSize: 13.5, color: p.onInk),
+      actionTextColor: dark ? p.greenDark : const Color(0xFF7DF0C2),
+      elevation: 0,
+      insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      shape: const RoundedRectangleBorder(borderRadius: KRadius.md),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(color: p.ink, borderRadius: KRadius.sm),
+      textStyle: KText.caption.copyWith(color: p.onInk),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: p.textPrimary,
+      linearTrackColor: hair,
+      circularTrackColor: Colors.transparent,
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? p.onInk : p.textMuted,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? p.ink : p.cardHigh,
+      ),
+      trackOutlineColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? Colors.transparent : p.border,
+      ),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: p.textPrimary,
+      inactiveTrackColor: hair,
+      thumbColor: p.textPrimary,
+      overlayColor: p.textPrimary.withValues(alpha: 0.1),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: p.card,
+      selectedColor: p.ink,
+      secondarySelectedColor: p.ink,
+      side: BorderSide(color: hair),
+      shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+      labelStyle: KText.caption.copyWith(color: p.textPrimary, fontWeight: FontWeight.w600),
+      secondaryLabelStyle: KText.caption.copyWith(color: p.onInk, fontWeight: FontWeight.w600),
+      checkmarkColor: p.onInk,
+    ),
+    listTileTheme: ListTileThemeData(iconColor: p.textSecondary),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: p.ink,
+      foregroundColor: p.onInk,
+      elevation: 0,
+      highlightElevation: 0,
+      shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: p.textPrimary,
+      selectionColor: p.green.withValues(alpha: 0.3),
+      selectionHandleColor: p.textPrimary,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: p.card,
+      border: field(Colors.transparent),
+      enabledBorder: field(dark ? hair : p.border),
+      focusedBorder: field(p.textPrimary, 1.4),
+      errorBorder: field(p.danger),
+      focusedErrorBorder: field(p.danger, 1.6),
+      hintStyle: TextStyle(color: p.textMuted),
+      labelStyle: TextStyle(color: p.textSecondary),
+      floatingLabelStyle: TextStyle(color: p.textPrimary),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: p.ink,
+        foregroundColor: p.onInk,
+        disabledBackgroundColor: p.cardHigh,
+        disabledForegroundColor: p.textDisabled,
+        minimumSize: const Size(48, 52),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+        elevation: 0,
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+        textStyle: buttonText,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: p.ink,
+        foregroundColor: p.onInk,
+        minimumSize: const Size(48, 52),
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+        textStyle: buttonText,
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: p.textPrimary,
+        minimumSize: const Size(48, 52),
+        side: BorderSide(color: p.fg.withValues(alpha: dark ? 0.16 : 0.18)),
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+        textStyle: buttonText,
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: p.textPrimary,
+        minimumSize: const Size(48, 48),
+        shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+        textStyle: buttonText.copyWith(fontSize: 14.5),
+      ),
+    ),
+  );
 }

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_client.dart';
+import 'internal/scoped_prefs.dart';
+import 'internal/net_timeouts.dart';
 
 // ─── Data models ──────────────────────────────────────────────────────────────
 
@@ -51,6 +53,14 @@ class ChatGptLinkStatus {
   final String? lastSuccessfulProvider;
   final double? averageLatencyMs;
 
+  /// 'siwc' (Sign in with ChatGPT, plan usage) or 'codex_device' (code flow).
+  final String? authMethod;
+
+  /// Set while plan requests are paused after a usage-limit response.
+  final DateTime? planPausedUntil;
+
+  bool get usesChatGptPlan => authMethod == 'siwc';
+
   const ChatGptLinkStatus({
     required this.isConnected,
     this.tokenExpired = false,
@@ -71,6 +81,8 @@ class ChatGptLinkStatus {
     this.lastFailedRequestAt,
     this.lastSuccessfulProvider,
     this.averageLatencyMs,
+    this.authMethod,
+    this.planPausedUntil,
   });
 
   static ChatGptLinkStatus get disconnected => const ChatGptLinkStatus(
@@ -111,7 +123,7 @@ class ChatGptLinkService {
     final res = await supabase.functions.invoke(
       'openai-link-start',
       method: HttpMethod.post,
-    );
+    ).within(NetTimeouts.edge, 'openai-link-start');
 
     if (res.data == null) {
       throw Exception('Empty response from openai-link-start');
@@ -126,7 +138,7 @@ class ChatGptLinkService {
               'Enable device code authorization in ChatGPT settings.',
         );
       }
-      throw Exception('openai-link-start error: $code — ${data['message']}');
+      throw Exception('openai-link-start error: $code, ${data['message']}');
     }
 
     return DeviceCodeSession(
@@ -146,7 +158,7 @@ class ChatGptLinkService {
         'openai-link-poll',
         method: HttpMethod.post,
         body: {'session_id': sessionId},
-      );
+      ).within(NetTimeouts.edge, 'openai-link-poll');
 
       if (res.data == null) return const LinkPollResult(LinkPollStatus.error, message: 'Empty response');
 
@@ -176,7 +188,7 @@ class ChatGptLinkService {
       final res = await supabase.functions.invoke(
         'openai-link-verify',
         method: HttpMethod.post,
-      );
+      ).within(NetTimeouts.ai, 'openai-link-verify');
 
       if (res.data == null) {
         return const ModelVerificationResult(
@@ -221,13 +233,13 @@ class ChatGptLinkService {
       final res = await supabase.functions.invoke(
         'openai-link-status',
         method: HttpMethod.post,
-      );
+      ).within(NetTimeouts.edge, 'openai-link-status');
 
       final prefs = await SharedPreferences.getInstance();
-      final lastSuccessStr = prefs.getString('ai_diag_last_success_at');
-      final lastFailureStr = prefs.getString('ai_diag_last_failed_at');
-      final lastProvider = prefs.getString('ai_diag_last_provider');
-      final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+      final lastSuccessStr = prefs.getString(_diagKey('ai_diag_last_success_at'));
+      final lastFailureStr = prefs.getString(_diagKey('ai_diag_last_failed_at'));
+      final lastProvider = prefs.getString(_diagKey('ai_diag_last_provider'));
+      final latencyHistoryRaw = prefs.getStringList(_diagKey('ai_diag_latency_history')) ?? [];
 
       final lastSuccess = lastSuccessStr != null ? DateTime.tryParse(lastSuccessStr) : null;
       final lastFailure = lastFailureStr != null ? DateTime.tryParse(lastFailureStr) : null;
@@ -291,15 +303,17 @@ class ChatGptLinkService {
         lastFailedRequestAt:     lastFailure,
         lastSuccessfulProvider:  lastProvider,
         averageLatencyMs:        avgLatency,
+        authMethod:              data['auth_method'] as String?,
+        planPausedUntil:         _parseDate(data['plan_paused_until']),
       );
     } catch (e) {
       debugPrint('[ChatGptLinkService] getStatus error: $e');
       try {
         final prefs = await SharedPreferences.getInstance();
-        final lastSuccessStr = prefs.getString('ai_diag_last_success_at');
-        final lastFailureStr = prefs.getString('ai_diag_last_failed_at');
-        final lastProvider = prefs.getString('ai_diag_last_provider');
-        final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+        final lastSuccessStr = prefs.getString(_diagKey('ai_diag_last_success_at'));
+        final lastFailureStr = prefs.getString(_diagKey('ai_diag_last_failed_at'));
+        final lastProvider = prefs.getString(_diagKey('ai_diag_last_provider'));
+        final latencyHistoryRaw = prefs.getStringList(_diagKey('ai_diag_latency_history')) ?? [];
 
         final lastSuccess = lastSuccessStr != null ? DateTime.tryParse(lastSuccessStr) : null;
         final lastFailure = lastFailureStr != null ? DateTime.tryParse(lastFailureStr) : null;
@@ -332,24 +346,32 @@ class ChatGptLinkService {
     await supabase.functions.invoke(
       'openai-link-disconnect',
       method: HttpMethod.post,
-    );
+    ).within(NetTimeouts.edge, 'openai-link-disconnect');
   }
 
+  /// Where users manage ChatGPT plan usage and limits.
+  static const manageUsageUrl = 'https://chatgpt.com/settings/usage';
+
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// AI diagnostics are per account, so one user never sees another's
+  /// request history on a shared device.
+  static String _diagKey(String base) =>
+      ScopedPrefs.key(base, supabase.auth.currentUser?.id);
 
   static Future<void> recordAiRequestSuccess(String provider, double latencyMs) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ai_diag_last_success_at', DateTime.now().toIso8601String());
-      await prefs.setString('ai_diag_last_provider', provider);
+      await prefs.setString(_diagKey('ai_diag_last_success_at'), DateTime.now().toIso8601String());
+      await prefs.setString(_diagKey('ai_diag_last_provider'), provider);
 
-      final latencyHistoryRaw = prefs.getStringList('ai_diag_latency_history') ?? [];
+      final latencyHistoryRaw = prefs.getStringList(_diagKey('ai_diag_latency_history')) ?? [];
       latencyHistoryRaw.add(latencyMs.toStringAsFixed(1));
 
       if (latencyHistoryRaw.length > 20) {
         latencyHistoryRaw.removeRange(0, latencyHistoryRaw.length - 20);
       }
-      await prefs.setStringList('ai_diag_latency_history', latencyHistoryRaw);
+      await prefs.setStringList(_diagKey('ai_diag_latency_history'), latencyHistoryRaw);
     } catch (e) {
       debugPrint('[ChatGptLinkService] Error recording AI success diagnostics: $e');
     }
@@ -358,7 +380,7 @@ class ChatGptLinkService {
   static Future<void> recordAiRequestFailure() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ai_diag_last_failed_at', DateTime.now().toIso8601String());
+      await prefs.setString(_diagKey('ai_diag_last_failed_at'), DateTime.now().toIso8601String());
     } catch (e) {
       debugPrint('[ChatGptLinkService] Error recording AI failure diagnostics: $e');
     }

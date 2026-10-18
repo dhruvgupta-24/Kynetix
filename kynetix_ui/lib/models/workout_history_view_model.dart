@@ -171,8 +171,7 @@ class WorkoutHistoryViewModel {
         if (entry.isSkipped) continue;
         final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
         if (top == null) continue;
-        final prevBest = service.bestSetBefore(entry.exercise.id, session.date);
-        if (prevBest == null || top.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01) {
+        if (service.isPersonalRecord(top, entry.exercise.id, session.date)) {
           totalPrs++;
         }
       }

@@ -1,3 +1,4 @@
+import '../data/micronutrient_library.dart';
 import 'package:flutter/foundation.dart';
 import '../models/nutrition_result.dart';
 import '../services/meal_memory.dart';
@@ -13,6 +14,7 @@ import '../services/mock_estimation_service.dart'
     LocalEstimationAnalysis,
     NutrientRange;
 import '../services/item_parser.dart';
+import '../services/food_link_service.dart';
 import '../services/unit_normalizer.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
@@ -21,6 +23,12 @@ import '../models/user_profile.dart';
 import 'profile_service.dart';
 
 export '../services/mock_estimation_service.dart' show NutrientRange;
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 // ─── Nutrition Pipeline ───────────────────────────────────────────────────────
 //
@@ -60,18 +68,27 @@ class NutritionPipeline {
     final trimmed = rawInput.trim();
     final classification = MealClassifier.instance.classify(trimmed);
 
-    debugPrint('\n══════════════════════════════════════');
-    debugPrint('[Pipeline] estimateMeal: "$trimmed"');
-    debugPrint('[Pipeline] classification: ${classification.category.name} '
+    _debugLog('\n══════════════════════════════════════');
+    _debugLog('[Pipeline] estimateMeal: "$trimmed"');
+    _debugLog('[Pipeline] classification: ${classification.category.name} '
                '(${classification.reason})');
 
     if (trimmed.isEmpty) return _empty();
 
+    // ── 0. LINKED SCANNED FOOD ───────────────────────────────────────────────
+    // A name the person linked to a scanned pack (its own name or an older
+    // one) logs the pack's label numbers, exactly like the scanner does.
+    final linked = FoodLinkService.instance.resolveMeal(trimmed);
+    if (linked != null) {
+      _debugLog('[Pipeline] ✅ Linked scanned food: ${linked.canonicalMeal}');
+      return linked;
+    }
+
     // ── 1. SPLIT & PARSE INTO ATOMIC ITEMS ─────────────────────────────────
     final parsedItems = ItemParser.parse(trimmed);
-    debugPrint('[Pipeline] Extracted ${parsedItems.length} items:');
+    _debugLog('[Pipeline] Extracted ${parsedItems.length} items:');
     for (final p in parsedItems) {
-      debugPrint('  -> ${p.normalizedName} (qty: ${p.quantity}, unit: ${p.unit})');
+      _debugLog('  -> ${p.normalizedName} (qty: ${p.quantity}, unit: ${p.unit})');
     }
 
     var finalItems = <NutritionItem>[];
@@ -95,41 +112,51 @@ class NutritionPipeline {
       final name = normParsed.normalizedName;
       final itemStr = _constructItemString(normParsed);
 
-      debugPrint('[Pipeline] --- Lookup for item: "$itemStr" (normalized: "$name") ---');
+      _debugLog('[Pipeline] --- Lookup for item: "$itemStr" (normalized: "$name") ---');
+
+      // ── LINKED SCANNED FOOD ─────────────────────────────────────────────────
+      final linkedItem = FoodLinkService.instance
+          .resolveItem(name, normParsed.quantity, normParsed.unit);
+      if (linkedItem != null) {
+        finalItems.add(linkedItem);
+        matchesUsed.add('linked_barcode: $name');
+        priorityLevels.add('Branded Food');
+        continue;
+      }
 
       // ── USER OVERRIDE ───────────────────────────────────────────────────────────
       // Source: stores PER-UNIT-1 values. MUST scale by normParsed.quantity.
       // Hard blocks AI when matched. Unit-category guard applied.
-      debugPrint('[Pipeline]   [1/5] Checking UserNutritionMemory...');
+      _debugLog('[Pipeline]   [1/5] Checking UserNutritionMemory...');
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
         final storedUnit = UserNutritionMemory.instance.storedUnit(name);
         if (storedUnit != null &&
             !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
-          debugPrint('[Pipeline]     ⚠️  unit mismatch: stored=$storedUnit input=${normParsed.unit} — skipping UserNutritionMemory');
+          _debugLog('[Pipeline]     ⚠️  unit mismatch: stored=$storedUnit input=${normParsed.unit}, skipping UserNutritionMemory');
         } else {
           final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
           if (_isSane(candidate, name)) {
-            debugPrint('[Pipeline]     ✅ Match in UserNutritionMemory: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+            _debugLog('[Pipeline]     ✅ Match in UserNutritionMemory: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
             finalItems.add(candidate);
             matchesUsed.add('user_override: $name');
             priorityLevels.add('User Memory');
             continue;
           } else {
-            debugPrint('[Pipeline]     🚨 Matched but insane values — skipping UserNutritionMemory');
+            _debugLog('[Pipeline]     🚨 Matched but insane values, skipping UserNutritionMemory');
           }
         }
       } else {
-        debugPrint('[Pipeline]     No match in UserNutritionMemory');
+        _debugLog('[Pipeline]     No match in UserNutritionMemory');
       }
 
       // ── PERSONAL EXACT / TEMPLATE ──────────────────────────────────────────────
-      debugPrint('[Pipeline]   [2/5] Checking PersonalNutritionMemory...');
+      _debugLog('[Pipeline]   [2/5] Checking PersonalNutritionMemory...');
       final personalExact = PersonalNutritionMemory.instance.lookupExact(itemStr);
       if (personalExact != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalExact);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in PersonalNutritionMemory (exact): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in PersonalNutritionMemory (exact): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
           matchesUsed.add('personal_exact: $itemStr');
           priorityLevels.add('Saved Meal');
@@ -140,22 +167,22 @@ class NutritionPipeline {
       if (personalTemplate != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalTemplate);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in PersonalNutritionMemory (template): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in PersonalNutritionMemory (template): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
           matchesUsed.add('personal_template: $itemStr');
           priorityLevels.add('Saved Meal');
           continue;
         }
       }
-      debugPrint('[Pipeline]     No match in PersonalNutritionMemory');
+      _debugLog('[Pipeline]     No match in PersonalNutritionMemory');
 
       // ── EXACT KNOWN FOOD / RECURRING MEMORY ──────────────────────────────────────
-      debugPrint('[Pipeline]   [3/5] Checking MealMemory (known/recurring)...');
+      _debugLog('[Pipeline]   [3/5] Checking MealMemory (known/recurring)...');
       final exactKnown = MealMemory.instance.lookupExactKnownFood(itemStr);
       if (exactKnown != null) {
         final candidate = _itemFromPortionMemory(normParsed, exactKnown);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in MealMemory (exact known): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in MealMemory (exact known): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
           matchesUsed.add('exact_known: $itemStr');
           final isBoot = MealMemory.instance.allKnownFoods.containsKey(name) &&
@@ -168,39 +195,39 @@ class NutritionPipeline {
       if (cached != null) {
         final candidate = _itemFromPortionMemory(normParsed, cached);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in MealMemory (recurring cache): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in MealMemory (recurring cache): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
           matchesUsed.add('recurring_memory: $itemStr');
           priorityLevels.add('User Memory');
           continue;
         }
       }
-      debugPrint('[Pipeline]     No match in MealMemory');
+      _debugLog('[Pipeline]     No match in MealMemory');
 
       // ── GLOBAL FOOD DEFAULTS (KYNETIX CURATED) ──────────────────────────────────
-      debugPrint('[Pipeline]   Checking GlobalFoodService...');
+      _debugLog('[Pipeline]   Checking GlobalFoodService...');
       final globalResult = GlobalFoodService.instance.lookup(name, quantity: normParsed.quantity);
       if (globalResult != null) {
         final candidate = _pullBestItem(globalResult, normParsed);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in GlobalFoodService: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in GlobalFoodService: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate.withScalar(1.0));
           matchesUsed.add('global_default: $name');
           priorityLevels.add('Global Default');
           continue;
         }
       }
-      debugPrint('[Pipeline]     No match in GlobalFoodService');
+      _debugLog('[Pipeline]     No match in GlobalFoodService');
 
       // ── FOOD LIBRARY (LOCAL DATABASE) ───────────────────────────────────────────
-      debugPrint('[Pipeline]   [4/5] Checking Food Library (local database)...');
+      _debugLog('[Pipeline]   [4/5] Checking Food Library (local database)...');
       final localAnalysis = analyzeLocalEstimation(itemStr);
       if (localAnalysis.coverageConfidence >= 0.9 && localAnalysis.estimation.items.isNotEmpty) {
         final localResult = NutritionResult.fromEstimationResult(localAnalysis.estimation, itemStr)
             .copyWith(source: 'local_hybrid');
         final candidate = _pullBestItem(localResult, normParsed);
         if (_isSane(candidate, name)) {
-          debugPrint('[Pipeline]     ✅ Match in Food Library: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein — AI BLOCKED');
+          _debugLog('[Pipeline]     ✅ Match in Food Library: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           // Important: mark it true so portion anchor pass doesn't scale it!
           finalItems.add(candidate.withScalar(1.0));
           matchesUsed.add('food_library: $name');
@@ -208,10 +235,10 @@ class NutritionPipeline {
           continue;
         }
       }
-      debugPrint('[Pipeline]     No match in Food Library');
+      _debugLog('[Pipeline]     No match in Food Library');
 
       // ── AI ESTIMATE ESCALATION GATED ─────────────────────────────────────────────
-      debugPrint('[Pipeline]   [5/5] All memory and database lookups failed for "$name". Escalation to AI/estimation required.');
+      _debugLog('[Pipeline]   [5/5] All memory and database lookups failed for "$name". Escalation to AI/estimation required.');
       needsEstimation.add(normParsed);
     }
 
@@ -220,14 +247,14 @@ class NutritionPipeline {
       // Re-stitch item specific string for the estimator engine. 
       // It relies on qty + unit + name context. e.g "1 scoop whey"
       final itemStr = _constructItemString(parsed);
-      debugPrint('[Pipeline] Estimating unknown atomic item: "$itemStr"');
+      _debugLog('[Pipeline] Estimating unknown atomic item: "$itemStr"');
 
       final localAnalysis = analyzeLocalEstimation(itemStr);
       final complexity = _assessComplexity(itemStr, localAnalysis);
       final localGate = _buildGate(localAnalysis, complexity);
 
       if (localGate.shouldFinalizeLocal) {
-        debugPrint('[Pipeline] ✅ LOCAL FINALIZED for "$itemStr"');
+        _debugLog('[Pipeline] ✅ LOCAL FINALIZED for "$itemStr"');
         final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'Local passed');
         final item = _pullBestItem(localResult, parsed);
         finalItems.add(item);
@@ -237,7 +264,7 @@ class NutritionPipeline {
         uncertaintyFactors.add('local fallback');
       } else {
         if (AiNutritionService.instance.isConfigured) {
-          debugPrint('[Pipeline] 🚀 calling AI for item: "$itemStr"...');
+          _debugLog('[Pipeline] 🚀 calling AI for item: "$itemStr"...');
           try {
             final raw = await AiNutritionService.instance.estimateWithContext(
               itemStr,
@@ -259,7 +286,7 @@ class NutritionPipeline {
               uncertaintyFactors.add('mixed meal components');
             }
           } catch (e) {
-            debugPrint('[Pipeline] ❌ AI failed for item "$itemStr": $e');
+            _debugLog('[Pipeline] ❌ AI failed for item "$itemStr": $e');
             final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'AI escalation required; AI failed for item');
             final item = _pullBestItem(localResult, parsed);
             finalItems.add(item);
@@ -281,7 +308,7 @@ class NutritionPipeline {
     }
 
     // Apply eating pattern scalars and Portion Anchor meal-level adjustments
-    finalItems = _applyMealLevelPortionAnchorPass(finalItems);
+    finalItems = _withMicros(_applyMealLevelPortionAnchorPass(finalItems));
 
     // ── 4. AGGREGATION ───────────────────────────────────────────────────────
     double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
@@ -364,7 +391,7 @@ class NutritionPipeline {
     }
 
     final audit = EstimationAudit(
-      memoryMatchUsed: matchesUsed.isNotEmpty ? matchesUsed.join('; ') : 'none — AI fallback',
+      memoryMatchUsed: matchesUsed.isNotEmpty ? matchesUsed.join('; ') : 'none, AI fallback',
       portionAssumption: ProfileService.instance.currentUserProfile?.portionAnchor?.toString() ?? 'PortionAnchor.balanced',
       environmentAssumption: 'behavior-based (default)',
       finalChoiceReason: aiUsed ? 'AI estimation successful' : (localHybridUsed ? 'local pipeline fallback' : 'memory exact match'),
@@ -406,7 +433,7 @@ class NutritionPipeline {
     final normUnit = UnitNormalizer.normalizeUnit(parsed.unit);
     final normName = FoodNameNormalizer.normalize(parsed.normalizedName);
     if (normQty == parsed.quantity && normUnit == parsed.unit && normName == parsed.normalizedName) {
-      return parsed; // already canonical — avoid allocation
+      return parsed; // already canonical, avoid allocation
     }
     return ParsedFoodItem(
       rawChunk:       parsed.rawChunk,
@@ -588,14 +615,14 @@ class NutritionPipeline {
 
     // Absolute maximums (physics-level)
     if (cal > 3000 || pro > 300) {
-      debugPrint('[Pipeline] 🚨 SANITY FAIL absolute: '
+      _debugLog('[Pipeline] 🚨 SANITY FAIL absolute: '
           '"$foodName" cal=$cal pro=$pro');
       return false;
     }
 
     // Liquid heuristic: if unit is ml and quantity > 100ml, cap at 1 500 kcal
     if (item.unit == 'ml' && item.quantity > 100 && cal > 1500) {
-      debugPrint('[Pipeline] 🚨 SANITY FAIL liquid: '
+      _debugLog('[Pipeline] 🚨 SANITY FAIL liquid: '
           '"$foodName" ${item.quantity}ml = $cal kcal');
       return false;
     }
@@ -603,7 +630,7 @@ class NutritionPipeline {
     // Weight heuristic: if unit is g and quantity < 1000g, kcal cannot exceed
     // ~9 kcal/g × quantity (pure fat is 9 kcal/g — nothing is denser).
     if (item.unit == 'g' && item.quantity > 0 && cal > item.quantity * 9.5) {
-      debugPrint('[Pipeline] 🚨 SANITY FAIL density: '
+      _debugLog('[Pipeline] 🚨 SANITY FAIL density: '
           '"$foodName" ${item.quantity}g = $cal kcal '
           '(>${(item.quantity * 9.5).toStringAsFixed(0)} max)');
       return false;
@@ -631,6 +658,13 @@ class NutritionPipeline {
         saturatedFat: result.saturatedFat,
         sodium: result.sodium,
       );
+    }
+
+    // Micros carry over only when every part had them; a partial sum would
+    // read as a complete (and too low) value.
+    Micronutrients? micros;
+    if (result.items.every((i) => i.micros != null)) {
+      micros = result.items.fold<Micronutrients>(Micronutrients.empty, (a, i) => a + i.micros!);
     }
     
     // Bundle mock-separated logic pieces logically tracking atomic components
@@ -685,6 +719,7 @@ class NutritionPipeline {
       sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
       saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
       sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,
+      micros: micros == null || micros.isEmpty ? null : micros,
     );
   }
 
@@ -694,7 +729,7 @@ class NutritionPipeline {
     required MealClassification classification,
     required String fallbackReason,
   }) {
-    debugPrint('[Pipeline] 📦 LOCAL RESULT — reason: $fallbackReason');
+    _debugLog('[Pipeline] 📦 LOCAL RESULT, reason: $fallbackReason');
     final base = NutritionResult.fromEstimationResult(analysis.estimation, rawInput)
         .copyWith(source: 'local_hybrid', fallbackReason: fallbackReason);
     return NutritionGuardrails.apply(base, rawInput,
@@ -840,6 +875,9 @@ class NutritionPipeline {
     final trimmed = rawInput.trim();
     if (trimmed.isEmpty) return null;
 
+    final linked = FoodLinkService.instance.resolveMeal(trimmed);
+    if (linked != null) return linked;
+
     final parsedItems = ItemParser.parse(trimmed);
     var finalItems = <NutritionItem>[];
 
@@ -848,13 +886,17 @@ class NutritionPipeline {
       final name = normParsed.normalizedName;
       final itemStr = _constructItemString(normParsed);
 
+      final linkedItem = FoodLinkService.instance
+          .resolveItem(name, normParsed.quantity, normParsed.unit);
+      if (linkedItem != null) { finalItems.add(linkedItem); continue; }
+
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
         final storedUnit = UserNutritionMemory.instance.storedUnit(name);
         if (storedUnit != null &&
             !UnitNormalizer.sameCategory(storedUnit, normParsed.unit)) {
-          debugPrint('[Pipeline Sync] ⚠️  unit mismatch: stored=$storedUnit '
-              'input=${normParsed.unit} for "$name" — skipping user memory');
+          _debugLog('[Pipeline Sync] ⚠️  unit mismatch: stored=$storedUnit '
+              'input=${normParsed.unit} for "$name", skipping user memory');
         } else {
           final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
           if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
@@ -899,7 +941,7 @@ class NutritionPipeline {
       return null; // Atomic item missed memory, requires AI -> fail sync lookup
     }
 
-    finalItems = _applyMealLevelPortionAnchorPass(finalItems);
+    finalItems = _withMicros(_applyMealLevelPortionAnchorPass(finalItems));
 
     double sumCalMin = 0, sumCalMax = 0, sumProMin = 0, sumProMax = 0;
     double? carbMin, carbMax, fatMin, fatMax, fibMin, fibMax, sugMin, sugMax, satMin, satMax, sodMin, sodMax;
@@ -965,13 +1007,21 @@ class NutritionPipeline {
     );
   }
 
+  /// Micronutrients: cited food-library values for foods it knows (scaled by
+  /// each item's calories); Kyno's estimate fills the rest. Unknown foods stay
+  /// untracked rather than zero.
+  static List<NutritionItem> _withMicros(List<NutritionItem> items) => [
+        for (final i in items)
+          i.withMicros(MicronutrientLibrary.instance.enrich(i.name, i.calories.mid, i.micros)),
+      ];
+
   List<NutritionItem> _applyMealLevelPortionAnchorPass(List<NutritionItem> items) {
     if (items.isEmpty) return items;
 
     // Check if the pass has already been applied to prevent double application
     if (items.isNotEmpty && items.every((item) => item.eatingPatternScalarApplied)) {
       if (kDebugMode) {
-        debugPrint('[Pipeline Pass] ⚠️  Skipping Portion Anchor pass: already applied to all.');
+        _debugLog('[Pipeline Pass] ⚠️  Skipping Portion Anchor pass: already applied to all.');
       }
       return items;
     }
@@ -1033,7 +1083,7 @@ class NutritionPipeline {
     for (final item in items) {
       if (item.eatingPatternScalarApplied) {
         if (kDebugMode) {
-          debugPrint('[Pipeline Pass] 🔒 Skipping Portion Anchor scalar for memory-matched item: "${item.name}"');
+          _debugLog('[Pipeline Pass] 🔒 Skipping Portion Anchor scalar for memory-matched item: "${item.name}"');
         }
         result.add(item);
         continue;
@@ -1081,7 +1131,7 @@ class NutritionPipeline {
       if (finalScalar != null) {
         result.add(item.withScalar(finalScalar));
         if (kDebugMode) {
-          debugPrint('[Pipeline Pass] 🧠 Scalar ${finalScalar.toStringAsFixed(2)}× applied to "${item.name}" ($role)');
+          _debugLog('[Pipeline Pass] 🧠 Scalar ${finalScalar.toStringAsFixed(2)}× applied to "${item.name}" ($role)');
         }
       } else {
         // Mark as processed/scalar-applied even if 1.0 to protect against double application

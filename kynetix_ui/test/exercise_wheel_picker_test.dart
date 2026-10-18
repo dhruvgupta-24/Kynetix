@@ -40,8 +40,8 @@ void main() {
       );
 
       // Verify header titles
-      expect(find.text('WEIGHT (KG)'), findsOneWidget);
-      expect(find.text('REPS SELECTOR'), findsOneWidget);
+      expect(find.text('Weight (kg)'), findsOneWidget);
+      expect(find.text('Reps'), findsOneWidget);
 
       // Verify quick-adjust buttons
       expect(find.text('-5'), findsNWidgets(2)); // weight and reps

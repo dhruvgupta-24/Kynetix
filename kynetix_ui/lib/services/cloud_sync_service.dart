@@ -10,11 +10,85 @@ import '../services/workout_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/persistence_service.dart';
+import '../services/meal_tombstones.dart';
 import '../services/quick_add_service.dart';
 
 import '../services/nutrition_hydration_guard.dart';
 import '../models/insights_models.dart';
 import '../services/insights_report_service.dart';
+import '../services/user_session_coordinator.dart';
+import '../services/internal/net_timeouts.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
+/// The remote rows hydration merges, fetched in one round trip.
+class CloudHydrationCore {
+  const CloudHydrationCore({
+    this.dayLogs = const [],
+    this.workouts = const [],
+    this.memory = const [],
+    this.patterns = const [],
+    this.contexts = const [],
+    this.split,
+  });
+  final List<dynamic> dayLogs;
+  final List<dynamic> workouts;
+  final List<dynamic> memory;
+  final List<dynamic> patterns;
+  final List<dynamic> contexts;
+  final Map<String, dynamic>? split;
+}
+
+/// Remote reads (and the split back-up) that hydration performs. The default
+/// talks to Supabase; tests substitute a fake so the merge path runs offline.
+class CloudHydrationSource {
+  const CloudHydrationSource();
+
+  SupabaseClient get _db => Supabase.instance.client;
+
+  Future<CloudHydrationCore> fetchCore() async {
+    final results = await Future.wait([
+      _db.from('day_logs').select(),
+      _db.from('workout_sessions').select(),
+      _db.from('user_nutrition_memory').select(),
+      _db.from('user_eating_patterns').select().order('recorded_at', ascending: true),
+      _db.from('user_meal_contexts').select().order('recorded_at', ascending: true),
+      _db.from('workout_splits').select().maybeSingle(),
+    ]).within(NetTimeouts.sync, 'cloud hydration');
+    return CloudHydrationCore(
+      dayLogs: results[0] as List<dynamic>,
+      workouts: results[1] as List<dynamic>,
+      memory: results[2] as List<dynamic>,
+      patterns: results[3] as List<dynamic>,
+      contexts: results[4] as List<dynamic>,
+      split: results[5] as Map<String, dynamic>?,
+    );
+  }
+
+  Future<List<dynamic>> fetchAchievements() async =>
+      await _db.from('user_achievements').select()
+          .within(NetTimeouts.sync, 'achievements fetch');
+
+  Future<Map<String, dynamic>?> fetchInsightsCache() =>
+      _db.from('user_insights_cache').select().maybeSingle()
+          .within(NetTimeouts.sync, 'insights cache fetch');
+
+  /// Quick Add two-way sync; it re-checks [stillCurrent] after every await.
+  Future<void> syncQuickAdds(String userId, bool Function() stillCurrent) =>
+      QuickAddService.instance
+          .syncWithCloud(expectedUserId: userId, stillCurrent: stillCurrent);
+
+  Future<void> uploadSplit(WorkoutSplit split, List<Exercise> customExercises) =>
+      CloudSyncService.instance.syncWorkoutSplitBackground(split, customExercises);
+
+  /// Re-sends the cloud delete for sessions the user deleted on this device.
+  Future<bool> deleteWorkouts(Set<String> ids, String userId) =>
+      CloudSyncService.instance
+          .deleteWorkoutSessions(ids, expectedUserId: userId);
+}
 
 class CloudSyncService {
   CloudSyncService._();
@@ -22,84 +96,79 @@ class CloudSyncService {
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
+  /// True while [userId]'s session, as it was at [epoch], is still the loaded
+  /// one. Every cloud merge re-checks this after each await: a sign-out or
+  /// account switch in between must drop the remote data, never write it
+  /// into the next account's store (or the device-wide legacy keys).
+  static bool isSessionCurrent(String userId, int epoch) =>
+      PersistenceService.sessionEpoch == epoch &&
+      UserSessionCoordinator.instance.isReadyFor(userId);
+
   /// Hydrate local state from Supabase
   Future<void> hydrateFromCloud() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+    await hydrateForUser(userId);
+  }
+
+  /// Hydrates [userId]'s local stores from [source]. Drops everything the
+  /// moment [userId]'s session stops being the loaded one.
+  @visibleForTesting
+  Future<void> hydrateForUser(
+    String userId, {
+    CloudHydrationSource source = const CloudHydrationSource(),
+  }) async {
+    final epoch = PersistenceService.sessionEpoch;
+    bool stillCurrent() => isSessionCurrent(userId, epoch);
+    bool dropped(String step) {
+      if (stillCurrent()) return false;
+      _debugLog('[CloudSyncService] Session for $userId ended during hydration '
+          '($step), dropping remote data');
+      return true;
+    }
+
+    if (dropped('start')) return;
 
     NutritionHydrationGuard.instance.beginHydration(isBackgroundUpdate: true);
-    debugPrint('[CloudSyncService] Starting cloud hydration for user: $userId');
+    _debugLog('[CloudSyncService] Starting cloud hydration for user: $userId');
+    // Remote rows may now differ from what this session uploaded: forget the
+    // upload fingerprints so the next sync re-uploads every day.
+    _uploadedDayJson.clear();
 
     try {
       // Hydrate all components concurrently
-      final results = await Future.wait([
-        _supabase.from('day_logs').select(),
-        _supabase.from('workout_sessions').select(),
-        _supabase.from('user_nutrition_memory').select(),
-        _supabase.from('user_eating_patterns').select().order('recorded_at', ascending: true),
-        _supabase.from('user_meal_contexts').select().order('recorded_at', ascending: true),
-        _supabase.from('workout_splits').select().maybeSingle(),
-      ]);
+      final core = await source.fetchCore();
+      if (dropped('fetch')) return;
 
-      final dayLogsResp = results[0] as List<dynamic>;
-      final workoutsResp = results[1] as List<dynamic>;
-      final memoryResp = results[2] as List<dynamic>;
-      final patternsResp = results[3] as List<dynamic>;
-      final contextsResp = results[4] as List<dynamic>;
-      final splitResp = results[5] as Map<String, dynamic>?;
-
-      // 1. Process Day Logs
-      for (final row in dayLogsResp) {
+      // 1. Process Day Logs (the merge and the save's key capture both run
+      //    synchronously right after the check above)
+      for (final row in core.dayLogs) {
         final dateKey = row['date_key'] as String;
-        final gymDayJson = row['gym_day_json'];
-        final sectionsJson = row['sections_json'];
-
-        final existingLocalLog = dayLogStore[dateKey];
-        final log = existingLocalLog ?? DayLog();
-
-        if (gymDayJson != null && log.gymDay == null) {
-          log.gymDay = GymDay.fromJson(gymDayJson as Map<String, dynamic>);
-        }
-        if (sectionsJson != null) {
-          final sectionsMap = sectionsJson as Map<String, dynamic>;
-          for (final sectionName in sectionsMap.keys) {
-            final sectionEnum = MealSection.values.firstWhere((e) => e.name == sectionName, orElse: () => MealSection.breakfast);
-            final entries = sectionsMap[sectionName] as List<dynamic>;
-            final cloudEntries = entries.map((e) => MealEntry.fromJson(e as Map<String, dynamic>)).toList();
-
-            for (final cloudEntry in cloudEntries) {
-              final localEntries = log.entriesFor(sectionEnum);
-              final alreadyPresent = localEntries.any((local) =>
-                local.rawInput == cloudEntry.rawInput &&
-                local.addedAt.millisecondsSinceEpoch == cloudEntry.addedAt.millisecondsSinceEpoch
-              );
-              if (!alreadyPresent) {
-                log.add(sectionEnum, cloudEntry);
-              }
-            }
-          }
-        }
-        // Load frozen target values from Supabase to prevent drift on hydration
-        if (row['target_calories'] != null && log.targetCalories == null) {
-          log.targetCalories = (row['target_calories'] as num?)?.toDouble();
-        }
-        if (row['target_protein'] != null && log.targetProtein == null) {
-          log.targetProtein = (row['target_protein'] as num?)?.toDouble();
-        }
-
-        dayLogStore[dateKey] = log;
+        dayLogStore[dateKey] = mergeCloudDayRow(
+          dateKey,
+          row as Map<String, dynamic>,
+          dayLogStore[dateKey],
+        );
       }
       // Re-save locally
       await PersistenceService.saveDayLogs();
+      if (dropped('day logs')) return;
       PersistenceService.lastDayLogsHydratedAt = DateTime.now();
-      debugPrint('[CloudSyncService] Day logs hydration complete at: ${PersistenceService.lastDayLogsHydratedAt}');
+      _debugLog('[CloudSyncService] Day logs hydration complete at: ${PersistenceService.lastDayLogsHydratedAt}');
 
       // 2. Process Workouts
       // Only add sessions that are not already in local storage.
       // Historical sessions are immutable — never overwrite existing local entries.
       final importedSessions = <WorkoutSession>[];
-      for (final row in workoutsResp) {
+      final stillDeleted = <String>{};
+      for (final row in core.workouts) {
         final id = row['id'] as String;
+        // Deleted on this device: never re-add it, and retry the cloud delete
+        // that evidently did not land (e.g. it ran offline).
+        if (WorkoutService.instance.isSessionDeleted(id)) {
+          stillDeleted.add(id);
+          continue;
+        }
         // Avoid overwriting local history if it exists, or just accept cloud as truth
         final exists = WorkoutService.instance.sessions.any((s) => s.id == id);
         if (!exists) {
@@ -119,14 +188,19 @@ class CloudSyncService {
         }
       }
       if (importedSessions.isNotEmpty) {
-        await WorkoutService.instance.bulkImportCloudSessions(importedSessions);
+        await WorkoutService.instance
+            .bulkImportCloudSessions(importedSessions, stillCurrent: stillCurrent);
+        if (dropped('workouts')) return;
+      }
+      if (stillDeleted.isNotEmpty) {
+        source.deleteWorkouts(stillDeleted, userId).ignore();
       }
       WorkoutService.lastWorkoutsHydratedAt = DateTime.now();
-      debugPrint('[CloudSyncService] Workout sessions hydration complete at: ${WorkoutService.lastWorkoutsHydratedAt}');
+      _debugLog('[CloudSyncService] Workout sessions hydration complete at: ${WorkoutService.lastWorkoutsHydratedAt}');
 
       // 3. Process Nutrition Memory
       final cloudOverrides = <UserMealOverride>[];
-      for (final row in memoryResp) {
+      for (final row in core.memory) {
         try {
           // Support both legacy (calories) and new (caloriesPerUnit) columns.
           // Supabase rows written by older clients only have 'calories'/'protein';
@@ -158,43 +232,52 @@ class CloudSyncService {
             correctionCount:   correctionCount,
           ));
         } catch (e) {
-          debugPrint('[CloudSyncService] Failed to parse memory row: $e');
+          _debugLog('[CloudSyncService] Failed to parse memory row: $e');
         }
       }
       if (cloudOverrides.isNotEmpty) {
-        await UserNutritionMemory.instance.mergeFromCloud(cloudOverrides);
+        await UserNutritionMemory.instance.mergeFromCloud(
+          cloudOverrides,
+          expectedUserId: userId,
+          stillCurrent: stillCurrent,
+        );
+        if (dropped('nutrition memory')) return;
       }
 
       // 4. Process Eating Patterns (correction records)
-      if (patternsResp.isNotEmpty) {
+      if (core.patterns.isNotEmpty) {
         EatingPatternService.instance.mergeFromCloud(
-          patternsResp.cast<Map<String, dynamic>>(),
+          core.patterns.cast<Map<String, dynamic>>(),
         );
         await EatingPatternService.instance.save();
+        if (dropped('eating patterns')) return;
       }
 
       // 5. Process Meal Contexts
-      if (contextsResp.isNotEmpty) {
+      if (core.contexts.isNotEmpty) {
         EatingPatternService.instance.mergeContextsFromCloud(
-          contextsResp.cast<Map<String, dynamic>>(),
+          core.contexts.cast<Map<String, dynamic>>(),
         );
         await EatingPatternService.instance.save();
+        if (dropped('meal contexts')) return;
       }
 
       // 6. Sync Quick Adds from Cloud
-      await QuickAddService.instance.syncWithCloud();
+      await source.syncQuickAdds(userId, stillCurrent);
+      if (dropped('quick adds')) return;
 
       // 7. Process Workout Split & Custom Exercises
+      final splitResp = core.split;
       if (splitResp != null) {
         final splitJson = splitResp['split_json'];
         final customExercisesJson = splitResp['custom_exercises_json'] as List<dynamic>?;
         final cloudUpdatedAtStr = splitResp['updated_at'] as String?;
-        final cloudUpdatedAt = cloudUpdatedAtStr != null 
-            ? DateTime.tryParse(cloudUpdatedAtStr) 
+        final cloudUpdatedAt = cloudUpdatedAtStr != null
+            ? DateTime.tryParse(cloudUpdatedAtStr)
             : null;
-        
+
         final localUpdatedAt = WorkoutService.instance.splitUpdatedAt;
-        
+
         List<Exercise> customExercises = [];
         if (customExercisesJson != null) {
           try {
@@ -202,17 +285,17 @@ class CloudSyncService {
                 .map((e) => Exercise.fromJson(e as Map<String, dynamic>))
                 .toList();
           } catch (e) {
-            debugPrint('[CloudSyncService] Error parsing custom exercises from cloud: $e');
+            _debugLog('[CloudSyncService] Error parsing custom exercises from cloud: $e');
           }
         }
 
-        final isLocalNewer = WorkoutService.instance.isSetupDone && 
-            cloudUpdatedAt != null && 
+        final isLocalNewer = WorkoutService.instance.isSetupDone &&
+            cloudUpdatedAt != null &&
             localUpdatedAt.isAfter(cloudUpdatedAt);
 
         if (isLocalNewer) {
-          debugPrint('[CloudSyncService] Local workout split is newer than cloud. Backing up split to cloud...');
-          await syncWorkoutSplitBackground(
+          _debugLog('[CloudSyncService] Local workout split is newer than cloud. Backing up split to cloud...');
+          await source.uploadSplit(
             WorkoutService.instance.split,
             WorkoutService.instance.customExercises,
           );
@@ -223,23 +306,26 @@ class CloudSyncService {
               cloudSplit,
               customExercises,
               cloudUpdatedAt: cloudUpdatedAt,
+              stillCurrent: stillCurrent,
             );
-            debugPrint('[CloudSyncService] 🔄 Hydrated workout split and custom exercises from cloud');
+            _debugLog('[CloudSyncService] 🔄 Hydrated workout split and custom exercises from cloud');
           } catch (e) {
-            debugPrint('[CloudSyncService] Error parsing cloud workout split: $e');
+            _debugLog('[CloudSyncService] Error parsing cloud workout split: $e');
           }
         }
       } else if (WorkoutService.instance.isSetupDone) {
-        debugPrint('[CloudSyncService] Cloud split empty but local setup done. Backing up split to cloud...');
-        await syncWorkoutSplitBackground(
+        _debugLog('[CloudSyncService] Cloud split empty but local setup done. Backing up split to cloud...');
+        await source.uploadSplit(
           WorkoutService.instance.split,
           WorkoutService.instance.customExercises,
         );
       }
+      if (dropped('workout split')) return;
 
       // 8. Restore achievements from cloud
       try {
-        final cloudAchievements = await _supabase.from('user_achievements').select();
+        final cloudAchievements = await source.fetchAchievements();
+        if (dropped('achievements')) return;
         final restored = cloudAchievements.map((row) {
           final earnedAtStr = row['earned_at'] as String;
           final id = row['id'] as String;
@@ -253,26 +339,32 @@ class CloudSyncService {
             isNew: false,
           );
         }).toList();
-        await InsightsReportService.instance.mergeAchievementsFromCloud(restored);
-        debugPrint('[CloudSyncService] 🔄 Restored ${restored.length} achievements from cloud');
+        await InsightsReportService.instance
+            .mergeAchievementsFromCloud(restored, stillCurrent: stillCurrent);
+        _debugLog('[CloudSyncService] 🔄 Restored ${restored.length} achievements from cloud');
       } catch (e) {
-        debugPrint('[CloudSyncService] Error restoring achievements: $e');
+        _debugLog('[CloudSyncService] Error restoring achievements: $e');
       }
+      if (dropped('achievements')) return;
 
       // 9. Restore insights cache from cloud
       try {
-        final cacheResp = await _supabase.from('user_insights_cache').select().maybeSingle();
+        final cacheResp = await source.fetchInsightsCache();
+        if (dropped('insights cache')) return;
         if (cacheResp != null) {
-          await InsightsReportService.instance.mergeCacheFromCloud(cacheResp);
-          debugPrint('[CloudSyncService] 🔄 Restored insights cache from cloud');
+          await InsightsReportService.instance
+              .mergeCacheFromCloud(cacheResp, stillCurrent: stillCurrent);
+          _debugLog('[CloudSyncService] 🔄 Restored insights cache from cloud');
         }
       } catch (e) {
-        debugPrint('[CloudSyncService] Error restoring insights cache: $e');
+        _debugLog('[CloudSyncService] Error restoring insights cache: $e');
       }
+      if (dropped('insights cache')) return;
 
       // 10. Reconstruct carry-forward resolved dates and history from day logs
       try {
         final prefs = await SharedPreferences.getInstance();
+        if (dropped('carry-forward')) return;
         final resolvedDates = <String>{};
         final history = <String>[];
 
@@ -285,53 +377,209 @@ class CloudSyncService {
         }
 
         if (resolvedDates.isNotEmpty) {
-          await prefs.setStringList('carry_forward_resolved_dates_v1', resolvedDates.toList());
-          await prefs.setStringList('carry_forward_history_v1', history);
-          debugPrint('[CloudSyncService] 🔄 Reconstructed ${resolvedDates.length} carry-forward rollover events from logs.');
+          await prefs.setStringList(
+              UserSessionCoordinator.carryForwardWriteKey(
+                  UserSessionCoordinator.kCarryForwardResolved, userId), resolvedDates.toList());
+          if (dropped('carry-forward')) return;
+          await prefs.setStringList(UserSessionCoordinator.carryForwardWriteKey(
+                  UserSessionCoordinator.kCarryForwardHistory, userId), history);
+          _debugLog('[CloudSyncService] 🔄 Reconstructed ${resolvedDates.length} carry-forward rollover events from logs.');
         }
       } catch (e) {
-        debugPrint('[CloudSyncService] Error reconstructing carry-forward from day logs: $e');
+        _debugLog('[CloudSyncService] Error reconstructing carry-forward from day logs: $e');
       }
 
-      debugPrint('[CloudSyncService] Hydration completed.');
+      // Never open the gate (or re-point the cached owner) for a session
+      // that is no longer the loaded one.
+      if (dropped('finish')) return;
+      _debugLog('[CloudSyncService] Hydration completed.');
       NutritionHydrationGuard.instance.markComplete(userId);
     } catch (e) {
-      debugPrint('[CloudSyncService] Error during hydration: $e');
+      _debugLog('[CloudSyncService] Error during hydration: $e');
     }
   }
 
+  /// Merges one cloud `day_logs` row into the local day ([local], or a new
+  /// day), per meal entry ([MealEntry.id]):
+  ///  * a cloud entry the local day lacks is added, unless a local pending
+  ///    deletion ([MealTombstones]) suppresses it;
+  ///  * when both hold the entry, the cloud copy replaces the local one only
+  ///    if its `updatedAt` is strictly newer (local wins ties);
+  ///  * a cloud tombstone (`deleted_meal_ids`) removes the local copy unless
+  ///    that copy was changed after the deletion (e.g. restored by Undo).
+  @visibleForTesting
+  static DayLog mergeCloudDayRow(String dateKey, Map<String, dynamic> row, DayLog? local) {
+    final gymDayJson = row['gym_day_json'];
+    final sectionsJson = row['sections_json'];
+    final tombstones = MealTombstones.instance;
+
+    final log = local ?? DayLog();
+
+    if (gymDayJson != null && log.gymDay == null) {
+      log.gymDay = GymDay.fromJson(gymDayJson as Map<String, dynamic>);
+    }
+    if (sectionsJson is Map) {
+      final localById = <String, MealEntry>{
+        for (final e in log.allEntries) e.id: e,
+      };
+      for (final sectionName in sectionsJson.keys) {
+        final sectionEnum = MealSection.values.firstWhere((e) => e.name == sectionName, orElse: () => MealSection.breakfast);
+        final entries = sectionsJson[sectionName];
+        if (entries is! List) continue;
+        for (final raw in entries) {
+          if (raw is! Map<String, dynamic>) continue;
+          final cloudEntry = MealEntry.fromJson(raw);
+          // Pre-id deletion recorded here: now that its id is known, make it
+          // uploadable as a server tombstone.
+          tombstones.upgradeLegacy(dateKey, cloudEntry);
+          // Deleted / edited away on this device, not yet uploaded.
+          if (tombstones.suppresses(dateKey, cloudEntry)) continue;
+          final mine = localById[cloudEntry.id];
+          if (mine == null) {
+            log.add(sectionEnum, cloudEntry);
+            localById[cloudEntry.id] = cloudEntry;
+          } else if (cloudEntry.isNewerThan(mine)) {
+            log.replace(mine.section, mine, cloudEntry);
+            localById[cloudEntry.id] = cloudEntry;
+          }
+        }
+      }
+    }
+    final cloudDeleted = row['deleted_meal_ids'];
+    if (cloudDeleted is Map && cloudDeleted.isNotEmpty) {
+      for (final s in MealSection.values) {
+        for (final e in log.entriesFor(s)) {
+          final at = cloudDeleted[e.id];
+          final deletedAt = at is String ? DateTime.tryParse(at) : null;
+          if (deletedAt == null) continue;
+          final updated = e.updatedAt;
+          if (updated == null || !updated.isAfter(deletedAt)) {
+            log.remove(s, e);
+          }
+        }
+      }
+    }
+    // Load frozen target values from Supabase to prevent drift on hydration
+    if (row['target_calories'] != null && log.targetCalories == null) {
+      log.targetCalories = (row['target_calories'] as num?)?.toDouble();
+    }
+    if (row['target_protein'] != null && log.targetProtein == null) {
+      log.targetProtein = (row['target_protein'] as num?)?.toDouble();
+    }
+    return log;
+  }
+
+  /// Parameters of the `merge_day_log` RPC for one day: the day's entries,
+  /// its pending deletions ([deletions], `{id: deletedAt}`), and the day
+  /// fields. The server merges per entry (newest `updatedAt` wins, tombstones
+  /// persist and beat older copies), so a stale device can neither resurrect
+  /// a meal deleted elsewhere nor drop meals it has not seen.
+  @visibleForTesting
+  static Map<String, dynamic> dayMergeParams(
+    String dateKey,
+    DayLog log,
+    Map<String, String> deletions,
+  ) => {
+        'p_date_key': dateKey,
+        'p_sections': {
+          for (final s in MealSection.values)
+            s.name: log.entriesFor(s).map((e) => e.toJson()).toList(),
+        },
+        'p_deleted': deletions,
+        'p_gym_day_json': log.gymDay?.toJson(),
+        'p_target_calories': log.targetCalories,
+        'p_target_protein': log.targetProtein,
+      };
+
+  // ── Day-log upload ──────────────────────────────────────────────────────
+  //
+  // Each day is merge-uploaded through `merge_day_log` (see
+  // [dayMergeParams]); the stored row keeps the same format. To avoid
+  // re-uploading the whole history on every save, a day is skipped only when
+  // its persisted JSON (from PersistenceService's last write) is identical to
+  // the JSON it had when this session last uploaded it successfully. Anything
+  // unknown, changed, or previously failed is uploaded. Runs are serialized
+  // and coalesced: a request during a run triggers exactly one more run.
+
+  final Map<String, String> _uploadedDayJson = {};
+  String? _uploadedDayJsonOwner;
+  Future<void>? _dayLogSyncRun;
+  bool _dayLogSyncAgain = false;
+
   /// Fire-and-forget sync for day logs
-  Future<void> syncDayLogsBackground() async {
+  Future<void> syncDayLogsBackground() {
+    final running = _dayLogSyncRun;
+    if (running != null) {
+      _dayLogSyncAgain = true;
+      return running;
+    }
+    final run = _runDayLogSyncLoop();
+    _dayLogSyncRun = run;
+    return run;
+  }
+
+  Future<void> _runDayLogSyncLoop() async {
+    try {
+      do {
+        _dayLogSyncAgain = false;
+        await _syncChangedDayLogsOnce();
+      } while (_dayLogSyncAgain);
+    } finally {
+      _dayLogSyncRun = null;
+    }
+  }
+
+  Future<void> _syncChangedDayLogsOnce() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+    // The in-memory store belongs to the session user; never upload it under
+    // a different auth identity.
+    final sessionUser = UserSessionCoordinator.instance.currentUserId;
+    if (sessionUser != null && sessionUser != userId) return;
+
+    if (_uploadedDayJsonOwner != userId) {
+      _uploadedDayJson.clear();
+      _uploadedDayJsonOwner = userId;
+    }
+    final written = PersistenceService.lastWrittenDayJsonFor(userId);
+    final snapshot = Map<String, DayLog>.of(dayLogStore);
 
     try {
       final futures = <Future>[];
-      for (final entry in dayLogStore.entries) {
+      for (final entry in snapshot.entries) {
         final dateKey = entry.key;
         final log = entry.value;
+        final fingerprint = written?[dateKey];
+        if (fingerprint != null && _uploadedDayJson[dateKey] == fingerprint) {
+          continue; // Unchanged since this session's last successful upload.
+        }
+        // Deletions this upload carries to the cloud; ones recorded while it
+        // is in flight are not in it and must survive.
+        final tombstoneSnapshot = MealTombstones.instance.snapshotFor(dateKey);
 
         futures.add(
-          _supabase.from('day_logs').upsert({
-            'user_id': userId,
-            'date_key': dateKey,
-            'gym_day_json': log.gymDay?.toJson(),
-            'sections_json': {
-              for (final s in MealSection.values)
-                s.name: log.entriesFor(s).map((e) => e.toJson()).toList(),
-            },
-            'target_calories': log.targetCalories,
-            'target_protein': log.targetProtein,
-            'updated_at': DateTime.now().toIso8601String(),
-          }, onConflict: 'user_id, date_key').catchError((e) {
-            debugPrint('[CloudSyncService] Failed to sync day log $dateKey: $e');
+          _supabase
+              .rpc('merge_day_log', params: dayMergeParams(
+                dateKey,
+                log,
+                MealTombstones.instance.deletionsFor(dateKey),
+              ))
+              .within(NetTimeouts.sync, 'day log upload')
+              .then((value) {
+            if (fingerprint != null && _uploadedDayJsonOwner == userId) {
+              _uploadedDayJson[dateKey] = fingerprint;
+            }
+            MealTombstones.instance.clearUploaded(dateKey, tombstoneSnapshot, userId: userId);
+            return value;
+          }).catchError((e) {
+            _debugLog('[CloudSyncService] Failed to sync day log $dateKey: $e');
             return {};
           })
         );
       }
       await Future.wait(futures);
     } catch (e) {
-      debugPrint('[CloudSyncService] Background day log sync failed: $e');
+      _debugLog('[CloudSyncService] Background day log sync failed: $e');
     }
   }
 
@@ -352,9 +600,31 @@ class CloudSyncService {
         'notes': session.notes,
         'duration_minutes': session.durationMinutes,
         'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'id');
+      }, onConflict: 'id').within(NetTimeouts.sync, 'workout upload');
     } catch (e) {
-      debugPrint('[CloudSyncService] Background workout sync failed: $e');
+      _debugLog('[CloudSyncService] Background workout sync failed: $e');
+    }
+  }
+
+  /// Deletes the signed-in user's own `workout_sessions` rows [ids] (RLS
+  /// limits deletes to the owner; the user_id filter keeps it that way).
+  /// Returns true only when the delete went through. Never throws.
+  Future<bool> deleteWorkoutSessions(Set<String> ids,
+      {required String expectedUserId}) async {
+    if (ids.isEmpty) return true;
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null || userId != expectedUserId) return false;
+      await _supabase
+          .from('workout_sessions')
+          .delete()
+          .eq('user_id', userId)
+          .inFilter('id', ids.toList())
+          .within(NetTimeouts.sync, 'workout delete');
+      return true;
+    } catch (e) {
+      _debugLog('[CloudSyncService] Workout delete failed: $e');
+      return false;
     }
   }
 
@@ -369,10 +639,10 @@ class CloudSyncService {
         'split_json': split.toJson(),
         'custom_exercises_json': customExercises.map((e) => e.toJson()).toList(),
         'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'user_id');
-      debugPrint('[CloudSyncService] 🔄 Workout split and custom exercises synced successfully.');
+      }, onConflict: 'user_id').within(NetTimeouts.sync, 'split upload');
+      _debugLog('[CloudSyncService] 🔄 Workout split and custom exercises synced successfully.');
     } catch (e) {
-      debugPrint('[CloudSyncService] Background workout split sync failed: $e');
+      _debugLog('[CloudSyncService] Background workout split sync failed: $e');
     }
   }
 
@@ -401,9 +671,33 @@ class CloudSyncService {
         'protein':           memory.proteinPerUnit,
         'updated_at':        memory.savedAt.toUtc().toIso8601String(),
         'times_used':        memory.correctionCount,
-      }, onConflict: 'user_id, canonical_meal');
+      }, onConflict: 'user_id, canonical_meal')
+          .within(NetTimeouts.sync, 'memory upload');
     } catch (e) {
-      debugPrint('[CloudSyncService] Background memory sync failed: $e');
+      _debugLog('[CloudSyncService] Background memory sync failed: $e');
+    }
+  }
+
+  /// Deletes the signed-in user's own `user_nutrition_memory` rows for
+  /// [canonicalMeals] (RLS limits the delete to the caller's rows; the
+  /// explicit user_id filter keeps it that way regardless). Returns true only
+  /// when the delete went through, so the caller can drop its tombstones.
+  /// Only [expectedUserId]'s rows are ever touched.
+  Future<bool> deleteMemoryRows(Set<String> canonicalMeals, {required String expectedUserId}) async {
+    if (canonicalMeals.isEmpty) return true;
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null || userId != expectedUserId) return false;
+      await _supabase
+          .from('user_nutrition_memory')
+          .delete()
+          .eq('user_id', userId)
+          .inFilter('canonical_meal', canonicalMeals.toList())
+          .within(NetTimeouts.sync, 'memory delete');
+      return true;
+    } catch (e) {
+      _debugLog('[CloudSyncService] Background memory delete failed: $e');
+      return false;
     }
   }
 
@@ -430,11 +724,11 @@ class CloudSyncService {
           rows,
           onConflict: 'user_id,recorded_at,target_role',
           ignoreDuplicates: true,
-        );
+        ).within(NetTimeouts.sync, 'eating pattern upload');
       }
-      debugPrint('[CloudSyncService] 🔄 Eating patterns synced (${records.length} records)');
+      _debugLog('[CloudSyncService] 🔄 Eating patterns synced (${records.length} records)');
     } catch (e) {
-      debugPrint('[CloudSyncService] Eating pattern sync failed: $e');
+      _debugLog('[CloudSyncService] Eating pattern sync failed: $e');
     }
   }
 
@@ -458,11 +752,11 @@ class CloudSyncService {
           rows,
           onConflict: 'user_id,recorded_at',
           ignoreDuplicates: true,
-        );
+        ).within(NetTimeouts.sync, 'meal context upload');
       }
-      debugPrint('[CloudSyncService] 🔄 Meal contexts synced (${contexts.length} records)');
+      _debugLog('[CloudSyncService] 🔄 Meal contexts synced (${contexts.length} records)');
     } catch (e) {
-      debugPrint('[CloudSyncService] Meal context sync failed: $e');
+      _debugLog('[CloudSyncService] Meal context sync failed: $e');
     }
   }
 
@@ -480,10 +774,10 @@ class CloudSyncService {
         'yearly_json': service.yearlyCache.map((k, v) => MapEntry(k, v.toJson())),
         'personal_bests_json': service.personalBests?.toJson(),
         'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'user_id');
-      debugPrint('[CloudSyncService] 🔄 Insights cache synced to cloud successfully.');
+      }, onConflict: 'user_id').within(NetTimeouts.sync, 'insights upload');
+      _debugLog('[CloudSyncService] 🔄 Insights cache synced to cloud successfully.');
     } catch (e) {
-      debugPrint('[CloudSyncService] Background insights cache sync failed: $e');
+      _debugLog('[CloudSyncService] Background insights cache sync failed: $e');
     }
   }
 
@@ -501,13 +795,13 @@ class CloudSyncService {
           'user_id': userId,
           'id': a.id,
           'earned_at': a.earnedAt.toIso8601String(),
-        }, onConflict: 'user_id, id');
+        }, onConflict: 'user_id, id').within(NetTimeouts.sync, 'achievement upload');
       }
       if (newOnes.isNotEmpty) {
-        debugPrint('[CloudSyncService] 🔄 Synced ${newOnes.length} new achievements to cloud.');
+        _debugLog('[CloudSyncService] 🔄 Synced ${newOnes.length} new achievements to cloud.');
       }
     } catch (e) {
-      debugPrint('[CloudSyncService] Background achievements sync failed: $e');
+      _debugLog('[CloudSyncService] Background achievements sync failed: $e');
     }
   }
 }

@@ -2,16 +2,41 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- ── Health Connect permissions ─────────────────────────────────────── -->
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
+    <!-- Exactly the types lib/services/health_service.dart requests (READ only).
+         Keep this list and the Play Console health declaration in sync. -->
     <uses-permission android:name="android.permission.health.READ_STEPS"/>
     <uses-permission android:name="android.permission.health.READ_WEIGHT"/>
-    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY"/>
+    <uses-permission android:name="android.permission.health.READ_SLEEP"/>
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY"/>
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- allowBackup=false: prefs hold the Supabase session and every
+         account's cached data; they must not be restored onto another
+         device or reinstall. usesCleartextTraffic=false: all traffic is
+         HTTPS (the ChatGPT PKCE loopback is a server inside the app that the
+         browser calls, which this setting does not affect). -->
+    <!-- Barcode scanning for packaged food -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Rest-timer notifications (countdown while resting, "rest over" when
+         the app is in the background). Asked for at the first rest timer on
+         Android 13+; the workout never depends on it being granted. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Exact "rest over" alarm while the app is backgrounded/frozen. Checked
+         with canScheduleExactNotifications(); without it the alert is
+         scheduled inexactly. (Not USE_EXACT_ALARM: that is reserved for
+         alarm-clock / calendar apps.) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:label="Kynetix"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
@@ -46,6 +71,13 @@
                     android:path="/callback" />
             </intent-filter>
 
+            <!-- Health Connect (Android 13 and lower): "privacy policy" link
+                 on the permission screen. MainActivity opens the in-app
+                 privacy policy. -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+
             <!-- Supabase Auth deep links -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -57,7 +89,8 @@
         </activity>
 
         <!-- ── Health Connect: privacy policy rationale link ──────────────── -->
-        <!-- Required by Google Play when requesting Health Connect permissions -->
+        <!-- Android 14+. Required by Google Play when requesting Health Connect
+             permissions; MainActivity opens the in-app privacy policy. -->
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"
@@ -80,6 +113,12 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/kynetix_widget_info" />
         </receiver>
+
+        <!-- flutter_local_notifications: delivers scheduled notifications
+             (the rest timer's "Rest over" alert). -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

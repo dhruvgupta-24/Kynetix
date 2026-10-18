@@ -41,11 +41,12 @@ class GlobalFoodItem {
       id: json['id'] as String? ?? '',
       canonicalName: json['canonical_name'] as String? ?? '',
       aliases: (json['aliases'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
-      caloriesMid: (json['calories_mid'] as num?)?.toDouble() ?? 0.0,
-      proteinMid: (json['protein_mid'] as num?)?.toDouble() ?? 0.0,
-      carbsMid: (json['carbs_mid'] as num?)?.toDouble(),
-      fatMid: (json['fat_mid'] as num?)?.toDouble(),
-      fiberMid: (json['fiber_mid'] as num?)?.toDouble(),
+      // The table names these `*_per_unit`; the local cache uses `*_mid`.
+      caloriesMid: _num(json, 'calories_per_unit', 'calories_mid') ?? 0.0,
+      proteinMid: _num(json, 'protein_per_unit', 'protein_mid') ?? 0.0,
+      carbsMid: _num(json, 'carbs_per_unit', 'carbs_mid'),
+      fatMid: _num(json, 'fat_per_unit', 'fat_mid'),
+      fiberMid: _num(json, 'fiber_per_unit', 'fiber_mid'),
       referenceQuantity: (json['reference_quantity'] as num?)?.toDouble() ?? 1.0,
       referenceUnit: json['reference_unit'] as String? ?? 'serving',
       qualityScore: (json['quality_score'] as num?)?.toDouble() ?? 0.85,
@@ -53,6 +54,9 @@ class GlobalFoodItem {
       curatedBy: json['curated_by'] as String?,
     );
   }
+
+  static double? _num(Map<String, dynamic> json, String a, String b) =>
+      ((json[a] ?? json[b]) as num?)?.toDouble();
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -115,7 +119,7 @@ class GlobalFoodService {
   GlobalFoodService._();
   static final GlobalFoodService instance = GlobalFoodService._();
 
-  static const _kGlobalCache = 'global_food_defaults_cache_v1';
+  static const _kGlobalCache = 'global_food_defaults_cache_v2';
   final Map<String, GlobalFoodItem> _itemsByCanonical = {};
   final Map<String, String> _aliasMap = {};
   bool _initialized = false;
@@ -163,11 +167,12 @@ class GlobalFoodService {
       id: 'default_roti',
       canonicalName: 'roti',
       aliases: ['chapati', 'phulka', 'roties', 'chapatis'],
-      caloriesMid: 200.0,
-      proteinMid: 6.0,
-      carbsMid: 35.0,
-      fatMid: 4.0,
-      fiberMid: 2.0,
+      // One plain roti (~40 g atta). 200 kcal / 6 g is two rotis.
+      caloriesMid: 100.0,
+      proteinMid: 3.0,
+      carbsMid: 17.5,
+      fatMid: 2.0,
+      fiberMid: 1.0,
       referenceQuantity: 1.0,
       referenceUnit: 'piece',
       qualityScore: 0.90,
@@ -235,6 +240,8 @@ class GlobalFoodService {
           .toList();
 
       for (final item in list) {
+        // A row with no energy is broken data; keep the compiled default.
+        if (item.caloriesMid <= 0) continue;
         _register(item);
       }
 

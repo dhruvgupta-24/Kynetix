@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'ai_router_error.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_secrets.dart';
 import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart' show WeightContext;
+import 'internal/net_timeouts.dart';
 
 // ─── AiCoachResponse ──────────────────────────────────────────────────────────
 
@@ -45,12 +47,17 @@ class AiCoachResponse {
   final String         providerUsed;   // 'openai' | 'openrouter' | 'none'
   final bool           fallbackUsed;
   final AiCoachContext? context;
+  /// Why the server skipped the user's ChatGPT plan for this reply
+  /// ('usage_limit', 'not_eligible', 'plan_unavailable', …); null when the
+  /// plan answered or isn't in use.
+  final String?        planFallbackReason;
 
   const AiCoachResponse({
     required this.message,
     required this.providerUsed,
     required this.fallbackUsed,
     this.context,
+    this.planFallbackReason,
   });
 
   factory AiCoachResponse.fromJson(Map<String, dynamic> j) => AiCoachResponse(
@@ -60,6 +67,7 @@ class AiCoachResponse {
     context:      j['context'] != null
         ? AiCoachContext.fromJson(j['context'] as Map<String, dynamic>)
         : null,
+    planFallbackReason: AiCoachService.cleanFallbackReason(j['plan_fallback_reason']),
   );
 }
 
@@ -69,12 +77,25 @@ class AiCoachService {
   AiCoachService._();
   static final AiCoachService instance = AiCoachService._();
 
+  /// Plan fallback reason from the latest successful reply: the
+  /// `X-Fallback-Reason` header (streaming) or `plan_fallback_reason` body
+  /// field. Null when the ChatGPT plan answered or isn't in use. The UI
+  /// listens to this to explain why Kyno is on the standard model.
+  final ValueNotifier<String?> planFallbackReason = ValueNotifier<String?>(null);
+
+  /// Normalises a raw fallback reason: trimmed, non-empty, or null.
+  static String? cleanFallbackReason(Object? raw) {
+    if (raw is! String) return null;
+    final v = raw.trim();
+    return v.isEmpty ? null : v;
+  }
+
   /// Sends a message (and optional image) to ai-meal-coach.
   /// The backend injects all meal/nutrition context automatically.
   Future<AiCoachResponse> sendMessage({
     required String message,
     List<Uint8List>? imagesBytes,
-    String?         dateKey,  // YYYYMMDD — defaults to today on backend if null
+    String?         dateKey,  // YYYYMMDD, defaults to today on backend if null
   }) async {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
@@ -103,17 +124,22 @@ class AiCoachService {
       debugPrint('[AiCoachService] (4/7) sendMessage payload: no images attached.');
     }
 
-    // Pass portion anchor so the edge function can include it in the system prompt.
-    final portionHint = _portionAnchorHint();
-    if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
+    // Portion anchor (enum name); the server maps it to its own prompt text.
+    addPortionAnchor(body);
 
     final stopwatch = Stopwatch()..start();
     try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'ai-meal-coach',
-        body:    body,
-        headers: {'Authorization': 'Bearer ${session.accessToken}'},
-      );
+      final FunctionResponse res;
+      try {
+        res = await Supabase.instance.client.functions.invoke(
+          'ai-meal-coach',
+          body:    body,
+          headers: {'Authorization': 'Bearer ${session.accessToken}'},
+        ).within(NetTimeouts.ai, 'Kyno reply');
+      } on FunctionException catch (e) {
+        // Router 429 / 413 pass through ai-meal-coach: typed, calm copy.
+        throw AiRouterException.from(e);
+      }
 
       final data = res.data as Map<String, dynamic>?;
       if (data == null) {
@@ -121,14 +147,14 @@ class AiCoachService {
         throw Exception('ai-meal-coach returned no data');
       }
       if (data['success'] != true) {
-        final err = data['error'] ?? 'Unknown error from ai-meal-coach';
-        debugPrint('[AiCoachService] ✖ error: $err');
+        debugPrint('[AiCoachService] ✖ error: ${data['error']}');
         ChatGptLinkService.recordAiRequestFailure().ignore();
-        throw Exception(err);
+        throw AiRouterException.fromResponse(res.status, data);
       }
 
       stopwatch.stop();
       final response = AiCoachResponse.fromJson(data);
+      planFallbackReason.value = response.planFallbackReason;
       ChatGptLinkService.recordAiRequestSuccess(
         response.providerUsed,
         stopwatch.elapsedMilliseconds.toDouble(),
@@ -150,11 +176,12 @@ class AiCoachService {
     required String  message,
     List<Uint8List>? imagesBytes,
     String?          dateKey,
-    bool?            isGymDay,     // client real-time value — overrides stale DB
+    bool?            isGymDay,     // client real-time value, overrides stale DB
     String?          workoutType,  // e.g. 'Push', 'Pull', 'Chest + Triceps'
     double?          targetCaloriesOverride, // active manual override for this day
     List<Map<String, String>>? conversationHistory, // prior turns for multi-turn context
     WeightContext?   weightContext, // compact weight summary for Kyno coaching
+    Map<String, dynamic>? appContext, // KynoBriefService brief: targets, trends, food options
   }) async* {
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
@@ -189,9 +216,12 @@ class AiCoachService {
           : conversationHistory;
       body['history'] = limited;
     }
-    // Portion anchor — edge function appends to system prompt when present.
-    final portionHint = _portionAnchorHint();
-    if (portionHint.isNotEmpty) body['portion_anchor_hint'] = portionHint;
+    // Portion anchor (enum name); the server maps it to its own prompt text.
+    addPortionAnchor(body);
+
+    // The app's own numbers (targets with steps and manual targets, 14-day
+    // eating, lift trends, food options). The server fences it as data.
+    if (appContext != null) body['app_context'] = appContext;
 
     // Weight context — compact summary only, never raw history.
     // The edge function appends toPromptString() to its system prompt.
@@ -212,15 +242,26 @@ class AiCoachService {
 
     final client = http.Client();
     try {
-      final streamedRes = await client.send(request);
+      // Bound only the wait for the response to start; the stream itself
+      // may run as long as the reply takes.
+      final streamedRes = await client
+          .send(request)
+          .within(NetTimeouts.aiFirstByte, 'Kyno stream start');
 
       if (streamedRes.statusCode != 200) {
         final errBody = await streamedRes.stream.bytesToString();
         ChatGptLinkService.recordAiRequestFailure().ignore();
-        throw Exception('ai-meal-coach ${streamedRes.statusCode}: $errBody');
+        // Typed and calm (rate limit, too long, …); the raw body is never
+        // shown.
+        final err = AiRouterException.fromResponse(streamedRes.statusCode, errBody);
+        debugPrint('[AiCoachService] ✖ stream rejected: $err');
+        throw err;
       }
 
       stopwatch.stop();
+      // http lower-cases header names.
+      planFallbackReason.value =
+          cleanFallbackReason(streamedRes.headers['x-fallback-reason']);
       ChatGptLinkService.recordAiRequestSuccess(
         'openai',
         stopwatch.elapsedMilliseconds.toDouble(),
@@ -259,12 +300,12 @@ class AiCoachService {
         '${now.day.toString().padLeft(2, '0')}';
   }
 
-  /// Returns the user's portion-anchor instruction string, or empty string
-  /// when the user hasn't set one. The edge function appends this to the
-  /// system prompt when non-empty.
-  String _portionAnchorHint() {
+  /// Adds the user's portion anchor as its enum name ('carbAnchored',
+  /// 'curryAnchored', 'balanced') when set. ai-meal-coach owns the prompt
+  /// text for each anchor.
+  @visibleForTesting
+  static void addPortionAnchor(Map<String, dynamic> body) {
     final anchor = ProfileService.instance.currentUserProfile?.portionAnchor;
-    if (anchor == null) return '';
-    return anchor.aiHint;
+    if (anchor != null) body['portion_anchor'] = anchor.name;
   }
 }

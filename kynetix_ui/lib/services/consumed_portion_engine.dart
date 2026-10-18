@@ -64,7 +64,7 @@ class ConsumedPortionEngine {
       PortionAnchor.carbAnchored  => 0.78,
       PortionAnchor.balanced      => 1.00,
       PortionAnchor.curryAnchored => 1.30,
-      null                        => 1.00,  // not set — keep existing calibration
+      null                        => 1.00,  // not set, keep existing calibration
     };
 
     // Clamp the scalar for safety in case of unexpected enum additions.
@@ -191,7 +191,7 @@ class ConsumedPortionEngine {
           ctx.isThali ? ctx.compartmentCount * 5.0 : 9.0, 80.0).toDouble(),
       proteinMax:  chunkProMax.clamp(
           ctx.isThali ? ctx.compartmentCount * 7.0 : 12.0, 80.0).toDouble(),
-      rationale: 'Paneer: ${chunkGMin.toInt()}–${chunkGMax.toInt()}g chunks '
+      rationale: 'Paneer: ${chunkGMin.toInt()}-${chunkGMax.toInt()}g chunks '
                  '+ ${gravyConsumed.toInt()}ml gravy/'
                  '${isHeavyGravy ? "heavy" : "regular"} '
                  '(${carbLoad.toStringAsFixed(1)} carb units)',

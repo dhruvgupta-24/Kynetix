@@ -4,6 +4,9 @@ import '../services/mock_estimation_service.dart'
     show NutrientRange, FoodItem, EstimationResult;
 import '../services/user_nutrition_memory.dart';
 import '../services/unit_normalizer.dart';
+import 'micronutrients.dart';
+
+export 'micronutrients.dart' show Micro, Micronutrients;
 
 
 double _safe(double v, [int precision = 1]) {
@@ -14,7 +17,7 @@ double _safe(double v, [int precision = 1]) {
 // ─── Estimation mode ──────────────────────────────────────────────────────────
 
 enum EstimationMode {
-  directQuantity,     // explicit qty — 400ml milk, 4 egg whites
+  directQuantity,     // explicit qty, 400ml milk, 4 egg whites
   contextualIntake,   // sabzi/dal eaten alongside roti/rice
   packagedKnown,      // milk packet, bread, oats, whey
   outsideRestaurant;  // burger, pizza, biryani
@@ -95,6 +98,11 @@ class NutritionItem {
   final NutrientRange? sodium;
   final bool           eatingPatternScalarApplied;
 
+  /// Known micronutrients for this item (food library, pack label or Kyno's
+  /// estimate). Null means not tracked, never zero. Stored under 'micros'
+  /// only when present, so older JSON reads and writes unchanged.
+  final Micronutrients? micros;
+
   const NutritionItem({
     required this.name,
     required this.quantity,
@@ -110,7 +118,27 @@ class NutritionItem {
     this.saturatedFat,
     this.sodium,
     this.eatingPatternScalarApplied = false,
+    this.micros,
   });
+
+  /// A copy with [micros] replaced (null clears them).
+  NutritionItem withMicros(Micronutrients? micros) => NutritionItem(
+        name: name,
+        quantity: quantity,
+        unit: unit,
+        estimated: estimated,
+        mode: mode,
+        calories: calories,
+        protein: protein,
+        carbohydrates: carbohydrates,
+        fat: fat,
+        fiber: fiber,
+        sugar: sugar,
+        saturatedFat: saturatedFat,
+        sodium: sodium,
+        eatingPatternScalarApplied: eatingPatternScalarApplied,
+        micros: micros == null || micros.isEmpty ? null : micros,
+      );
 
   Map<String, dynamic> toJson() => {
         'name':           name,
@@ -127,6 +155,7 @@ class NutritionItem {
         if (saturatedFat != null) 'saturatedFat': {'min': saturatedFat!.min, 'max': saturatedFat!.max},
         if (sodium != null) 'sodium': {'min': sodium!.min, 'max': sodium!.max},
         'eatingPatternScalarApplied': eatingPatternScalarApplied,
+        if (micros != null && !micros!.isEmpty) 'micros': micros!.toJson(),
       };
 
   factory NutritionItem.fromJson(Map<String, dynamic> j) {
@@ -157,6 +186,7 @@ class NutritionItem {
       saturatedFat:  j['saturatedFat'] != null ? _range(j['saturatedFat']) : null,
       sodium:        j['sodium'] != null ? _range(j['sodium']) : null,
       eatingPatternScalarApplied: j['eatingPatternScalarApplied'] as bool? ?? false,
+      micros: Micronutrients.fromJson(j['micros']),
     );
   }
 
@@ -185,6 +215,7 @@ class NutritionItem {
         saturatedFat: saturatedFat != null ? _normalizeRange(saturatedFat!) : null,
         sodium: sodium != null ? _normalizeRange(sodium!) : null,
         eatingPatternScalarApplied: eatingPatternScalarApplied,
+        micros: micros,
       );
 
   static NutrientRange _normalizeRange(NutrientRange r) {
@@ -224,6 +255,7 @@ class NutritionItem {
           ? NutrientRange(min: sodium!.min * scalar, max: sodium!.max * scalar)
           : null,
       eatingPatternScalarApplied: true,
+      micros: micros?.scaled(scalar),
     );
   }
 }
@@ -463,6 +495,9 @@ class NutritionResult {
           saturatedFat: item.saturatedFat,
           sodium: item.sodium,
           eatingPatternScalarApplied: true,
+          // Same food, same amount: a calorie correction doesn't change
+          // what minerals it carries.
+          micros: item.micros,
         ));
       } else {
         updatedItems.add(item);

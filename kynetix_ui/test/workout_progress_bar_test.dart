@@ -73,8 +73,8 @@ void main() {
     expect(find.text('0%'), findsOneWidget);
 
     // 2. Log Set 1 on Exercise 1 (Bench Press)
-    expect(find.text('LOG SET 1'), findsOneWidget);
-    await tester.tap(find.text('LOG SET 1'));
+    expect(find.text('Log set 1'), findsOneWidget);
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     // Progress should increase from 0% (1 of 2 sets in 1 of 2 exercises = ~25%)
@@ -83,8 +83,8 @@ void main() {
     expect(find.text('25%'), findsOneWidget);
 
     // 3. Log Set 2 on Exercise 1 (Bench Press)
-    expect(find.text('LOG SET 2'), findsOneWidget);
-    await tester.tap(find.text('LOG SET 2'));
+    expect(find.text('Log set 2'), findsOneWidget);
+    await tester.tap(find.text('Log set 2'));
     await tester.pumpAndSettle();
 
     // Exercise 1 complete: 50% of the entire workout is completed
@@ -119,7 +119,7 @@ void main() {
       await tester.tap(moreOptionsFinder);
       await tester.pumpAndSettle();
 
-      final skipOption = find.text('Skip Exercise');
+      final skipOption = find.text('Skip exercise');
       if (skipOption.evaluate().isNotEmpty) {
         await tester.tap(skipOption);
         await tester.pumpAndSettle();

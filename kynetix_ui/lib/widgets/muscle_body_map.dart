@@ -1,15 +1,45 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import '../config/app_theme.dart';
 import '../utils/svg_path_parser.dart';
+import 'muscle_regions.dart';
 
 enum BodyView {
   front,
   back,
   sideBySide,
 }
+
+// ─── Body-map palette (train world) ───────────────────────────────────────────
+// Silhouette sits in ink; targeted muscles light up in the train light.
+// The volume heat ramp runs cool → hot through three distinct stops
+// (cyan → violet → ember) so low / medium / high stay distinguishable.
+
+// Every value is a getter so a theme switch is picked up on the next paint.
+// Resting muscles sit one clear step off the card; inert parts (head, hands,
+// feet, joints) sit half a step, so the silhouette reads on both Carbon and
+// Paper without competing with the targeted muscles.
+Color get _kDefaultHighlight => KColor.violet;
+Color get _kBaseFill => Color.alphaBlend(
+      KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.16),
+      KColor.card,
+    );
+Color get _kInertFill => Color.alphaBlend(
+      KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.09),
+      KColor.card,
+    );
+// Carbon: a faint light seam between muscles. Paper: the card tone itself,
+// engraving the muscle boundaries like a printed plate.
+Color get _kOutline => KColor.isDark
+    ? KColor.fg.withValues(alpha: 0.1)
+    : KColor.card.withValues(alpha: 0.95);
+Color get _kHeatFloor => Color.alphaBlend(
+      KColor.cyan.withValues(alpha: KColor.isDark ? 0.14 : 0.16),
+      _kBaseFill,
+    );
 
 /// Premium Vector Anatomical Muscle Map for Kynetix.
 /// Displays high-fidelity front/back body silhouettes with dynamic muscle targeting,
@@ -75,10 +105,14 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
     }
   }
 
+  /// 1 when the geometry was already cached at mount (no fade needed);
+  /// 0 when it arrives later, so the silhouette fades in once.
+  double _fadeFrom = 1;
+
   Future<void> _loadGeometry() async {
     await preload();
     if (mounted) {
-      setState(() {});
+      setState(() => _fadeFrom = 0);
     }
   }
 
@@ -86,51 +120,84 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
   Widget build(BuildContext context) {
     if (_cachedGeometry == null) {
       return SizedBox(
+        key: const ValueKey('body-placeholder'),
         width: widget.width ?? 140,
         height: widget.height ?? 220,
         child: Center(
-          child: Icon(
-            Icons.accessibility_new_rounded,
-            size: 28,
-            color: Colors.white.withValues(alpha: 0.15),
+          child: ExcludeSemantics(
+            child: Icon(
+              Icons.accessibility_new_rounded,
+              size: 28,
+              color: KColor.textDisabled,
+            ),
           ),
         ),
       );
     }
 
+    final Widget body;
     if (widget.view == BodyView.sideBySide) {
-      return Row(
+      body = Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Expanded(
             child: _buildSingleView(
-              isFront: true,
               data: _cachedGeometry!['front'] as Map<String, dynamic>,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: KSpacing.md),
           Expanded(
             child: _buildSingleView(
-              isFront: false,
               data: _cachedGeometry!['back'] as Map<String, dynamic>,
             ),
           ),
         ],
       );
+    } else {
+      final isFront = widget.view == BodyView.front;
+      final viewData = isFront
+          ? _cachedGeometry!['front'] as Map<String, dynamic>
+          : _cachedGeometry!['back'] as Map<String, dynamic>;
+      body = _buildSingleView(data: viewData);
     }
 
-    final isFront = widget.view == BodyView.front;
-    final viewData = isFront
-        ? _cachedGeometry!['front'] as Map<String, dynamic>
-        : _cachedGeometry!['back'] as Map<String, dynamic>;
-
-    return _buildSingleView(isFront: isFront, data: viewData);
+    // The painted silhouette is opaque to screen readers; speak the answer
+    // (which muscles are targeted) instead of the shape.
+    // The silhouette fades in once when the geometry first arrives; after
+    // that, fill changes are tweened per muscle below.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: _fadeFrom, end: 1),
+      duration: KMotion.of(context, KMotion.standard),
+      curve: KMotion.emphasizedCurve,
+      builder: (context, o, child) => Opacity(opacity: o, child: child),
+      child: Semantics(
+        container: true,
+        label: _semanticsLabel(),
+        child: ExcludeSemantics(child: body),
+      ),
+    );
   }
 
-  Widget _buildSingleView({
-    required bool isFront,
-    required Map<String, dynamic> data,
-  }) {
+  String _semanticsLabel() {
+    final named = <String>{
+      ...?widget.muscleColorMap?.keys,
+      ...?widget.highlightedMuscles,
+    };
+    if (named.isNotEmpty) {
+      return 'Muscle map. Targeted: ${named.join(', ')}';
+    }
+    final heat = widget.muscleHeatmap;
+    if (heat != null && heat.isNotEmpty) {
+      final ranked = heat.entries.where((e) => e.value > 0).toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      if (ranked.isEmpty) return 'Muscle volume map. Nothing trained recently';
+      final top = ranked.take(3).map((e) => e.key).join(', ');
+      return 'Muscle volume map. Most trained: $top';
+    }
+    return 'Muscle map';
+  }
+
+  Widget _buildSingleView({required Map<String, dynamic> data}) {
     final vbStr = data['viewBox'] as String? ?? '0 95 727 1280';
     final vbParts = vbStr.split(' ').map((p) => double.tryParse(p) ?? 0).toList();
     final vbRect = Rect.fromLTWH(
@@ -142,28 +209,154 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
 
     final pathsMap = data['paths'] as Map<String, dynamic>? ?? {};
 
+    // Resolve every muscle's target fill once, upstream of paint().
+    final target = _MuscleFills.resolve(
+      partNames: pathsMap.keys,
+      highlightedMuscles: widget.highlightedMuscles ?? const {},
+      muscleColorMap: widget.muscleColorMap ?? const {},
+      muscleHeatmap: widget.muscleHeatmap ?? const {},
+    );
+
     return SizedBox(
       width: widget.width,
       height: widget.height ?? 220,
-      child: CustomPaint(
-        painter: _AnatomicalBodyPainter(
-          viewBox: vbRect,
-          pathsMap: pathsMap,
-          highlightedMuscles: widget.highlightedMuscles ?? const {},
-          muscleColorMap: widget.muscleColorMap ?? const {},
-          muscleHeatmap: widget.muscleHeatmap ?? const {},
+      child: RepaintBoundary(
+        // Implicit tween: when the selection changes, each muscle's fill
+        // glides from its current colour to the new one (interruptible —
+        // a mid-flight change continues from wherever it is).
+        child: TweenAnimationBuilder<_MuscleFills>(
+          tween: _MuscleFillsTween(begin: target, end: target),
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
+          builder: (context, fills, _) => CustomPaint(
+            painter: _AnatomicalBodyPainter(
+              viewBox: vbRect,
+              pathsMap: pathsMap,
+              fills: fills,
+              dark: KColor.isDark,
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
+// ─── Scene: resolved per-muscle fills ─────────────────────────────────────────
+
+@immutable
+class _MuscleFills {
+  const _MuscleFills(this.colors);
+
+  /// canonical muscle → active fill. Absent = resting (base) fill.
+  final Map<String, Color> colors;
+
+  static const empty = _MuscleFills({});
+
+  /// Same priority as always: explicit colour map → highlighted set →
+  /// heatmap intensity.
+  static _MuscleFills resolve({
+    required Iterable<String> partNames,
+    required Set<String> highlightedMuscles,
+    required Map<String, Color> muscleColorMap,
+    required Map<String, double> muscleHeatmap,
+  }) {
+    // Inputs are muscle-group labels ("Back", "Rear Delts", "Glutes") or raw
+    // region ids; both resolve through [muscleRegionsFor] so a label lights
+    // the right region instead of whatever its letters happen to contain.
+    final colorByRegion = <String, Color>{};
+    muscleColorMap.forEach((name, color) {
+      for (final r in _regionsOf(name)) {
+        colorByRegion.putIfAbsent(r, () => color);
+      }
+    });
+    final highlightedRegions = {
+      for (final name in highlightedMuscles) ..._regionsOf(name),
+    };
+    final heatByRegion = <String, double>{};
+    muscleHeatmap.forEach((name, v) {
+      for (final r in _regionsOf(name)) {
+        final prev = heatByRegion[r];
+        if (prev == null || v > prev) heatByRegion[r] = v;
+      }
+    });
+    final out = <String, Color>{};
+    for (final partName in partNames) {
+      if (_AnatomicalBodyPainter._inertParts.contains(partName)) continue;
+      final canonicalMuscle = _AnatomicalBodyPainter._mapToCanonical(partName);
+      if (out.containsKey(canonicalMuscle)) continue;
+
+      Color? activeColor;
+      if (colorByRegion.containsKey(canonicalMuscle)) {
+        activeColor = colorByRegion[canonicalMuscle];
+      } else if (highlightedRegions.contains(canonicalMuscle)) {
+        activeColor = _kDefaultHighlight;
+      } else if (heatByRegion.containsKey(canonicalMuscle)) {
+        final intensity = (heatByRegion[canonicalMuscle] ?? 0.0).clamp(0.0, 1.0);
+        if (intensity > 0.0) {
+          activeColor = _calculateHeatColor(intensity);
+        }
+      }
+      if (activeColor != null) out[canonicalMuscle] = activeColor;
+    }
+    return _MuscleFills(out);
+  }
+
+  /// Region ids named by [name]; an unmapped name falls back to the
+  /// painter's own canonical form so raw part ids still work.
+  static Set<String> _regionsOf(String name) {
+    final mapped = muscleRegionsFor(name);
+    if (mapped.isNotEmpty) return mapped;
+    return {_AnatomicalBodyPainter._mapToCanonical(name)};
+  }
+
+  static Color _calculateHeatColor(double intensity) {
+    if (intensity < 0.3) {
+      return Color.lerp(_kHeatFloor, KColor.cyan, intensity / 0.3)!;
+    } else if (intensity < 0.7) {
+      return Color.lerp(KColor.cyan, KColor.violet, (intensity - 0.3) / 0.4)!;
+    } else {
+      return Color.lerp(KColor.violet, KColor.ember, (intensity - 0.7) / 0.3)!;
+    }
+  }
+
+  static _MuscleFills lerp(_MuscleFills a, _MuscleFills b, double t) {
+    if (t <= 0) return a;
+    if (t >= 1) return b;
+    final keys = {...a.colors.keys, ...b.colors.keys};
+    final out = <String, Color>{};
+    for (final k in keys) {
+      final from = a.colors[k] ?? _kBaseFill;
+      final to = b.colors[k] ?? _kBaseFill;
+      out[k] = Color.lerp(from, to, t)!;
+    }
+    return _MuscleFills(out);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is _MuscleFills && mapEquals(other.colors, colors);
+
+  @override
+  int get hashCode => Object.hashAllUnordered(
+        colors.entries.map((e) => Object.hash(e.key, e.value)),
+      );
+}
+
+class _MuscleFillsTween extends Tween<_MuscleFills> {
+  _MuscleFillsTween({super.begin, super.end});
+
+  @override
+  _MuscleFills lerp(double t) =>
+      _MuscleFills.lerp(begin ?? _MuscleFills.empty, end ?? _MuscleFills.empty, t);
+}
+
+// ─── Painter ──────────────────────────────────────────────────────────────────
+
 class _AnatomicalBodyPainter extends CustomPainter {
   final Rect viewBox;
   final Map<String, dynamic> pathsMap;
-  final Set<String> highlightedMuscles;
-  final Map<String, Color> muscleColorMap;
-  final Map<String, double> muscleHeatmap;
+  final _MuscleFills fills;
 
   static const Set<String> _inertParts = {
     'head',
@@ -178,16 +371,37 @@ class _AnatomicalBodyPainter extends CustomPainter {
   _AnatomicalBodyPainter({
     required this.viewBox,
     required this.pathsMap,
-    required this.highlightedMuscles,
-    required this.muscleColorMap,
-    required this.muscleHeatmap,
+    required this.fills,
+    required this.dark,
+    this.stroke = 1.0,
   });
+
+  /// Seam width in logical pixels; thumbnails use a finer seam.
+  final double stroke;
+
+  /// Active palette; compared in shouldRepaint so a theme switch repaints
+  /// the resting and inert fills (which are not part of [fills]).
+  final bool dark;
+
+  // Paints are fields — nothing hoistable is allocated in paint().
+  final Paint _fill = Paint()
+    ..style = PaintingStyle.fill
+    ..isAntiAlias = true;
+  final Paint _outline = Paint()
+    ..style = PaintingStyle.stroke
+    ..isAntiAlias = true;
+  final Paint _rim = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeJoin = StrokeJoin.round
+    ..isAntiAlias = true;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (viewBox.width <= 0 || viewBox.height <= 0) return;
     final scaleX = size.width / viewBox.width;
     final scaleY = size.height / viewBox.height;
     final scale = scaleX < scaleY ? scaleX : scaleY;
+    if (scale <= 0) return;
 
     final dx = (size.width - viewBox.width * scale) / 2.0 - viewBox.left * scale;
     final dy = (size.height - viewBox.height * scale) / 2.0 - viewBox.top * scale;
@@ -196,54 +410,35 @@ class _AnatomicalBodyPainter extends CustomPainter {
     canvas.translate(dx, dy);
     canvas.scale(scale, scale);
 
-    final paintBase = Paint()
-      ..color = const Color(0xFF161624)
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
+    _outline
+      ..color = _kOutline
+      ..strokeWidth = stroke / scale;
+    _rim.strokeWidth = 1.6 * stroke / scale;
 
-    final paintInert = Paint()
-      ..color = const Color(0xFF1C1C2C)
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
-
-    final paintOutline = Paint()
-      ..color = const Color(0xFF262638)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0 / scale
-      ..isAntiAlias = true;
-
-    // Draw all muscle parts
     pathsMap.forEach((partName, pathListRaw) {
       final isInert = _inertParts.contains(partName);
-      final canonicalMuscle = _mapToCanonical(partName);
+      final active = isInert ? null : fills.colors[_mapToCanonical(partName)];
 
-      Color? activeColor;
-      if (!isInert) {
-        if (muscleColorMap.containsKey(canonicalMuscle)) {
-          activeColor = muscleColorMap[canonicalMuscle];
-        } else if (highlightedMuscles.any((m) => _mapToCanonical(m) == canonicalMuscle)) {
-          activeColor = KColor.green;
-        } else if (muscleHeatmap.containsKey(canonicalMuscle)) {
-          final intensity = (muscleHeatmap[canonicalMuscle] ?? 0.0).clamp(0.0, 1.0);
-          if (intensity > 0.0) {
-            activeColor = _calculateHeatColor(intensity);
-          }
-        }
-      }
-
-      final fillPaint = activeColor != null
-          ? (Paint()
-            ..color = activeColor
-            ..style = PaintingStyle.fill
-            ..isAntiAlias = true)
-          : (isInert ? paintInert : paintBase);
+      _fill.color = active ?? (isInert ? _kInertFill : _kBaseFill);
 
       final List<dynamic> pathList = pathListRaw is List ? pathListRaw : [pathListRaw];
       for (final pStr in pathList) {
         if (pStr is! String || pStr.isEmpty) continue;
-        final path = SvgPathParser.parse(pStr);
-        canvas.drawPath(path, fillPaint);
-        canvas.drawPath(path, paintOutline);
+        final path = SvgPathParser.parse(pStr); // cached by the parser
+        canvas.drawPath(path, _fill);
+        // Thumbnails (stroke 0) are fill only: strokes on these tiny paths
+        // smear across the screen on Impeller.
+        if (stroke <= 0) continue;
+        if (active != null) {
+          // A rim gives targeted muscles a shape cue, not only hue: lifted
+          // toward white on Carbon, deepened toward ink on Paper.
+          _rim.color = dark
+              ? Color.lerp(active, KColor.fg, 0.35)!.withValues(alpha: 0.9)
+              : Color.lerp(active, KColor.fg, 0.28)!.withValues(alpha: 0.85);
+          canvas.drawPath(path, _rim);
+        } else {
+          canvas.drawPath(path, _outline);
+        }
       }
     });
 
@@ -252,24 +447,18 @@ class _AnatomicalBodyPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AnatomicalBodyPainter oldDelegate) {
-    return !setEquals(oldDelegate.highlightedMuscles, highlightedMuscles) ||
-        !mapEquals(oldDelegate.muscleColorMap, muscleColorMap) ||
-        !mapEquals(oldDelegate.muscleHeatmap, muscleHeatmap) ||
+    return oldDelegate.fills != fills ||
+        oldDelegate.dark != dark ||
+        oldDelegate.stroke != stroke ||
+        !identical(oldDelegate.pathsMap, pathsMap) ||
         oldDelegate.viewBox != viewBox;
-  }
-
-  Color _calculateHeatColor(double intensity) {
-    if (intensity < 0.3) {
-      return Color.lerp(const Color(0xFF1E293B), KColor.blue, intensity / 0.3)!;
-    } else if (intensity < 0.7) {
-      return Color.lerp(KColor.blue, KColor.green, (intensity - 0.3) / 0.4)!;
-    } else {
-      return Color.lerp(KColor.green, KColor.amber, (intensity - 0.7) / 0.3)!;
-    }
   }
 
   static String _mapToCanonical(String raw) {
     final m = raw.toLowerCase().trim();
+    // Path ids in body_paths.json are already canonical.
+    if (kFrontRegions.contains(m) || kBackRegions.contains(m)) return m;
+    if (m.contains('lower back') || m.contains('spine')) return 'lower-back';
     if (m.contains('chest') || m.contains('pec')) return 'chest';
     if (m.contains('abs') || m.contains('core') || m.contains('waist')) return 'abs';
     if (m.contains('oblique')) return 'obliques';
@@ -277,7 +466,6 @@ class _AnatomicalBodyPainter extends CustomPainter {
     if (m.contains('bicep') || m.contains('brachialis')) return 'biceps';
     if (m.contains('tricep')) return 'triceps';
     if (m.contains('lat') || m.contains('upper back') || m.contains('rhomboid') || m.contains('back')) return 'upper-back';
-    if (m.contains('lower back') || m.contains('spine')) return 'lower-back';
     if (m.contains('trap')) return 'trapezius';
     if (m.contains('forearm') || m.contains('wrist')) return 'forearm';
     if (m.contains('quad')) return 'quadriceps';
@@ -289,5 +477,102 @@ class _AnatomicalBodyPainter extends CustomPainter {
     if (m.contains('hip flexor')) return 'hip-flexors';
     if (m.contains('serratus')) return 'serratus';
     return m;
+  }
+}
+
+
+// ─── Thumbnail ────────────────────────────────────────────────────────────────
+
+/// A small one-sided body with [group]'s muscle lit, for chips and headers.
+///
+/// The side (front or back) comes from [muscleTargetFor], so lats, traps,
+/// glutes, hamstrings, calves, triceps and rear delts show on the back, and
+/// chest, biceps, quads, abs, adductors and shoulders on the front. A group
+/// with no muscle on the map ("Cardio", "Other") renders nothing: wrong
+/// imagery is worse than none. Geometry and parsed paths are shared caches;
+/// each thumb is one cheap painter behind its own [RepaintBoundary].
+class MuscleThumb extends StatefulWidget {
+  const MuscleThumb(this.group, {super.key, this.height = 36, Color? color})
+      : _color = color;
+
+  final String group;
+  final double height;
+  final Color? _color;
+
+  /// Whether [group] has a muscle to show; lets callers skip the gap too.
+  static bool canShow(String group) => muscleTargetFor(group) != null;
+
+  @override
+  State<MuscleThumb> createState() => _MuscleThumbState();
+}
+
+class _MuscleThumbState extends State<MuscleThumb> {
+  // Drawing the full body at a thumbnail's tiny scale (about 1/50) makes
+  // Impeller smear the paths across the screen, so each thumbnail is drawn
+  // once at a sane scale into an image and shown shrunk. Images are cached
+  // per muscle, colour and theme.
+  static final Map<String, Future<ui.Image?>> _cache = {};
+  static const double _renderHeight = 320;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_MuscleBodyMapState._cachedGeometry == null) {
+      MuscleBodyMap.preload().then((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  static Future<ui.Image?> _render(MuscleTarget target, Color color, bool dark) async {
+    final geometry = _MuscleBodyMapState._cachedGeometry;
+    final data = geometry?[target.view == BodyView.back ? 'back' : 'front'];
+    if (data is! Map<String, dynamic>) return null;
+    final vb = (data['viewBox'] as String? ?? '0 95 727 1280')
+        .split(' ')
+        .map((p) => double.tryParse(p) ?? 0)
+        .toList();
+    final viewBox = vb.length == 4 ? Rect.fromLTWH(vb[0], vb[1], vb[2], vb[3]) : const Rect.fromLTWH(0, 95, 727, 1280);
+    final size = Size(_renderHeight * viewBox.width / viewBox.height, _renderHeight);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    _AnatomicalBodyPainter(
+      viewBox: viewBox,
+      pathsMap: data['paths'] as Map<String, dynamic>? ?? const {},
+      fills: _MuscleFills({for (final r in target.regions) r: color}),
+      dark: dark,
+      stroke: 0,
+    ).paint(canvas, size);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.width.ceil(), size.height.ceil());
+    picture.dispose();
+    return image;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final target = muscleTargetFor(widget.group);
+    if (target == null) return const SizedBox.shrink();
+    final width = widget.height * 0.57;
+    final box = SizedBox(width: width, height: widget.height);
+    if (_MuscleBodyMapState._cachedGeometry == null) return box;
+    final color = widget._color ?? _kDefaultHighlight;
+    final dark = KColor.isDark;
+    final key = '${target.view.name}|${target.regions.join(',')}|${color.toARGB32()}|$dark';
+    final future = _cache.putIfAbsent(key, () => _render(target, color, dark));
+    return ExcludeSemantics(
+      child: SizedBox(
+        width: width,
+        height: widget.height,
+        child: FutureBuilder<ui.Image?>(
+          future: future,
+          builder: (context, snap) {
+            final img = snap.data;
+            if (img == null) return const SizedBox.shrink();
+            return RawImage(image: img, fit: BoxFit.contain, filterQuality: FilterQuality.medium);
+          },
+        ),
+      ),
+    );
   }
 }

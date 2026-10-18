@@ -146,12 +146,12 @@ void main() {
         expect(find.byKey(const ValueKey('demo_view')), findsNothing);
 
         debugPrint('[MEDIA_TEST] recommendation rendered');
-        expect(find.text('PROGRESSION RECOMMENDATION'), findsOneWidget);
+        expect(find.text('Progression recommendation'), findsOneWidget);
         expect(find.text('+2.5 kg next session'), findsOneWidget);
-        expect(find.text('DOUBLE PROGRESSION'), findsOneWidget);
+        expect(find.text('Double progression'), findsOneWidget);
         expect(find.textContaining('Today\'s target: 82.5 kg × 8 reps'), findsOneWidget);
         expect(find.textContaining('Solid ceiling hit'), findsOneWidget);
-        expect(find.text('1RM: 102.5 kg'), findsOneWidget);
+        expect(find.text('1RM 102.5 kg'), findsOneWidget);
         expect(find.text('Demo'), findsOneWidget);
 
         debugPrint('[MEDIA_TEST] test cleanup started');
@@ -244,9 +244,9 @@ void main() {
         await tester.pump();
 
         // Expanded evidence view is visible
-        expect(find.text('EVIDENCE & NEXT MILESTONE'), findsOneWidget);
+        expect(find.text('Evidence and next milestone'), findsOneWidget);
         expect(find.textContaining('Completed 3/3 target working sets'), findsOneWidget);
-        expect(find.textContaining('NEXT: Establish 82.5 kg'), findsOneWidget);
+        expect(find.textContaining('Next: Establish 82.5 kg'), findsOneWidget);
         expect(find.text('Close'), findsOneWidget);
 
         // Tap Close button
@@ -254,7 +254,7 @@ void main() {
         await tester.pump();
 
         // Collapsed back to compact card view
-        expect(find.text('PROGRESSION RECOMMENDATION'), findsOneWidget);
+        expect(find.text('Progression recommendation'), findsOneWidget);
         expect(find.text('Why?'), findsOneWidget);
 
         debugPrint('[MEDIA_TEST] test cleanup started');
@@ -374,8 +374,8 @@ void main() {
 
         // Progression card is shown with neutral baseline fallback
         expect(find.byKey(const ValueKey('progression_view')), findsOneWidget);
-        expect(find.text('ESTABLISH BASELINE'), findsOneWidget);
-        expect(find.text('STANDARD PROGRESSION'), findsOneWidget);
+        expect(find.text('Establish baseline'), findsOneWidget);
+        expect(find.text('Standard progression'), findsOneWidget);
 
         // Verify slot height remains exactly 195pt
         final slotSize = tester.getSize(find.byType(KynoStageSlot));

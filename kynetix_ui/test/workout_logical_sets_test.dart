@@ -280,7 +280,7 @@ void main() {
       await tester.pump();
 
       // Verify UI displays "LOGGED SETS (3)"
-      expect(find.text('LOGGED SETS (3)'), findsOneWidget);
+      expect(find.text('Logged sets (3)'), findsOneWidget);
 
       // Verify UI displays Total volume 565 kg and Drop volume 40 kg
       expect(find.textContaining('Vol: 565 kg (Drop: 40 kg)'), findsOneWidget);
@@ -291,7 +291,7 @@ void main() {
       expect(find.text('15 kg  ×  10 reps'), findsOneWidget);
 
       // Verify child drop set nested with DROP indicator
-      expect(find.text('DROP'), findsOneWidget);
+      expect(find.text('Drop set'), findsOneWidget);
       expect(find.text('10 kg  ×  4 reps  (40 kg)'), findsOneWidget);
     });
   });

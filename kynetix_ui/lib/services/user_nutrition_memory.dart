@@ -6,6 +6,13 @@ import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/cloud_sync_service.dart';
 import '../services/unit_normalizer.dart';
 import '../services/nutrition_hydration_guard.dart';
+import 'internal/scoped_prefs.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 // ─── UserMealOverride ─────────────────────────────────────────────────────────
 //
@@ -189,6 +196,36 @@ class UserNutritionMemory {
 
   String get _currentPrefKey => _ownerUserId != null ? '${_kOverrides}_$_ownerUserId' : _kOverrides;
 
+  // ── Deletion tombstones ────────────────────────────────────────────────────
+  //
+  // Canonical names the user deleted on this device whose cloud row may still
+  // exist. mergeFromCloud skips them so a delete made offline (or before the
+  // cloud delete landed) is never undone by hydration. Cleared per name once
+  // the cloud delete succeeds, or when the user saves that food again.
+  // Stored per user; account deletion's per-user key sweep removes it.
+  static const kOverrideTombstonesPrefix = 'user_meal_override_tombstones_v1';
+  static String tombstonePrefKeyFor(String userId) => '${kOverrideTombstonesPrefix}_$userId';
+
+  final Set<String> _tombstones = {};
+  Future<void>? _cloudDeleteRun;
+  bool _cloudDeleteAgain = false;
+
+  /// Replaces the cloud delete in tests (the real one needs Supabase).
+  @visibleForTesting
+  Future<bool> Function(Set<String> names, String userId)? cloudDeleterOverride;
+
+  /// Names currently suppressed from cloud merge.
+  Set<String> get deletedOverrideTombstones => Set.unmodifiable(_tombstones);
+
+  /// Completes when any in-flight cloud delete (and its tombstone write) has
+  /// finished.
+  @visibleForTesting
+  Future<void> waitForCloudDeletes() async {
+    while (_cloudDeleteRun != null) {
+      await _cloudDeleteRun;
+    }
+  }
+
   // ── Startup ────────────────────────────────────────────────────────────────
 
   /// Load for specific authenticated user
@@ -201,6 +238,7 @@ class UserNutritionMemory {
   /// Flush in-memory state without deleting persisted disk stores
   void clearMemory() {
     _overrides.clear();
+    _tombstones.clear();
     _ready = false;
     _ownerUserId = null;
   }
@@ -209,25 +247,32 @@ class UserNutritionMemory {
   /// cloud hydration, so memory is immediately available even offline.
   Future<void> init({SharedPreferences? prefsOverride}) async {
     final prefs = prefsOverride ?? await SharedPreferences.getInstance();
-    final list  = prefs.getStringList(_currentPrefKey) ?? prefs.getStringList(_kOverrides) ?? [];
+    final list  = ScopedPrefs.getStringList(prefs, _kOverrides, _ownerUserId) ?? [];
     _overrides.clear();
     for (final s in list) {
       try {
         _overrides.add(
             UserMealOverride.fromJson(jsonDecode(s) as Map<String, dynamic>));
       } catch (e) {
-        debugPrint('[UserNutritionMemory] parse error: $e');
+        _debugLog('[UserNutritionMemory] parse error: $e');
       }
     }
     _ownerUserId ??= prefs.getString('cached_owner_user_id_v1');
+    _tombstones.clear();
+    final owner = _ownerUserId;
+    if (owner != null) {
+      _tombstones.addAll(prefs.getStringList(tombstonePrefKeyFor(owner)) ?? const []);
+    }
     _ready = true;
-    debugPrint('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId, key: $_currentPrefKey)');
+    // Retry cloud deletes an earlier session could not land.
+    if (_tombstones.isNotEmpty) _pushCloudDeletes();
+    _debugLog('[UserNutritionMemory] loaded ${_overrides.length} overrides from local storage (owner: $_ownerUserId, key: $_currentPrefKey)');
   }
 
   /// Internal ownership synchronization method called only by PersistenceService.
   void setOwnerId(String userId) {
     _ownerUserId = userId;
-    debugPrint('[UserNutritionMemory] 🔒 cached owner ID synchronized to: $userId');
+    _debugLog('[UserNutritionMemory] 🔒 cached owner ID synchronized to: $userId');
   }
 
   // ── Write ──────────────────────────────────────────────────────────────────
@@ -295,13 +340,16 @@ class UserNutritionMemory {
     _overrides.add(override);
     _ready = true;
     _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
+    // Saving the food again revives it: cloud copies are welcome again.
+    final revived = _tombstones.remove(normName);
 
     await _persist();
+    if (revived) await _persistTombstones();
     try {
       CloudSyncService.instance.syncMemoryBackground(override).catchError((_) {}).ignore();
     } catch (_) {}
 
-    debugPrint('[UserNutritionMemory] saved: "$normName" '
+    _debugLog('[UserNutritionMemory] saved: "$normName" '
         '${finalCal.toStringAsFixed(3)} kcal/$normUnit '
         '| ref qty=$normQty $normUnit');
   }
@@ -309,17 +357,56 @@ class UserNutritionMemory {
   Future<void> deleteOverride(String rawMealName) async {
     final normName = FoodNameNormalizer.normalize(rawMealName);
     _overrides.removeWhere((o) => o.canonicalMeal == normName);
+    _tombstones.add(normName);
     await _persist();
+    await _persistTombstones();
+    _pushCloudDeletes();
   }
+
+  /// Removes several overrides with a single write. Same end state as calling
+  /// [deleteOverride] for each name, without one disk write per food.
+  Future<void> deleteOverrides(Iterable<String> rawMealNames) async {
+    final norms = rawMealNames.map(FoodNameNormalizer.normalize).toSet();
+    if (norms.isEmpty) return;
+    _overrides.removeWhere((o) => norms.contains(o.canonicalMeal));
+    _tombstones.addAll(norms);
+    await _persist();
+    await _persistTombstones();
+    _pushCloudDeletes();
+  }
+
+  bool _isTombstoned(String canonicalMeal) =>
+      _tombstones.contains(canonicalMeal) ||
+      _tombstones.contains(FoodNameNormalizer.normalize(canonicalMeal));
 
   /// Merge overrides hydrated from cloud into local memory.
   /// Called by CloudSyncService after a successful hydration.
   /// Uses a bidirectional "newer wins" resolution strategy based on savedAt.
-  Future<void> mergeFromCloud(List<UserMealOverride> cloudOverrides) async {
+  ///
+  /// With [expectedUserId] / [stillCurrent] (cloud hydration), the merge is
+  /// dropped unless that user's session is still the loaded one, and the
+  /// result is persisted under that user's key only.
+  Future<void> mergeFromCloud(
+    List<UserMealOverride> cloudOverrides, {
+    String? expectedUserId,
+    bool Function()? stillCurrent,
+  }) async {
+    if (stillCurrent != null && !stillCurrent()) return;
+    if (expectedUserId != null &&
+        _ownerUserId != null &&
+        _ownerUserId != expectedUserId) {
+      return;
+    }
     final toSyncBack = <UserMealOverride>[];
+    var skippedDeleted = false;
 
     // 1. Process cloud entries against local entries
     for (final remote in cloudOverrides) {
+      // Deleted on this device: the cloud row is stale, never resurrect it.
+      if (_isTombstoned(remote.canonicalMeal)) {
+        skippedDeleted = true;
+        continue;
+      }
       final existingIndex = _overrides.indexWhere((o) => o.canonicalMeal == remote.canonicalMeal);
       if (existingIndex != -1) {
         final local = _overrides[existingIndex];
@@ -344,15 +431,19 @@ class UserNutritionMemory {
       }
     }
 
-    _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
+    _ownerUserId = expectedUserId ?? NutritionHydrationGuard.instance.currentUserId;
     await _persist();
-    debugPrint('[UserNutritionMemory] merged ${cloudOverrides.length} cloud overrides');
+    if (stillCurrent != null && !stillCurrent()) return;
+    _debugLog('[UserNutritionMemory] merged ${cloudOverrides.length} cloud overrides');
 
     // 3. Sync newer local entries back to cloud asynchronously
     for (final local in toSyncBack) {
-      debugPrint('[UserNutritionMemory] Syncing newer local override for "${local.canonicalMeal}" back to cloud');
+      _debugLog('[UserNutritionMemory] Syncing newer local override for "${local.canonicalMeal}" back to cloud');
       CloudSyncService.instance.syncMemoryBackground(local);
     }
+
+    // 4. The cloud still holds rows the user deleted: retry their delete.
+    if (skippedDeleted) _pushCloudDeletes();
   }
 
   // ── Lookup ─────────────────────────────────────────────────────────────────
@@ -404,14 +495,14 @@ class UserNutritionMemory {
   NutritionResult? lookup(String rawInput) {
     // FAIL CLOSED: user-specific correction store
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      debugPrint('[UserNutritionMemory] 🔒 guard not ready — skipping override lookup for "$rawInput"');
+      _debugLog('[UserNutritionMemory] 🔒 guard not ready, skipping override lookup for "$rawInput"');
       return null;
     }
 
     // DEFENSE-IN-DEPTH: cache-level ownership verification
     final currentUserId = NutritionHydrationGuard.instance.currentUserId;
     if (_ownerUserId == null || _ownerUserId != currentUserId) {
-      debugPrint('[UserNutritionMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+      _debugLog('[UserNutritionMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
           'cache owned by $_ownerUserId, current user is $currentUserId');
       return null;
     }
@@ -450,7 +541,7 @@ class UserNutritionMemory {
     // "milkshake" (2 tokens: 'milkshake') vs "milk" (1 token: 'milk'):
     //   matchCount = 0 because 'milkshake' ≠ 'milk' → F1 = 0 → correctly rejected.
     if (bestMatch != null && bestScore >= 0.98) {
-      debugPrint('[UserNutritionMemory] ✅ MATCH '
+      _debugLog('[UserNutritionMemory] ✅ MATCH '
           '"${bestMatch.canonicalMeal}" f1=$bestScore '
           '| ${bestMatch.caloriesPerUnit.toStringAsFixed(3)} kcal/${bestMatch.referenceUnit}');
       final score = NutritionResult.calculateLocalQualityScore(
@@ -508,7 +599,7 @@ class UserNutritionMemory {
     }
 
     if (bestMatch != null) {
-      debugPrint('[UserNutritionMemory] ❌ rejected '
+      _debugLog('[UserNutritionMemory] ❌ rejected '
           '"${bestMatch.canonicalMeal}" f1=$bestScore');
     }
     return null;
@@ -532,10 +623,58 @@ class UserNutritionMemory {
     await prefs.remove(_currentPrefKey);
     await prefs.remove(_kOverrides);
     _ownerUserId = null;
-    debugPrint('[UserNutritionMemory] 🗑️  clearAll() complete — overrides wiped');
+    _debugLog('[UserNutritionMemory] 🗑️  clearAll() complete, overrides wiped');
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
+
+  /// Background cloud delete of every tombstoned name. Serialized; a request
+  /// during a run triggers one more run. Tombstones are dropped only for names
+  /// the successful delete covered and that are still tombstoned.
+  void _pushCloudDeletes() {
+    if (_cloudDeleteRun != null) {
+      _cloudDeleteAgain = true;
+      return;
+    }
+    _cloudDeleteRun = () async {
+      try {
+        do {
+          _cloudDeleteAgain = false;
+          final owner = _ownerUserId;
+          if (owner == null || _tombstones.isEmpty) return;
+          final names = Set<String>.of(_tombstones);
+          bool ok;
+          try {
+            final deleter = cloudDeleterOverride;
+            ok = deleter != null
+                ? await deleter(names, owner)
+                : await CloudSyncService.instance.deleteMemoryRows(names, expectedUserId: owner);
+          } catch (e) {
+            _debugLog('[UserNutritionMemory] cloud delete failed: $e');
+            ok = false;
+          }
+          if (!ok || _ownerUserId != owner) return;
+          final before = _tombstones.length;
+          _tombstones.removeAll(names);
+          if (_tombstones.length != before) await _persistTombstones();
+        } while (_cloudDeleteAgain);
+      } finally {
+        _cloudDeleteRun = null;
+      }
+    }();
+  }
+
+  Future<void> _persistTombstones() async {
+    final owner = _ownerUserId;
+    if (owner == null) return; // Not signed in: nothing syncs to guard against.
+    final prefs = await SharedPreferences.getInstance();
+    final key = tombstonePrefKeyFor(owner);
+    if (_tombstones.isEmpty) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setStringList(key, _tombstones.toList());
+    }
+  }
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();

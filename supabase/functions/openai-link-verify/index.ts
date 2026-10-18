@@ -17,6 +17,13 @@
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { refreshAccessTokenIfNeeded } from "../shared/oauth_refresh.ts";
+import { selectSiwcModel, SIWC_RESPONSES_URL } from "../shared/siwc.ts";
+import { AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS, timedFetch } from "../shared/timed_fetch.ts";
+
+// The test generation must finish inside the app's 90s call budget.
+const CODEX_HEADERS_TIMEOUT_MS = 45_000;
+const CODEX_TOTAL_TIMEOUT_MS = 75_000;
 
 declare const Deno: any;
 
@@ -65,9 +72,10 @@ Deno.serve(async (req: Request) => {
     );
 
     // ── 2. Retrieve stored access_token ──────────────────────────────────────
+    // select('*') so this works before and after the siwc migration.
     const { data: link, error: linkErr } = await supabaseAdmin
       .from('user_openai_links')
-      .select('access_token, is_connected')
+      .select('*')
       .eq('user_id', user.id)
       .single();
 
@@ -76,6 +84,33 @@ Deno.serve(async (req: Request) => {
     }
     if (!link.is_connected) {
       return json({ error: 'Account is not connected' }, 400);
+    }
+
+    // Sign in with ChatGPT (plan usage) links verify against the public API.
+    if (link.auth_method === 'siwc') {
+      const fresh = await refreshAccessTokenIfNeeded(supabaseAdmin, user.id, link);
+      if (!fresh) return json({ success: false, error: 'token_expired' }, 400);
+      const sel = await selectSiwcModel(fresh.accessToken);
+      await persistDiscovery(
+        supabaseAdmin, user.id, sel.selectedModel, sel.ok, sel.testSnippet,
+        sel.allSlugs, sel.tried.map(t => ({ model: t.model, status: null, result: t.result })),
+        SIWC_RESPONSES_URL,
+      );
+      if (!sel.ok) {
+        return json({
+          success: false,
+          error:   sel.errorKind === 'not_eligible' ? 'not_eligible' : 'generation_failed',
+        }, 400);
+      }
+      return json({
+        success:           true,
+        selected_model:    sel.selectedModel,
+        selection_reason:  'First model listed for your ChatGPT plan',
+        chat_models_found: sel.allSlugs,
+        all_discovered:    sel.allSlugs,
+        test_snippet:      sel.testSnippet,
+        endpoint_used:     SIWC_RESPONSES_URL,
+      });
     }
 
     const accessToken = link.access_token;
@@ -134,7 +169,8 @@ Deno.serve(async (req: Request) => {
         model:   candidate,
         status:  probe.httpStatus,
         result:  probe.success ? 'success' : 'failed',
-        rawBody: probe.rawError?.slice(0, 500),
+        // Upstream bodies are never returned to the client (may echo tokens/ids).
+        rawBody: undefined,
         text:    probe.text?.slice(0, 100),
       });
 
@@ -144,7 +180,7 @@ Deno.serve(async (req: Request) => {
         console.log(`[openai-link-verify] ✅ model="${candidate}" works. text="${probe.text?.slice(0, 80)}"`);
         break;
       } else {
-        console.warn(`[openai-link-verify] ❌ model="${candidate}" → HTTP ${probe.httpStatus}: ${probe.rawError?.slice(0, 300)}`);
+        console.warn(`[openai-link-verify] ❌ model="${candidate}" → HTTP ${probe.httpStatus}: (body withheld)`);
 
         // If auth error, stop immediately — the token itself is the problem
         if (probe.httpStatus === 401 || probe.httpStatus === 403) {
@@ -165,7 +201,7 @@ Deno.serve(async (req: Request) => {
       return json({
         success:         false,
         error:           'generation_failed',
-        message:         'All model candidates failed. See tried[] for raw upstream errors.',
+        message:         'All model candidates failed. See tried[] for status codes.',
         endpoint_probed: CODEX_URL,
         discovery:       discoveryResult.models.slice(0, 30),
         tried:           triedModels,
@@ -196,13 +232,13 @@ async function discoverModels(accessToken: string): Promise<{
   rawBody: string;
 }> {
   try {
-    const res = await fetch(MODELS_URL, {
+    const res = await timedFetch(MODELS_URL, {
       method:  'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type':  'application/json',
       },
-    });
+    }, AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS);
 
     const rawBody = await res.text();
     console.log(`[openai-link-verify] ${MODELS_URL} → status=${res.status}`);
@@ -273,14 +309,14 @@ async function probeCodexEndpoint(
       }],
     };
 
-    const res = await fetch(CODEX_URL, {
+    const res = await timedFetch(CODEX_URL, {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
         'Authorization': `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
-    });
+    }, CODEX_HEADERS_TIMEOUT_MS, CODEX_TOTAL_TIMEOUT_MS);
 
     if (!res.ok) {
       const errBody = await res.text();
@@ -365,6 +401,7 @@ async function persistDiscovery(
   testSnippet:    string | null,
   discoveredSlugs: string[],
   triedModels:    any[],
+  endpoint:       string = CODEX_URL,
 ): Promise<void> {
   const { error } = await admin
     .from('user_openai_links')
@@ -373,7 +410,7 @@ async function persistDiscovery(
       discovered_models:        {
         all:          discoveredSlugs,
         chat_capable: triedModels.filter(t => t.result === 'success').map(t => t.model),
-        endpoint:     CODEX_URL,
+        endpoint:     endpoint,
         tried:        triedModels,
       },
       discovery_timestamp:      new Date().toISOString(),

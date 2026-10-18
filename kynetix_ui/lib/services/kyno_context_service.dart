@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
 import '../models/day_log.dart';
 import '../models/workout_session.dart';
+import 'health_service.dart';
+import 'nutrition_target_engine.dart';
 import 'profile_service.dart';
 import 'workout_service.dart';
 import 'exercise_media_service.dart';
@@ -7,6 +10,7 @@ import 'saved_meal_service.dart';
 import 'meal_memory.dart';
 import 'user_nutrition_memory.dart';
 import 'user_session_coordinator.dart';
+import '../ui/k_format.dart';
 
 // ─── Fact vs Inference Models ────────────────────────────────────────────────
 
@@ -296,14 +300,14 @@ class KynoContextService {
 
   /// Resets the context snapshot when user logs out or switches accounts.
   void reset() {
-    print('[KYNO_CONTEXT] Resetting context cache.');
+    debugPrint('[KYNO_CONTEXT] Resetting context cache.');
     _cachedSnapshot = null;
     _lastSnapshotComputedAt = null;
   }
 
   /// Invalidates any cached snapshot so subsequent queries reflect live state immediately.
   void invalidate() {
-    print('[KYNO_CONTEXT_REFRESH] Invalidation triggered. Clearing cached snapshot.');
+    debugPrint('[KYNO_CONTEXT_REFRESH] Invalidation triggered. Clearing cached snapshot.');
     _cachedSnapshot = null;
     _lastSnapshotComputedAt = null;
   }
@@ -341,7 +345,7 @@ class KynoContextService {
     _cachedSnapshot = snapshot;
     _lastSnapshotComputedAt = now;
 
-    print('[KYNO_CONTEXT] Refreshed snapshot for user: $currentUserId, date: ${date.toIso8601String().substring(0, 10)}. Training: ${training.hasWorkoutToday ? "${training.setsLoggedToday} sets (${training.workingSetsLoggedToday} working)" : "none"}, Nutrition: ${nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${nutrition.consumedProtein.toStringAsFixed(1)}g pro');
+    debugPrint('[KYNO_CONTEXT] Refreshed snapshot for user: $currentUserId, date: ${date.toIso8601String().substring(0, 10)}. Training: ${training.hasWorkoutToday ? "${training.setsLoggedToday} sets (${training.workingSetsLoggedToday} working)" : "none"}, Nutrition: ${nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${nutrition.consumedProtein.toStringAsFixed(1)}g pro');
 
     return snapshot;
   }
@@ -366,9 +370,10 @@ class KynoContextService {
 
     final activeOrCompleted = draft ?? completedToday;
     final hasWorkoutToday = activeOrCompleted != null;
-    final scheduledDay = ws.splitDayFor(date);
-    final isGymDay = scheduledDay != null && !scheduledDay.isRestDay;
-    final splitName = activeOrCompleted?.splitDayName ?? scheduledDay?.name;
+    // Same answer as the Nutrition day screen and the Train tab.
+    final plan = ws.planFor(date);
+    final isGymDay = plan.isTraining;
+    final splitName = activeOrCompleted?.splitDayName ?? plan.name;
 
     final exercisesTrained = <String>[];
     final detailedEntries = <String>[];
@@ -390,14 +395,16 @@ class KynoContextService {
         warmupSetsToday += warmups.length;
 
         final setsSummary = e.sets.map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}kg × ${s.reps}').join(', ');
-        detailedEntries.add('${e.exercise.name}: ${e.sets.length} sets ($setsSummary)');
+        detailedEntries.add('${e.exercise.name}: ${plural(e.sets.length, 'set')} ($setsSummary)');
       }
     }
 
-    final allSessions = ws.sessions;
+    // Newest first: the service stores sessions oldest-first.
+    final allSessions = ws.sessions.where((s) => !s.isEmpty).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
     double avgFreq = 0.0;
     if (allSessions.isNotEmpty) {
-      final firstDate = allSessions.first.date;
+      final firstDate = allSessions.last.date;
       final daysBetween = DateTime.now().difference(firstDate).inDays.clamp(7, 3650);
       avgFreq = (allSessions.length / (daysBetween / 7.0));
     }
@@ -408,7 +415,7 @@ class KynoContextService {
       final matches = allSessions.where((s) => s.splitDayName == splitName && s.id != activeOrCompleted?.id).toList();
       if (matches.isNotEmpty) {
         final prev = matches.first;
-        prevSplitSummary = '${prev.splitDayName} on ${prev.date.month}/${prev.date.day}: ${prev.totalWorkingVolume.toStringAsFixed(0)} kg volume across ${prev.entries.length} exercises';
+        prevSplitSummary = '${prev.splitDayName} on ${prev.date.month}/${prev.date.day}: ${prev.totalWorkingVolume.toStringAsFixed(0)} kg volume across ${plural(prev.entries.length, 'exercise')}';
       }
     }
 
@@ -443,9 +450,25 @@ class KynoContextService {
     final fatConsumed = log.totalFatMid;
     final fibConsumed = log.totalFiberMid;
 
-    // Daily targets from log frozen target or profile default
-    final targetCal = log.targetCalories ?? (profile.weightKg != null ? profile.weightKg! * 32.0 : 2200.0);
-    final targetPro = log.targetProtein ?? (profile.weightKg != null ? profile.weightKg! * 2.0 : 150.0);
+    // Daily targets: the same source as the dashboard and day screen (the
+    // day's frozen target, else NutritionTargetEngine), so Kyno never quotes a
+    // different number than the rest of the app.
+    final engineTarget = ProfileService.instance.currentUserProfile != null
+        ? NutritionTargetEngine.instance.effectiveTargetForDate(
+            date,
+            health: HealthService().lastSyncResult,
+            log: log,
+          )
+        : null;
+    // Engine first: it already returns the day's frozen target when there is
+    // one, AND applies a manual override set on the day screen (which never
+    // updates log.targetCalories).
+    final targetCal = engineTarget?.calories ??
+        log.targetCalories ??
+        (profile.weightKg != null ? profile.weightKg! * 32.0 : 2200.0);
+    final targetPro = engineTarget?.protein ??
+        log.targetProtein ??
+        (profile.weightKg != null ? profile.weightKg! * 2.0 : 150.0);
     final proPerKg = profile.weightKg != null && profile.weightKg! > 0 ? proConsumed / profile.weightKg! : null;
 
     final mealsLogged = <String>[];
@@ -521,7 +544,7 @@ class KynoContextService {
         advice = 'Distribute remaining ${deficit.toStringAsFixed(0)}g protein across upcoming meals to hit your daily target.';
       } else {
         status = 'Training volume logged; protein target pending.';
-        advice = 'Trained ${training.todaySplitDayName ?? "session"} (${training.workingSetsLoggedToday} working sets, ${training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume). Distribute your remaining ${deficit.toStringAsFixed(0)}g protein across your remaining meals today to meet your daily target.';
+        advice = 'Trained ${training.todaySplitDayName ?? "session"} (${plural(training.workingSetsLoggedToday, 'working set')}, ${training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume). Distribute your remaining ${deficit.toStringAsFixed(0)}g protein across your remaining meals today to meet your daily target.';
       }
     }
 
@@ -551,34 +574,34 @@ class KynoContextService {
     if (training.hasWorkoutToday) {
       list.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Today\'s Training',
-        detail: 'Logged ${training.setsLoggedToday} sets (${training.workingSetsLoggedToday} working) across ${training.exercisesTrainedToday.length} exercises (${training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume).',
+        title: 'Today\'s training',
+        detail: 'Logged ${plural(training.setsLoggedToday, 'set')} (${training.workingSetsLoggedToday} working) across ${plural(training.exercisesTrainedToday.length, 'exercise')}, ${whole(training.volumeTrainedTodayKg)} kg volume.',
       ));
     }
     list.add(KynoInsightItem(
       type: KynoInformationType.fact,
-      title: 'Today\'s Nutrition',
-      detail: '${nutrition.consumedCalories.toStringAsFixed(0)} kcal • ${nutrition.consumedProtein.toStringAsFixed(1)}g protein logged.',
+      title: 'Today\'s food',
+      detail: '${whole(nutrition.consumedCalories)} kcal and ${amount(nutrition.consumedProtein)} g protein logged.',
     ));
 
     // Calculations
     list.add(KynoInsightItem(
       type: KynoInformationType.calculation,
-      title: 'Remaining Targets',
-      detail: '${nutrition.remainingCalories.toStringAsFixed(0)} kcal & ${nutrition.remainingProtein.toStringAsFixed(0)}g protein remaining today.',
+      title: 'Left for today',
+      detail: '${whole(nutrition.remainingCalories)} kcal and ${whole(nutrition.remainingProtein)} g protein to go.',
     ));
 
     // Inferences
     list.add(KynoInsightItem(
       type: KynoInformationType.inference,
-      title: 'Recovery State',
+      title: 'Recovery',
       detail: crossDomain.recoveryStatus,
     ));
 
     // Recommendations
     list.add(KynoInsightItem(
       type: KynoInformationType.recommendation,
-      title: 'Kyno Coaching',
+      title: 'What to do next',
       detail: crossDomain.nutritionAdvice,
     ));
 

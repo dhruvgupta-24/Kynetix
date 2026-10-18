@@ -37,7 +37,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Check Header
-      expect(find.textContaining('EXERCISE'), findsOneWidget);
+      expect(find.textContaining('Add an exercise'), findsOneWidget);
 
       // Check Search bar
       expect(find.byType(TextField), findsOneWidget);
@@ -105,20 +105,20 @@ void main() {
 
       // Verify Header
       expect(find.text('Incline Dumbbell Press'), findsOneWidget);
-      expect(find.text('CHEST'), findsWidgets);
-      expect(find.text('DUMBBELL'), findsWidgets);
+      expect(find.text('Chest'), findsWidgets);
+      expect(find.text('Dumbbell'), findsWidgets);
 
       // Verify Anatomical Section
-      expect(find.text('ANATOMICAL TARGETS', skipOffstage: false), findsOneWidget);
-      expect(find.text('Primary Agonist:', skipOffstage: false), findsOneWidget);
+      expect(find.text('Muscles worked', skipOffstage: false), findsOneWidget);
+      expect(find.text('Main muscle:', skipOffstage: false), findsOneWidget);
       expect(find.text('Shoulders, Triceps', skipOffstage: false), findsOneWidget);
 
       // Verify Instructions
-      expect(find.text('EXECUTION & CUES', skipOffstage: false), findsOneWidget);
+      expect(find.text('How to do it', skipOffstage: false), findsOneWidget);
       expect(find.text('Set an incline bench to roughly 30 degrees.', skipOffstage: false), findsOneWidget);
 
       // Verify CTA
-      expect(find.text('ADD TO WORKOUT', skipOffstage: false), findsOneWidget);
+      expect(find.text('Add to workout', skipOffstage: false), findsOneWidget);
     });
   });
 }

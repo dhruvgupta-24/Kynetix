@@ -51,7 +51,14 @@ dependencies:
   app_links: ^6.3.2
   image_picker: ^1.1.2
   flutter_markdown: ^0.7.7+1
-  google_fonts: ^6.1.0
+  animations: ^2.2.0
+  # SHA-256 for the OAuth 2.0 PKCE code challenge (Sign in with ChatGPT).
+  crypto: ^3.0.6
+  # Barcode scanning for packaged food (Open Food Facts lookup).
+  mobile_scanner: ^7.4.0
+  flutter_local_notifications: ^22.3.2
+  timezone: ^0.11.2
+  share_plus: ^13.3.1
 
 dev_dependencies:
   flutter_test:
@@ -76,12 +83,16 @@ flutter_launcher_icons:
   adaptive_icon_foreground: "assets/branding/kynetix_icon_fg.png"
 
 flutter_native_splash:
-  color: "#13131F"
+  # Splash follows the phone theme: Paper (warm white) / Carbon (true black).
+  color: "#FAF7F1"
+  color_dark: "#000000"
   image: "assets/branding/kynetix_logo_padded.png"
   android_12:
     image: "assets/branding/kynetix_icon_padded.png"
-    icon_background_color: "#060606"
-    color: "#13131F"
+    icon_background_color: "#FAF7F1"
+    color: "#FAF7F1"
+    icon_background_color_dark: "#000000"
+    color_dark: "#000000"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -98,12 +109,49 @@ flutter:
   assets:
     - assets/branding/
     - assets/data/
+    # Inter font licence (OFL), shown in Settings → Licences.
+    - assets/fonts/inter/OFL.txt
+    # User-facing privacy policy, rendered in-app (Settings, sign-in).
+    - docs/PRIVACY_POLICY.md
+    # Scene photography (Unsplash License, graded) for sign-in and onboarding.
+    - assets/images/scenes/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package
+
+  # Geist (SIL OFL 1.1) — bundled so type never downloads at runtime.
+  fonts:
+    # Inter (OFL) for text; Inter Tight (OFL) for headlines and numbers.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter/Inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/inter/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/inter/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/inter/Inter-700.ttf
+          weight: 700
+    - family: InterTight
+      fonts:
+        - asset: assets/fonts/inter_tight/InterTight-400.ttf
+          weight: 400
+        - asset: assets/fonts/inter_tight/InterTight-500.ttf
+          weight: 500
+        - asset: assets/fonts/inter_tight/InterTight-600.ttf
+          weight: 600
+        - asset: assets/fonts/inter_tight/InterTight-700.ttf
+          weight: 700
+    # The Kynetix wordmark only: Bricolage Grotesque (OFL).
+    - family: Bricolage
+      fonts:
+        - asset: assets/fonts/bricolage/BricolageGrotesque-Display700.ttf
+          weight: 700
+        - asset: assets/fonts/bricolage/BricolageGrotesque-Display800.ttf
+          weight: 800
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a

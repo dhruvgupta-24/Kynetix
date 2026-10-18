@@ -64,7 +64,7 @@ class NutritionHydrationGuard {
   void reset() {
     _state = _HydrationState.notReady;
     _hydratedUserId = null;
-    debugPrint('[HydrationGuard] 🔒 RESET — all nutrition memory reads blocked');
+    debugPrint('[HydrationGuard] 🔒 RESET, all nutrition memory reads blocked');
   }
 
   /// Call when cloud hydration starts. Distinguishes "never hydrated"
@@ -72,11 +72,11 @@ class NutritionHydrationGuard {
   /// this is a background update, keeps existing Ready state active.
   void beginHydration({bool isBackgroundUpdate = false}) {
     if (_state == _HydrationState.ready && isBackgroundUpdate) {
-      debugPrint('[HydrationGuard] 🔄 HYDRATING IN BACKGROUND — keeping existing ready state active for $_hydratedUserId');
+      debugPrint('[HydrationGuard] 🔄 HYDRATING IN BACKGROUND, keeping existing ready state active for $_hydratedUserId');
       return;
     }
     _state = _HydrationState.hydrating;
-    debugPrint('[HydrationGuard] 🔄 HYDRATING — nutrition memory reads blocked');
+    debugPrint('[HydrationGuard] 🔄 HYDRATING, nutrition memory reads blocked');
   }
 
   /// Callback triggered when hydration marks complete. Used to notify the
@@ -89,7 +89,7 @@ class NutritionHydrationGuard {
     if (userId == null) {
       _state = _HydrationState.notReady;
       _hydratedUserId = null;
-      debugPrint('[HydrationGuard] ⚠️  markComplete called with null userId — staying NotReady');
+      debugPrint('[HydrationGuard] ⚠️  markComplete called with null userId, staying NotReady');
       return;
     }
     _state = _HydrationState.ready;
@@ -100,7 +100,7 @@ class NutritionHydrationGuard {
       callback(userId);
     }
     
-    debugPrint('[HydrationGuard] ✅ READY — nutrition memory reads enabled for $userId');
+    debugPrint('[HydrationGuard] ✅ READY, nutrition memory reads enabled for $userId');
   }
 
   // ── Read-side checks ─────────────────────────────────────────────────────

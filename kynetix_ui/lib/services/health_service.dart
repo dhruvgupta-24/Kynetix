@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 
 // ─── WeightReading ───────────────────────────────────────────────────
@@ -466,6 +467,23 @@ class HealthService {
 
   final _health = Health();
 
+  static Future<void>? _configureFuture;
+
+  /// Configures the health plugin once. Kicked off after the first frame (it
+  /// is not needed to draw anything) and awaited by every call that talks to
+  /// Health Connect / HealthKit, so nothing reaches the plugin unconfigured.
+  /// Never throws: a failed configure leaves the calls to fail closed.
+  static Future<void> ensureConfigured() {
+    return _configureFuture ??= Health().configure().catchError((Object e) {
+      debugPrint('[HealthService] configure failed: $e');
+    });
+  }
+
+  Future<Health> get _configured async {
+    await ensureConfigured();
+    return _health;
+  }
+
   HealthSyncResult? lastSyncResult;
 
   static const _stepTypes       = [HealthDataType.STEPS];
@@ -481,7 +499,7 @@ class HealthService {
 
   Future<bool> isAvailable() async {
     try {
-      final state = await _health.getHealthConnectSdkStatus();
+      final state = await (await _configured).getHealthConnectSdkStatus();
       return state == HealthConnectSdkStatus.sdkAvailable;
     } catch (_) {
       return false;
@@ -490,7 +508,7 @@ class HealthService {
 
   Future<bool> hasPermission() async {
     try {
-      final granted = await _health.hasPermissions(_stepTypes, permissions: _stepPermissions);
+      final granted = await (await _configured).hasPermissions(_stepTypes, permissions: _stepPermissions);
       return granted == true;
     } catch (_) {
       return false;
@@ -499,7 +517,7 @@ class HealthService {
 
   Future<bool> requestPermission() async {
     try {
-      return await _health.requestAuthorization(_stepTypes, permissions: _stepPermissions);
+      return await (await _configured).requestAuthorization(_stepTypes, permissions: _stepPermissions);
     } catch (_) {
       return false;
     }
@@ -508,7 +526,7 @@ class HealthService {
   /// Returns true if weight (BODY_MASS) permission has been granted.
   Future<bool> hasWeightPermission() async {
     try {
-      final granted = await _health.hasPermissions(_weightTypes, permissions: _weightPermissions);
+      final granted = await (await _configured).hasPermissions(_weightTypes, permissions: _weightPermissions);
       return granted == true;
     } catch (_) {
       return false;
@@ -519,7 +537,7 @@ class HealthService {
   /// Handled separately from steps so a weight denial does not block step sync.
   Future<bool> requestWeightPermission() async {
     try {
-      return await _health.requestAuthorization(_weightTypes, permissions: _weightPermissions);
+      return await (await _configured).requestAuthorization(_weightTypes, permissions: _weightPermissions);
     } catch (_) {
       return false;
     }
@@ -528,7 +546,7 @@ class HealthService {
   /// Returns true if sleep permission has been granted.
   Future<bool> hasSleepPermission() async {
     try {
-      final granted = await _health.hasPermissions(_sleepTypes, permissions: _sleepPermissions);
+      final granted = await (await _configured).hasPermissions(_sleepTypes, permissions: _sleepPermissions);
       return granted == true;
     } catch (_) {
       return false;
@@ -538,7 +556,7 @@ class HealthService {
   /// Requests permission to read sleep data from Health Connect.
   Future<bool> requestSleepPermission() async {
     try {
-      return await _health.requestAuthorization(_sleepTypes, permissions: _sleepPermissions);
+      return await (await _configured).requestAuthorization(_sleepTypes, permissions: _sleepPermissions);
     } catch (_) {
       return false;
     }
@@ -547,7 +565,7 @@ class HealthService {
   /// Returns true if HRV permission has been granted.
   Future<bool> hasHrvPermission() async {
     try {
-      final granted = await _health.hasPermissions(_hrvTypes, permissions: _hrvPermissions);
+      final granted = await (await _configured).hasPermissions(_hrvTypes, permissions: _hrvPermissions);
       return granted == true;
     } catch (_) {
       return false;
@@ -557,7 +575,7 @@ class HealthService {
   /// Requests permission to read HRV data from Health Connect.
   Future<bool> requestHrvPermission() async {
     try {
-      return await _health.requestAuthorization(_hrvTypes, permissions: _hrvPermissions);
+      return await (await _configured).requestAuthorization(_hrvTypes, permissions: _hrvPermissions);
     } catch (_) {
       return false;
     }
@@ -566,10 +584,13 @@ class HealthService {
   /// Reads 30 days of step history and returns a rich [HealthSyncResult].
   ///
   /// Data collection strategy:
-  ///   1. Fetches ALL step data points for the last 30 days in ONE batch call.
-  ///   2. Aggregates points into per-calendar-day totals.
-  ///   3. Filters out wear-gap days (< 500 steps) — too low to be real data.
-  ///   4. Computes 14-day and 30-day arithmetic averages plus a weighted effective steps.
+  ///   1. Asks Health Connect for one de-duplicated total per calendar day for
+  ///      the last 30 COMPLETED days (yesterday back to D-30; today is partial
+  ///      and would drag the average down).
+  ///   2. Drops wear-gap days (< [minWornDaySteps], e.g. phone left on a desk)
+  ///      and failed reads — they are not real activity.
+  ///   3. Averages the remaining days of the latest 7 / 14 / 30 completed days
+  ///      (see [computeStepStats]) plus a recency-weighted effective average.
   ///
   /// Timezone note: [DateTime.now()] returns the device's local time.
   /// [getTotalStepsInInterval] passes DateTime objects to Health Connect, which
@@ -600,46 +621,37 @@ class HealthService {
       // from multiple apps, causing massively inflated step counts.
       // We run them in parallel to avoid slow sequential loops.
       final daysToFetch = 30;
+      // Calendar arithmetic (not 24h Durations) so DST / travel days still
+      // map to true local midnights.
+      DateTime dayAt(int offset) =>
+          DateTime(todayStart.year, todayStart.month, todayStart.day - offset);
+      final health = await _configured;
       final stepFutures = List.generate(daysToFetch, (i) {
-        final dayStart = todayStart.subtract(Duration(days: i + 1));
-        final dayEnd   = dayStart.add(const Duration(days: 1));
-        return _health.getTotalStepsInInterval(dayStart, dayEnd).catchError((_) => null);
+        final dayStart = dayAt(i + 1);
+        final dayEnd   = dayAt(i);
+        return health.getTotalStepsInInterval(dayStart, dayEnd).catchError((_) => null);
       });
 
       final results = await Future.wait(stepFutures);
 
-      // ── Build ordered per-day lists (most recent = index 0) ──────────────
-      final List<double> last7 = [];
-      final List<double> last14 = [];
-      final List<double> last30 = [];
+      // ── Per-day records (most recent = index 0) ──────────────────────────
       final List<HealthDailyRecord> dailyRecords = [];
-
       for (int i = 0; i < daysToFetch; i++) {
-        final dayStart = todayStart.subtract(Duration(days: i + 1));
-        final rawVal = results[i];
-
-        if (rawVal != null) {
-          final val = rawVal.toDouble();
-          if (i < 7) last7.add(val);
-          if (i < 14) last14.add(val);
-          last30.add(val);
-
-          dailyRecords.add(HealthDailyRecord(
-            date: dayStart,
-            steps: val,
-            usedByKynetix: true,
-          ));
-        } else {
-          // Failed daily query (timeout/permission/SDK error) is excluded from averages
-          dailyRecords.add(HealthDailyRecord(
-            date: dayStart,
-            steps: 0.0,
-            usedByKynetix: false,
-          ));
-        }
+        final raw = results[i]?.toDouble();
+        dailyRecords.add(HealthDailyRecord(
+          date: dayAt(i + 1),
+          steps: raw ?? 0.0,
+          usedByKynetix: raw != null && raw >= minWornDaySteps,
+        ));
       }
 
-      // Require at least 1 successful day to complete sync
+      final stats = computeStepStats(
+        results.map((v) => v?.toDouble()).toList(),
+      );
+      final last14 = stats.days14;
+      final last30 = stats.days30;
+
+      // Require at least 1 usable day to complete sync
       if (last14.isEmpty && last30.isEmpty) {
         return HealthSyncResult(
           syncedAt: now,
@@ -647,18 +659,10 @@ class HealthService {
         );
       }
 
-      // ── Calculate strict arithmetic averages ──────────────────────────────
-      final avg7 = last7.isNotEmpty ? _arithmeticMean(last7) : null;
-      final avg14 = last14.isNotEmpty ? _arithmeticMean(last14) : null;
-      final avg30 = last30.isNotEmpty ? _arithmeticMean(last30) : null;
-
-      // ── Weighted effective average ────────────────────────────────────────
-      final double? effective;
-      if (avg14 != null && avg30 != null) {
-        effective = avg14 * 0.70 + avg30 * 0.30;
-      } else {
-        effective = avg14 ?? avg30;
-      }
+      final avg7 = stats.avg7;
+      final avg14 = stats.avg14;
+      final avg30 = stats.avg30;
+      final effective = stats.effective;
 
       final result = HealthSyncResult(
         dailySteps14d:        last14.isEmpty ? null : last14,
@@ -705,7 +709,7 @@ class HealthService {
       final now      = DateTime.now();
       final start    = now.subtract(const Duration(days: 90));
 
-      final points = await _health.getHealthDataFromTypes(
+      final points = await (await _configured).getHealthDataFromTypes(
         types:     _weightTypes,
         startTime: start,
         endTime:   now,
@@ -766,7 +770,7 @@ class HealthService {
     try {
       final hasSleep = await hasSleepPermission();
       if (hasSleep) {
-        final sleepPoints = await _health.getHealthDataFromTypes(
+        final sleepPoints = await (await _configured).getHealthDataFromTypes(
           types: _sleepTypes,
           startTime: start,
           endTime: now,
@@ -786,7 +790,7 @@ class HealthService {
     try {
       final hasHrv = await hasHrvPermission();
       if (hasHrv) {
-        final hrvPoints = await _health.getHealthDataFromTypes(
+        final hrvPoints = await (await _configured).getHealthDataFromTypes(
           types: _hrvTypes,
           startTime: start,
           endTime: now,
@@ -820,13 +824,54 @@ class HealthService {
     };
   }
 
-  // ── Arithmetic helper ───────────────────────────────────────────────────────
+}
 
-  double _arithmeticMean(List<double> values) {
-    if (values.isEmpty) return 0.0;
-    final sum = values.fold<double>(0, (a, b) => a + b);
-    final avg = sum / values.length;
-    if (avg.isNaN || avg.isInfinite) return 0.0;
-    return double.tryParse(avg.toStringAsFixed(0)) ?? 0.0;
+
+// ─── Step statistics (pure, unit-tested) ─────────────────────────────────────
+
+/// Days below this are treated as "phone/watch not worn" and left out of
+/// averages — a 40-step day is missing data, not a rest day.
+const double minWornDaySteps = 500;
+
+/// Averages over the latest completed days.
+class StepStats {
+  const StepStats({
+    required this.days7,
+    required this.days14,
+    required this.days30,
+    required this.avg7,
+    required this.avg14,
+    required this.avg30,
+    required this.effective,
+  });
+
+  /// Usable day totals within each window (most recent first).
+  final List<double> days7, days14, days30;
+  final double? avg7, avg14, avg30;
+
+  /// Recency-weighted signal for the calorie engine:
+  /// 70% latest-14-day mean + 30% latest-30-day mean.
+  final double? effective;
+}
+
+/// [dailyTotals] holds one entry per completed day, index 0 = yesterday.
+/// `null` = the read failed. Days under [minWornDaySteps] are excluded.
+StepStats computeStepStats(List<double?> dailyTotals) {
+  final d7 = <double>[], d14 = <double>[], d30 = <double>[];
+  for (var i = 0; i < dailyTotals.length && i < 30; i++) {
+    final v = dailyTotals[i];
+    if (v == null || v < minWornDaySteps) continue;
+    if (i < 7) d7.add(v);
+    if (i < 14) d14.add(v);
+    d30.add(v);
   }
+  // Whole steps, as displayed.
+  double? mean(List<double> xs) =>
+      xs.isEmpty ? null : (xs.reduce((a, b) => a + b) / xs.length).roundToDouble();
+  final a7 = mean(d7), a14 = mean(d14), a30 = mean(d30);
+  final eff = (a14 != null && a30 != null) ? a14 * 0.70 + a30 * 0.30 : (a14 ?? a30);
+  return StepStats(
+    days7: d7, days14: d14, days30: d30,
+    avg7: a7, avg14: a14, avg30: a30, effective: eff,
+  );
 }

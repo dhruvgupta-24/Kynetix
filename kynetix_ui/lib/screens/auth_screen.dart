@@ -8,6 +8,9 @@ import '../services/user_session_coordinator.dart';
 import '../services/dev_test_harness.dart';
 import '../config/app_theme.dart';
 import 'app_shell.dart';
+import 'privacy_policy_screen.dart';
+import 'onboarding/password_toggle.dart';
+import 'onboarding/scene_backdrop.dart';
 
 enum AuthMethod { email, phone }
 
@@ -26,6 +29,14 @@ class _AuthScreenState extends State<AuthScreen> {
   AuthMethod _authMethod = AuthMethod.email;
   bool _isLoading = false;
   String? _errorMessage;
+
+  /// True when [_errorMessage] is good news (sign-up confirmation sent), so
+  /// the notice gets the calm info treatment instead of the error one.
+  bool _noticeIsInfo = false;
+
+  /// The in-flight request is Google sign-in, so the spinner shows on the
+  /// Google button rather than on the email/phone action.
+  bool _googleLoading = false;
 
   // Email Controllers
   final _emailCtrl = TextEditingController();
@@ -57,6 +68,7 @@ class _AuthScreenState extends State<AuthScreen> {
   void _resetAuthState() {
     FocusScope.of(context).unfocus();
     _errorMessage = null;
+    _noticeIsInfo = false;
     _isLoading = false;
     _isOtpSent = false;
     _otpCtrl.clear();
@@ -69,21 +81,26 @@ class _AuthScreenState extends State<AuthScreen> {
     final password = _passwordCtrl.text;
 
     if (email.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Please fill out all fields.');
+      _showError('Add your email and password to continue.');
       return;
     }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _noticeIsInfo = false;
     });
 
     try {
       if (_isSignup) {
         final response = await _authService.signUp(email: email, password: password);
-        if (response.session == null && response.user != null) {
+        // Email-confirmation projects return a user without a session: the
+        // account only signs in (and reaches onboarding through AuthGate)
+        // once the link in the email is opened.
+        if (response.session == null && response.user != null && mounted) {
           setState(() {
-            _errorMessage = 'Account created! Please check your email to confirm.';
+            _errorMessage = 'Almost there. Check your email for a confirmation link, then sign in.';
+            _noticeIsInfo = true;
           });
         }
       } else {
@@ -91,12 +108,57 @@ class _AuthScreenState extends State<AuthScreen> {
         // AuthGate handles the implicit routing.
       }
     } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      _showError(_friendlyAuthError(e));
     } catch (e) {
-      setState(() => _errorMessage = 'An unexpected error occurred.');
+      _showError(_genericError);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+
+  static const _genericError = "That didn't go through. Check your connection and try again.";
+
+  void _showError(String message) {
+    if (!mounted) return;
+    KHaptics.reject();
+    setState(() {
+      _errorMessage = message;
+      _noticeIsInfo = false;
+    });
+  }
+
+  /// Maps Supabase auth failures to calm, actionable copy (docs/VOICE.md):
+  /// what happened and what to do, never raw exception text.
+  static String _friendlyAuthError(AuthException e) {
+    final code = (e.code ?? '').toLowerCase();
+    final msg = e.message.toLowerCase();
+    bool has(String s) => code.contains(s) || msg.contains(s);
+    if (has('invalid_credentials') || has('invalid login')) {
+      return "That email and password don't match. Try again or reset your password.";
+    }
+    if (has('email_not_confirmed') || has('not confirmed')) {
+      return 'Confirm your email first. The link is in your inbox.';
+    }
+    if (has('user_already_exists') || has('already registered') || has('already been registered')) {
+      return 'There is already an account with that email. Sign in instead.';
+    }
+    if (has('weak_password') || has('password should be')) {
+      return 'That password is too short. Use at least 6 characters.';
+    }
+    if (has('email_address_invalid') || has('invalid email') || has('unable to validate email')) {
+      return "That email doesn't look right. Check it and try again.";
+    }
+    if (has('otp_expired') || has('token has expired') || has('invalid otp') || has('token is invalid')) {
+      return "That code didn't work. Check it, or send a new one.";
+    }
+    if (has('rate') || has('too many') || has('security purposes')) {
+      return 'Too many tries. Give it a minute, then try again.';
+    }
+    if (has('phone')) {
+      return "That number didn't go through. Check it and try again.";
+    }
+    return _genericError;
   }
 
   Future<void> _showForgotPasswordSheet() async {
@@ -105,98 +167,114 @@ class _AuthScreenState extends State<AuthScreen> {
     String? sheetError;
     bool isSent = false;
 
-    await showModalBottomSheet(
+    await showKSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            return Container(
+            return Padding(
               padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-                left: 24,
-                right: 24,
-                top: 32,
+                bottom: MediaQuery.viewInsetsOf(context).bottom + KSpacing.xxl,
               ),
-              decoration: const BoxDecoration(
-                color: Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: isSent
-                  ? Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.mark_email_read_outlined, color: Color(0xFF52B788), size: 48),
-                        const SizedBox(height: 16),
-                        const Text('Check your email', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 8),
-                        const Text('We sent a password reset link to your email.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF9CA3AF))),
-                        const SizedBox(height: 32),
-                      ],
-                    )
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Reset Password', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 8),
-                        const Text('Enter your email to receive a password reset link.', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14)),
-                        const SizedBox(height: 24),
-                        if (sheetError != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Text(sheetError!, style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13)),
-                          ),
-                        _StyledField(
-                          controller: emailCtrl,
-                          hint: 'Email Address',
-                          icon: Icons.email_outlined,
-                          keyboardType: TextInputType.emailAddress,
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 52,
-                          child: ElevatedButton(
-                            onPressed: isSending
-                                ? null
-                                : () async {
-                                    final em = emailCtrl.text.trim();
-                                    if (em.isEmpty) {
-                                      setSheetState(() => sheetError = 'Please enter an email.');
-                                      return;
-                                    }
-                                    setSheetState(() {
-                                      isSending = true;
-                                      sheetError = null;
-                                    });
-                                    try {
-                                      await Supabase.instance.client.auth.resetPasswordForEmail(
-                                        em,
-                                        redirectTo: 'kynetix://reset-password',
-                                      );
-                                      setSheetState(() => isSent = true);
-                                    } on AuthException catch (e) {
-                                      setSheetState(() => sheetError = e.message);
-                                    } catch (_) {
-                                      setSheetState(() => sheetError = 'An unexpected error occurred.');
-                                    } finally {
-                                      setSheetState(() => isSending = false);
-                                    }
-                                  },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF52B788),
-                              foregroundColor: const Color(0xFF081C15),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: SingleChildScrollView(
+                child: AnimatedSize(
+                  duration: KMotion.of(context, KMotion.standard),
+                  curve: KMotion.emphasizedCurve,
+                  alignment: Alignment.topCenter,
+                  child: AnimatedSwitcher(
+                    duration: KMotion.of(context, KMotion.standard),
+                    child: isSent
+                        ? Padding(
+                            key: const ValueKey('reset-sent'),
+                            padding: const EdgeInsets.fromLTRB(KSpacing.xxl, 0, KSpacing.xxl, KSpacing.lg),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const KDragHandle(),
+                                const SizedBox(height: KSpacing.xl),
+                                _IconBadge(
+                                  icon: Icons.mark_email_read_outlined,
+                                  color: KColor.green,
+                                  size: 64,
+                                ),
+                                const SizedBox(height: KSpacing.lg),
+                                Semantics(
+                                  liveRegion: true,
+                                  child: Text('Check your inbox', style: KText.h1, textAlign: TextAlign.center),
+                                ),
+                                const SizedBox(height: KSpacing.sm),
+                                Text(
+                                  "If there's an account for that email, a reset link is on its way.",
+                                  textAlign: TextAlign.center,
+                                  style: KText.body.copyWith(color: KColor.textSecondary),
+                                ),
+                                const SizedBox(height: KSpacing.xxl),
+                              ],
                             ),
-                            child: isSending
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF081C15)))
-                                : const Text('Send Reset Link', style: TextStyle(fontWeight: FontWeight.w700)),
+                          )
+                        : Column(
+                            key: const ValueKey('reset-form'),
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const KSheetHeader(
+                                'Reset your password',
+                                subtitle: "Drop your email and we'll send you a reset link.",
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.xl, KSpacing.xl, 0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    _InlineNotice(message: sheetError),
+                                    _StyledField(
+                                      controller: emailCtrl,
+                                      hint: 'Email address',
+                                      icon: Icons.email_outlined,
+                                      keyboardType: TextInputType.emailAddress,
+                                    ),
+                                    const SizedBox(height: KSpacing.xl),
+                                    KButton(
+                                      label: 'Send reset link',
+                                      width: double.infinity,
+                                      loading: isSending,
+                                      onTap: isSending
+                                          ? null
+                                          : () async {
+                                              final em = emailCtrl.text.trim();
+                                              if (em.isEmpty) {
+                                                setSheetState(() => sheetError = 'Add your email first.');
+                                                return;
+                                              }
+                                              setSheetState(() {
+                                                isSending = true;
+                                                sheetError = null;
+                                              });
+                                              try {
+                                                await Supabase.instance.client.auth.resetPasswordForEmail(
+                                                  em,
+                                                  redirectTo: 'kynetix://reset-password',
+                                                );
+                                                setSheetState(() => isSent = true);
+                                              } on AuthException catch (e) {
+                                                setSheetState(() => sheetError = _friendlyAuthError(e));
+                                              } catch (_) {
+                                                setSheetState(() => sheetError = _genericError);
+                                              } finally {
+                                                setSheetState(() => isSending = false);
+                                              }
+                                            },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
+                  ),
+                ),
+              ),
             );
           },
         );
@@ -209,22 +287,23 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _handlePhoneOtpSend() async {
     final phone = _fullPhoneNumber.trim();
     if (phone.isEmpty || !phone.startsWith('+')) {
-      setState(() => _errorMessage = 'Please enter a valid phone number.');
+      _showError("That number doesn't look right. Check it and try again.");
       return;
     }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _noticeIsInfo = false;
     });
 
     try {
       await _authService.sendPhoneOtp(phone);
-      setState(() => _isOtpSent = true);
+      if (mounted) setState(() => _isOtpSent = true);
     } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      _showError(_friendlyAuthError(e));
     } catch (_) {
-      setState(() => _errorMessage = 'An unexpected error occurred sending OTP.');
+      _showError("Couldn't send the code. Check your connection and try again.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -235,22 +314,23 @@ class _AuthScreenState extends State<AuthScreen> {
     final token = _otpCtrl.text.trim();
 
     if (token.length != 6) {
-      setState(() => _errorMessage = 'Please enter a valid 6-digit OTP.');
+      _showError('Enter the 6-digit code from your SMS.');
       return;
     }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _noticeIsInfo = false;
     });
 
     try {
       await _authService.verifyPhoneOtp(phone, token);
       // AuthGate handles the route naturally.
     } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
+      _showError(_friendlyAuthError(e));
     } catch (_) {
-      setState(() => _errorMessage = 'Invalid OTP or network error.');
+      _showError("That code didn't go through. Check it and try again.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -261,397 +341,698 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _handleGoogleSignIn() async {
     setState(() {
       _isLoading = true;
+      _googleLoading = true;
       _errorMessage = null;
+      _noticeIsInfo = false;
     });
 
     try {
       await _authService.signInWithGoogle();
       // AuthGate handles implicit routing via deep link or local browser redirect.
+    } on AuthException catch (e) {
+      _showError(_friendlyAuthError(e));
     } catch (e) {
-      setState(() => _errorMessage = e.toString().replaceFirst('Exception: ', ''));
+      debugPrint('[AuthScreen] Google sign-in failed: $e');
+      _showError("Google sign-in didn't go through. Try again, or use email.");
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _googleLoading = false;
+        });
+      }
     }
   }
 
   /// ── BUILDERS ─────────────────────────────────────────────────────────────
 
+  void _selectSignIn() {
+    if (_isSignup) KHaptics.select();
+    FocusScope.of(context).unfocus();
+    _resetAuthState();
+    setState(() => _isSignup = false);
+  }
+
+  void _selectSignUp() {
+    if (!_isSignup) KHaptics.select();
+    _resetAuthState();
+    setState(() => _isSignup = true);
+  }
+
+  void _selectMethod(AuthMethod method) {
+    if (_authMethod != method) KHaptics.select();
+    _resetAuthState();
+    setState(() {
+      _authMethod = method;
+    });
+  }
+
+  void _openPrivacyPolicy() {
+    KHaptics.select();
+    Navigator.of(context).push(
+      kRiseRoute(builder: (_) => const PrivacyPolicyScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF07070C),
+    // Full-bleed scene: the lifter for sign-in, the rack for sign-up. The
+    // photo cross-fades when the mode flips; the form sits where the scrim
+    // has settled into the page background.
+    final size = MediaQuery.sizeOf(context);
+    final topInset = MediaQuery.paddingOf(context).top;
+    final heroH = (size.height * 0.5).clamp(300.0, 520.0);
+    final sections = <Widget>[
+      _Hero(height: (heroH * 0.62).clamp(196.0, 320.0)),
+      const SizedBox(height: KSpacing.xl),
+      _Headline(isSignup: _isSignup),
+      const SizedBox(height: KSpacing.xl),
+      // The form sits on the page itself (no glass card): the photo, the
+      // wordmark and the type do the work.
+      _buildForm(context),
+      const SizedBox(height: KSpacing.xxl),
+      _buildAlternatives(context),
+      _LegalLine(onOpenPolicy: _openPrivacyPolicy),
+    ];
+
+    return KPage(
+      tone: KTone.neutral,
+      intensity: 0.35,
       body: Stack(
         children: [
-          // Background linear mesh gradient
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF0F0F1A),
-                    Color(0xFF07070C),
-                    Color(0xFF0A1411),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Glowing radial orbs
           Positioned(
-            top: -150,
-            left: -150,
-            child: Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    const Color(0xFF52B788).withValues(alpha: 0.12),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -200,
-            right: -200,
-            child: Container(
-              width: 500,
-              height: 500,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    const Color(0xFFFF6B35).withValues(alpha: 0.06),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
+            top: 0,
+            left: 0,
+            right: 0,
+            height: heroH + topInset,
+            child: KSceneBackdrop(
+              asset: _isSignup ? KScene.rack : KScene.lifter,
+              alignment: _isSignup ? const Alignment(0, -0.1) : const Alignment(0.3, -0.35),
             ),
           ),
           SafeArea(
-            child: Center(
+            child: Align(
+              alignment: Alignment.topCenter,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Header Logo
-                    Center(
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E1E2C),
-                          borderRadius: BorderRadius.circular(18),
-                          image: const DecorationImage(
-                            image: AssetImage('assets/branding/kynetix_icon_fg.png'),
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.lg, KSpacing.xl, KSpacing.xl),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: AutofillGroup(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      // One orchestrated entrance on first mount; plays once.
+                      children: kStagger(sections, stagger: const Duration(milliseconds: 45)),
                     ),
-                    const SizedBox(height: 32),
-
-                    // Title
-                    Text(
-                      _isSignup ? 'Create Account' : 'Welcome Back',
-                      style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isSignup ? 'Sign up to build your personalized nutrition plan.' : 'Sign in to access your personalized nutrition plan.',
-                      style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 15),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Error Message
-                    if (_errorMessage != null)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 24),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2E0F0F),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF3E1E1E)),
-                        ),
-                        child: Text(
-                          _errorMessage!,
-                          style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-
-                    // Segmented Control (Sign In / Sign Up)
-                    Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E2C),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                FocusScope.of(context).unfocus();
-                                _resetAuthState();
-                                setState(() => _isSignup = false);
-                              },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: !_isSignup ? const Color(0xFF2E2E3E) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text('Sign In', style: TextStyle(color: !_isSignup ? Colors.white : const Color(0xFF6B7280), fontWeight: FontWeight.w700)),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                _resetAuthState();
-                                setState(() => _isSignup = true);
-                              },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: _isSignup ? const Color(0xFF2E2E3E) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text('Sign Up', style: TextStyle(color: _isSignup ? Colors.white : const Color(0xFF6B7280), fontWeight: FontWeight.w700)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Segmented Control (Email / Phone)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _MethodToggle(
-                          title: 'Email',
-                          icon: Icons.email_outlined,
-                          isSelected: _authMethod == AuthMethod.email,
-                          onTap: () {
-                            _resetAuthState();
-                            setState(() {
-                              _authMethod = AuthMethod.email;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 16),
-                        _MethodToggle(
-                          title: 'Phone',
-                          icon: Icons.phone_android_rounded,
-                          isSelected: _authMethod == AuthMethod.phone,
-                          onTap: () {
-                            _resetAuthState();
-                            setState(() {
-                              _authMethod = AuthMethod.phone;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Dynamic Form Area
-                    if (_authMethod == AuthMethod.email) ...[
-                      _StyledField(
-                        key: const ValueKey('email_field'),
-                        controller: _emailCtrl,
-                        focusNode: _emailFocus,
-                        hint: 'Email Address',
-                        icon: Icons.email_outlined,
-                        keyboardType: TextInputType.emailAddress,
-                      ),
-                      const SizedBox(height: 16),
-                      _StyledField(
-                        key: const ValueKey('password_field'),
-                        controller: _passwordCtrl,
-                        focusNode: _passwordFocus,
-                        hint: 'Password',
-                        icon: Icons.lock_outline,
-                        isPassword: true,
-                      ),
-                      if (!_isSignup)
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: _showForgotPasswordSheet,
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFF9CA3AF),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text('Forgot Password?', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          ),
-                        )
-                      else
-                        const SizedBox(height: 32),
-
-                      _PrimaryButton(
-                        isLoading: _isLoading,
-                        label: _isSignup ? 'Create Account' : 'Sign In',
-                        onPressed: _submitEmailAuth,
-                      ),
-                    ] else if (_authMethod == AuthMethod.phone) ...[
-                      if (!_isOtpSent) ...[
-                        IntlPhoneField(
-                          key: const ValueKey('phone_field'),
-                          controller: _phoneCtrl,
-                          focusNode: _phoneFocus,
-                          initialCountryCode: 'IN',
-                          style: const TextStyle(color: Colors.white, fontSize: 15),
-                          dropdownTextStyle: const TextStyle(color: Colors.white, fontSize: 15),
-                          dropdownIconPosition: IconPosition.trailing,
-                          dropdownIcon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280)),
-                          showCountryFlag: true,
-                          decoration: InputDecoration(
-                            hintText: 'Mobile Number',
-                            hintStyle: const TextStyle(color: Color(0xFF6B7280)),
-                            filled: true,
-                            fillColor: Colors.white.withValues(alpha: 0.04),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1)),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5)),
-                          ),
-                          onChanged: (phone) {
-                            _fullPhoneNumber = phone.completeNumber;
-                          },
-                        ),
-                        const SizedBox(height: 32),
-                        _PrimaryButton(
-                          isLoading: _isLoading,
-                          label: 'Send OTP',
-                          onPressed: _handlePhoneOtpSend,
-                        ),
-                      ] else ...[
-                        _StyledField(
-                          key: const ValueKey('otp_field'),
-                          controller: _otpCtrl,
-                          focusNode: _otpFocus,
-                          hint: 'Enter 6-digit OTP',
-                          icon: Icons.message_rounded,
-                          keyboardType: TextInputType.number,
-                        ),
-                        const SizedBox(height: 32),
-                        _PrimaryButton(
-                          isLoading: _isLoading,
-                          label: 'Verify & ${_isSignup ? "Sign Up" : "Sign In"}',
-                          onPressed: _handlePhoneOtpVerify,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            TextButton(
-                              onPressed: _handlePhoneOtpSend,
-                              child: const Text('Resend OTP', style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.w600)),
-                            ),
-                            const SizedBox(width: 8),
-                            const Text('•', style: TextStyle(color: Color(0xFF6B7280))),
-                            const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  _isOtpSent = false;
-                                  _otpCtrl.clear();
-                                });
-                              },
-                              child: const Text('Change Number', style: TextStyle(color: Color(0xFF9CA3AF))),
-                            ),
-                          ],
-                        ),
-                      ]
-                    ],
-
-                    const SizedBox(height: 40),
-
-                    // Divider
-                    Row(
-                      children: [
-                        Expanded(child: Divider(color: const Color(0xFF2E2E3E), thickness: 1)),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16),
-                          child: Text('OR', style: TextStyle(color: Color(0xFF6B7280), fontSize: 12, fontWeight: FontWeight.w800)),
-                        ),
-                        Expanded(child: Divider(color: const Color(0xFF2E2E3E), thickness: 1)),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Google Button
-                    SizedBox(
-                      height: 54,
-                      child: OutlinedButton.icon(
-                        onPressed: _isLoading ? null : _handleGoogleSignIn,
-                        icon: Image.asset(
-                          'assets/branding/google_logo.png',
-                          width: 24,
-                          height: 24,
-                          errorBuilder: (context, error, stackTrace) => const Text(
-                            'G',
-                            style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white),
-                          ),
-                        ),
-                        label: const Text('Continue with Google', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Color(0xFF2E2E3E)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          backgroundColor: const Color(0xFF1E1E2C),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    if (kDebugMode) ...[
-                      TextButton.icon(
-                        key: const ValueKey('dev_quick_login_button'),
-                        onPressed: () async {
-                          const devId = 'dev_tester_pixel7';
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.setString('dev_auto_login_user_id', devId);
-                          await UserSessionCoordinator.instance.initializeForUser(devId);
-                          await DevTestHarness.seedDevTesterData(devId);
-                          if (context.mounted) {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(builder: (_) => const AppShell()),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.developer_mode, color: KColor.green, size: 18),
-                        label: const Text(
-                          'DEV LOGIN (TEST WORKOUT)',
-                          style: TextStyle(
-                            color: KColor.green,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-                  ],
+                  ),
                 ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildForm(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Segmented control (Sign in / Sign up)
+        _ModeSwitch(
+          isSignup: _isSignup,
+          onSignIn: _selectSignIn,
+          onSignUp: _selectSignUp,
+        ),
+        const SizedBox(height: KSpacing.md),
+
+        // Method tabs (Email / Phone)
+        _MethodTabs(
+          method: _authMethod,
+          onSelect: _selectMethod,
+        ),
+        const SizedBox(height: KSpacing.lg),
+
+        // Error / info message
+        _InlineNotice(message: _errorMessage, isInfo: _noticeIsInfo),
+
+        // Dynamic form area — remounts (with a short fade-rise) when the
+        // method or OTP stage changes, never when only the mode flips.
+        AnimatedSize(
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
+          alignment: Alignment.topCenter,
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey('${_authMethod.name}-$_isOtpSent'),
+            tween: Tween(begin: 0, end: 1),
+            duration: KMotion.of(context, KMotion.standard),
+            curve: KMotion.decelerate,
+            builder: (context, v, child) => Opacity(
+              opacity: v,
+              child: Transform.translate(offset: Offset(0, 10 * (1 - v)), child: child),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: _authMethod == AuthMethod.email
+                  ? _emailFields(context)
+                  : _phoneFields(context),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _emailFields(BuildContext context) {
+    return [
+      _StyledField(
+        key: const ValueKey('email_field'),
+        controller: _emailCtrl,
+        focusNode: _emailFocus,
+        hint: 'Email address',
+        icon: Icons.email_outlined,
+        keyboardType: TextInputType.emailAddress,
+        textInputAction: TextInputAction.next,
+        autofillHints: const [AutofillHints.email],
+        onSubmitted: (_) => _passwordFocus.requestFocus(),
+      ),
+      const SizedBox(height: KSpacing.md),
+      _StyledField(
+        key: const ValueKey('password_field'),
+        controller: _passwordCtrl,
+        focusNode: _passwordFocus,
+        hint: _isSignup ? 'Password, at least 6 characters' : 'Password',
+        icon: Icons.lock_outline,
+        isPassword: true,
+        textInputAction: TextInputAction.done,
+        autofillHints: [_isSignup ? AutofillHints.newPassword : AutofillHints.password],
+        onSubmitted: (_) {
+          if (!_isLoading) _submitEmailAuth();
+        },
+      ),
+      if (!_isSignup)
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: TextButton(
+            onPressed: _showForgotPasswordSheet,
+            style: TextButton.styleFrom(
+              foregroundColor: KColor.textSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm, vertical: KSpacing.md),
+              minimumSize: const Size(48, 48),
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+            ),
+            child: Text(
+              'Forgot password?',
+              style: KText.caption.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: KColor.textSecondary),
+            ),
+          ),
+        )
+      else
+        const SizedBox(height: KSpacing.xl),
+      KButton(
+        label: _isSignup ? 'Create account' : 'Sign in',
+        width: double.infinity,
+        loading: _isLoading && !_googleLoading,
+        onTap: _submitEmailAuth,
+      ),
+    ];
+  }
+
+  List<Widget> _phoneFields(BuildContext context) {
+    if (!_isOtpSent) {
+      return [
+        _FocusRing(
+          focusNode: _phoneFocus,
+          child: IntlPhoneField(
+            key: const ValueKey('phone_field'),
+            controller: _phoneCtrl,
+            focusNode: _phoneFocus,
+            initialCountryCode: 'IN',
+            style: KText.bodyMedium.copyWith(fontSize: 15),
+            dropdownTextStyle: KText.bodyMedium.copyWith(fontSize: 15),
+            dropdownIconPosition: IconPosition.trailing,
+            dropdownIcon: Icon(Icons.arrow_drop_down, color: KColor.textMuted),
+            showCountryFlag: true,
+            cursorColor: KColor.ink,
+            decoration: _fieldDecoration(hint: 'Mobile number').copyWith(
+              counterStyle: KText.caption.copyWith(color: KColor.textMuted),
+            ),
+            onChanged: (phone) {
+              _fullPhoneNumber = phone.completeNumber;
+            },
+          ),
+        ),
+        const SizedBox(height: KSpacing.lg),
+        KButton(
+          label: 'Send code',
+          width: double.infinity,
+          loading: _isLoading && !_googleLoading,
+          onTap: _handlePhoneOtpSend,
+        ),
+      ];
+    }
+    return [
+      _StyledField(
+        key: const ValueKey('otp_field'),
+        controller: _otpCtrl,
+        focusNode: _otpFocus,
+        hint: '6-digit code',
+        icon: Icons.sms_outlined,
+        keyboardType: TextInputType.number,
+        tabular: true,
+      ),
+      const SizedBox(height: KSpacing.xl),
+      KButton(
+        label: 'Verify and ${_isSignup ? "sign up" : "sign in"}',
+        width: double.infinity,
+        loading: _isLoading && !_googleLoading,
+        onTap: _handlePhoneOtpVerify,
+      ),
+      const SizedBox(height: KSpacing.sm),
+      Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: KSpacing.xs,
+        children: [
+          TextButton(
+            onPressed: _handlePhoneOtpSend,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              foregroundColor: KColor.textPrimary,
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+            ),
+            child: Text('Resend code', style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
+          ),
+          ExcludeSemantics(
+            child: Text('·', style: KText.body.copyWith(color: KColor.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isOtpSent = false;
+                _otpCtrl.clear();
+              });
+            },
+            style: TextButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              foregroundColor: KColor.textSecondary,
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+            ),
+            child: Text('Change number', style: KText.bodyMedium.copyWith(color: KColor.textSecondary)),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Widget _buildAlternatives(BuildContext context) {
+    final rule = KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.12);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Divider
+        Row(
+          children: [
+            Expanded(child: Container(height: 1, color: rule)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg),
+              child: Text('or', style: KText.caption.copyWith(color: KColor.textMuted)),
+            ),
+            Expanded(child: Container(height: 1, color: rule)),
+          ],
+        ),
+        const SizedBox(height: KSpacing.xl),
+
+        // Google button
+        _GoogleButton(
+          onTap: _isLoading ? null : _handleGoogleSignIn,
+          loading: _googleLoading,
+        ),
+        const SizedBox(height: KSpacing.lg),
+        if (kDebugMode) ...[
+          Center(
+            child: TextButton.icon(
+              key: const ValueKey('dev_quick_login_button'),
+              onPressed: () async {
+                const devId = 'dev_tester_pixel7';
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('dev_auto_login_user_id', devId);
+                await UserSessionCoordinator.instance.initializeForUser(devId);
+                await DevTestHarness.seedDevTesterData(devId);
+                if (context.mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AppShell()),
+                  );
+                }
+              },
+              style: TextButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                foregroundColor: KColor.textMuted,
+                shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+              ),
+              icon: Icon(Icons.developer_mode, color: KColor.textMuted, size: 18),
+              label: Text(
+                'Dev login (test workout)',
+                style: KText.caption.copyWith(
+                  color: KColor.textMuted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Shared field decoration ──────────────────────────────────────────────────
+// Carbon: a faint lifted well with a white hairline. Paper: a clean card-white
+// well with the warm border. Focus is an ink border (plus the focus ring).
+
+InputDecoration _fieldDecoration({required String hint, IconData? icon}) {
+  final dark = KColor.isDark;
+  OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+        borderRadius: KRadius.md,
+        borderSide: BorderSide(color: c, width: w),
+      );
+  final rest = dark ? KColor.fg.withValues(alpha: 0.10) : KColor.border;
+  return InputDecoration(
+    hintText: hint,
+    hintStyle: KText.body.copyWith(color: KColor.textMuted, fontSize: 15),
+    prefixIcon: icon == null ? null : Icon(icon, color: KColor.textMuted, size: 20),
+    filled: true,
+    fillColor: dark ? KColor.fg.withValues(alpha: 0.04) : KColor.card,
+    contentPadding: const EdgeInsets.symmetric(horizontal: KSpacing.xl, vertical: 17),
+    border: border(rest),
+    enabledBorder: border(rest),
+    focusedBorder: border(KColor.ink, 1.5),
+    errorBorder: border(KColor.danger),
+    focusedErrorBorder: border(KColor.danger, 1.5),
+  );
+}
+
+// ─── Kinetic orbit (brand moment) ─────────────────────────────────────────────
+// Three thin orbits, one per world (fuel, protein, train), each carrying a
+// short comet arc around the Kynetix mark. Moment: ambient brand presence.
+// Trigger: screen mounted. Loop: 24 s, runs only while
+// `KMotion.ambientAllowed` (never under reduced motion or in tests), and stops
+// when the widget leaves the tree. Off: the comets rest at a fixed, composed
+// position, so the end state is identical with motion disabled.
+// Public so the auth gate's loader can share the same mark.
+
+class KineticOrbit extends StatefulWidget {
+  const KineticOrbit({super.key, this.size = 220, this.showMark = true, this.markSize = 52});
+
+  final double size;
+  final bool showMark;
+  final double markSize;
+
+  @override
+  State<KineticOrbit> createState() => _KineticOrbitState();
+}
+
+class _KineticOrbitState extends State<KineticOrbit> with SingleTickerProviderStateMixin {
+  /// Resting phase: a composed spread of the three comets.
+  static const _rest = 0.14;
+
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 24),
+    value: _rest,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final allowed = KMotion.ambientAllowed(context);
+    if (allowed && !_spin.isAnimating) {
+      _spin.repeat();
+    } else if (!allowed && _spin.isAnimating) {
+      _spin.stop();
+      _spin.value = _rest;
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = KColor.isDark;
+    final scene = _OrbitScene(
+      track: KColor.fg.withValues(alpha: dark ? 0.09 : 0.11),
+      colors: [KColor.ember, KColor.green, KColor.violet],
+      cometAlpha: dark ? 1.0 : 0.9,
+    );
+    final s = widget.size;
+    final m = widget.markSize;
+    return ExcludeSemantics(
+      child: SizedBox.square(
+        dimension: s,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(painter: _OrbitPainter(scene: scene, phase: _spin)),
+              ),
+            ),
+            if (widget.showMark)
+              DecoratedBox(
+                // On Carbon the dark mark gets a hairline so it doesn't sink
+                // into the black; Paper gets the soft card shadow instead.
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(m * 0.28),
+                  border: dark ? Border.all(color: KColor.fg.withValues(alpha: 0.14)) : null,
+                  boxShadow: KShadow.card,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(m * 0.28),
+                  child: Image.asset(
+                    'assets/branding/kynetix_icon_fg.png',
+                    width: m,
+                    height: m,
+                    cacheWidth: (m * 3).round(),
+                    fit: BoxFit.cover,
+                    excludeFromSemantics: true,
+                    errorBuilder: (_, _, _) => SizedBox.square(dimension: m),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Immutable inputs for one paint of the orbit (resolved from the palette in
+/// `build`, so a theme flip repaints with the new values).
+class _OrbitScene {
+  const _OrbitScene({required this.track, required this.colors, required this.cometAlpha});
+  final Color track;
+  final List<Color> colors;
+  final double cometAlpha;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _OrbitScene &&
+      other.track == track &&
+      other.cometAlpha == cometAlpha &&
+      other.colors.length == colors.length &&
+      List.generate(colors.length, (i) => other.colors[i] == colors[i]).every((e) => e);
+
+  @override
+  int get hashCode => Object.hash(track, cometAlpha, Object.hashAll(colors));
+}
+
+class _OrbitPainter extends CustomPainter {
+  _OrbitPainter({required this.scene, required this.phase}) : super(repaint: phase);
+
+  final _OrbitScene scene;
+  final Animation<double> phase;
+
+  // Radii as a fraction of the half-size, turns per loop (integers keep the
+  // loop seamless), start angle and comet length (radians).
+  static const _radii = [0.52, 0.74, 0.96];
+  static const _turns = [2, -1, 1];
+  static const _start = [0.4, 2.6, 4.4];
+  static const _sweep = [1.5, 1.2, 1.0];
+  static const _segments = 18;
+  static const _tau = 6.283185307179586;
+
+  final Paint _track = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1;
+  final Paint _arc = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeWidth = 2.2;
+  final Paint _dot = Paint()..style = PaintingStyle.fill;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final half = size.shortestSide / 2 - 4;
+    final t = phase.value;
+    _track.color = scene.track;
+    for (var i = 0; i < _radii.length; i++) {
+      final r = half * _radii[i];
+      canvas.drawCircle(c, r, _track);
+
+      final color = scene.colors[i % scene.colors.length];
+      final head = _start[i] + t * _tau * _turns[i];
+      final sweep = _sweep[i];
+      final dir = _turns[i] >= 0 ? 1.0 : -1.0;
+      final rect = Rect.fromCircle(center: c, radius: r);
+      // Comet: the tail fades out behind the head.
+      final seg = sweep / _segments;
+      for (var k = 0; k < _segments; k++) {
+        final f = (k + 1) / _segments; // 0 (tail) → 1 (head)
+        _arc.color = color.withValues(alpha: scene.cometAlpha * f * f);
+        final from = head - dir * sweep + dir * seg * k;
+        canvas.drawArc(rect, from, dir * seg, false, _arc);
+      }
+      _dot.color = color.withValues(alpha: scene.cometAlpha);
+      canvas.drawCircle(c + Offset.fromDirection(head, r), 3.2, _dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbitPainter old) => old.scene != scene || old.phase != phase;
+}
+
+// ─── Hero ─────────────────────────────────────────────────────────────────────
+// The signature moment: the scene photo under its scrim and a heavy, tightly
+// tracked Geist wordmark set where the scrim has settled, so it reads in both
+// themes. The tagline sits on a short ink rule, like a masthead line.
+
+class _Hero extends StatelessWidget {
+  const _Hero({required this.height});
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Align(
+            alignment: AlignmentDirectional.bottomStart,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    'Kynetix',
+                    style: KText.display.copyWith(
+                      fontSize: 64,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -3.4,
+                      height: 0.92,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: KSpacing.md),
+                Text(
+                  'Real food. Real lifts.',
+                  style: KText.bodyMedium.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Headline ─────────────────────────────────────────────────────────────────
+
+class _Headline extends StatelessWidget {
+  const _Headline({required this.isSignup});
+  final bool isSignup;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = isSignup ? 'Make it official.' : 'Welcome back.';
+    final body = isSignup
+        ? 'Log roti, dal and paneer the way you actually eat them. Track your sets. Get targets that fit your week.'
+        : 'Your meals, targets and lifts are right where you left them.';
+    return AnimatedSwitcher(
+      duration: KMotion.of(context, KMotion.standard),
+      switchInCurve: KMotion.decelerate,
+      switchOutCurve: KMotion.accelerate,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: AlignmentDirectional.topStart,
+        children: [...previous, ?current],
+      ),
+      child: Column(
+        key: ValueKey(isSignup),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(title, style: KText.h1.copyWith(fontSize: 26, height: 1.1)),
+          ),
+          const SizedBox(height: KSpacing.sm),
+          Text(body, style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15, height: 1.5)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Legal line ───────────────────────────────────────────────────────────────
+// Informational only: no consent checkbox, no change to the auth flow.
+
+class _LegalLine extends StatelessWidget {
+  const _LegalLine({required this.onOpenPolicy});
+  final VoidCallback onOpenPolicy;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = KText.caption.copyWith(color: KColor.textMuted, fontSize: 12.5);
+    return Padding(
+      padding: const EdgeInsets.only(top: KSpacing.sm),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('By continuing, you agree to our', style: style),
+          TextButton(
+            onPressed: onOpenPolicy,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              padding: const EdgeInsets.symmetric(horizontal: KSpacing.xs),
+              foregroundColor: KColor.textPrimary,
+              tapTargetSize: MaterialTapTargetSize.padded,
+              shape: const RoundedRectangleBorder(borderRadius: KRadius.sm),
+            ),
+            child: Text(
+              'Privacy policy',
+              style: style.copyWith(
+                color: KColor.textPrimary,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+                decorationColor: KColor.textMuted,
               ),
             ),
           ),
@@ -661,73 +1042,424 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
-class _MethodToggle extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
+// ─── Inline notice (error / info) ─────────────────────────────────────────────
 
-  const _MethodToggle({required this.title, required this.icon, required this.isSelected, required this.onTap});
+class _InlineNotice extends StatelessWidget {
+  const _InlineNotice({required this.message, this.isInfo = false});
+  final String? message;
+
+  /// Good news (the sign-up confirmation) gets the calm success treatment
+  /// instead of danger.
+  final bool isInfo;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF2D6A4F).withAlpha(51) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isSelected ? const Color(0xFF52B788) : const Color(0xFF2E2E3E)),
+    final msg = message;
+    final color = isInfo ? KColor.green : KColor.danger;
+    final dark = KColor.isDark;
+    return AnimatedSize(
+      duration: KMotion.of(context, KMotion.standard),
+      curve: KMotion.emphasizedCurve,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: KMotion.of(context, KMotion.quick),
+        child: msg == null
+            ? const SizedBox(width: double.infinity, key: ValueKey('no-notice'))
+            : Padding(
+                key: ValueKey(msg),
+                padding: const EdgeInsets.only(bottom: KSpacing.lg),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(KSpacing.md),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: dark ? 0.10 : 0.07),
+                      borderRadius: KRadius.sm,
+                      border: Border.all(color: color.withValues(alpha: dark ? 0.35 : 0.30)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          isInfo ? Icons.mark_email_unread_outlined : Icons.error_outline_rounded,
+                          size: 18,
+                          color: color,
+                          semanticLabel: isInfo ? 'Info' : 'Error',
+                        ),
+                        const SizedBox(width: KSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            msg,
+                            style: KText.caption.copyWith(
+                              fontSize: 13,
+                              color: isInfo ? KColor.textPrimary : KColor.danger,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+// ─── Mode switch (Sign in / Sign up) ──────────────────────────────────────────
+// Sliding ink pill; the label weight and colour also change so the state is
+// never carried by the pill alone.
+
+class _ModeSwitch extends StatelessWidget {
+  const _ModeSwitch({required this.isSignup, required this.onSignIn, required this.onSignUp});
+  final bool isSignup;
+  final VoidCallback onSignIn;
+  final VoidCallback onSignUp;
+
+  @override
+  Widget build(BuildContext context) {
+    final dur = KMotion.of(context, KMotion.standard);
+    final dark = KColor.isDark;
+    Widget segment(String label, bool selected, VoidCallback onTap) {
+      return Expanded(
+        child: Semantics(
+          button: true,
+          selected: selected,
+          inMutuallyExclusiveGroup: true,
+          label: label,
+          excludeSemantics: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm, vertical: KSpacing.sm),
+                  child: AnimatedDefaultTextStyle(
+                    duration: dur,
+                    style: KText.bodyMedium.copyWith(
+                      fontSize: 14.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? KColor.onInk : KColor.textSecondary,
+                    ),
+                    child: Text(label, textAlign: TextAlign.center),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
-        child: Row(
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(KSpacing.xs),
+      decoration: BoxDecoration(
+        color: KColor.fg.withValues(alpha: dark ? 0.05 : 0.045),
+        borderRadius: KRadius.pill,
+        border: Border.all(color: KColor.fg.withValues(alpha: dark ? 0.08 : 0.06)),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: AnimatedAlign(
+              duration: dur,
+              curve: KMotion.emphasizedCurve,
+              alignment: isSignup ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
+              child: FractionallySizedBox(
+                widthFactor: 0.5,
+                heightFactor: 1,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: KColor.ink,
+                    borderRadius: KRadius.pill,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              segment('Sign in', !isSignup, onSignIn),
+              segment('Sign up', isSignup, onSignUp),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Method tabs (Email / Phone) ──────────────────────────────────────────────
+// Quiet underline tabs, a level below the mode switch. Selected state is
+// carried by weight, colour and the sliding ink underline together.
+
+class _MethodTabs extends StatelessWidget {
+  const _MethodTabs({required this.method, required this.onSelect});
+  final AuthMethod method;
+  final ValueChanged<AuthMethod> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final dur = KMotion.of(context, KMotion.standard);
+    final isEmail = method == AuthMethod.email;
+    Widget tab(String title, IconData icon, AuthMethod value) {
+      final selected = method == value;
+      final fg = selected ? KColor.textPrimary : KColor.textMuted;
+      return Expanded(
+        child: Semantics(
+          button: true,
+          selected: selected,
+          inMutuallyExclusiveGroup: true,
+          label: title,
+          excludeSemantics: true,
+          child: Pressable(
+            onTap: () => onSelect(value),
+            scale: 0.98,
+            borderRadius: KRadius.sm,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 18, color: fg),
+                  const SizedBox(width: KSpacing.sm),
+                  Flexible(
+                    child: AnimatedDefaultTextStyle(
+                      duration: dur,
+                      style: KText.bodyMedium.copyWith(
+                        color: fg,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                      child: Text(title),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            Icon(icon, size: 18, color: isSelected ? const Color(0xFF52B788) : const Color(0xFF6B7280)),
-            const SizedBox(width: 8),
-            Text(title, style: TextStyle(color: isSelected ? const Color(0xFF52B788) : const Color(0xFF6B7280), fontWeight: FontWeight.w600)),
+            tab('Email', Icons.email_outlined, AuthMethod.email),
+            tab('Phone', Icons.phone_android_rounded, AuthMethod.phone),
           ],
         ),
-      ),
+        SizedBox(
+          height: 2,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ColoredBox(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.08)),
+              ),
+              AnimatedAlign(
+                duration: dur,
+                curve: KMotion.emphasizedCurve,
+                alignment: isEmail ? AlignmentDirectional.centerStart : AlignmentDirectional.centerEnd,
+                child: FractionallySizedBox(
+                  widthFactor: 0.5,
+                  heightFactor: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: KSpacing.xxl),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: KColor.ink, borderRadius: KRadius.pill),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _PrimaryButton extends StatelessWidget {
-  final bool isLoading;
-  final String label;
-  final VoidCallback onPressed;
+// ─── Google button ────────────────────────────────────────────────────────────
+// Secondary action: an outlined pill matching KButton(outlined: true).
 
-  const _PrimaryButton({required this.isLoading, required this.label, required this.onPressed});
+class _GoogleButton extends StatelessWidget {
+  const _GoogleButton({required this.onTap, this.loading = false});
+  final VoidCallback? onTap;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF52B788),
-          foregroundColor: const Color(0xFF081C15),
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    final enabled = onTap != null;
+    final dark = KColor.isDark;
+    return Pressable(
+      onTap: onTap == null
+          ? null
+          : () {
+              KHaptics.commit();
+              onTap!();
+            },
+      borderRadius: KRadius.pill,
+      semanticLabel: 'Continue with Google',
+      child: AnimatedOpacity(
+        duration: KMotion.of(context, KMotion.quick),
+        opacity: enabled || loading ? 1 : 0.5,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 56),
+          padding: const EdgeInsets.symmetric(horizontal: KSpacing.xl, vertical: KSpacing.md),
+          decoration: BoxDecoration(
+            color: dark ? KColor.fg.withValues(alpha: 0.03) : KColor.card.withValues(alpha: 0.7),
+            borderRadius: KRadius.pill,
+            border: Border.all(color: KColor.fg.withValues(alpha: dark ? 0.18 : 0.2), width: 1.2),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedSwitcher(
+                duration: KMotion.of(context, KMotion.quick),
+                child: loading
+                    ? const SizedBox.square(
+                        key: ValueKey('google-loading'),
+                        dimension: 20,
+                        child: Center(child: KSpinner(size: 18)),
+                      )
+                    : Image.asset(
+                        'assets/branding/google_logo.png',
+                        key: const ValueKey('google-logo'),
+                        width: 20,
+                        height: 20,
+                        cacheWidth: 64,
+                        excludeFromSemantics: true,
+                        errorBuilder: (context, error, stackTrace) => Text(
+                          'G',
+                          style: KText.h2.copyWith(fontSize: 20, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: KSpacing.md),
+              Flexible(
+                child: Text(
+                  'Continue with Google',
+                  textAlign: TextAlign.center,
+                  style: KText.bodyMedium.copyWith(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.2),
+                ),
+              ),
+            ],
+          ),
         ),
-        child: isLoading
-            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Color(0xFF081C15))))
-            : Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
       ),
     );
   }
 }
 
-class _StyledField extends StatelessWidget {
+// ─── Icon badge ───────────────────────────────────────────────────────────────
+
+class _IconBadge extends StatelessWidget {
+  const _IconBadge({required this.icon, required this.color, this.size = 56});
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = KColor.isDark;
+    return ExcludeSemantics(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: dark ? 0.12 : 0.09),
+          shape: BoxShape.circle,
+          border: Border.all(color: color.withValues(alpha: dark ? 0.35 : 0.30)),
+        ),
+        child: Icon(icon, color: color, size: size * 0.46),
+      ),
+    );
+  }
+}
+
+// ─── Focus ring ───────────────────────────────────────────────────────────────
+// A soft monochrome halo while the wrapped field has focus. Decoration only —
+// the ink focused border on the field itself carries the state too.
+
+class _FocusRing extends StatefulWidget {
+  const _FocusRing({required this.focusNode, required this.child});
+  final FocusNode focusNode;
+  final Widget child;
+
+  @override
+  State<_FocusRing> createState() => _FocusRingState();
+}
+
+class _FocusRingState extends State<_FocusRing> {
+  late bool _focused = widget.focusNode.hasFocus;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_onFocus);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FocusRing old) {
+    super.didUpdateWidget(old);
+    if (old.focusNode != widget.focusNode) {
+      old.focusNode.removeListener(_onFocus);
+      widget.focusNode.addListener(_onFocus);
+      _focused = widget.focusNode.hasFocus;
+    }
+  }
+
+  void _onFocus() {
+    if (!mounted) return;
+    final f = widget.focusNode.hasFocus;
+    if (f != _focused) setState(() => _focused = f);
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_onFocus);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ring = KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.07);
+    return AnimatedContainer(
+      duration: KMotion.of(context, KMotion.quick),
+      curve: KMotion.emphasizedCurve,
+      decoration: BoxDecoration(
+        borderRadius: KRadius.md,
+        boxShadow: [
+          BoxShadow(
+            color: _focused ? ring : ring.withValues(alpha: 0),
+            blurRadius: 0,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+// ─── Styled field ─────────────────────────────────────────────────────────────
+
+class _StyledField extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String hint;
   final IconData icon;
   final bool isPassword;
   final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
+  final bool tabular;
+  final Iterable<String>? autofillHints;
 
   const _StyledField({
     super.key,
@@ -737,26 +1469,60 @@ class _StyledField extends StatelessWidget {
     required this.icon,
     this.isPassword = false,
     this.keyboardType,
+    this.textInputAction,
+    this.onSubmitted,
+    this.tabular = false,
+    this.autofillHints,
   });
 
   @override
+  State<_StyledField> createState() => _StyledFieldState();
+}
+
+class _StyledFieldState extends State<_StyledField> {
+  FocusNode? _ownNode;
+  FocusNode get _node => widget.focusNode ?? (_ownNode ??= FocusNode());
+
+  /// Password fields start hidden; the eye toggle flips this.
+  bool _obscured = true;
+
+  @override
+  void dispose() {
+    _ownNode?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      obscureText: isPassword,
-      keyboardType: keyboardType,
-      style: const TextStyle(color: Colors.white, fontSize: 15),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Color(0xFF6B7280)),
-        prefixIcon: Icon(icon, color: const Color(0xFF52B788), size: 20),
-        filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.04),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF52B788), width: 1.5)),
+    final base = widget.tabular ? KText.numSmall.copyWith(fontSize: 17, letterSpacing: 1.0) : KText.bodyMedium;
+    return _FocusRing(
+      focusNode: _node,
+      child: TextField(
+        controller: widget.controller,
+        focusNode: _node,
+        obscureText: widget.isPassword && _obscured,
+        enableSuggestions: !widget.isPassword,
+        autocorrect: !widget.isPassword,
+        keyboardType: widget.isPassword && !_obscured
+            ? TextInputType.visiblePassword
+            : widget.keyboardType,
+        textInputAction: widget.textInputAction,
+        onSubmitted: widget.onSubmitted,
+        autofillHints: widget.autofillHints,
+        style: base.copyWith(fontSize: widget.tabular ? 17 : 15, color: KColor.textPrimary),
+        cursorColor: KColor.ink,
+        decoration: _fieldDecoration(hint: widget.hint, icon: widget.icon).copyWith(
+          suffixIcon: widget.isPassword
+              ? Padding(
+                  padding: const EdgeInsetsDirectional.only(end: KSpacing.xs),
+                  child: PasswordVisibilityToggle(
+                    key: const ValueKey('password_visibility_toggle'),
+                    obscured: _obscured,
+                    onToggle: () => setState(() => _obscured = !_obscured),
+                  ),
+                )
+              : null,
+        ),
       ),
     );
   }

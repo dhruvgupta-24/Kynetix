@@ -226,7 +226,7 @@ void main() {
         weight: 75.0,
         workoutDaysMin: 3,
         workoutDaysMax: 3,
-        goal: 'Fat Loss',
+        goal: 'Maintenance', // the 2,382 kcal fixtures are maintenance numbers ('Fat Loss' used to fall through to maintenance)
       );
     });
 

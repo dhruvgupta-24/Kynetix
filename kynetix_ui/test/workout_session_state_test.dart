@@ -8,6 +8,14 @@ import 'package:kynetix/services/workout_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Search the picker so the pick doesn't depend on list order or screen size.
+Future<void> pickBench(WidgetTester tester) async {
+  await tester.enterText(find.byType(TextField).first, 'flat bench');
+  await tester.pumpAndSettle();
+  expect(find.text('Flat Bench Press'), findsAtLeastNWidgets(1));
+  await tester.tap(find.text('Flat Bench Press').first);
+}
+
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -45,7 +53,7 @@ void main() {
 
     // Verify empty state is displayed properly and no crash has occurred
     expect(find.byType(WorkoutSessionScreen), findsOneWidget);
-    expect(find.text('Empty Workout Session'), findsOneWidget);
+    expect(find.text('Empty workout'), findsOneWidget);
     expect(find.text('Add your first exercise to start tracking your sets, weight, reps, and RPE.'), findsOneWidget);
 
     // Verify "Add Exercise" CTA buttons exist
@@ -74,29 +82,28 @@ void main() {
     await tester.pumpAndSettle();
 
     // 2. Select the first exercise (e.g. Bench Press) in list
-    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
-    await tester.tap(find.text('Bench Press'));
+    await pickBench(tester);
     await tester.pumpAndSettle();
 
     // Verify Bench Press is added to the session
-    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
-    expect(find.text('Empty Workout Session'), findsNothing);
+    expect(find.text('Flat Bench Press'), findsAtLeastNWidgets(1));
+    expect(find.text('Empty workout'), findsNothing);
 
     // 3. Log a Set
-    expect(find.text('LOG SET 1'), findsOneWidget);
-    await tester.tap(find.text('LOG SET 1'));
+    expect(find.text('Log set 1'), findsOneWidget);
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     // Verify set is logged (button updates to LOG SET 2)
-    expect(find.text('LOG SET 2'), findsOneWidget);
+    expect(find.text('Log set 2'), findsOneWidget);
 
     // 4. Click Finish
     await tester.tap(find.text('Finish'));
     await tester.pumpAndSettle();
 
     // Dialog pops up: choose "Finish Workout"
-    expect(find.text('End Workout Session'), findsOneWidget);
-    await tester.tap(find.text('Finish Workout'));
+    expect(find.text('End this workout?'), findsOneWidget);
+    await tester.tap(find.text('Finish workout'));
     await tester.pumpAndSettle();
 
     // Verify no exception occurred
@@ -119,18 +126,18 @@ void main() {
     // 1. Add Exercise
     await tester.tap(find.byKey(const Key('center_add_exercise_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bench Press'));
+    await pickBench(tester);
     await tester.pumpAndSettle();
 
     // Verify exercise is present
-    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
+    expect(find.text('Flat Bench Press'), findsAtLeastNWidgets(1));
 
     // 2. Remove Exercise
     await tester.tap(find.byIcon(Icons.delete_outline_rounded));
     await tester.pumpAndSettle();
 
     // Verify we are back to empty state since no sets were logged (removed immediately)
-    expect(find.text('Empty Workout Session'), findsOneWidget);
+    expect(find.text('Empty workout'), findsOneWidget);
     expect(find.byKey(const Key('center_add_exercise_button')), findsOneWidget);
 
     // Verify no exceptions
@@ -154,11 +161,11 @@ void main() {
     // Add exercise
     await tester.tap(find.byKey(const Key('center_add_exercise_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bench Press'));
+    await pickBench(tester);
     await tester.pumpAndSettle();
 
     // Log set
-    await tester.tap(find.text('LOG SET 1'));
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     // Exit workout via Close button
@@ -166,8 +173,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Pause Dialog shows up, select "Save & Leave"
-    expect(find.text('Pause Workout?'), findsOneWidget);
-    await tester.tap(find.text('Save & Leave'));
+    expect(find.text('Pause workout?'), findsOneWidget);
+    await tester.tap(find.text('Save and leave'));
     await tester.pumpAndSettle();
 
     // Ensure we exited without exceptions
@@ -192,8 +199,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify draft was restored correctly: Bench Press is present and set counts are retrieved
-    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
-    expect(find.text('LOG SET 2'), findsOneWidget); // since set 1 was logged
+    expect(find.text('Flat Bench Press'), findsAtLeastNWidgets(1));
+    expect(find.text('Log set 2'), findsOneWidget); // since set 1 was logged
 
     // Ensure we exited without exceptions
     expect(tester.takeException(), isNull);
@@ -215,11 +222,11 @@ void main() {
     // Add exercise
     await tester.tap(find.byKey(const Key('center_add_exercise_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bench Press'));
+    await pickBench(tester);
     await tester.pumpAndSettle();
 
     // Log set
-    await tester.tap(find.text('LOG SET 1'));
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     // Exit workout via Close button
@@ -227,8 +234,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Pause Dialog shows up, select "Save & Leave"
-    expect(find.text('Pause Workout?'), findsOneWidget);
-    await tester.tap(find.text('Save & Leave'));
+    expect(find.text('Pause workout?'), findsOneWidget);
+    await tester.tap(find.text('Save and leave'));
     await tester.pumpAndSettle();
 
     // Verify draft was created
@@ -251,15 +258,15 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify Bench Press is present
-    expect(find.text('Bench Press'), findsAtLeastNWidgets(1));
+    expect(find.text('Flat Bench Press'), findsAtLeastNWidgets(1));
 
     // Click Finish
     await tester.tap(find.text('Finish'));
     await tester.pumpAndSettle();
 
     // Dialog pops up: choose "Finish Workout"
-    expect(find.text('End Workout Session'), findsOneWidget);
-    await tester.tap(find.text('Finish Workout'));
+    expect(find.text('End this workout?'), findsOneWidget);
+    await tester.tap(find.text('Finish workout'));
     await tester.pumpAndSettle();
 
     // Verify draft and draftStartedAt are both cleaned up (null)

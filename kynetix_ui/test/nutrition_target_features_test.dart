@@ -26,7 +26,7 @@ void main() {
 
       expect(plan.maintenanceCalories, greaterThan(2000.0));
       expect(plan.avgDailyCalories, greaterThan(plan.maintenanceCalories)); // lean bulk goal
-      expect(plan.avgDailyProtein, closeTo(85.0 * 1.70, 1.0));
+      expect(plan.avgDailyProtein, closeTo(85.0 * 1.80, 1.0));
     });
 
     test('Should return custom targets when useCustomTargets is true', () {

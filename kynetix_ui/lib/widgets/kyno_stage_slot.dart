@@ -8,9 +8,9 @@ import 'exercise_media_widget.dart';
 ///
 /// Houses the GymVisual demonstration GIF and the precomputed
 /// Kyno Progression Recommendation in the exact same slot.
-/// Switches smoothly via [AnimatedSwitcher] (600ms) after exactly
-/// 2 animation loops, with zero loading delay. A `[Demo]` button
-/// allows replaying the demonstration anytime.
+/// Switches smoothly via [AnimatedSwitcher] (KMotion.emphasized, collapses to
+/// zero under reduced motion) after exactly 2 animation loops, with zero
+/// loading delay. A `[Demo]` button allows replaying the demonstration anytime.
 class KynoStageSlot extends StatefulWidget {
   final Exercise exercise;
   final KynoProgressionAdvice? advice;
@@ -31,15 +31,18 @@ class KynoStageSlot extends StatefulWidget {
   /// or when there is no historical progression data yet.
   static KynoProgressionAdvice getNeutralAdvice(Exercise exercise) {
     return KynoProgressionAdvice(
-      action: 'ESTABLISH BASELINE',
+      action: 'Establish baseline',
       styleLabel: 'Standard Progression',
-      todayTarget: "Target: ${exercise.defaultTargetSets} sets • ${exercise.targetRepMin}–${exercise.targetRepMax} reps",
-      summary: 'Focus on strict technique and controlled tempo today. Log your sets to build your personalized progression curve.',
+      todayTarget:
+          "Target: ${exercise.defaultTargetSets} sets • ${exercise.targetRepMin}-${exercise.targetRepMax} reps",
+      summary:
+          'Clean reps and a steady tempo today. Log your sets and Kyno builds your progression from there.',
       evidence: [
-        'No prior session data logged yet.',
-        'Target rep range is ${exercise.targetRepMin}–${exercise.targetRepMax} reps.',
+        'No earlier sessions logged for this one yet.',
+        'Target range is ${exercise.targetRepMin}-${exercise.targetRepMax} reps.',
       ],
-      nextMilestone: 'Complete ${exercise.defaultTargetSets} working sets leaving 1–2 reps in reserve to trigger progression.',
+      nextMilestone:
+          'Finish ${exercise.defaultTargetSets} working sets with 1-2 reps left in the tank to unlock your first bump.',
       confidence: 'Baseline',
       isDeload: false,
       spark1RmTrend: const [],
@@ -112,6 +115,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
   }
 
   void _replayDemo() {
+    KHaptics.select();
     widget.playbackController?.reset();
     setState(() {
       _progressionRevealed = false;
@@ -126,43 +130,39 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
       height: widget.height,
       width: double.infinity,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: KRadius.md,
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 600),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
+          duration: KMotion.of(context, KMotion.emphasized),
+          switchInCurve: KMotion.decelerate,
+          switchOutCurve: KMotion.accelerate,
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
               fit: StackFit.expand,
-              children: <Widget>[
-                ...previousChildren,
-                ?currentChild,
-              ],
+              children: <Widget>[...previousChildren, ?currentChild],
             );
           },
           transitionBuilder: (child, animation) {
-            final isProgression = child.key == const ValueKey('progression_view');
+            final isProgression =
+                child.key == const ValueKey('progression_view');
             final inOffset = isProgression
-                ? const Offset(0.12, 0.0)
-                : const Offset(-0.12, 0.0);
+                ? const Offset(0.08, 0.0)
+                : const Offset(-0.08, 0.0);
             final slideAnim = Tween<Offset>(
               begin: inOffset,
               end: Offset.zero,
-            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+            ).animate(animation);
 
             return SlideTransition(
               position: slideAnim,
-              child: FadeTransition(
-                opacity: animation,
-                child: child,
-              ),
+              child: FadeTransition(opacity: animation, child: child),
             );
           },
           child: _progressionRevealed
               ? KeyedSubtree(
                   key: const ValueKey('progression_view'),
                   child: _buildKynoProgressionCard(
-                    widget.advice ?? KynoStageSlot.getNeutralAdvice(widget.exercise),
+                    widget.advice ??
+                        KynoStageSlot.getNeutralAdvice(widget.exercise),
                     widget.height,
                   ),
                 )
@@ -185,26 +185,36 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
     );
   }
 
-  Widget _buildKynoProgressionCard(KynoProgressionAdvice advice, double height) {
-    final isDeloadOrSafety = advice.isDeload ||
+  // ── Progression card ─────────────────────────────────────────────────────
+  // Card surface + hairline, monochrome chrome. Colour only carries meaning:
+  // danger for a deload / safety call (paired with a warning icon). The two
+  // control rows are fixed 48dp bands so "Demo", "Why?" and "Close" are always
+  // full-size targets; only the content between them scrolls at large text.
+
+  Widget _buildKynoProgressionCard(
+    KynoProgressionAdvice advice,
+    double height,
+  ) {
+    final isDeloadOrSafety =
+        advice.isDeload ||
         advice.confidence.contains('Safety') ||
         advice.confidence.contains('Deload');
-    final cardColor = isDeloadOrSafety
-        ? KColor.danger.withValues(alpha: 0.08)
-        : const Color(0xFF13131F);
-    final borderColor = isDeloadOrSafety
-        ? KColor.danger.withValues(alpha: 0.35)
-        : const Color(0xFFFFB347).withValues(alpha: 0.3);
-    final actionColor = isDeloadOrSafety ? KColor.danger : const Color(0xFFFFB347);
+    final actionColor = isDeloadOrSafety ? KColor.danger : KColor.textPrimary;
+    final dark = KColor.isDark;
 
     return Container(
       width: double.infinity,
       height: height,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(14, 0, 4, 0),
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor, width: 1.0),
+        color: KColor.card,
+        borderRadius: KRadius.md,
+        border: Border.all(
+          color: isDeloadOrSafety
+              ? KColor.danger.withValues(alpha: dark ? 0.45 : 0.4)
+              : (dark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+          width: 1.0,
+        ),
       ),
       child: _showWhyDetails
           ? _buildExpandedWhyView(advice)
@@ -217,284 +227,359 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
     Color actionColor,
     bool isDeloadOrSafety,
   ) {
+    final target = advice.todayTarget.startsWith("Today's target:")
+        ? advice.todayTarget
+        : "Today's target: ${advice.todayTarget}";
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        // Eyebrow Row: PROGRESSION RECOMMENDATION + Replay Demo Button
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  isDeloadOrSafety
-                      ? Icons.warning_amber_rounded
-                      : Icons.offline_bolt_rounded,
-                  color: actionColor,
-                  size: 13,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'PROGRESSION RECOMMENDATION',
-                  style: TextStyle(
-                    color: actionColor,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.6,
+        // Eyebrow: Kyno mark + "Progression recommendation" + Demo replay.
+        SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              if (isDeloadOrSafety)
+                Icon(Icons.warning_amber_rounded, color: actionColor, size: 14)
+              else
+                const _KynoGlyph(),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Progression recommendation',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: KText.caption.copyWith(
+                    color: isDeloadOrSafety
+                        ? actionColor
+                        : KColor.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
-            GestureDetector(
-              onTap: _replayDemo,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.white12, width: 0.5),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.play_arrow_rounded, size: 12, color: Colors.white70),
-                    SizedBox(width: 2),
-                    Text(
-                      'Demo',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
               ),
-            ),
-          ],
-        ),
-
-        // Action + Style Badge Row (No ellipsis on action)
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                advice.action,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: actionColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                advice.styleLabel.toUpperCase(),
-                style: TextStyle(
-                  color: actionColor,
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        // Today's Target
-        Text(
-          advice.todayTarget.startsWith("Today's target:")
-              ? advice.todayTarget
-              : "Today's target: ${advice.todayTarget}",
-          style: const TextStyle(
-            color: Color(0xFF60A5FA),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-
-        // Recommendation Summary (Strictly non-truncated, complete instruction)
-        Text(
-          advice.summary,
-          style: const TextStyle(
-            color: Color(0xFFE5E7EB),
-            fontSize: 11.5,
-            fontWeight: FontWeight.w500,
-            height: 1.25,
-          ),
-        ),
-
-        // Footer Row: Why Button + Evidence preview + 1RM indicator
-        Row(
-          children: [
-            GestureDetector(
-              onTap: () => setState(() => _showWhyDetails = true),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: KColor.border, width: 0.5),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Why?',
-                      style: TextStyle(
-                        color: KColor.green,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(Icons.arrow_drop_down_rounded, color: KColor.green, size: 16),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                advice.evidence.isNotEmpty ? advice.evidence.first : '',
-                style: const TextStyle(
-                  color: Color(0xFF9CA3AF),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (advice.spark1RmTrend.length >= 2) ...[
-              const SizedBox(width: 6),
-              const Icon(Icons.trending_up_rounded, size: 12, color: KColor.green),
-              const SizedBox(width: 3),
-              Text(
-                '1RM: ${advice.spark1RmTrend.last.toStringAsFixed(1)} kg',
-                style: const TextStyle(
-                  color: KColor.green,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
+              _SlotPill(
+                label: 'Demo',
+                semanticLabel: 'Replay exercise demo',
+                leading: Icons.play_arrow_rounded,
+                onTap: _replayDemo,
               ),
             ],
-          ],
+          ),
+        ),
+
+        // Action, style, target and summary: the only part that may scroll.
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        _sentenceCase(advice.action),
+                        style: KText.h2.copyWith(
+                          color: actionColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      // The method, as a quiet label rather than a pill.
+                      Text(
+                        _sentenceCase(advice.styleLabel),
+                        style: KText.caption.copyWith(
+                          color: KColor.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(target, style: KText.numSmall.copyWith(fontSize: 12.5)),
+                  const SizedBox(height: 4),
+                  // Kyno suggests; the user decides what to lift.
+                  Text(
+                    advice.summary,
+                    style: KText.caption.copyWith(
+                      color: KColor.textSecondary,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w400,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // Footer: Why? + first piece of evidence + latest estimated 1RM.
+        SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              _SlotPill(
+                label: 'Why?',
+                semanticLabel: 'Why this recommendation',
+                trailing: Icons.arrow_drop_down_rounded,
+                onTap: () {
+                  KHaptics.select();
+                  setState(() => _showWhyDetails = true);
+                },
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  advice.evidence.isNotEmpty ? advice.evidence.first : '',
+                  style: KText.caption.copyWith(
+                    color: KColor.textMuted,
+                    fontSize: 10,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (advice.spark1RmTrend.length >= 2) ...[
+                const SizedBox(width: 6),
+                Semantics(
+                  label: 'Estimated one rep max',
+                  child: Icon(
+                    Icons.trending_up_rounded,
+                    size: 13,
+                    color: KColor.textMuted,
+                  ),
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  '1RM ${amount(advice.spark1RmTrend.last)} kg',
+                  style: KText.numSmall.copyWith(
+                    color: KColor.textSecondary,
+                    fontSize: 10.5,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+            ],
+          ),
         ),
       ],
     );
   }
 
   Widget _buildExpandedWhyView(KynoProgressionAdvice advice) {
+    final hairline = KColor.isDark
+        ? KColor.fg.withValues(alpha: 0.08)
+        : KColor.border;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.psychology_rounded, size: 14, color: KColor.green),
-            const SizedBox(width: 6),
-            const Text(
-              'EVIDENCE & NEXT MILESTONE',
-              style: TextStyle(
-                color: KColor.textMuted,
-                fontSize: 9.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.5,
+        SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.fact_check_outlined,
+                size: 14,
+                color: KColor.textSecondary,
               ),
-            ),
-            const Spacer(),
-            GestureDetector(
-              onTap: () => setState(() => _showWhyDetails = false),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E2C),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Close',
-                      style: TextStyle(
-                        color: KColor.green,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(width: 2),
-                    Icon(Icons.arrow_drop_up_rounded, color: KColor.green, size: 16),
-                  ],
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Evidence and next milestone',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: KText.caption.copyWith(
+                    color: KColor.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-          ],
+              _SlotPill(
+                label: 'Close',
+                semanticLabel: 'Close evidence',
+                trailing: Icons.arrow_drop_up_rounded,
+                onTap: () {
+                  KHaptics.select();
+                  setState(() => _showWhyDetails = false);
+                },
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
         Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ...advice.evidence.map((ev) => Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
+          child: Padding(
+            padding: const EdgeInsets.only(right: 10, bottom: 10),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ...advice.evidence.map(
+                    (ev) => Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            '• ',
-                            style: TextStyle(
-                              color: Color(0xFFFFB347),
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
+                          Container(
+                            width: 4,
+                            height: 4,
+                            margin: const EdgeInsets.only(top: 6, right: 8),
+                            decoration: BoxDecoration(
+                              color: KColor.textMuted,
+                              shape: BoxShape.circle,
                             ),
                           ),
                           Expanded(
                             child: Text(
                               ev,
-                              style: const TextStyle(
-                                color: Color(0xFFE5E7EB),
-                                fontSize: 10.5,
-                                height: 1.22,
+                              style: KText.caption.copyWith(
+                                color: KColor.textPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w400,
+                                height: 1.35,
                               ),
                             ),
                           ),
                         ],
                       ),
-                    )),
-                const SizedBox(height: 4),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E2C).withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: const Color(0xFFFFB347).withValues(alpha: 0.25),
-                      width: 0.5,
                     ),
                   ),
-                  child: Text(
-                    'NEXT: ${advice.nextMilestone}',
-                    style: const TextStyle(
-                      color: Color(0xFFFFB347),
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.only(top: 8),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: hairline)),
+                    ),
+                    child: Text(
+                      'Next: ${advice.nextMilestone}',
+                      style: KText.caption.copyWith(
+                        color: KColor.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Kyno glyph ───────────────────────────────────────────────────────────────
+// Kyno's monochrome mark from the shared icon language: marks the card as
+// Kyno's voice without a stock "AI orb".
+
+class _KynoGlyph extends StatelessWidget {
+  const _KynoGlyph();
+
+  @override
+  Widget build(BuildContext context) => const KynoMark(size: 16);
+}
+
+/// Engine copy arrives in caps ("INCREASE TO 42.5 KG"); the stage speaks in
+/// sentence case ("Increase to 42.5 kg"). Display only: stored advice is
+/// unchanged.
+String _sentenceCase(String s) {
+  if (s.isEmpty) return s;
+  final lower = s.toLowerCase();
+  return lower[0].toUpperCase() + lower.substring(1);
+}
+
+// ─── Slot pill button ─────────────────────────────────────────────────────────
+// Compact visual pill inside a 48dp hit target; the whole target speaks as a
+// button. Neutral outline: the stage is chrome, not data.
+
+class _SlotPill extends StatelessWidget {
+  const _SlotPill({
+    required this.label,
+    required this.semanticLabel,
+    required this.onTap,
+    this.leading,
+    this.trailing,
+  });
+
+  final String label;
+  final String semanticLabel;
+  final VoidCallback onTap;
+  final IconData? leading;
+  final IconData? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = KColor.textPrimary;
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: onTap,
+        borderRadius: KRadius.pill,
+        scale: 0.94,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Center(
+              widthFactor: 1,
+              child: Container(
+                padding: EdgeInsets.fromLTRB(
+                  leading != null ? 8 : 11,
+                  5,
+                  trailing != null ? 5 : 11,
+                  5,
+                ),
+                decoration: BoxDecoration(
+                  color: KColor.fg.withValues(
+                    alpha: KColor.isDark ? 0.06 : 0.04,
+                  ),
+                  borderRadius: KRadius.pill,
+                  border: Border.all(
+                    color: KColor.fg.withValues(
+                      alpha: KColor.isDark ? 0.16 : 0.16,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (leading != null) ...[
+                      Icon(leading, size: 14, color: fg),
+                      const SizedBox(width: 3),
+                    ],
+                    Text(
+                      label,
+                      style: KText.caption.copyWith(
+                        color: fg,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        height: 1.2,
+                      ),
+                    ),
+                    if (trailing != null) Icon(trailing, size: 16, color: fg),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

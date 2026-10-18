@@ -19,47 +19,87 @@ class ExerciseMediaService {
   static const String rawBaseVideos =
       'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos';
 
-  /// Mandatory GymVisual copyright attribution notice per dataset license.
-  static const String attribution = '© Gym visual — gymvisual.com';
+  /// The raw GitHub copy of a jsDelivr media url, used as a single retry
+  /// when the CDN fails. Returns null for urls that are not dataset media.
+  static String? mirrorUrlFor(String url) {
+    if (url.startsWith('$cdnBaseVideos/')) {
+      return '$rawBaseVideos/${url.substring(cdnBaseVideos.length + 1)}';
+    }
+    if (url.startsWith('$cdnBaseImages/')) {
+      return '$rawBaseImages/${url.substring(cdnBaseImages.length + 1)}';
+    }
+    return null;
+  }
 
-  /// Deterministic media mappings for the foundational exercises.
-  /// Verified against GymVisual / openGym CDN repository.
+  /// Mandatory GymVisual copyright attribution notice per dataset license.
+  static const String attribution = '© Gym visual, gymvisual.com';
+
+  /// Explicit media for the app's own (non-numeric) exercise ids: the
+  /// foundational library, the day library and the Developer's Choice split.
+  ///
+  /// Every entry was checked against the dataset index
+  /// (data/exercises.json in hasaneyldrm/exercises-dataset) and by eye
+  /// against the GIF frames, so the equipment, grip and bench angle match
+  /// the exercise name. These win over any media refs on a definition.
+  /// The trailing comment is the dataset's own exercise name.
   static const Map<String, ({String image, String gif})> _foundationalMediaMap = {
-    'bench_press': (image: '0025-EIeI8Vf.jpg', gif: '0025-EIeI8Vf.gif'),
-    'incline_db_press': (image: '0314-ns0SIbU.jpg', gif: '0314-ns0SIbU.gif'),
-    'pec_dec': (image: '0596-v3xmPAR.jpg', gif: '0596-v3xmPAR.gif'),
-    'cable_chest_fly': (image: '0188-xLYSdtg.jpg', gif: '0188-xLYSdtg.gif'),
-    'chest_dip': (image: '0251-9WTm7dq.jpg', gif: '0251-9WTm7dq.gif'),
-    'deadlift': (image: '0032-ila4NZS.jpg', gif: '0032-ila4NZS.gif'),
-    'rdl': (image: '0085-wQ2c4XD.jpg', gif: '0085-wQ2c4XD.gif'),
-    'squat': (image: '0043-sA9xX0W.jpg', gif: '0043-sA9xX0W.gif'),
-    'hack_squat': (image: '0046-5VCj6iH.jpg', gif: '0046-5VCj6iH.gif'),
-    'leg_press': (image: '2287-V07qpXy.jpg', gif: '2287-V07qpXy.gif'),
-    'leg_extension': (image: '0585-my33uHU.jpg', gif: '0585-my33uHU.gif'),
-    'leg_curl': (image: '0586-17lJ1kr.jpg', gif: '0586-17lJ1kr.gif'),
-    'standing_calf': (image: '1372-8ozhUIZ.jpg', gif: '1372-8ozhUIZ.gif'),
-    'calf_raise': (image: '0088-ktsFQAZ.jpg', gif: '0088-ktsFQAZ.gif'),
-    'bb_row': (image: '0027-eZyBC3j.jpg', gif: '0027-eZyBC3j.gif'),
-    'db_row': (image: '0293-BJ0Hz5L.jpg', gif: '0293-BJ0Hz5L.gif'),
-    'tbar_row': (image: '1349-BgljGjd.jpg', gif: '1349-BgljGjd.gif'),
-    'seated_cable_row': (image: '0861-fUBheHs.jpg', gif: '0861-fUBheHs.gif'),
-    'lat_pulldown': (image: '2330-LEprlgG.jpg', gif: '2330-LEprlgG.gif'),
-    'ohp': (image: '0091-gAeez7P.jpg', gif: '0091-gAeez7P.gif'),
-    'arnold_press': (image: '2137-Xy4jlWA.jpg', gif: '2137-Xy4jlWA.gif'),
-    'db_shoulder_press': (image: '0426-A6wtbuL.jpg', gif: '0426-A6wtbuL.gif'),
-    'lateral_raise': (image: '0334-DsgkuIt.jpg', gif: '0334-DsgkuIt.gif'),
-    'cable_lateral_raise': (image: '0178-goJ6ezq.jpg', gif: '0178-goJ6ezq.gif'),
-    'face_pull': (image: '0233-ZfyAGhK.jpg', gif: '0233-ZfyAGhK.gif'), // Cable Standing Rear Delt Row (with Rope)
-    'shrugs': (image: '0406-NJzBsGJ.jpg', gif: '0406-NJzBsGJ.gif'),
-    'bb_curl': (image: '2407-aee2Fcj.jpg', gif: '2407-aee2Fcj.gif'),
-    'db_curl': (image: '0294-G7dY8zE.jpg', gif: '0294-G7dY8zE.gif'),
-    'hammer_curl': (image: '0313-slDvUAU.jpg', gif: '0313-slDvUAU.gif'),
-    'incline_db_curl': (image: '0315-G09xWwN.jpg', gif: '0315-G09xWwN.gif'),
-    'cable_curl': (image: '0868-G08RZcQ.jpg', gif: '0868-G08RZcQ.gif'),
-    'tri_pushdown': (image: '1723-qRZ5S1N.jpg', gif: '1723-qRZ5S1N.gif'),
-    'overhead_tri_ext': (image: '1722-1xHyxys.jpg', gif: '1722-1xHyxys.gif'),
-    'skullcrusher': (image: '0061-iZop9xO.jpg', gif: '0061-iZop9xO.gif'),
+    // Chest
+    'bench_press': (image: '0025-EIeI8Vf.jpg', gif: '0025-EIeI8Vf.gif'), // barbell bench press
+    'flat_bench_press': (image: '0025-EIeI8Vf.jpg', gif: '0025-EIeI8Vf.gif'), // barbell bench press
+    'incline_bench_press': (image: '0047-3TZduzM.jpg', gif: '0047-3TZduzM.gif'), // barbell incline bench press
+    'incline_db_press': (image: '0314-ns0SIbU.jpg', gif: '0314-ns0SIbU.gif'), // dumbbell incline bench press
+    'close_grip_bench': (image: '0030-J6Dx1Mu.jpg', gif: '0030-J6Dx1Mu.gif'), // barbell close-grip bench press
+    'pec_dec': (image: '0596-v3xmPAR.jpg', gif: '0596-v3xmPAR.gif'), // lever seated fly
+    'cable_chest_fly': (image: '0188-xLYSdtg.jpg', gif: '0188-xLYSdtg.gif'), // cable middle fly
+    'chest_dip': (image: '0251-9WTm7dq.jpg', gif: '0251-9WTm7dq.gif'), // chest dip
+    'dips': (image: '0814-X6C6i5Y.jpg', gif: '0814-X6C6i5Y.gif'), // triceps dip
+    // Legs
+    'deadlift': (image: '0032-ila4NZS.jpg', gif: '0032-ila4NZS.gif'), // barbell deadlift
+    'rdl': (image: '0085-wQ2c4XD.jpg', gif: '0085-wQ2c4XD.gif'), // barbell romanian deadlift
+    'squat': (image: '0043-qXTaZnJ.jpg', gif: '0043-qXTaZnJ.gif'), // barbell full squat
+    'hack_squat': (image: '0743-Qa55kX1.jpg', gif: '0743-Qa55kX1.gif'), // sled hack squat
+    'leg_press': (image: '0739-10Z2DXU.jpg', gif: '0739-10Z2DXU.gif'), // sled 45 degree leg press
+    'leg_extension': (image: '0585-my33uHU.jpg', gif: '0585-my33uHU.gif'), // lever leg extension
+    'leg_curl': (image: '0586-17lJ1kr.jpg', gif: '0586-17lJ1kr.gif'), // lever lying leg curl
+    'standing_calf': (image: '0605-ykUOVze.jpg', gif: '0605-ykUOVze.gif'), // lever standing calf raise
+    'calf_raise': (image: '0594-bOOdeyc.jpg', gif: '0594-bOOdeyc.gif'), // lever seated calf raise
+    'adductor_machine': (image: '0598-oHsrypV.jpg', gif: '0598-oHsrypV.gif'), // lever seated hip adduction
+    // Back
+    'bb_row': (image: '0027-eZyBC3j.jpg', gif: '0027-eZyBC3j.gif'), // barbell bent over row
+    'db_row': (image: '0292-C0MA9bC.jpg', gif: '0292-C0MA9bC.gif'), // dumbbell one arm bent-over row
+    'tbar_row': (image: '0606-aaXr7ld.jpg', gif: '0606-aaXr7ld.gif'), // lever t bar row
+    'seated_cable_row': (image: '0861-fUBheHs.jpg', gif: '0861-fUBheHs.gif'), // cable seated row
+    'close_grip_cable_row': (image: '0861-fUBheHs.jpg', gif: '0861-fUBheHs.gif'), // cable seated row (close handle)
+    'wide_grip_seated_row': (image: '0218-qcY50ZD.jpg', gif: '0218-qcY50ZD.gif'), // cable seated wide-grip row
+    'lat_pulldown': (image: '0198-RVwzP10.jpg', gif: '0198-RVwzP10.gif'), // cable pulldown
+    'pullups': (image: '0652-lBDjFxJ.jpg', gif: '0652-lBDjFxJ.gif'), // pull-up
+    'cable_pullover': (image: '0238-x69MAlq.jpg', gif: '0238-x69MAlq.gif'), // cable straight arm pulldown
+    'shrugs': (image: '0406-NJzBsGJ.jpg', gif: '0406-NJzBsGJ.gif'), // dumbbell shrug
+    // Shoulders
+    'ohp': (image: '1456-wdRZISl.jpg', gif: '1456-wdRZISl.gif'), // barbell standing close grip military press
+    'arnold_press': (image: '2137-Xy4jlWA.jpg', gif: '2137-Xy4jlWA.gif'), // dumbbell arnold press
+    'db_shoulder_press': (image: '0405-znQUdHY.jpg', gif: '0405-znQUdHY.gif'), // dumbbell seated shoulder press
+    'machine_shoulder_press': (image: '0869-vqsbmL0.jpg', gif: '0869-vqsbmL0.gif'), // lever shoulder press v. 2
+    'lateral_raise': (image: '0334-DsgkuIt.jpg', gif: '0334-DsgkuIt.gif'), // dumbbell lateral raise
+    'cable_lateral_raise': (image: '0178-goJ6ezq.jpg', gif: '0178-goJ6ezq.gif'), // cable lateral raise
+    'face_pull': (image: '0233-ZfyAGhK.jpg', gif: '0233-ZfyAGhK.gif'), // cable standing rear delt row (with rope)
+    'rear_delt_fly': (image: '0602-myfUsKf.jpg', gif: '0602-myfUsKf.gif'), // lever seated reverse fly
+    // Arms
+    'bb_curl': (image: '0031-25GPyDY.jpg', gif: '0031-25GPyDY.gif'), // barbell curl
+    'db_curl': (image: '0294-NbVPDMW.jpg', gif: '0294-NbVPDMW.gif'), // dumbbell biceps curl
+    'hammer_curl': (image: '0313-slDvUAU.jpg', gif: '0313-slDvUAU.gif'), // dumbbell hammer curl
+    'incline_db_curl': (image: '0315-F3xgbjF.jpg', gif: '0315-F3xgbjF.gif'), // dumbbell incline biceps curl
+    'cable_curl': (image: '0868-G08RZcQ.jpg', gif: '0868-G08RZcQ.gif'), // cable curl
+    'machine_preacher_curl': (image: '0592-b6hQYMb.jpg', gif: '0592-b6hQYMb.gif'), // lever preacher curl
+    'tri_pushdown': (image: '0200-dU605di.jpg', gif: '0200-dU605di.gif'), // cable pushdown (with rope attachment)
+    'rod_tricep_pushdown': (image: '0201-3ZflifB.jpg', gif: '0201-3ZflifB.gif'), // cable pushdown
+    'overhead_tri_ext': (image: '1722-1xHyxys.jpg', gif: '1722-1xHyxys.gif'), // cable high pulley overhead tricep extension
+    'skullcrusher': (image: '0060-h8LFzo9.jpg', gif: '0060-h8LFzo9.gif'), // barbell lying triceps extension skull crusher
   };
+
+  /// Read-only view of the explicit media overrides, for audits and tests.
+  static Map<String, ({String image, String gif})> get mediaOverrides =>
+      _foundationalMediaMap;
 
   /// Centralized canonical alias dictionary mapping gym aliases, alternate namings,
   /// and legacy workout IDs directly to their canonical foundational identity.
@@ -79,7 +119,8 @@ class ExerciseMediaService {
     'cable rope face pull': 'face_pull',
     'cable rope face pulls': 'face_pull',
     'cable standing rear delt row with rope': 'face_pull',
-    'cable rear delt row with rope': 'face_pull',
+    // 'cable rear delt row (with rope)' is its own dataset entry (0203).
+    'cable rear delt row with rope': '0203',
     'standing face pull': 'face_pull',
     'standing face pulls': 'face_pull',
 
@@ -90,12 +131,12 @@ class ExerciseMediaService {
     'cable high pulley overhead tricep extension': 'overhead_tri_ext',
     'cable overhead tricep extension': 'overhead_tri_ext',
     'cable overhead triceps extension': 'overhead_tri_ext',
-    'cable rope high pulley overhead tricep extension': 'overhead_tri_ext',
-    'db overhead tricep extension': 'overhead_tri_ext',
-    'dumbbell overhead tricep extension': 'overhead_tri_ext',
-    'dumbbell seated reverse grip one arm overhead tricep extension': 'overhead_tri_ext',
-    'barbell seated overhead triceps extension': 'overhead_tri_ext',
-    'barbell standing overhead triceps extension': 'overhead_tri_ext',
+    'cable rope high pulley overhead tricep extension': '1724',
+    // Dumbbell and barbell variants are deliberately not aliased here: the
+    // cable demo would show the wrong equipment. Barbell ones resolve to
+    // their own dataset entries.
+    'barbell seated overhead triceps extension': '0092',
+    'barbell standing overhead triceps extension': '0109',
     'overhead tricep ext': 'overhead_tri_ext',
     'tricep overhead extension': 'overhead_tri_ext',
 
@@ -148,7 +189,8 @@ class ExerciseMediaService {
     // Dumbbell Row aliases
     'db_row': 'db_row',
     'dumbbell row': 'db_row',
-    'dumbbell bent over row': 'db_row',
+    // Two-arm dumbbell row is its own dataset entry.
+    'dumbbell bent over row': '0293',
     'single arm db row': 'db_row',
     'one arm dumbbell row': 'db_row',
 
@@ -181,7 +223,8 @@ class ExerciseMediaService {
     'tri_pushdown': 'tri_pushdown',
     'tricep pushdown': 'tri_pushdown',
     'triceps pushdown': 'tri_pushdown',
-    'cable pushdown': 'tri_pushdown',
+    // Plain 'cable pushdown' in the dataset is the straight bar version.
+    'cable pushdown': '0201',
     'cable tricep pushdown': 'tri_pushdown',
     'rope pushdown': 'tri_pushdown',
 
@@ -232,8 +275,9 @@ class ExerciseMediaService {
     'rdl': 'rdl',
     'romanian deadlift': 'rdl',
     'barbell romanian deadlift': 'rdl',
-    'stiff leg deadlift': 'rdl',
-    'sldl': 'rdl',
+    // Stiff-leg is a distinct dataset lift (barbell straight leg deadlift).
+    'stiff leg deadlift': '0116',
+    'sldl': '0116',
 
     // Pec Dec aliases
     'pec_dec': 'pec_dec',
@@ -257,13 +301,14 @@ class ExerciseMediaService {
     'pull up': 'pullups',
     'pull-up': 'pullups',
     'pull ups': 'pullups',
-    'chin up': 'pullups',
-    'chin-up': 'pullups',
+    // Chin-ups (supinated grip) have their own demo.
+    'chin up': '1326',
+    'chin-up': '1326',
+    'chin ups': '1326',
 
     // Cable Pullover aliases
     'cable_pullover': 'cable_pullover',
     'cable pullover': 'cable_pullover',
-    'pullover': 'cable_pullover',
 
     // Leg Extension aliases
     'leg_extension': 'leg_extension',
@@ -293,13 +338,13 @@ class ExerciseMediaService {
     'rear_delt_fly': 'rear_delt_fly',
     'rear delt fly': 'rear_delt_fly',
     'reverse fly': 'rear_delt_fly',
-    'dumbbell rear delt fly': 'rear_delt_fly',
+    'dumbbell rear delt fly': '0378',
 
     // Shrugs aliases
     'shrugs': 'shrugs',
     'shrug': 'shrugs',
     'dumbbell shrug': 'shrugs',
-    'barbell shrug': 'shrugs',
+    'barbell shrug': '0095',
 
     // Adductor Machine aliases
     'adductor_machine': 'adductor_machine',
@@ -345,22 +390,24 @@ class ExerciseMediaService {
     String? id,
     String? name,
   }) {
-    // 1. Explicit openGym media on definition
+    final effectiveId = id ?? exercise?.id ?? definition?.id ?? '';
+    final effectiveName = name ?? exercise?.name ?? definition?.name ?? '';
+
+    // 1. Explicit, verified override for the app's own exercise ids. These
+    // win over refs carried on a definition so a stale ref can't show the
+    // wrong demo.
+    if (effectiveId.isNotEmpty && _foundationalMediaMap.containsKey(effectiveId)) {
+      final mapped = _foundationalMediaMap[effectiveId]!;
+      return (image: mapped.image, gif: mapped.gif, canonicalId: effectiveId);
+    }
+
+    // 1a. Media refs on the definition (dataset-backed library entries)
     if (definition != null) {
       final img = definition.imageRef;
       final gf = definition.gifRef;
       if (img != null && img.isNotEmpty && gf != null && gf.isNotEmpty) {
         return (image: img, gif: gf, canonicalId: definition.id);
       }
-    }
-
-    final effectiveId = id ?? exercise?.id ?? definition?.id ?? '';
-    final effectiveName = name ?? exercise?.name ?? definition?.name ?? '';
-
-    // 1a. Explicit canonical ID in foundational map
-    if (effectiveId.isNotEmpty && _foundationalMediaMap.containsKey(effectiveId)) {
-      final mapped = _foundationalMediaMap[effectiveId]!;
-      return (image: mapped.image, gif: mapped.gif, canonicalId: effectiveId);
     }
 
     // 1b. Explicit canonical ID in catalog definitions
@@ -405,17 +452,28 @@ class ExerciseMediaService {
           _normalize(def.canonicalName) == normName ||
           _normalize(def.displayName) == normName).toList();
 
-      if (matches.length == 1) {
-        final def = matches.first;
+      // The dataset repeats a few names (two angles of the same lift). Those
+      // are the same exercise, so the first one with media is safe to use.
+      final sameExercise = matches.length > 1 &&
+          matches.every((d) =>
+              _normalize(d.canonicalName) == _normalize(matches.first.canonicalName) &&
+              d.equipment.toLowerCase() == matches.first.equipment.toLowerCase());
+      if (matches.length == 1 || sameExercise) {
+        final def = matches.firstWhere(
+          (d) =>
+              (d.gifRef?.isNotEmpty ?? false) ||
+              _foundationalMediaMap.containsKey(d.id),
+          orElse: () => matches.first,
+        );
+        if (_foundationalMediaMap.containsKey(def.id)) {
+          final mapped = _foundationalMediaMap[def.id]!;
+          return (image: mapped.image, gif: mapped.gif, canonicalId: def.id);
+        }
         if (def.imageRef != null &&
             def.imageRef!.isNotEmpty &&
             def.gifRef != null &&
             def.gifRef!.isNotEmpty) {
           return (image: def.imageRef, gif: def.gifRef, canonicalId: def.id);
-        }
-        if (_foundationalMediaMap.containsKey(def.id)) {
-          final mapped = _foundationalMediaMap[def.id]!;
-          return (image: mapped.image, gif: mapped.gif, canonicalId: def.id);
         }
       }
     }

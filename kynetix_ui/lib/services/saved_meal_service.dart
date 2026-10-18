@@ -6,6 +6,7 @@ import '../services/mock_estimation_service.dart' show NutrientRange;
 import 'user_nutrition_memory.dart';
 import 'global_food_service.dart';
 import 'saved_meal_canonicalizer.dart';
+import 'food_link_service.dart';
 
 /// Categories of locally discoverable meals and foods.
 enum SavedMealType {
@@ -78,12 +79,11 @@ class SavedMealService {
     return norm.split(' ').where((t) => t.isNotEmpty && (t.length > 1 || RegExp(r'\d').hasMatch(t))).toList();
   }
 
-  final Map<String, List<SavedMealMatch>> _queryCache = {};
-
-  /// Clears the internal search query cache when new meals are saved.
-  void clearCache() {
-    _queryCache.clear();
-  }
+  /// Kept for API compatibility. Search no longer caches: a cache keyed only
+  /// by query text returned stale results after an override was saved and
+  /// could carry one account's results into another account's search.
+  /// Searching the in-memory stores is cheap, so results are always live.
+  void clearCache() {}
 
   /// Searches all saved meals, memory items, user overrides, and logged meals for [query].
   /// Ranked by relevance score and usage frequency.
@@ -91,15 +91,47 @@ class SavedMealService {
     final cleanQuery = normalize(query);
     if (cleanQuery.isEmpty || cleanQuery.length < 2) return const [];
 
-    final cacheKey = '$cleanQuery:$limit';
-    if (_queryCache.containsKey(cacheKey)) {
-      return _queryCache[cacheKey]!;
-    }
 
     final queryTokens = tokenize(query);
     if (queryTokens.isEmpty) return const [];
 
     final Map<String, SavedMealMatch> candidateMap = {};
+
+    // 0. Linked scanned foods: one entry per pack, found by its own name or
+    // any older name linked to it. Memory entries under those names are
+    // represented by this entry, so the tiers below skip them.
+    final links = FoodLinkService.instance.links;
+    bool isLinked(String a, [String? b]) =>
+        links.isNotEmpty &&
+        (FoodLinkService.instance.linkFor(a) != null ||
+            (b != null && FoodLinkService.instance.linkFor(b) != null));
+    try {
+      for (final link in links) {
+        final title = link.name;
+        final key = normalize(title);
+        if (key.isEmpty) continue;
+        final baseScore = _calculateScore(
+          cleanQuery, queryTokens, title, link.aliases.join(' '), [title, ...link.aliases], 5);
+        if (baseScore <= 25.0) continue;
+        final grams = link.portionGrams;
+        final result = link.product.resultForAmount(grams);
+        candidateMap[key] = SavedMealMatch(
+          title: title,
+          rawInput: link.product.entryText(grams),
+          calories: result.calories.mid,
+          protein: result.protein.mid,
+          carbohydrates: result.carbohydrates?.mid ?? 0.0,
+          fat: result.fat?.mid ?? 0.0,
+          fiber: result.fiber?.mid ?? 0.0,
+          ingredientNames: [title],
+          timesUsed: 5,
+          result: result,
+          emoji: _detectEmoji(title),
+          matchScore: baseScore + 70.0,
+          mealType: SavedMealType.rememberedFood,
+        );
+      }
+    } catch (_) {}
 
     // 1. Local Saved Meals: MealMemory.instance.allEntries (Priority 1)
     try {
@@ -108,6 +140,7 @@ class SavedMealService {
         final title = entry.result.canonicalMeal.isNotEmpty ? entry.result.canonicalMeal : entry.rawInput;
         final key = normalize(title);
         if (key.isEmpty) continue;
+        if (isLinked(title, entry.rawInput)) continue;
 
         final cal = entry.result.calories.mid;
         final pro = entry.result.protein.mid;
@@ -148,6 +181,7 @@ class SavedMealService {
         final title = override.canonicalMeal;
         final key = normalize(title);
         if (key.isEmpty) continue;
+        if (isLinked(title)) continue;
 
         final qty = override.referenceQuantity > 0 ? override.referenceQuantity : 1.0;
         final cal = override.caloriesPerUnit * qty;
@@ -253,6 +287,7 @@ class SavedMealService {
           final title = entry.finalSavedInput.isNotEmpty ? entry.finalSavedInput : entry.rawInput;
           final key = normalize(title);
           if (key.isEmpty) continue;
+          if (isLinked(title, entry.rawInput)) continue;
 
           final cal = entry.calMid;
           final pro = entry.protMid;
@@ -295,6 +330,7 @@ class SavedMealService {
         final title = entry.value.canonicalMeal.isNotEmpty ? entry.value.canonicalMeal : entry.key;
         final key = normalize(title);
         if (key.isEmpty) continue;
+        if (isLinked(title, entry.key)) continue;
 
         final cal = entry.value.calories.mid;
         final pro = entry.value.protein.mid;
@@ -335,12 +371,7 @@ class SavedMealService {
       return b.timesUsed.compareTo(a.timesUsed);
     });
 
-    final sorted = results.take(limit).toList();
-    if (_queryCache.length > 50) {
-      _queryCache.remove(_queryCache.keys.first);
-    }
-    _queryCache[cacheKey] = sorted;
-    return sorted;
+    return results.take(limit).toList();
   }
 
   static double _calculateScore(

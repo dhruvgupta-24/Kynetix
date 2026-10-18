@@ -9,6 +9,7 @@ import 'kyno_context_service.dart';
 import 'kyno_historical_analysis_service.dart';
 import 'kyno_coaching_insight_service.dart';
 import 'meal_memory.dart';
+import 'meal_tombstones.dart';
 import 'nutrition_hydration_guard.dart';
 import 'persistence_service.dart';
 import 'personal_nutrition_memory.dart';
@@ -16,6 +17,11 @@ import 'profile_service.dart';
 import 'quick_add_service.dart';
 import 'user_nutrition_memory.dart';
 import 'workout_service.dart';
+import 'barcode_food_service.dart';
+import 'body_metrics_service.dart';
+import 'fasting_service.dart';
+import 'food_link_service.dart';
+import 'kyno_notes_service.dart';
 import 'wakelock_service.dart';
 
 class DataPreservationException implements Exception {
@@ -98,6 +104,70 @@ class UserSessionCoordinator {
   static String scopedKey(String baseKey, String userId) => '${baseKey}_$userId';
   static String backupKey(String baseKey, String userId) => 'backup_pre_migration_${baseKey}_$userId';
 
+  /// The device-wide (unscoped) legacy stores belong to ONE person: whoever
+  /// claimed them first. Every other account on the device must start clean.
+  static const legacyOwnerKey = 'legacy_unscoped_owner_v1';
+
+  /// Claim value left behind when the legacy owner deleted their account.
+  /// The legacy stores then belong to nobody, for good: no account matches
+  /// it, so nobody ever migrates or reads them again, and ownership is never
+  /// re-derived from other accounts' migration markers.
+  static const legacyOwnerDeleted = '__deleted__';
+
+  /// Who owns the legacy unscoped stores on this device, or null if nobody has
+  /// claimed them yet. Back-fills the claim for installs that migrated before
+  /// the claim key existed (the earliest verified migration is the owner).
+  /// Returns [legacyOwnerDeleted] once the owner deleted their account; that
+  /// never equals a real user id.
+  static String? legacyOwner(SharedPreferences prefs) {
+    final claimed = prefs.getString(legacyOwnerKey);
+    if (claimed != null) return claimed;
+    const markerPrefix = 'migration_verified_v1_';
+    String? owner;
+    DateTime? earliest;
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(markerPrefix) || prefs.getBool(key) != true) continue;
+      final uid = key.substring(markerPrefix.length);
+      DateTime? at;
+      try {
+        final raw = prefs.getString('migration_audit_report_v1_$uid');
+        if (raw != null) {
+          final ts = (jsonDecode(raw) as Map<String, dynamic>)['timestamp'];
+          if (ts is String) at = DateTime.tryParse(ts);
+        }
+      } catch (_) {}
+      if (owner == null || (at != null && (earliest == null || at.isBefore(earliest)))) {
+        owner = uid;
+        earliest = at ?? earliest;
+      }
+    }
+    return owner;
+  }
+
+  // ── Carry-forward keys ──────────────────────────────────────────────────
+  //
+  // Stored per user. The old device-wide keys are read as a fallback only by
+  // the account that owns the device's legacy data (see [legacyOwner]),
+  // until that account's own key exists.
+  static const kCarryForwardResolved = 'carry_forward_resolved_dates_v1';
+  static const kCarryForwardHistory = 'carry_forward_history_v1';
+
+  /// Where the carry-forward list [legacyKey] is stored for [userId] (no
+  /// user: the device-wide key, as before).
+  static String carryForwardWriteKey(String legacyKey, String? userId) =>
+      userId == null ? legacyKey : scopedKey(legacyKey, userId);
+
+  /// Reads the carry-forward list [legacyKey] for [userId]. Any account other
+  /// than the legacy owner never sees the device-wide list.
+  static List<String>? readCarryForwardList(
+      SharedPreferences prefs, String legacyKey, String? userId) {
+    if (userId == null) return prefs.getStringList(legacyKey);
+    final scoped = prefs.getStringList(scopedKey(legacyKey, userId));
+    if (scoped != null) return scoped;
+    if (legacyOwner(prefs) == userId) return prefs.getStringList(legacyKey);
+    return null;
+  }
+
   /// Primary unscoped storage keys that belong to a single user
   static const unscopedKeys = [
     'day_logs_v1',
@@ -134,6 +204,33 @@ class UserSessionCoordinator {
     if (userId.isEmpty) {
       throw ArgumentError('[UserSessionCoordinator] Cannot initialize for empty userId');
     }
+    // Two callers asking for the same user at once (e.g. boot and the signed-in
+    // gate) share one load instead of racing two loads of the same stores.
+    final pending = _inFlightInit;
+    if (pending != null && _inFlightUserId == userId) return pending;
+    final run = _initializeForUser(userId, prefsOverride: prefsOverride);
+    _inFlightInit = run;
+    _inFlightUserId = userId;
+    try {
+      await run;
+    } finally {
+      if (identical(_inFlightInit, run)) {
+        _inFlightInit = null;
+        _inFlightUserId = null;
+      }
+    }
+  }
+
+  Future<void>? _inFlightInit;
+  String? _inFlightUserId;
+  String? _readyUserId;
+
+  /// True once [initializeForUser] has fully loaded [userId]'s scoped data
+  /// (unlike [currentUserId], which is set as soon as a load starts).
+  bool isReadyFor(String? userId) =>
+      userId != null && _readyUserId == userId && _currentUserId == userId;
+
+  Future<void> _initializeForUser(String userId, {SharedPreferences? prefsOverride}) async {
 
     // If switching from a different user, cleanly flush all in-memory states first.
     if (_currentUserId != null && _currentUserId != userId) {
@@ -144,6 +241,9 @@ class UserSessionCoordinator {
     _currentUserId = userId;
     final prefs = prefsOverride ?? await SharedPreferences.getInstance();
 
+    // 0. Land any queued day-log write so migration reads the latest data.
+    await PersistenceService.flushPendingWrites();
+
     // 1. Perform safe, non-destructive migration if not yet done for this user
     await migrateUnscopedDataForUser(userId, prefs);
 
@@ -152,6 +252,7 @@ class UserSessionCoordinator {
 
     // 3. Initialize user-scoped services with this user's data
     await PersistenceService.loadForUser(userId, prefsOverride: prefs);
+    await MealTombstones.instance.loadForUser(userId, prefsOverride: prefs);
     await WorkoutService.instance.initForUser(userId, prefsOverride: prefs);
     await UserNutritionMemory.instance.initForUser(userId, prefsOverride: prefs);
     await MealMemory.instance.initForUser(userId, prefsOverride: prefs);
@@ -159,12 +260,18 @@ class UserSessionCoordinator {
     await EatingPatternService.instance.loadForUser(userId, prefsOverride: prefs);
     await QuickAddService.instance.initForUser(userId, prefsOverride: prefs);
     await InsightsReportService.instance.initForUser(userId, prefsOverride: prefs);
+    await BodyMetricsService.instance.initForUser(userId, prefsOverride: prefs);
+    await KynoNotesService.instance.initForUser(userId, prefsOverride: prefs);
+    await FastingService.instance.initForUser(userId, prefsOverride: prefs);
+    await FoodLinkService.instance.initForUser(userId, prefsOverride: prefs);
+    BodyMetricsService.instance.hydrateFromCloud().ignore();
 
     // 4. Reset KynoContext cache so no stale data from any prior session leaks
     KynoContextService.instance.reset();
 
     // 5. Open hydration guard for this user
     NutritionHydrationGuard.instance.markComplete(userId);
+    _readyUserId = userId;
 
     debugPrint('[UserSessionCoordinator] ✅ All services successfully initialized for user: $userId');
   }
@@ -173,13 +280,19 @@ class UserSessionCoordinator {
   /// Wipes all in-memory state without deleting persisted scoped data on disk.
   Future<void> clearAllUserServices() async {
     debugPrint('[UserSessionCoordinator] 🔒 Flushing all in-memory user states (Hard Boundary)');
-    
+    _readyUserId = null;
+
+    // Finish this user's pending writes / uploads while their data is still in
+    // memory (debounced saves must never be lost at logout).
+    await PersistenceService.flushForSessionEnd();
+
     // Close the hydration gate first
     NutritionHydrationGuard.instance.reset();
 
     // Flush in-memory stores
     ProfileService.instance.currentUserProfile = null;
     dayLogStore.clear();
+    MealTombstones.instance.clearMemory();
     WorkoutService.instance.clearMemory();
     UserNutritionMemory.instance.clearMemory();
     MealMemory.instance.clearMemory();
@@ -187,14 +300,26 @@ class UserSessionCoordinator {
     EatingPatternService.instance.clearMemory();
     QuickAddService.instance.clearMemory();
     InsightsReportService.instance.clearMemory();
+    BodyMetricsService.instance.clearMemory();
+    KynoNotesService.instance.clearMemory();
+    FastingService.instance.clearMemory();
+    FoodLinkService.instance.clearMemory();
     KynoContextService.instance.reset();
     KynoHistoricalAnalysisService.instance.clearMemory();
     KynoCoachingInsightService.instance.clearMemory();
     WakelockService.instance.disable().ignore();
+    // Scanned-product cache is device-wide: clear it so the next account
+    // can't see which products this one scanned.
+    BarcodeFoodService.instance.clearCache().ignore();
+
+    // Service resets above can read today's log via logFor(), which
+    // re-creates an empty entry; clear again so logout is a true clean slate.
+    dayLogStore.clear();
+    ProfileService.instance.currentUserProfile = null;
 
     await PersistenceService.clearCachedOwnerId();
     _currentUserId = null;
-    debugPrint('[UserSessionCoordinator] ✅ In-memory flush complete — zero cross-user leakage');
+    debugPrint('[UserSessionCoordinator] ✅ In-memory flush complete, zero cross-user leakage');
   }
 
   /// Non-destructive migration:
@@ -223,6 +348,38 @@ class UserSessionCoordinator {
         isVerified: true,
         timestamp: DateTime.now(),
       );
+    }
+
+    // Legacy unscoped data is only ever copied into its owner's account. A new
+    // account on a device that already has an owner starts clean (nothing is
+    // deleted — the legacy keys stay put for their owner).
+    final owner = legacyOwner(prefs);
+    if (owner != null && owner != userId) {
+      debugPrint('[UserSessionCoordinator] Legacy local data belongs to another account, skipping copy for: $userId');
+      final report = MigrationAuditReport(
+        userId: userId,
+        historicalNutritionRecordsScanned: 0,
+        historicalNutritionRecordsChanged: 0,
+        historicalNutritionRecordsDeleted: 0,
+        historicalNutritionRecordsLost: 0,
+        workoutSessionsScanned: 0,
+        workoutSessionsChanged: 0,
+        workoutSessionsDeleted: 0,
+        workoutSessionsLost: 0,
+        overridesScanned: 0,
+        overridesLost: 0,
+        mealMemoryScanned: 0,
+        mealMemoryLost: 0,
+        isVerified: true,
+        timestamp: DateTime.now(),
+      );
+      _lastAuditReport = report;
+      await prefs.setString(legacyOwnerKey, owner);
+      await prefs.setBool(migrationMarkerKey, true);
+      return report;
+    }
+    if (owner == null && unscopedKeys.any(prefs.containsKey)) {
+      await prefs.setString(legacyOwnerKey, userId);
     }
 
     debugPrint('[UserSessionCoordinator] 🛡️ Starting Non-Destructive Pre-Migration Audit for user: $userId');

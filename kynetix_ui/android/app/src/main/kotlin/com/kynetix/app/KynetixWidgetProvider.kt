@@ -1,25 +1,43 @@
 package com.kynetix.app
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.*
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
+/**
+ * Kynetix home-screen widget ("Carbon & Paper").
+ *
+ * Data comes from lib/services/widget_service.dart as JSON under the
+ * SharedPreferences key `flutter.widget_data_v1`. Every render compares the
+ * payload's `date_key` with today's local date, so the widget never shows
+ * yesterday's numbers: after midnight it falls back to the payload's
+ * `next_day` target with nothing eaten, or to a calm "Open Kynetix" state.
+ *
+ * One 2x2 size: [WidgetRings] draws two flat concentric rings (calories,
+ * protein) on a transparent canvas with what is left in the middle.
+ */
 class KynetixWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId)
         }
+        scheduleMidnightUpdate(context)
     }
 
     override fun onAppWidgetOptionsChanged(
@@ -31,8 +49,128 @@ class KynetixWidgetProvider : AppWidgetProvider() {
         updateAppWidget(context, appWidgetManager, appWidgetId, newOptions)
     }
 
+    override fun onEnabled(context: Context) {
+        scheduleMidnightUpdate(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        try {
+            context.getSystemService(AlarmManager::class.java)?.cancel(midnightIntent(context))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to cancel midnight update: ", e)
+        }
+    }
+
+    /** What one day looks like on the widget. */
+    data class DayState(
+        val caloriesEaten: Int,
+        val caloriesTarget: Int,
+        val proteinEaten: Int,
+        val proteinTarget: Int,
+        val isTrainingDay: Boolean,
+        val label: String,
+        /** Targets are from the last known plan; the app hasn't run for a while. */
+        val stale: Boolean = false,
+    )
+
     companion object {
         private const val TAG = "KynetixWidgetProvider"
+        private const val PREFS = "FlutterSharedPreferences"
+        private const val DATA_KEY = "flutter.widget_data_v1"
+
+        const val ACTION_OPEN_NUTRITION = "com.kynetix.app.ACTION_OPEN_NUTRITION"
+
+        /** Intent extra the "Log meal" pill adds to the launch intent. */
+        const val EXTRA_KYNETIX_ACTION = "kynetix_action"
+        const val KYNETIX_ACTION_LOG_MEAL = "log_meal"
+
+        private const val REQUEST_OPEN = 0
+        private const val REQUEST_LOG_MEAL = 1 // retired with the 4x4 pill; kept so the code is not reused
+        private const val REQUEST_MIDNIGHT = 1001
+
+        private const val MIDNIGHT_WINDOW_MS = 10 * 60 * 1000L
+
+        // ── State ────────────────────────────────────────────────────────────
+
+        /** `yyyy-MM-dd` in ASCII digits, matching Dart's date keys. */
+        fun todayKey(now: Date = Date()): String =
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
+
+        /**
+         * Resolves what to show for [todayKey], or null for the
+         * "Open Kynetix" state. Never returns another day's eaten numbers and
+         * never invents a target.
+         */
+        fun resolveState(json: String?, todayKey: String): DayState? {
+            if (json.isNullOrBlank()) return null
+            val obj = try { JSONObject(json) } catch (e: Exception) { return null }
+
+            val dataDay = obj.optString("date_key", obj.optString("last_update_date", ""))
+            if (dataDay == todayKey) {
+                val calTarget = obj.cleanInt("calories_target")
+                val proTarget = obj.cleanInt("protein_target")
+                if (calTarget == null || calTarget <= 0 || proTarget == null || proTarget <= 0) return null
+                return DayState(
+                    caloriesEaten = (obj.cleanInt("calories_consumed") ?: 0).coerceAtLeast(0),
+                    caloriesTarget = calTarget,
+                    proteinEaten = (obj.cleanInt("protein_consumed") ?: 0).coerceAtLeast(0),
+                    proteinTarget = proTarget,
+                    isTrainingDay = obj.optBoolean("is_training_day", false),
+                    label = obj.optString("day_label", ""),
+                )
+            }
+
+            // The app has not run today. Nothing has been logged on this phone
+            // since, so today starts from zero against today's planned target
+            // (the payload carries the week ahead).
+            fun fromDay(day: JSONObject?, stale: Boolean): DayState? {
+                if (day == null) return null
+                val calTarget = day.cleanInt("calories_target")
+                val proTarget = day.cleanInt("protein_target")
+                if (calTarget == null || calTarget <= 0 || proTarget == null || proTarget <= 0) return null
+                return DayState(
+                    caloriesEaten = 0,
+                    caloriesTarget = calTarget,
+                    proteinEaten = 0,
+                    proteinTarget = proTarget,
+                    isTrainingDay = day.optBoolean("is_training_day", false),
+                    label = day.optString("day_label", ""),
+                    stale = stale,
+                )
+            }
+            val next = obj.optJSONObject("next_day")
+            if (next != null && next.optString("date_key", "") == todayKey) return fromDay(next, false)
+            val days = obj.optJSONArray("days")
+            if (days != null) {
+                for (i in 0 until days.length()) {
+                    val d = days.optJSONObject(i) ?: continue
+                    if (d.optString("date_key", "") == todayKey) return fromDay(d, false)
+                }
+            }
+            // Over a week without the app: keep showing the last plan rather
+            // than a blank dial, and say it may be out of date.
+            if (dataDay.isNotEmpty() && dataDay < todayKey) return fromDay(obj, true)
+            return null
+        }
+
+        private fun JSONObject.cleanInt(key: String): Int? {
+            if (!has(key) || isNull(key)) return null
+            val d = optDouble(key, Double.NaN)
+            if (d.isNaN() || d.isInfinite()) return null
+            return d.roundToInt()
+        }
+
+        /** "Push Day" -> "Push day"; engine bookkeeping labels -> plain day type. */
+        fun dayName(label: String, isTrainingDay: Boolean): String {
+            val generic = setOf("", "Default", "Manual Override", "Saved Target", "Training Day", "Rest Day")
+            val trimmed = label.trim()
+            if (trimmed in generic) return if (isTrainingDay) "Training day" else "Rest day"
+            return if (trimmed.endsWith(" Day")) trimmed.dropLast(4) + " day" else trimmed
+        }
+
+        private fun fmt(n: Int): String = String.format(Locale.US, "%,d", n)
+
+        // ── Rendering ────────────────────────────────────────────────────────
 
         fun updateAppWidget(
             context: Context,
@@ -41,288 +179,107 @@ class KynetixWidgetProvider : AppWidgetProvider() {
             options: Bundle? = null
         ) {
             try {
-                val opts = options ?: try {
-                    appWidgetManager.getAppWidgetOptions(appWidgetId)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to get app widget options: ", e)
-                    null
-                }
+                val views = RemoteViews(context.packageName, R.layout.kynetix_widget_2x2)
+                bindClicks(context, views)
 
-                val minWidth = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0
-                val minHeight = opts?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0
+                val json = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(DATA_KEY, null)
+                val state = resolveState(json, todayKey())
 
-                Log.d(TAG, "updateAppWidget: id=$appWidgetId size=${minWidth}x${minHeight}")
-
-                val layoutResId = when {
-                    minWidth >= 180 -> {
-                        if (minHeight >= 180) {
-                            R.layout.kynetix_widget_4x4
-                        } else {
-                            R.layout.kynetix_widget_4x2
-                        }
-                    }
-                    else -> R.layout.kynetix_widget_2x2
-                }
-
-                val views = RemoteViews(context.packageName, layoutResId)
-
-                // Setup click intent to open Kynetix app & switch to Nutrition tab
-                val intent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    action = "com.kynetix.app.ACTION_OPEN_NUTRITION"
-                }
-                val pendingIntent = PendingIntent.getActivity(
-                    context, 
-                    0, 
-                    intent, 
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-
-                // Read SharedPreferences
-                val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val dataStr = prefs.getString("flutter.widget_data_v1", null)
-
-                if (dataStr == null) {
-                    // Fresh install / empty state fallback
-                    views.setViewVisibility(R.id.widget_content_layout, View.GONE)
-                    views.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
-                    if (layoutResId == R.layout.kynetix_widget_4x4) {
-                        views.setViewVisibility(R.id.widget_header_layout, View.GONE)
-                        views.setViewVisibility(R.id.widget_details_layout, View.GONE)
-                    }
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
-                    return
-                }
-
-                val json = JSONObject(dataStr)
-                val lastUpdateDate = json.optString("last_update_date", "")
-                val lastUpdateTime = json.optString("last_update_time", "--:--")
-
-                // Daily Rollover check
-                val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                val isNewDay = currentDate != lastUpdateDate
-
-                var caloriesConsumed = if (isNewDay) 0.0 else json.optDouble("calories_consumed", 0.0)
-                val caloriesTarget = json.optDouble("calories_target", 2000.0)
-                var caloriesRemaining = if (isNewDay) caloriesTarget else json.optDouble("calories_remaining", caloriesTarget)
-
-                var proteinConsumed = if (isNewDay) 0.0 else json.optDouble("protein_consumed", 0.0)
-                val proteinTarget = json.optDouble("protein_target", 120.0)
-                var proteinRemaining = if (isNewDay) proteinTarget else json.optDouble("protein_remaining", proteinTarget)
-
-                // Clean NaN or Infinite values
-                fun Double.clean(): Double = if (isNaN() || isInfinite()) 0.0 else this
-                caloriesConsumed = caloriesConsumed.clean()
-                val cleanCaloriesTarget = caloriesTarget.clean()
-                caloriesRemaining = caloriesRemaining.clean()
-                proteinConsumed = proteinConsumed.clean()
-                val cleanProteinTarget = proteinTarget.clean()
-                proteinRemaining = proteinRemaining.clean()
-
-                // Clamp values just in case
-                val finalCaloriesRemaining = if (caloriesRemaining < 0.0) 0.0 else caloriesRemaining
-                val finalProteinRemaining = if (proteinRemaining < 0.0) 0.0 else proteinRemaining
-
-                // Allow ratios to exceed 1.0f (up to 2.0f) to render over-target highlight arc
-                val calRatio = if (cleanCaloriesTarget > 0.0) {
-                    (caloriesConsumed / cleanCaloriesTarget).toFloat().coerceIn(0f, 2f)
+                if (state == null) {
+                    showEmpty(context, views)
                 } else {
-                    0f
+                    bindState(context, views, state)
                 }
-                val proRatio = if (cleanProteinTarget > 0.0) {
-                    (proteinConsumed / cleanProteinTarget).toFloat().coerceIn(0f, 2f)
-                } else {
-                    0f
-                }
-
-                // Bind view elements based on layout size
-                if (layoutResId == R.layout.kynetix_widget_2x2) {
-                    views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
-                    views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
-
-                    val bitmap = drawConcentricRings(calRatio, proRatio, caloriesConsumed > cleanCaloriesTarget, proteinConsumed > cleanProteinTarget, isLarge = false)
-                    views.setImageViewBitmap(R.id.widget_progress_rings, bitmap)
-
-                    views.setTextViewText(R.id.widget_calories_value, "${finalCaloriesRemaining.toInt()}")
-                    views.setTextViewText(R.id.widget_protein_value, "${finalProteinRemaining.toInt()}g")
-                } 
-                else if (layoutResId == R.layout.kynetix_widget_4x2) {
-                    views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
-                    views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
-
-                    val calBitmap = drawSingleRing(calRatio, caloriesConsumed > cleanCaloriesTarget, "#FF6B35")
-                    val proBitmap = drawSingleRing(proRatio, proteinConsumed > cleanProteinTarget, "#52B788")
-                    views.setImageViewBitmap(R.id.widget_calories_ring, calBitmap)
-                    views.setImageViewBitmap(R.id.widget_protein_ring, proBitmap)
-
-                    views.setTextViewText(R.id.widget_calories_center_value, "${finalCaloriesRemaining.toInt()}")
-                    views.setTextViewText(R.id.widget_protein_center_value, "${finalProteinRemaining.toInt()}g")
-
-                    views.setTextViewText(R.id.widget_calories_remaining, "${finalCaloriesRemaining.toInt()} kcal left")
-                    views.setTextViewText(R.id.widget_calories_consumed_target, "${caloriesConsumed.toInt()} / ${cleanCaloriesTarget.toInt()} consumed")
-
-                    views.setTextViewText(R.id.widget_protein_remaining, "${finalProteinRemaining.toInt()}g left")
-                    views.setTextViewText(R.id.widget_protein_consumed_target, "${proteinConsumed.toInt()} / ${cleanProteinTarget.toInt()} consumed")
-                } 
-                else { // 4x4
-                    views.setViewVisibility(R.id.widget_content_layout, View.VISIBLE)
-                    views.setViewVisibility(R.id.widget_fallback_text, View.GONE)
-
-                    val bitmap = drawConcentricRings(calRatio, proRatio, caloriesConsumed > cleanCaloriesTarget, proteinConsumed > cleanProteinTarget, isLarge = true)
-                    views.setImageViewBitmap(R.id.widget_progress_rings, bitmap)
-
-                    views.setTextViewText(R.id.widget_calories_value, "${finalCaloriesRemaining.toInt()}")
-                    views.setTextViewText(R.id.widget_protein_value, "${finalProteinRemaining.toInt()}g")
-
-                    views.setTextViewText(R.id.widget_calories_remaining, "${finalCaloriesRemaining.toInt()} kcal remaining")
-                    views.setTextViewText(R.id.widget_calories_consumed_target, "${caloriesConsumed.toInt()} / ${cleanCaloriesTarget.toInt()} kcal")
-
-                    views.setTextViewText(R.id.widget_protein_remaining, "${finalProteinRemaining.toInt()}g remaining")
-                    views.setTextViewText(R.id.widget_protein_consumed_target, "${proteinConsumed.toInt()} / ${cleanProteinTarget.toInt()} g")
-                }
-
                 appWidgetManager.updateAppWidget(appWidgetId, views)
-
             } catch (e: Exception) {
                 Log.e(TAG, "updateAppWidget error: ", e)
                 try {
-                    val fallbackResId = when {
-                        options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0 >= 180 -> {
-                            if (options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0 >= 180) {
-                                R.layout.kynetix_widget_4x4
-                            } else {
-                                R.layout.kynetix_widget_4x2
-                            }
-                        }
-                        else -> R.layout.kynetix_widget_2x2
-                    }
-                    val fallbackViews = RemoteViews(context.packageName, fallbackResId)
-                    fallbackViews.setViewVisibility(R.id.widget_content_layout, View.GONE)
-                    fallbackViews.setViewVisibility(R.id.widget_fallback_text, View.VISIBLE)
-                    if (fallbackResId == R.layout.kynetix_widget_4x4) {
-                        fallbackViews.setViewVisibility(R.id.widget_header_layout, View.GONE)
-                        fallbackViews.setViewVisibility(R.id.widget_details_layout, View.GONE)
-                    }
-                    appWidgetManager.updateAppWidget(appWidgetId, fallbackViews)
+                    val fallback = RemoteViews(context.packageName, R.layout.kynetix_widget_2x2)
+                    bindClicks(context, fallback)
+                    showEmpty(context, fallback)
+                    appWidgetManager.updateAppWidget(appWidgetId, fallback)
                 } catch (ex: Exception) {
                     Log.e(TAG, "Fatal widget fallback update failure: ", ex)
                 }
             }
         }
 
-        private fun drawSingleRing(
-            ratio: Float,
-            overTarget: Boolean,
-            colorHex: String
-        ): Bitmap {
-            val size = 150
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.TRANSPARENT)
-
-            val center = size / 2f
-            val radius = size * 0.415f
-            val stroke = size * 0.09f
-            val rect = RectF(center - radius, center - radius, center + radius, center + radius)
-
-            val paint = Paint().apply {
-                style = Paint.Style.STROKE
-                strokeCap = Paint.Cap.ROUND
-                isAntiAlias = true
+        private fun launchIntent(context: Context, extra: String?): Intent =
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                action = ACTION_OPEN_NUTRITION
+                if (extra != null) putExtra(EXTRA_KYNETIX_ACTION, extra)
             }
 
-            // Draw track
-            paint.color = Color.parseColor("#2A2A3C")
-            paint.strokeWidth = stroke
-            canvas.drawArc(rect, -90f, 360f, false, paint)
-
-            // Primary progress color
-            val baseColor = Color.parseColor(colorHex)
-            paint.color = baseColor
-
-            if (overTarget) {
-                // If over target, draw full 360 degree circle of base color
-                canvas.drawArc(rect, -90f, 360f, false, paint)
-                
-                // Then overlay the excess arc in gold/yellow
-                val excessRatio = (ratio - 1.0f).coerceAtMost(1.0f)
-                paint.color = Color.parseColor("#F59E0B")
-                canvas.drawArc(rect, -90f, excessRatio * 360f, false, paint)
-            } else {
-                canvas.drawArc(rect, -90f, ratio * 360f, false, paint)
-            }
-
-            return bitmap
+        private fun bindClicks(context: Context, views: RemoteViews) {
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            views.setOnClickPendingIntent(
+                R.id.widget_root,
+                PendingIntent.getActivity(context, REQUEST_OPEN, launchIntent(context, null), flags)
+            )
         }
 
-        private fun drawConcentricRings(
-            calRatio: Float,
-            proRatio: Float,
-            calOverTarget: Boolean,
-            proOverTarget: Boolean,
-            isLarge: Boolean
-        ): Bitmap {
-            val size = if (isLarge) 400 else 300
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.TRANSPARENT)
+        private const val SIZE_PX = 480
 
-            val center = size / 2f
+        private fun showEmpty(context: Context, views: RemoteViews) {
+            views.setImageViewBitmap(R.id.widget_dial, WidgetRings.empty(context, SIZE_PX))
+            views.setContentDescription(R.id.widget_root, "Kynetix. Open Kynetix to see what is left today.")
+        }
 
-            val paint = Paint().apply {
-                style = Paint.Style.STROKE
-                strokeCap = Paint.Cap.ROUND
-                isAntiAlias = true
+        private fun bindState(context: Context, views: RemoteViews, s: DayState) {
+            views.setImageViewBitmap(R.id.widget_dial, WidgetRings.rings(context, SIZE_PX, s))
+            val calLeft = s.caloriesTarget - s.caloriesEaten
+            val proLeft = s.proteinTarget - s.proteinEaten
+            val calSpoken = if (calLeft < 0) "${fmt(abs(calLeft))} kcal over" else "${fmt(calLeft)} kcal left"
+            val proSpoken = if (proLeft < 0) "${fmt(abs(proLeft))} grams protein over" else "${fmt(proLeft)} grams protein left"
+            views.setContentDescription(
+                R.id.widget_root,
+                "Kynetix. $calSpoken of ${fmt(s.caloriesTarget)}. $proSpoken. ${dayName(s.label, s.isTrainingDay)}."
+            )
+        }
+
+        // ── Midnight refresh ─────────────────────────────────────────────────
+
+        private fun midnightIntent(context: Context): PendingIntent {
+            val ids = AppWidgetManager.getInstance(context)
+                .getAppWidgetIds(ComponentName(context, KynetixWidgetProvider::class.java))
+            val intent = Intent(context, KynetixWidgetProvider::class.java).apply {
+                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
             }
+            return PendingIntent.getBroadcast(
+                context,
+                REQUEST_MIDNIGHT,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
 
-            // 1. Draw Calories Ring (Outer)
-            val outerRadius = if (isLarge) size * 0.43f else size * 0.45f
-            val outerStroke = size * 0.07f
-            val outerRect = RectF(center - outerRadius, center - outerRadius, center + outerRadius, center + outerRadius)
-
-            // Outer Track
-            paint.color = Color.parseColor("#2A2A3C")
-            paint.strokeWidth = outerStroke
-            canvas.drawArc(outerRect, -90f, 360f, false, paint)
-
-            // Outer Progress
-            paint.color = Color.parseColor("#FF6B35")
-            if (calOverTarget) {
-                canvas.drawArc(outerRect, -90f, 360f, false, paint)
-                
-                // Draw gold over-target overlay
-                val excessRatio = (calRatio - 1.0f).coerceAtMost(1.0f)
-                paint.color = Color.parseColor("#F59E0B")
-                canvas.drawArc(outerRect, -90f, excessRatio * 360f, false, paint)
-            } else {
-                canvas.drawArc(outerRect, -90f, calRatio * 360f, false, paint)
+        /**
+         * Inexact, non-waking alarm a few seconds after the next local
+         * midnight (no exact-alarm permission). If the phone is asleep it
+         * fires when the screen wakes, which is when the widget is seen.
+         */
+        fun scheduleMidnightUpdate(context: Context) {
+            try {
+                val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+                val next = Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_YEAR, 1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 5)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                alarmManager.setWindow(
+                    AlarmManager.RTC,
+                    next.timeInMillis,
+                    MIDNIGHT_WINDOW_MS,
+                    midnightIntent(context)
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to schedule midnight update: ", e)
             }
-
-            // 2. Draw Protein Ring (Inner)
-            val innerRadius = if (isLarge) size * 0.33f else size * 0.34f
-            val innerStroke = size * 0.055f
-            val innerRect = RectF(center - innerRadius, center - innerRadius, center + innerRadius, center + innerRadius)
-
-            // Inner Track
-            paint.color = Color.parseColor("#2A2A3C")
-            paint.strokeWidth = innerStroke
-            canvas.drawArc(innerRect, -90f, 360f, false, paint)
-
-            // Inner Progress
-            paint.color = Color.parseColor("#52B788")
-            if (proOverTarget) {
-                canvas.drawArc(innerRect, -90f, 360f, false, paint)
-                
-                // Draw gold over-target overlay
-                val excessRatio = (proRatio - 1.0f).coerceAtMost(1.0f)
-                paint.color = Color.parseColor("#F59E0B")
-                canvas.drawArc(innerRect, -90f, excessRatio * 360f, false, paint)
-            } else {
-                canvas.drawArc(innerRect, -90f, proRatio * 360f, false, paint)
-            }
-
-            return bitmap
         }
     }
 }

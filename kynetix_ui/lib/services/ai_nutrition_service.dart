@@ -1,15 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../config/mess_calibration.dart';
 import '../models/nutrition_result.dart';
-import '../models/user_profile.dart';
 import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import 'user_nutrition_memory.dart';
 import 'personal_nutrition_memory.dart';
 import 'meal_memory.dart';
+import 'ai_router_error.dart';
+import 'internal/net_timeouts.dart';
 
 class AiEscalationContext {
   final String localInterpretation;
@@ -60,31 +60,31 @@ class AiNutritionService {
     debugPrint('[AI] estimating: "$rawInput"');
 
     // ── Route through backend ai-chat-router ─────────────────────────────────
-    // The backend handles provider selection: OpenAI first, OpenRouter fallback.
-    // No API keys or provider logic on the client.
-    final relevantMemory = _getRelevantFoodMemory(rawInput);
-    final messages = [
-      {'role': 'system', 'content': _systemPrompt()},
-      {'role': 'user',   'content': _userPrompt(rawInput, context: context, foodMemoryBlock: relevantMemory)},
-    ];
+    // The backend handles provider selection and owns the system prompt
+    // (purpose 'meal_estimate'). No API keys or provider logic on the client.
+    final body = buildRequestBody(rawInput, context: context);
 
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
 
     final stopwatch = Stopwatch()..start();
     try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'ai-chat-router',
-        body: {'messages': messages},
-        headers: {'Authorization': 'Bearer ${session.accessToken}'},
-      );
+      final FunctionResponse res;
+      try {
+        res = await Supabase.instance.client.functions.invoke(
+          'ai-chat-router',
+          body: body,
+          headers: {'Authorization': 'Bearer ${session.accessToken}'},
+        ).within(NetTimeouts.ai, 'AI meal estimate');
+      } on FunctionException catch (e) {
+        // 429 / 413 / 400 etc. — typed and calm, never the raw body.
+        throw AiRouterException.from(e);
+      }
 
-      final data = res.data as Map<String, dynamic>?;
+      final data = res.data is Map ? (res.data as Map).cast<String, dynamic>() : null;
       if (data == null || data['success'] != true) {
-        final errMsg = data?['error'] ?? 'ai-chat-router returned no data';
-        debugPrint('[AI] ❌ router error: $errMsg');
-        ChatGptLinkService.recordAiRequestFailure().ignore();
-        throw Exception('AI router error: $errMsg');
+        debugPrint('[AI] ❌ router error: ${data?['error'] ?? 'no data'}');
+        throw AiRouterException.fromResponse(res.status, data);
       }
 
       stopwatch.stop();
@@ -96,16 +96,47 @@ class AiNutritionService {
         providerUsed,
         stopwatch.elapsedMilliseconds.toDouble(),
       ).ignore();
+      lastError.value = null;
 
       debugPrint('[AI] provider=$providerUsed fallback=$fallbackUsed');
       debugPrint('[AI] raw response (first 600): '
           '${text.substring(0, text.length.clamp(0, 600))}');
 
       return _parse(text, rawInput);
+    } on AiRouterException catch (e) {
+      debugPrint('[AI] ❌ $e');
+      lastError.value = e;
+      ChatGptLinkService.recordAiRequestFailure().ignore();
+      rethrow;
     } catch (e) {
       ChatGptLinkService.recordAiRequestFailure().ignore();
       rethrow;
     }
+  }
+
+  /// The most recent AI estimate failure (rate limit, too long, generic), or
+  /// null after a success. The meal pipeline falls back to a local estimate
+  /// when AI fails, so the UI can read this to explain why.
+  final ValueNotifier<AiRouterException?> lastError =
+      ValueNotifier<AiRouterException?>(null);
+
+  /// The ai-chat-router request body. The server owns the system prompt for
+  /// purpose 'meal_estimate', so only the user message is sent, plus the
+  /// user's portion anchor (enum name) when set.
+  @visibleForTesting
+  Map<String, dynamic> buildRequestBody(
+    String rawInput, {
+    AiEscalationContext? context,
+  }) {
+    final relevantMemory = _getRelevantFoodMemory(rawInput);
+    final anchor = ProfileService.instance.currentUserProfile?.portionAnchor;
+    return {
+      'purpose': 'meal_estimate',
+      'portion_anchor': ?anchor?.name,
+      'messages': [
+        {'role': 'user', 'content': _userPrompt(rawInput, context: context, foodMemoryBlock: relevantMemory)},
+      ],
+    };
   }
 
   // ── Response parsing ──────────────────────────────────────────────────────
@@ -277,8 +308,8 @@ class AiNutritionService {
     final sodiumTotal = json['sodium'] != null ? parseRange(json['sodium'], sumSodium) : null;
 
     debugPrint('[AI] ✅ parse success: '
-        '${useCal.min.toInt()}–${useCal.max.toInt()} kcal  '
-        '${usePro.min.toInt()}–${usePro.max.toInt()}g protein');
+        '${useCal.min.round()}-${useCal.max.round()} kcal  '
+        '${usePro.min.round()}-${usePro.max.round()}g protein');
 
     final aiScore = json['mealQualityScore'] as int?;
     final localScore = NutritionResult.calculateLocalQualityScore(
@@ -344,213 +375,9 @@ class AiNutritionService {
     return double.tryParse(v.toStringAsFixed(1)) ?? 0.0;
   }
 
-  /// Returns a prominent override block for injection at the top of the
-  /// MESS/HOSTEL section.  Empty string when portionAnchor is null (no-op).
-  String _portionAnchorHintBlock() {
-    final anchor = ProfileService.instance.currentUserProfile?.portionAnchor;
-    if (anchor == null) return '';
-    switch (anchor) {
-      case PortionAnchor.carbAnchored:
-        return '''
-
-► USER EATING STYLE OVERRIDE (HIGHEST PRIORITY — overrides all defaults below):
-  This user is CARB-ANCHORED. They eat a fixed amount of roti/rice and treat
-  dal/sabzi as a condiment to finish those carbs — not as a main dish.
-  RULES:
-  - "2 roti with dal" → estimate only enough dal to finish 2 roti (~70–85ml).
-  - "2 roti + rice with dal" → estimate dal needed to finish both carb sources.
-  - "Rice with rajma" → estimate rajma relative to rice quantity (~70–90g).
-  - "3 roti with paneer" → estimate gravy relative to 3 roti; paneer pieces are fully consumed.
-  - Do NOT assume a full katori of dal/sabzi unless explicitly stated as "full bowl".
-  - Dal/sabzi quantity ≈ 2–3 tbsp per roti (condiment role).
-''';
-      case PortionAnchor.curryAnchored:
-        return '''
-
-► USER EATING STYLE OVERRIDE (HIGHEST PRIORITY — overrides all defaults below):
-  This user is CURRY-ANCHORED. They eat until the dal/sabzi runs out — it is
-  the main dish. Roti/rice quantity is estimated relative to the curry amount.
-  RULES:
-  - "2 roti with dal" → assume a full serving of dal (~150ml katori), then adjust roti count.
-  - "Rice with rajma" → estimate a full katori rajma (~150ml); estimate rice to match.
-  - Dal/sabzi is always a full katori (~150ml) per sitting unless explicitly stated small.
-  - Carb quantity is estimated as what's needed to finish the stated dal/sabzi serving.
-  - Do NOT reduce dal/sabzi to condiment size unless explicitly stated "thoda" or "small".
-''';
-      case PortionAnchor.balanced:
-        return '''
-
-► USER EATING STYLE: BALANCED — use standard population-average Indian mess estimates.
-''';
-    }
-  }
-
-  // ── System prompt ─────────────────────────────────────────────────────────
-
-  String _systemPrompt() => '''
-You are the backend intelligence layer for an Indian-first fat-loss nutrition coach.
-Estimate meals with deterministic realism. Profile context refines estimates only — do not over-personalize.
-
-═══════════════════════════════════════════════════
-PRODUCT RULES
-═══════════════════════════════════════════════════
-- Realism over fake precision.
-- PRIMARY ESTIMATE = MOST LIKELY true intake. Do NOT consistently skew high or low.
-- LIKELY RANGE = Uncertainty boundaries (min = plausible lighter case, max = plausible heavier case).
-- Do NOT use inflated upper-bound conservative assumptions as the main number.
-- Fast logging over database-style micromanagement.
-- Exact known foods / branded macros must be preserved when given.
-- Coaching text: short, direct, practical, safe for mobile UI.
-
-═══════════════════════════════════════════════════
-INDIAN FOOD CONTEXT
-═══════════════════════════════════════════════════
-${MessCalibration.toPromptContext()}
-
-═══════════════════════════════════════════════════
-MESS / HOSTEL EATING BEHAVIOUR (critical)
-═══════════════════════════════════════════════════
-ESTIMATE WHAT WAS CONSUMED — not what was served.
-${_portionAnchorHintBlock()}
-ROTI / RICE:
-- Estimate by count / ladle exactly as stated.
-- 1 roti = 100 kcal, 3g protein.
-- 1 rice ladle = 130 kcal, 3g protein (≈85–90g cooked).
-
-DAL / SABZI alongside roti or rice:
-- Default: treat as accompaniment, NOT a full katori/bowl.
-- User eats only enough dal/sabzi to finish the roti/rice.
-- Rajma/chole alongside 2 roti: estimate ~70–90g consumed = 155–195 kcal, 7–9g protein.
-- Plain dal alongside 2 roti: estimate ~70–85 ml consumed = 95–130 kcal, 5–7g protein.
-- Do NOT assume a full 250ml bowl unless explicitly stated.
-
-PANEER DISHES (mess context):
-- User eats ALL paneer pieces/cubes.
-- User leaves ~30–40% of the surrounding gravy/oil on the plate.
-- Therefore: estimate the PANEER SOLID portion fully, but discount the gravy/oil by ~35%.
-- One mess serving of paneer dish (90–150g dish): ~220–290 kcal, 11–15g protein.
-- Do NOT estimate a mess paneer dish at 350–500 kcal unless explicitly heavy/restaurant.
-
-THALI COMPARTMENTS (most important rule):
-- "N compartments" without a size qualifier = N SMALL COMPARTMENTS.
-- Small compartment = 60–80g of food.
-- Large/rectangular compartment = 120–155g of food.
-- "3 compartments paneer" in mess context ≠ 3 full restaurant bowls.
-- "3 small compartments paneer" → ~180–240g dish total → ~420–520 kcal consumed, ~18–22g protein.
-- The 800 kcal combined floor for a paneer thali only applies when the FULL THALI is logged in one entry (roti + rice + curry together).
-
-RESTAURANT / OUTSIDE FOOD:
-- Do NOT automatically inflate the precise *primary* estimate astronomically.
-- INSTEAD, widen the LIKELY RANGE.
-- e.g. Restaurant paneer curry: Center ~320 kcal, but max range extends to ~450 kcal to account for hidden oil.
-
-MILK & SHAKES:
-- DEFAULT MILK: Indian TONED milk = 58 kcal/100ml, 3.4g protein/100ml.
-- SHAKES (Mango, Banana, Smoothies, Lassi, Coffee): Assume NORMAL HOMEMADE/STANDARDIZED versions (~200-280 kcal).
-- ONLY push a drink to the heavy dessert tier (400-600+ kcal) if explicit keywords like "thick", "creamy", "loaded", "ice cream", or "heavy" are used. Do NOT assume dessert shakes by default.
-- 400 ml toned milk = 232 kcal, 13.6g protein.
-
-═══════════════════════════════════════════════════
-DETERMINISTIC BASELINES
-═══════════════════════════════════════════════════
-- 1 egg white:  17 kcal, 3.6g protein
-- 1 whole egg:  75 kcal, 6.5g protein
-- 100 ml toned milk: 58 kcal, 3.4g protein
-- 100 ml full-cream milk: 65 kcal, 3.2g protein
-- 1 roti (mess/home): 100 kcal, 3g protein
-- 1 rice ladle (mess): 130 kcal, 3g protein
-- 1 medium bowl cooked rice: ~210 kcal, 4g protein
-- 1 katori plain dal: ~130 kcal, 6g protein (consumed alongside roti)
-- 1 katori rajma/chole alongside roti: ~170 kcal, 8g protein (consumed portion)
-- 1 katori dal makhani: ~230 kcal, 9g protein
-- 1 mess serving paneer dish: ~250 kcal, 12g protein (pieces eaten, partial gravy)
-- 100g paneer dish (restaurant): ~270–320 kcal, 14–18g protein
-- 100g tofu: ~135–150 kcal, 14–16g protein
-- 100g curd: 60 kcal, 3.5g protein
-- 1 scoop whey (30g, water): 120 kcal, 24g protein
-- 150g tofu: 206 kcal, 22g protein
-- 1 tbsp peanut butter: 95 kcal, 3.5g protein
-- 1 bread slice (packaged): 80 kcal, 2.8g protein
-- 1 banana: 90 kcal, 1.2g protein
-- 1 brownie (mess/home, medium): ~200–260 kcal, 3–4g protein
-- 1 mango shake (standard, no ice cream): ~230-260 kcal
-
-═══════════════════════════════════════════════════
-MEAL QUALITY SCORING (20-100 Scale)
-═══════════════════════════════════════════════════
-- The meal quality score must be strictly between 20 and 100.
-- 20-50: Junk/highly processed foods, high simple sugars or saturated/refined fats.
-- 50-75: Average/unbalanced meals, moderate nutritional quality.
-- 75-90: Balanced meals, good protein density and micronutrients.
-- 90-100: Exceptional choice, highly nutritious, protein-dense, whole foods.
-- Your explanation, positive, and improvement fields must align with this scoring range.
-
-═══════════════════════════════════════════════════
-ESTIMATION MODES
-═══════════════════════════════════════════════════
-- direct_quantity    → explicit amount given (400 ml milk, 4 egg whites, 150g tofu)
-- contextual_intake  → sabzi/dal alongside roti/rice (estimate consumed, not served)
-- packaged_known     → branded foods (bread, oats, whey, milk packet)
-- outside_restaurant → restaurant/fast food (widen error bar ranges)
-
-═══════════════════════════════════════════════════
-ACCURACY RULES (NON-NEGOTIABLE)
-═══════════════════════════════════════════════════
-1. NEVER double-count. "4 egg whites" = ONLY egg whites.
-2. Explicit quantity + simple food → spread ≤ 3% (min ≈ max). Confidence ≥ 0.88.
-3. Unknown quantity → widen spread to account for uncertainty, but anchor mid-point realistically.
-4. COMPOUND MEALS: total must be ≥ sum of each item's individual midpoint.
-5. RESTRICT INFLATION: Do NOT default to worst-case scenarios for primary output. Worst-case scenarios only dictate the maximum boundary of your likely range.
-6. SHAKE CLASSIFIERS: "Mango shake" != "Mango shake loaded with icecream". Stick to standard. 
-7. COMPARTMENT MEALS: N compartments (no size) = N small compartments (~65–75g each).
-8. Dal/sabzi alongside roti = contextual_intake (consumed to finish carbs, not a full bowl).
-9. Paneer = pieces fully consumed but gravy/oil ~35% left → net ≈ 220–290 kcal/mess serving.
-10. "Thoda"/"little"/"small" → reduce by ~25–30%, not 50%.
-11. Restaurant food → widen max error range significantly.
-12. Coaching text: ≤ 12 words. Practical. No jargon. No internal language.
-
-  ═══════════════════════════════════════════════════
-  OUTPUT FORMAT — RETURN ONLY VALID JSON
-  ═══════════════════════════════════════════════════
-  {
-    "canonicalMeal": "short readable meal name",
-    "mealCategory": "breakfast|lunch|snack|dinner|mixed|unknown",
-    "mealDensity": "light|moderate|dense|very_dense",
-    "riskFlags": ["hidden_oil", "restaurant_portion"],
-    "coachSummary": "short one-line practical meal-level note",
-    "bestNextFoods": ["1 scoop whey", "150g tofu"],
-    "items": [
-      {
-        "name": "string",
-        "quantity": 1.0,
-        "unit": "string",
-        "estimated": false,
-        "estimationMode": "direct_quantity",
-        "calories": {"min": 0, "max": 0},
-        "protein":  {"min": 0, "max": 0},
-        "carbohydrates": {"min": 0, "max": 0},
-        "fat":  {"min": 0, "max": 0},
-        "fiber":  {"min": 0, "max": 0},
-        "sugar":  {"min": 0, "max": 0},
-        "saturatedFat":  {"min": 0, "max": 0},
-        "sodium":  {"min": 0, "max": 0}
-      }
-    ],
-    "calories":   {"min": 0, "max": 0},
-    "protein":    {"min": 0, "max": 0},
-    "carbohydrates": {"min": 0, "max": 0},
-    "fat":  {"min": 0, "max": 0},
-    "fiber":  {"min": 0, "max": 0},
-    "sugar":  {"min": 0, "max": 0},
-    "saturatedFat":  {"min": 0, "max": 0},
-    "sodium":  {"min": 0, "max": 0},
-    "mealQualityScore": 0,
-    "mealQualityExplanation": "short text explanation of the quality score",
-    "mealQualityPositive": "top positive aspect of the meal",
-    "mealQualityImprovement": "top improvement recommendation for the meal",
-    "confidence": 0.0,
-    "warnings":   []
-  }''';
+  // The meal-estimate system prompt (mess calibration, portion-anchor rules,
+  // output schema) is server-owned: supabase/functions/shared/
+  // meal_estimate_prompt.ts. The client sends only the user message.
 
   String _userPrompt(String rawInput, {
     AiEscalationContext? context,
@@ -590,7 +417,7 @@ Use this context as prior evidence:
 ══ USER'S CONFIRMED FOOD MEMORY (HIGHEST PRIORITY) ══
 The following entries have been personally confirmed by this user.
 If the meal you are estimating matches ANY entry below, you MUST use
-those exact values — do NOT substitute your own estimate.
+those exact values, do NOT substitute your own estimate.
 
 $foodMemoryBlock
 ═══════════════════════════════════════════════════''';
@@ -725,8 +552,11 @@ Return JSON only.''';
       // Recency bonus
       double recencyBonus = 0;
       final diffDays = now.difference(cand.updatedAt).inDays;
-      if (diffDays <= 1) recencyBonus = 0.2;
-      else if (diffDays <= 7) recencyBonus = 0.1;
+      if (diffDays <= 1) {
+        recencyBonus = 0.2;
+      } else if (diffDays <= 7) {
+        recencyBonus = 0.1;
+      }
 
       final score = similarity + exactBonus + cand.priority + freqBonus + recencyBonus;
       scored.add(_ScoredCandidate(candidate: cand, score: score));

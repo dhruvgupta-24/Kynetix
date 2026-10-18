@@ -4,6 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/nutrition_hydration_guard.dart';
+import 'internal/scoped_prefs.dart';
+import 'food_link_service.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 // ─── MealMemoryEntry ─────────────────────────────────────────────────────────
 
@@ -184,7 +192,7 @@ class MealMemory {
     _initialized = true;
     try {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
-      final raw   = prefs.getString(_currentPrefKey) ?? prefs.getString(_prefKey);
+      final raw   = ScopedPrefs.getString(prefs, _prefKey, _ownerUserId);
       if (raw != null) {
         final list  = jsonDecode(raw) as List<dynamic>;
         for (final item in list) {
@@ -193,7 +201,7 @@ class MealMemory {
         }
       }
 
-      final candidateRaw = prefs.getString(_currentCandidatePrefKey) ?? prefs.getString(_candidatePrefKey);
+      final candidateRaw = ScopedPrefs.getString(prefs, _candidatePrefKey, _ownerUserId);
       if (candidateRaw != null) {
         final list = jsonDecode(candidateRaw) as List<dynamic>;
         for (final item in list) {
@@ -202,7 +210,7 @@ class MealMemory {
         }
       }
 
-      final knownRaw = prefs.getString(_currentKnownFoodPrefKey) ?? prefs.getString(_knownFoodPrefKey);
+      final knownRaw = ScopedPrefs.getString(prefs, _knownFoodPrefKey, _ownerUserId);
       if (knownRaw != null) {
         final map = jsonDecode(knownRaw) as Map<String, dynamic>;
         for (final entry in map.entries) {
@@ -227,7 +235,7 @@ class MealMemory {
   /// Internal ownership synchronization method called only by PersistenceService.
   void setOwnerId(String userId) {
     _ownerUserId = userId;
-    debugPrint('[MealMemory] 🔒 cached owner ID synchronized to: $userId');
+    _debugLog('[MealMemory] 🔒 cached owner ID synchronized to: $userId');
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -242,14 +250,14 @@ class MealMemory {
   NutritionResult? lookup(String rawInput) {
     // FAIL CLOSED: user-specific recurring store
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      debugPrint('[MealMemory] 🔒 guard not ready — skipping recurring lookup for "$rawInput"');
+      _debugLog('[MealMemory] 🔒 guard not ready, skipping recurring lookup for "$rawInput"');
       return null;
     }
 
     // DEFENSE-IN-DEPTH: cache-level ownership verification
     final currentUserId = NutritionHydrationGuard.instance.currentUserId;
     if (_ownerUserId == null || _ownerUserId != currentUserId) {
-      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+      _debugLog('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
           'cache owned by $_ownerUserId, current user is $currentUserId');
       return null;
     }
@@ -282,7 +290,7 @@ class MealMemory {
     // if guard is not ready, we only serve bootstrapped defaults, identified
     // by checking against the bootstrap key set.
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
-      debugPrint('[MealMemory] 🔒 guard not ready — returning compiled-in defaults only');
+      _debugLog('[MealMemory] 🔒 guard not ready, returning compiled-in defaults only');
       // Serve only if it exists in the bootstrap set (no user-learned contamination)
       final boot = _knownFoods[key];
       if (boot != null && _bootstrapKeys.contains(key)) {
@@ -301,7 +309,7 @@ class MealMemory {
     // DEFENSE-IN-DEPTH: cache-level ownership verification for user-learned known food
     final currentUserId = NutritionHydrationGuard.instance.currentUserId;
     if (_ownerUserId == null || _ownerUserId != currentUserId) {
-      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer (user-learned known food): '
+      _debugLog('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer (user-learned known food): '
           'cache owned by $_ownerUserId, current user is $currentUserId');
       return null;
     }
@@ -329,7 +337,7 @@ class MealMemory {
 
     final currentUserId = NutritionHydrationGuard.instance.currentUserId;
     if (_ownerUserId == null || _ownerUserId != currentUserId) {
-      debugPrint('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+      _debugLog('[MealMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
           'cache owned by $_ownerUserId, current user is $currentUserId');
       return null;
     }
@@ -432,9 +440,12 @@ class MealMemory {
 
   /// Meals that have been confirmed and logged repeatedly (timesUsed >= 2).
   /// FAIL CLOSED: returns empty list if hydration guard is not ready for current user.
+  /// Older names linked to a scanned pack are left out (hidden, not deleted).
   List<MealMemoryEntry> get recurringMeals {
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) return const [];
-    return _store.values.where((e) => e.timesUsed >= 2).toList();
+    return _store.values
+        .where((e) => e.timesUsed >= 2 && !FoodLinkService.instance.isHidden(e.rawInput))
+        .toList();
   }
 
   /// All known foods defaults/learned templates.
@@ -519,7 +530,7 @@ class MealMemory {
       await prefs.remove(_knownFoodPrefKey);
     } catch (_) {}
     _ownerUserId = null;
-    debugPrint('[MealMemory] 🗑️  clearAll() complete — recurring/candidates/user-foods wiped, defaults restored');
+    _debugLog('[MealMemory] 🗑️  clearAll() complete, recurring/candidates/user-foods wiped, defaults restored');
   }
 
   bool _isStable(NutritionResult a, NutritionResult b) {

@@ -72,41 +72,34 @@ void main() {
   }
 
   group('Workout Consistency — Auto-persistence & Migration Fix A', () {
-    test('Saving a DayLog with meals and null gymDay auto-populates scheduled training day', () async {
+    // The day's training plan is resolved live (session > pick > split), so a
+    // save no longer freezes the split into gymDay: editing the split later
+    // updates days the user never touched, on every screen at once.
+    test('Saving a DayLog with meals leaves gymDay unset; the split still decides', () async {
       // Monday June 1, 2026 is a training day in the default split (Chest + Triceps)
       final monday = DateTime(2026, 6, 1);
       final log = _makeLoggedDay();
-      
-      expect(log.gymDay, isNull);
-      
       dayLogStore['2026-06-01'] = log;
-      
-      // Save Monday
+
       await PersistenceService.saveDay(monday);
-      
-      // Verify gymDay was populated with default training split day info
-      expect(log.gymDay, isNotNull);
-      expect(log.gymDay!.didGym, isTrue);
-      expect(log.gymDay!.splitDayName, equals('Chest + Triceps'));
-      expect(log.gymDay!.splitOverridden, isFalse);
+
+      expect(log.gymDay, isNull);
+      final plan = WorkoutService.instance.planFor(monday);
+      expect(plan.isTraining, isTrue);
+      expect(plan.name, equals('Chest + Triceps'));
+      expect(plan.source, DayPlanSource.split);
     });
 
-    test('Saving a DayLog with meals and null gymDay auto-populates rest day on rest day', () async {
+    test('A rest day in the split resolves to rest without a stored gymDay', () async {
       // Sunday June 7, 2026 is a rest day in the default split
       final sunday = DateTime(2026, 6, 7);
       final log = _makeLoggedDay();
-      
-      expect(log.gymDay, isNull);
-      
       dayLogStore['2026-06-07'] = log;
-      
-      // Save Sunday
+
       await PersistenceService.saveDay(sunday);
-      
-      // Verify gymDay was populated as rest day (didGym = false)
-      expect(log.gymDay, isNotNull);
-      expect(log.gymDay!.didGym, isFalse);
-      expect(log.gymDay!.splitOverridden, isFalse);
+
+      expect(log.gymDay, isNull);
+      expect(WorkoutService.instance.planFor(sunday).isTraining, isFalse);
     });
 
     test('Explicit user action (didGym=false) overrides split fallback', () async {
@@ -123,31 +116,20 @@ void main() {
       expect(log.gymDay!.didGym, isFalse);
     });
 
-    test('One-time historical repair migration backfills existing null gymDays on training days', () async {
-      // Setup old data: Monday (training) and Friday (training) have null gymDays but have meals
+    test('Historical repair no longer back-fills gymDay; the split resolves those days', () async {
       final monday = DateTime(2026, 6, 1);
       final friday = DateTime(2026, 6, 5);
-      
       final mondayLog = _makeLoggedDay();
       final fridayLog = _makeLoggedDay();
-      
       dayLogStore['2026-06-01'] = mondayLog;
       dayLogStore['2026-06-05'] = fridayLog;
-      
+
+      await PersistenceService.runHistoricalRepairMigration();
+
       expect(mondayLog.gymDay, isNull);
       expect(fridayLog.gymDay, isNull);
-      
-      // Run the migration
-      await PersistenceService.runHistoricalRepairMigration();
-      
-      // Verify both are backfilled correctly using their split training day names
-      expect(mondayLog.gymDay, isNotNull);
-      expect(mondayLog.gymDay!.didGym, isTrue);
-      expect(mondayLog.gymDay!.splitDayName, equals('Chest + Triceps'));
-      
-      expect(fridayLog.gymDay, isNotNull);
-      expect(fridayLog.gymDay!.didGym, isTrue);
-      expect(fridayLog.gymDay!.splitDayName, equals('Push'));
+      expect(WorkoutService.instance.planFor(monday).name, equals('Chest + Triceps'));
+      expect(WorkoutService.instance.planFor(friday).name, equals('Push'));
     });
   });
 

@@ -140,7 +140,7 @@ class MealClassifier {
           category: effective,
           matchedSignals: List.unmodifiable(matches),
           reason: isMessContext && effective != category
-              ? 'Mess context — downgraded from ${category.name} to ${effective.name} (matched ${matches.join(', ')})'
+              ? 'Mess context, downgraded from ${category.name} to ${effective.name} (matched ${matches.join(', ')})'
               : 'Matched ${matches.join(', ')}',
         );
       }

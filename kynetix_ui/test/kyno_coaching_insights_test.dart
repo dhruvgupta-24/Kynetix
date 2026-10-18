@@ -103,7 +103,7 @@ void main() {
 
       expect(insights.any((i) => i.severity == KynoInsightSeverity.needsAttention && i.title.contains('Protein')), isTrue);
       final proCard = insights.firstWhere((i) => i.title.contains('Protein'));
-      expect(proCard.evidence, contains('60g'));
+      expect(proCard.evidence, contains('60 g'));
       expect(proCard.recommendation, contains('protein'));
     });
 
@@ -130,8 +130,8 @@ void main() {
 
       final insights = KynoCoachingInsightService.instance.evaluateInsightsForCurrentUser();
 
-      expect(insights.any((i) => i.severity == KynoInsightSeverity.coaching && i.title.contains('Bench Press Plateau')), isTrue);
-      final card = insights.firstWhere((i) => i.title.contains('Bench Press Plateau'));
+      expect(insights.any((i) => i.severity == KynoInsightSeverity.coaching && i.title.contains('Bench Press has stalled')), isTrue);
+      final card = insights.firstWhere((i) => i.title.contains('Bench Press has stalled'));
       expect(card.explanation.toLowerCase(), contains('progressive overload'));
     });
 
@@ -158,7 +158,7 @@ void main() {
 
       final insights = KynoCoachingInsightService.instance.evaluateInsightsForCurrentUser();
 
-      expect(insights.any((i) => i.severity == KynoInsightSeverity.progress && i.title.contains('Bench Press Progressive Overload')), isTrue);
+      expect(insights.any((i) => i.severity == KynoInsightSeverity.progress && i.title.contains('Bench Press is moving up')), isTrue);
     });
 
     test('4. Duplicate suppression during 24h cooldown', () async {

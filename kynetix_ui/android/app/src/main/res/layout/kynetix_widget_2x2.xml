@@ -1,95 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 2x2: two concentric rings (calories, protein) on a transparent
+     background, drawn by WidgetRings. Tapping opens the app. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/transparent"
-    android:padding="4dp">
+    android:padding="2dp">
 
-    <!-- Container for rings and center text -->
-    <RelativeLayout
-        android:id="@+id/widget_content_layout"
+    <ImageView
+        android:id="@+id/widget_dial"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_alignParentBottom="true"
-        android:layout_alignParentTop="true"
-        android:gravity="center">
-
-        <!-- Enlarge the rings container to fill as much space as possible -->
-        <FrameLayout
-            android:id="@+id/widget_rings_container"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_centerInParent="true">
-
-            <ImageView
-                android:id="@+id/widget_progress_rings"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitCenter" />
-
-            <!-- Center overlay text -->
-            <LinearLayout
-                android:id="@+id/widget_center_text_layout"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:gravity="center"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/widget_calories_value"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="--"
-                    android:textColor="#FF6B35"
-                    android:textSize="26sp"
-                    android:textStyle="bold"
-                    android:includeFontPadding="false" />
-
-                <TextView
-                    android:id="@+id/widget_calories_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="kcal left"
-                    android:textColor="#9CA3AF"
-                    android:textSize="10sp"
-                    android:layout_marginBottom="4dp"
-                    android:includeFontPadding="false" />
-
-                <TextView
-                    android:id="@+id/widget_protein_value"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="--"
-                    android:textColor="#52B788"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:includeFontPadding="false" />
-
-                <TextView
-                    android:id="@+id/widget_protein_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="protein left"
-                    android:textColor="#9CA3AF"
-                    android:textSize="9sp"
-                    android:includeFontPadding="false" />
-            </LinearLayout>
-        </FrameLayout>
-    </RelativeLayout>
-
-    <!-- Fallback state overlay -->
-    <TextView
-        android:id="@+id/widget_fallback_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
-        android:text="Open Kynetix to set targets"
-        android:textColor="#9CA3AF"
-        android:textSize="12sp"
-        android:gravity="center"
-        android:textStyle="italic"
-        android:visibility="gone" />
-
-</RelativeLayout>
+        android:layout_gravity="center"
+        android:adjustViewBounds="true"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+</FrameLayout>

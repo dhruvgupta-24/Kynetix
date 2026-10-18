@@ -28,8 +28,8 @@ void main() {
   });
 
   group('Calorie Target Investigation & Regression Tests', () {
-    // Standard profile that yields base training calories of 2430 kcal when rounded.
-    final profile2430 = UserProfile(
+    // Standard profile that yields base training calories of 2357 kcal when rounded.
+    final profile2357 = UserProfile(
       name: 'Dhruv',
       age: 25,
       gender: 'Male',
@@ -40,12 +40,13 @@ void main() {
       goal: kFatLoss,
     );
 
-    test('Verify base training calorie target is 2430 kcal (rounded)', () {
+    test('Verify base training calorie target is 2357 kcal (cycle weighted by 5.5 training days) (rounded)', () {
       final engine = NutritionTargetEngine.instance;
-      final plan = engine.weeklyPlan(profile2430);
+      final plan = engine.weeklyPlan(profile2357);
 
-      expect(plan.trainingDayCalories.round(), equals(2430));
-      // Clamped to floor = BMR + 200 = 2028 + 200 = 2228 kcal
+      expect(plan.trainingDayCalories.round(), equals(2357));
+      // avg 2309.5 (TDEE 2859.5 - 550); train = avg + 220 x 1.5/7 = 2357;
+      // rest = avg - 220 x 5.5/7 = 2137, clamped to floor BMR + 200 = 2228.
       expect(plan.restDayCalories.round(), equals(2228));
     });
 
@@ -80,13 +81,13 @@ void main() {
       );
 
       final target = engine.dayTarget(
-        profile2430,
+        profile2357,
         isGymDay: true,
         session: chestSession,
         workoutTypeName: 'Chest + Triceps',
       );
 
-      expect(target.calories.round(), equals(2430)); // workout load bonus removed
+      expect(target.calories.round(), equals(2357)); // workout load bonus removed
       expect(target.workoutLoadScore, equals(85));
       expect(target.workoutCalBonus, isNull);
     });
@@ -123,13 +124,13 @@ void main() {
       );
 
       final target = engine.dayTarget(
-        profile2430,
+        profile2357,
         isGymDay: true,
         session: backSession,
         workoutTypeName: 'Back + Biceps',
       );
 
-      expect(target.calories.round(), equals(2430)); // workout load bonus removed
+      expect(target.calories.round(), equals(2357)); // workout load bonus removed
       expect(target.workoutLoadScore, equals(100));
       expect(target.workoutCalBonus, isNull);
     });
@@ -157,13 +158,13 @@ void main() {
       final workoutTypeName = savedGymDay.workoutType?.displayName ?? savedGymDay.splitDayName;
 
       final target = engine.dayTarget(
-        profile2430,
+        profile2357,
         isGymDay: isGymDay,
         workoutTypeName: workoutTypeName,
         date: historicalDate,
       );
 
-      expect(target.calories.round(), equals(2430)); // Training day target
+      expect(target.calories.round(), equals(2357)); // Training day target
       expect(target.label, equals('Push Day'));
     });
 
@@ -198,7 +199,7 @@ void main() {
       // Verify saveDay populates split name and target calories
       // We will temporarily configure ProfileService currentUserProfile.
       final pService = ProfileService.instance;
-      pService.currentUserProfile = profile2430;
+      pService.currentUserProfile = profile2357;
 
       // Ensure split has Chest + Triceps on Monday
       final splitDay = WorkoutService.instance.splitDayFor(historicalDate);
@@ -211,7 +212,7 @@ void main() {
       // Calculate isGymDay: split training day is true.
       final isGymDayVal = (splitDay != null && !splitDay.isRestDay);
       final resolvedTarget = engine.dayTarget(
-        profile2430,
+        profile2357,
         isGymDay: isGymDayVal,
         workoutTypeName: splitDay?.name,
       );
@@ -225,19 +226,19 @@ void main() {
       );
       dayLogStore[dateKey(historicalDate)] = log;
 
-      expect(log.targetCalories?.round(), equals(2430));
+      expect(log.targetCalories?.round(), equals(2357));
 
       // Now query targetCalories using dayTarget with the date parameter.
       final targetBefore = engine.dayTarget(
-        profile2430,
+        profile2357,
         isGymDay: log.gymDay!.didGym,
         workoutTypeName: log.gymDay!.splitDayName,
         date: historicalDate,
       );
-      expect(targetBefore.calories.round(), equals(2430));
+      expect(targetBefore.calories.round(), equals(2357));
 
       // Modify the UserProfile (e.g. increase weight to 120 kg).
-      final modifiedProfile = profile2430.copyWith(weight: 120.0);
+      final modifiedProfile = profile2357.copyWith(weight: 120.0);
 
       // Query target again via effectiveTargetForDate (pure read function).
       final targetAfter = engine.effectiveTargetForDate(
@@ -245,8 +246,8 @@ void main() {
         profile: modifiedProfile,
       );
 
-      // Verify that the calorie target has NOT drifted (remains 2430 kcal).
-      expect(targetAfter.calories.round(), equals(2430));
+      // Verify that the calorie target has NOT drifted (remains 2357 kcal).
+      expect(targetAfter.calories.round(), equals(2357));
 
       // Meanwhile, querying WITHOUT the date parameter should recalculate and drift:
       final targetRecalculated = engine.dayTarget(
@@ -254,7 +255,7 @@ void main() {
         isGymDay: log.gymDay!.didGym,
         workoutTypeName: log.gymDay!.splitDayName,
       );
-      expect(targetRecalculated.calories.round(), isNot(equals(2430)));
+      expect(targetRecalculated.calories.round(), isNot(equals(2357)));
     });
 
     test('Verify mixed historical data: past frozen targets retain old logic, new targets use new logic, and reports behave correctly', () {
@@ -296,7 +297,7 @@ void main() {
       );
       dayLogStore[oldKey] = oldLog;
 
-      // 2. Create a new day log from "after the change" where targets recalculate to 2430 kcal
+      // 2. Create a new day log from "after the change" where targets recalculate to 2357 kcal
       final newDate = DateTime(2026, 6, 9); // Tuesday
       final newKey = dateKey(newDate);
       final newLog = logFor(newDate);
@@ -359,30 +360,30 @@ void main() {
       // Query target for the old date via effectiveTargetForDate (should yield 2590 from stored log)
       final targetOld = engine.effectiveTargetForDate(
         oldDate,
-        profile: profile2430,
+        profile: profile2357,
       );
       expect(targetOld.calories.round(), equals(2590)); // Frozen target preserved
 
-      // Query target for the new date via effectiveTargetForDate (should yield 2430 since it is computed via new logic)
+      // Query target for the new date via effectiveTargetForDate (should yield 2357 since it is computed via new logic)
       final targetNew = engine.effectiveTargetForDate(
         newDate,
-        profile: profile2430,
+        profile: profile2357,
       );
-      expect(targetNew.calories.round(), equals(2430)); // New logic applied
+      expect(targetNew.calories.round(), equals(2357)); // New logic applied
 
       // 4. Set the profile on ProfileService
       final pService = ProfileService.instance;
-      pService.currentUserProfile = profile2430;
+      pService.currentUserProfile = profile2357;
 
-      // Verify that saveDay freezes Tuesday at 2430
+      // Verify that saveDay freezes Tuesday at 2357
       PersistenceService.saveDay(newDate);
-      expect(newLog.targetCalories?.round(), equals(2430));
+      expect(newLog.targetCalories?.round(), equals(2357));
 
-      // 5. Verify weekly report uses 2590 for Monday and 2430 for Tuesday
+      // 5. Verify weekly report uses 2590 for Monday and 2357 for Tuesday
       final wKey = InsightsEngine.weekKeyOf(oldDate);
       final wReport = InsightsEngine.computeWeek(
         weekKey: wKey,
-        profile: profile2430,
+        profile: profile2357,
         logs: dayLogStore,
         sessions: const [],
         priorWeek: null,

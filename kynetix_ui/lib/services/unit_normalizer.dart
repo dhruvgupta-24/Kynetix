@@ -63,7 +63,7 @@ class UnitNormalizer {
     if (gMult != null) return quantity * gMult;
     final mlMult = _toMl[u];
     if (mlMult != null) return quantity * mlMult;
-    return quantity; // non-metric unit — pass through unchanged
+    return quantity; // non-metric unit, pass through unchanged
   }
 
   /// Whether two units are in the same measurement category and can be

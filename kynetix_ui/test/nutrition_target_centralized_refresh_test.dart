@@ -24,7 +24,7 @@ void main() {
       weight: 80,
       workoutDaysMin: 5,
       workoutDaysMax: 6,
-      goal: 'Fat Loss',
+      goal: 'Fat Loss', // older goal wording: still the fat-loss numbers (train 2042.1, rest = floor 2005)
     );
     ProfileService.instance.currentUserProfile = profile;
   });
@@ -50,8 +50,8 @@ void main() {
     print('stored targetCalories: ${log.targetCalories}');
     print('stored targetProtein: ${log.targetProtein}');
     print('effectiveTargetForDate: ${s1EffBefore.calories} kcal / ${s1EffBefore.protein} g');
-    expect(s1EffBefore.calories, equals(2665.0));
-    expect(s1EffBefore.protein, equals(148.0));
+    expect(s1EffBefore.calories, equals(2042.1));
+    expect(s1EffBefore.protein, equals(176.0));
 
     // Toggle Gym -> No Gym
     log.gymDay = log.gymDay!.withGym(false);
@@ -63,8 +63,8 @@ void main() {
     print('stored targetCalories: ${log.targetCalories}');
     print('stored targetProtein: ${log.targetProtein}');
     print('effectiveTargetForDate: ${s1EffAfter.calories} kcal / ${s1EffAfter.protein} g');
-    expect(s1EffAfter.calories, equals(2425.0));
-    expect(s1EffAfter.protein, equals(132.0));
+    expect(s1EffAfter.calories, equals(2005.0));
+    expect(s1EffAfter.protein, equals(160.0));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 2: No Gym → Gym
@@ -78,8 +78,8 @@ void main() {
     print('stored targetCalories: ${log.targetCalories}');
     print('stored targetProtein: ${log.targetProtein}');
     print('effectiveTargetForDate: ${s2Eff.calories} kcal / ${s2Eff.protein} g');
-    expect(s2Eff.calories, equals(2665.0));
-    expect(s2Eff.protein, equals(148.0));
+    expect(s2Eff.calories, equals(2042.1));
+    expect(s2Eff.protein, equals(176.0));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 3: Changing Today's Split
@@ -99,7 +99,7 @@ void main() {
     print('\n--- SCENARIO 3: Changing Today\'s Split to Rest Day ---');
     print('stored targetCalories: ${log.targetCalories}');
     print('effectiveTargetForDate: ${s3EffRest.calories} kcal / ${s3EffRest.protein} g');
-    expect(s3EffRest.calories, equals(2425.0));
+    expect(s3EffRest.calories, equals(2005.0));
 
     final splitWithTrainingToday = WorkoutSplit(
       id: 'split_1',
@@ -117,7 +117,7 @@ void main() {
     print('--- SCENARIO 3: Changing Today\'s Split to Push Heavy (Training) ---');
     print('stored targetCalories: ${log.targetCalories}');
     print('effectiveTargetForDate: ${s3EffTrain.calories} kcal / ${s3EffTrain.protein} g');
-    expect(s3EffTrain.calories, equals(2665.0));
+    expect(s3EffTrain.calories, equals(2042.1));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 4: Removing Today's Split
@@ -130,7 +130,7 @@ void main() {
     print('\n--- SCENARIO 4: Removing Today\'s Split ---');
     print('stored targetCalories: ${log.targetCalories}');
     print('effectiveTargetForDate: ${s4Eff.calories} kcal / ${s4Eff.protein} g');
-    expect(s4Eff.calories, equals(2425.0));
+    expect(s4Eff.calories, equals(2005.0));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 5: Finishing a Workout
@@ -154,7 +154,7 @@ void main() {
     print('\n--- SCENARIO 5: Finishing a Workout ---');
     print('stored targetCalories: ${log.targetCalories}');
     print('effectiveTargetForDate: ${s5Eff.calories} kcal / ${s5Eff.protein} g');
-    expect(s5Eff.calories, equals(2665.0));
+    expect(s5Eff.calories, equals(2042.1));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 6: Discarding a Workout
@@ -168,7 +168,7 @@ void main() {
     print('\n--- SCENARIO 6: Discarding a Workout ---');
     print('stored targetCalories: ${log.targetCalories}');
     print('effectiveTargetForDate: ${s6Eff.calories} kcal / ${s6Eff.protein} g');
-    expect(s6Eff.calories, equals(2425.0));
+    expect(s6Eff.calories, equals(2005.0));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 7: Manual Calorie Target Override Preserved
@@ -205,7 +205,7 @@ void main() {
     print('\n--- SCENARIO 8: App Restart / Serialization Restore ---');
     print('restored targetCalories: ${restoredLog.targetCalories}');
     print('effectiveTargetForDate: ${s8Eff.calories} kcal / ${s8Eff.protein} g');
-    expect(s8Eff.calories, equals(2425.0));
+    expect(s8Eff.calories, equals(2005.0));
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO 9: Midnight / Day Rollover

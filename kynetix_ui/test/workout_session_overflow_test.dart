@@ -66,7 +66,7 @@ void main() {
         
         // Check that the finish button and title are rendered
         expect(find.text('Finish'), findsOneWidget);
-        expect(find.text('PUSH'), findsOneWidget);
+        expect(find.text('Push'), findsOneWidget);
       });
     }
   }

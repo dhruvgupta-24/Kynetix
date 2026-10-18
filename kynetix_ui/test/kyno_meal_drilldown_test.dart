@@ -322,7 +322,7 @@ void main() {
       // CALCULATION & INFERENCE: Identifies low-protein meals and missed opportunity
       expect(allText, contains('Low-protein meals (<15g): 2 of 3 meals'));
       expect(allText, contains('Granola Energy Bar'));
-      expect(allText, contains('30–40g of protein'));
+      expect(allText, contains('30-40g of protein'));
     });
 
     test('3. "Did I eat anything late last night?" gives exact meal name + timestamp if late meals exist', () async {
@@ -420,8 +420,8 @@ void main() {
       final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
 
       // Chronological entries
-      expect(allText, contains('8:15 AM [BREAKFAST]: "Eggs and Toast" – 420 kcal | 26g P | 35g C | 18g F'));
-      expect(allText, contains('1:00 PM [LUNCH]: "Chicken Rice Bowl" – 750 kcal | 60g P | 85g C | 15g F'));
+      expect(allText, contains('8:15 AM [BREAKFAST]: "Eggs and Toast", 420 kcal | 26g P | 35g C | 18g F'));
+      expect(allText, contains('1:00 PM [LUNCH]: "Chicken Rice Bowl", 750 kcal | 60g P | 85g C | 15g F'));
       expect(allText, contains('Total Calories: 1170 kcal'));
       expect(allText, contains('Protein: 86g'));
     });
@@ -460,7 +460,7 @@ void main() {
       expect(allText, contains('1400 kcal'));
 
       // CALCULATION: Energy surplus math
-      expect(allText, contains('Energy Balance Math'));
+      expect(allText, contains('Energy balance math'));
 
       // Non-moralizing
       expect(allText.toLowerCase(), isNot(contains('bad food')));
@@ -499,7 +499,7 @@ void main() {
 
       final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
 
-      expect(allText, contains('Yesterday Intake Summary'));
+      expect(allText, contains('Yesterday intake summary'));
       expect(allText, contains('Protein Shake'));
       expect(allText, contains('Turkey Sandwich'));
       expect(allText, contains('Totals: 850 kcal, 75g P'));
@@ -673,13 +673,22 @@ void main() {
       expect(msg.structuredInsights, isNotNull);
 
       final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
-      expect(allText, contains('Logged Late-Night Meals'));
+      expect(allText, contains('Logged late-night meals'));
       expect(allText, contains('"Ben & Jerry\'s Half Baked Ice Cream" at 10:45 PM [LATENIGHT]'));
       expect(allText, contains('"Vegetable Stir-Fry with Tofu" at 8:15 PM [DINNER]'));
       expect(allText, contains('1190 kcal')); // 650 + 540 = 1190 kcal
     });
 
     test('3. "Why were my calories high yesterday?" identifies major contributors and surplus math', () async {
+      // 'muscle_gain' is a bulk goal (~2,714 kcal for this profile), so pin a
+      // configured 2,400 kcal target to keep yesterday's 2,600 kcal "high".
+      ProfileService.instance.currentUserProfile = ProfileService.instance.currentUserProfile!.copyWith(
+        useCustomTargets: true,
+        customTrainingDayCalories: 2400,
+        customRestDayCalories: 2400,
+        customProteinTarget: 150,
+      );
+      KynoHistoricalAnalysisService.instance.invalidate();
       final msg = await KynoAssistantService.instance.processQuery('Why were my calories high yesterday?');
       expect(msg.structuredInsights, isNotNull);
 
@@ -690,7 +699,7 @@ void main() {
       // Second highest: Vegetable Stir-Fry (650 kcal)
       expect(calc.detail, contains('Second highest contributor: "Vegetable Stir-Fry with Tofu"'));
       expect(calc.detail, contains('650 kcal'));
-      // Delta: 2600 - 2400 = 200 kcal exceeded
+      // The configured target comes from the engine (here: custom 2,400).
       expect(calc.detail, contains('exceeded your configured target of 2400 kcal by 200 kcal'));
     });
 
@@ -732,9 +741,9 @@ void main() {
       expect(msg.structuredInsights, isNotNull);
 
       final allText = msg.structuredInsights!.map((i) => '${i.title}: ${i.detail}').join('\n');
-      expect(allText, contains('Longitudinal Overview'));
-      expect(allText, contains('Adherence Audit'));
-      expect(allText, contains('Meal-Level Bottleneck'));
+      expect(allText, contains('Longitudinal overview'));
+      expect(allText, contains('Adherence audit'));
+      expect(allText, contains('Meal-level bottleneck'));
       expect(allText, contains('low-protein density across 3 of 5 logged meals'));
     });
 
@@ -797,7 +806,8 @@ void main() {
       final calcMath = msg.structuredInsights!.firstWhere(
         (i) => i.type == KynoInformationType.calculation && i.title.contains('Nutrition Adherence Math'),
       );
-      expect(calcMath.detail, contains('Average protein intake was 48% of configured target (77g below daily 150g target on average).'));
+      // Engine protein for 75 kg at maintenance: 1.8 g/kg = 135 g.
+      expect(calcMath.detail, contains('Average protein intake was 54% of configured target (62g below daily 135g target on average).'));
       expect(calcMath.detail, contains('14 of last 14 logged days'));
     });
   });

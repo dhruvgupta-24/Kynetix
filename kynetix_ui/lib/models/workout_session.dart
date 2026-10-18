@@ -8,7 +8,7 @@ import 'workout_split.dart';
 // analysis uses working sets only.
 
 enum SetType {
-  normal,     // Primary working set — used for progression decisions
+  normal,     // Primary working set, used for progression decisions
   warmUp,     // Excluded from progression; shown muted in UI
   dropSet,    // Reduced weight after working set; counts for volume
 }

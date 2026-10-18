@@ -122,10 +122,10 @@ class LocalEstimationAnalysis {
 // ─── Confidence tiers ────────────────────────────────────────────────────────
 // Reflect how predictable a food's calorie content is per typical serving.
 enum _Tier {
-  veryHigh,  // 0.88–0.92 — packaged / simple (egg, milk, bread, oats)
-  high,      // 0.78–0.84 — well-known mess staples (roti, rice, paneer, curd)
-  medium,    // 0.65–0.72 — variable preparations (dal, sabzi, biryani)
-  low,       // 0.50–0.62 — highly variable / oily (puri, samosa, coffee)
+  veryHigh,  // 0.88–0.92, packaged / simple (egg, milk, bread, oats)
+  high,      // 0.78–0.84, well-known mess staples (roti, rice, paneer, curd)
+  medium,    // 0.65–0.72, variable preparations (dal, sabzi, biryani)
+  low,       // 0.50–0.62, highly variable / oily (puri, samosa, coffee)
 }
 
 class _FoodEntry {
@@ -529,6 +529,9 @@ const List<_FoodEntry> _db = [
 const _thodaWords  = ['thoda', 'little', 'thodi', 'kam', 'half', 'aadha'];
 const _doubleWords = ['double', 'extra', 'zyada', 'large', 'big', 'full'];
 
+// A named serving vessel for a side: a katori/bowl/cup ≈ 2 ladles.
+const _sideVessels = {'katori', 'katoris', 'bowl', 'bowls', 'cup', 'cups'};
+
 // Mess partial-eat: dal/sabzi 55–65 % eaten
 const _sideEatMin = 0.55;
 const _sideEatMax = 0.65;
@@ -825,12 +828,18 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
     }
     if (!certain) uncertainItems++;
 
+    // "1 katori dal" / "a bowl of sabzi": the user named the vessel, so they
+    // told us what they ate. A katori (~150 ml) is about two mess ladles, and
+    // the mess partial-eat model doesn't apply.
+    final vessel = kwIdx > 0 && _sideVessels.contains(tokens[kwIdx - 1]);
+    if (entry.isSide && vessel) qty *= 2.0;
+
     // ── Calories range for this item ────────────────────────────────────────
     var cal  = entry.calories;
     var prot = entry.protein;
 
-    // Apply partial-eat for sides (dal/sabzi)
-    if (entry.isSide) {
+    // Apply partial-eat for sides (dal/sabzi) served by the ladle
+    if (entry.isSide && !vessel) {
       cal  = _scaleRange(cal,  _sideEatMin, _sideEatMax);
       prot = _scaleRange(prot, _sideEatMin, _sideEatMax);
     }
@@ -866,7 +875,7 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
         calories:   NutrientRange(min: 0, max: 0),
         protein:    NutrientRange(min: 0, max: 0),
         confidence: 0,
-        warnings:   ['No recognised food items — try rephrasing.'],
+        warnings:   ['No recognised food items, try rephrasing.'],
       ),
       meaningfulTokenCount: meaningfulTokenCount,
       matchedTokenCount: 0,
@@ -916,8 +925,8 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
   // ── Warnings (show only when genuinely useful) ────────────────────────────
   final warnings = <String>[];
 
-  if (hasThoda)  warnings.add('Small portion — output adjusted down slightly.');
-  if (hasDouble) warnings.add('Large portion — output adjusted up.');
+  if (hasThoda)  warnings.add('Small portion, output adjusted down slightly.');
+  if (hasDouble) warnings.add('Large portion, output adjusted up.');
 
   // Warn only when ≥2 items were uncertain, or confidence dropped below 0.75.
   if (uncertainItems > 0 && (conf < 0.75 || uncertainItems > 1)) {
@@ -931,7 +940,7 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
   final hasSide = matchedEntries.any((e) => e.isSide);
   final hasCarb = matchedEntries.any((e) => e.isCarb);
   if (hasSide && !hasCarb) {
-    warnings.add('No carbs detected — looks like a light sides-only meal.');
+    warnings.add('No carbs detected, looks like a light sides-only meal.');
   }
 
   final estimation = EstimationResult(

@@ -140,9 +140,10 @@ void main() {
       expect(infers.any((i) => i.detail.contains('consistent with a performance plateau')), isTrue);
       expect(infers.any((i) => i.detail.contains('plausible contributor')), isTrue);
 
-      // Check Recommendations: derived directly from user's configured target (70kg * 2.0 = 140g)
-      final rec = result.insights.firstWhere((i) => i.type == KynoInformationType.recommendation);
-      expect(rec.detail, contains('140g/day'));
+      // Check Recommendations: derived from the engine's target for this
+      // profile (70 kg at maintenance, 1.8 g/kg = 126 g), the dashboard's number.
+      final rec = result.insights.where((i) => i.type == KynoInformationType.recommendation).map((i) => i.detail).join(' ');
+      expect(rec, contains('126g/day'));
 
       // Check Unknown: explicitly declares untracked variables (sleep, stress, form)
       final unk = result.insights.firstWhere((i) => i.type == KynoInformationType.unknown);
@@ -337,8 +338,9 @@ void main() {
 
       final recText = recs.map((r) => r.detail).join(' ');
 
-      // Must recommend the user's actual configured target (70kg * 2.0 = 140g), NOT an invented 135g
-      final expectedTarget = (70.0 * 2.0).toStringAsFixed(0);
+      // Must recommend the engine's target for this profile (70 kg x 1.8 =
+      // 126 g at maintenance), NOT an invented number.
+      final expectedTarget = (70.0 * 1.8).toStringAsFixed(0);
       expect(recText, contains('${expectedTarget}g/day'));
       expect(recText, isNot(contains('135g')));
     });

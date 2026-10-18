@@ -1,6 +1,7 @@
 import '../models/day_log.dart';
 import 'kyno_historical_analysis_service.dart';
 import 'user_session_coordinator.dart';
+import '../ui/k_format.dart';
 
 enum KynoInsightSeverity {
   needsAttention,
@@ -39,10 +40,10 @@ class KynoCoachingInsight {
   });
 
   String get categoryLabel => switch (severity) {
-        KynoInsightSeverity.needsAttention => 'NEEDS ATTENTION',
-        KynoInsightSeverity.coaching => 'COACHING',
-        KynoInsightSeverity.progress => 'PROGRESS',
-        KynoInsightSeverity.resolved => 'RESOLVED',
+        KynoInsightSeverity.needsAttention => 'Needs attention',
+        KynoInsightSeverity.coaching => 'Coaching',
+        KynoInsightSeverity.progress => 'Progress',
+        KynoInsightSeverity.resolved => 'Resolved',
       };
 }
 
@@ -103,17 +104,17 @@ class KynoCoachingInsightService {
     if (isYesterdayLow || hasChronicLowProtein) {
       if (ignoreCooldown || _canTrigger(proDeficitKey, now)) {
         if (isYesterdayLow) {
-          final yProtein = yLog!.totalProteinMid;
-          final yCal = yLog.totalCaloriesMid;
+          final yProtein = yLog.totalProteinMid;
           final yDeficit = (yTargetProtein - yProtein).clamp(0.0, 999.0);
 
           final insight = KynoCoachingInsight(
             id: 'insight_${now.millisecondsSinceEpoch}_pro',
             deduplicationKey: proDeficitKey,
             severity: KynoInsightSeverity.needsAttention,
-            title: 'Yesterday Protein Deficit Check-in',
-            evidence: 'Yesterday you logged ${yProtein.toStringAsFixed(0)}g protein against your ${yTargetProtein.toStringAsFixed(0)}g target (deficit: -${yDeficit.toStringAsFixed(0)}g). Calories: ${yCal.toStringAsFixed(0)} kcal.\n'
-                'PATTERN: Below target on ${snapshot.lowProteinDaysLast7Days} of last 7 logged days (7-day avg: ${snapshot.avgProteinLast7Days.toStringAsFixed(0)}g).',
+            title: 'Protein came up short yesterday',
+            evidence: 'Yesterday: ${yProtein.toStringAsFixed(0)} g protein of your ${yTargetProtein.toStringAsFixed(0)} g, '
+                '${yDeficit.toStringAsFixed(0)} g short. That\'s ${snapshot.lowProteinDaysLast7Days} of your last 7 logged days under, '
+                'averaging ${snapshot.avgProteinLast7Days.toStringAsFixed(0)} g.',
             explanation: 'This is becoming a pattern. Consistently missing your protein target may slow your recovery and training progress.',
             recommendation: 'Today, aim to get closer to your configured protein target of ${yTargetProtein.toStringAsFixed(0)}g by including a protein source in each meal.',
             datePeriod: 'Yesterday ($yKey)',
@@ -125,11 +126,11 @@ class KynoCoachingInsightService {
             id: 'insight_${now.millisecondsSinceEpoch}_pro',
             deduplicationKey: proDeficitKey,
             severity: KynoInsightSeverity.needsAttention,
-            title: 'Protein Intake Below Target',
+            title: 'Protein is running low',
             evidence: 'Your protein intake averaged ${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g against your ${snapshot.targetDailyProtein.toStringAsFixed(0)}g daily target. Below target on ${snapshot.lowProteinDaysLast7Days} of the last 7 logged days.',
             explanation: 'This is the most consistent nutrition gap in your recent logs. Consistently low protein intake is a plausible contributor to slower recovery and strength progress.',
-            recommendation: 'Aim to get closer to your configured ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target by including 30–40g protein in your main meals.',
-            datePeriod: 'Last 7–14 days',
+            recommendation: 'Aim to get closer to your configured ${snapshot.targetDailyProtein.toStringAsFixed(0)}g target by including 30-40g protein in your main meals.',
+            datePeriod: 'Last 7-14 days',
             createdAt: now,
           );
           newlyGenerated.add(insight);
@@ -147,7 +148,7 @@ class KynoCoachingInsightService {
             id: 'insight_${now.millisecondsSinceEpoch}_pro_res',
             deduplicationKey: resKey,
             severity: KynoInsightSeverity.resolved,
-            title: 'Protein Adherence Recovered',
+            title: 'Protein is back on track',
             evidence: 'Your protein adherence improved to ${(snapshot.proteinAdherencePct14Days * 100).toInt()}% (${snapshot.avgProteinLast14Days.toStringAsFixed(0)}g/day) over the last 14 days.',
             explanation: 'Consistently hitting your protein target supports ongoing workout recovery.',
             recommendation: 'Maintain your current meal routine into next week.',
@@ -171,10 +172,10 @@ class KynoCoachingInsightService {
           id: 'insight_${now.millisecondsSinceEpoch}_plat_${exName.hashCode.abs()}',
           deduplicationKey: platKey,
           severity: KynoInsightSeverity.coaching,
-          title: '$exName Plateau Detected',
+          title: '$exName has stalled',
           evidence: plateau,
           explanation: 'You have logged the identical load and repetitions across consecutive sessions without rep progression. Progressive overload requires adding reps or load.',
-          recommendation: 'For your next session on $exName, keep the same weight and strive to add 1–2 reps on your first working set.',
+          recommendation: 'For your next session on $exName, keep the same weight and strive to add 1-2 reps on your first working set.',
           datePeriod: 'Recent sessions',
           createdAt: now,
         );
@@ -194,7 +195,7 @@ class KynoCoachingInsightService {
           id: 'insight_${now.millisecondsSinceEpoch}_imp_${exName.hashCode.abs()}',
           deduplicationKey: impKey,
           severity: KynoInsightSeverity.progress,
-          title: '$exName Progressive Overload',
+          title: '$exName is moving up',
           evidence: improvement,
           explanation: 'Your estimated 1RM and working set volume on $exName have progressed upwards.',
           recommendation: 'Keep following your double progression target until you hit the top of your rep range.',
@@ -214,11 +215,11 @@ class KynoCoachingInsightService {
           id: 'insight_${now.millisecondsSinceEpoch}_gap',
           deduplicationKey: gapKey,
           severity: KynoInsightSeverity.needsAttention,
-          title: 'Training Consistency Gap',
-          evidence: '${snapshot.daysSinceLastWorkout} days have elapsed since your last recorded workout.',
+          title: 'Time to get back in',
+          evidence: 'Your last logged workout was ${plural(snapshot.daysSinceLastWorkout, 'day')} ago.',
           explanation: 'Extended gaps between sessions can make returning to your previous training weights feel more challenging.',
           recommendation: 'Get back into your split today with a standard session. Keep working loads moderate to ease back in.',
-          datePeriod: '${snapshot.daysSinceLastWorkout} days',
+          datePeriod: plural(snapshot.daysSinceLastWorkout, 'day'),
           createdAt: now,
         );
         newlyGenerated.add(insight);

@@ -5,8 +5,6 @@ import '../config/supabase_secrets.dart';
 import '../config/supabase_client.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/persistence_service.dart';
-import '../services/nutrition_hydration_guard.dart';
 import '../services/user_session_coordinator.dart';
 
 class AuthService {

@@ -12,14 +12,9 @@ Future<Exercise?> showExerciseDetailSheet(
   required ExerciseDefinition definition,
   bool showAddButton = true,
 }) {
-  return showModalBottomSheet<Exercise>(
+  return showKSheet<Exercise>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: const Color(0xFF0C0C14),
-    barrierColor: Colors.black.withValues(alpha: 0.75),
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
     builder: (ctx) => ExerciseDetailSheet(
       definition: definition,
       showAddButton: showAddButton,
@@ -39,7 +34,17 @@ class ExerciseDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Rebuilds when workout history hydrates or changes, so the bests panel
+    // moves from its loader to real numbers without reopening the sheet.
+    return ListenableBuilder(
+      listenable: WorkoutService.instance,
+      builder: (context, _) => _buildSheet(context),
+    );
+  }
+
+  Widget _buildSheet(BuildContext context) {
     final media = MediaQuery.of(context);
+    final ready = WorkoutService.instance.isReady;
     final history = WorkoutService.instance.historyFor(definition.id);
 
     double maxWeight = 0.0;
@@ -63,292 +68,331 @@ class ExerciseDetailSheet extends StatelessWidget {
 
     return Container(
       constraints: BoxConstraints(maxHeight: media.size.height * 0.88),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0C0C14),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: KColor.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(
+          top: BorderSide(
+            color: KColor.isDark
+                ? KColor.fg.withValues(alpha: 0.08)
+                : KColor.border,
+          ),
+        ),
       ),
       child: Column(
         children: [
-          // Drag handle
-          Container(
-            margin: const EdgeInsets.only(top: 12, bottom: 8),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2E2E3E),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Badges row
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _buildPill(
-                            label: definition.category.toUpperCase(),
-                            color: KColor.green,
-                            bgColor: KColor.green.withValues(alpha: 0.15),
-                          ),
-                          _buildPill(
-                            label: definition.equipment.toUpperCase(),
-                            color: KColor.blue,
-                            bgColor: KColor.blue.withValues(alpha: 0.15),
-                          ),
-                          _buildPill(
-                            label: definition.targetMuscle.toUpperCase(),
-                            color: KColor.amber,
-                            bgColor: KColor.amber.withValues(alpha: 0.15),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        definition.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
+          // ── Sheet chrome: handle, title, close
+          Stack(
+            children: [
+              // The close glyph sits on the handle row (above the title's
+              // first line), so the title keeps the full sheet width.
+              KSheetHeader(definition.name, subtitle: _subtitle),
+              Positioned(
+                top: 0,
+                right: KSpacing.sm,
+                child: IconButton(
+                  tooltip: 'Close',
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded, color: Color(0xFF9CA3AF), size: 24),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(48, 48),
+                    backgroundColor: KColor.fg.withValues(
+                      alpha: KColor.isDark ? 0.06 : 0.05,
+                    ),
+                  ),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: KColor.textSecondary,
+                    size: 20,
+                  ),
                 ),
-              ],
+              ),
+            ],
+          ),
+
+          // ── Tags
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              KSpacing.p,
+              KSpacing.md,
+              KSpacing.p,
+              14,
+            ),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Wrap(
+                spacing: KSpacing.sm,
+                runSpacing: 6,
+                children: [
+                  // Plain labelled facts, not tinted pills. Only the target
+                  // muscle carries the train accent.
+                  // The demo below shows the muscle; here it is a word.
+                  _Fact(text: definition.category),
+                  _Fact(icon: KIcons.train, text: definition.equipment),
+                  _Fact(
+                    icon: KIcons.target,
+                    text: definition.targetMuscle,
+                    color: KColor.violet,
+                  ),
+                ],
+              ),
             ),
           ),
 
-          const Divider(height: 1, color: Color(0xFF1E1E2F)),
+          Divider(height: 1, color: KColor.divider),
 
-          // Scrollable Content
+          // ── Scrollable content
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            // Short, bounded content: a non-lazy column keeps every section
+            // (and its semantics) mounted, so cues are always reachable.
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                KSpacing.p,
+                KSpacing.lg,
+                KSpacing.p,
+                KSpacing.xxl,
+              ),
               physics: const BouncingScrollPhysics(),
-              children: [
-                // 0. Visual Demonstration & Media Card
-                ExerciseMediaWidget(
-                  definition: definition,
-                  height: 190,
-                ),
-                const SizedBox(height: 16),
-
-                // 1. Muscle Anatomy Section
-                _buildSectionHeader('ANATOMICAL TARGETS', Icons.accessibility_new_rounded),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF13131F),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF1E1E2F)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 0. Visual demonstration & media
+                  ClipRRect(
+                    borderRadius: KRadius.lg,
+                    child: ExerciseMediaWidget(
+                      definition: definition,
+                      height: 190,
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            'Primary Agonist:',
-                            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            definition.targetMuscle,
-                            style: const TextStyle(color: KColor.green, fontSize: 14, fontWeight: FontWeight.w900),
-                          ),
-                        ],
-                      ),
-                      if (definition.secondaryMuscles.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Synergists:',
-                              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, fontWeight: FontWeight.bold),
+                  const SizedBox(height: KSpacing.xl),
+
+                  // 1. Muscle anatomy
+                  const _SectionHeader(
+                    'Muscles worked',
+                    Icons.accessibility_new_rounded,
+                  ),
+                  const SizedBox(height: 10),
+                  _Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _LabeledRow(
+                          label: 'Main muscle:',
+                          child: Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: KChip(
+                              definition.targetMuscle,
+                              color: KColor.violet,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                definition.secondaryMuscles.join(', '),
-                                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ),
+                        if (definition.secondaryMuscles.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          _LabeledRow(
+                            label: 'Also works:',
+                            child: Text(
+                              definition.secondaryMuscles.join(', '),
+                              style: KText.body.copyWith(
+                                color: KColor.textPrimary,
+                                fontSize: 14,
                               ),
                             ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          const Text(
-                            'Progression Style:',
-                            style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            definition.exerciseType.name,
-                            style: const TextStyle(color: KColor.blue, fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                         ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // 2. Personal Historical Performance & PR Card
-                _buildSectionHeader('YOUR PERFORMANCE', Icons.emoji_events_rounded),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF13131F),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: hasLogs ? KColor.amber.withValues(alpha: 0.3) : const Color(0xFF1E1E2F)),
-                  ),
-                  child: hasLogs
-                      ? Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                _buildStatColumn('BEST WEIGHT', '${maxWeight.toStringAsFixed(1)} kg', KColor.amber),
-                                _buildStatColumn('BEST REPS', '$maxReps reps', Colors.white),
-                                _buildStatColumn('ESTIMATED 1RM', '${bestE1rm.toStringAsFixed(1)} kg', KColor.green),
-                              ],
+                        const SizedBox(height: 10),
+                        _LabeledRow(
+                          label: 'Progression style:',
+                          child: Text(
+                            _typeLabel(definition.exerciseType),
+                            style: KText.bodyMedium.copyWith(
+                              color: KColor.textPrimary,
+                              fontSize: 14,
                             ),
-                            if (lastTopSet != null) ...[
-                              const SizedBox(height: 12),
-                              const Divider(height: 1, color: Color(0xFF222233)),
-                              const SizedBox(height: 10),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Recent Output:',
-                                    style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: KSpacing.xl),
+
+                  // 2. Personal historical performance & PRs
+                  const _SectionHeader(
+                    'Your bests',
+                    Icons.emoji_events_rounded,
+                  ),
+                  const SizedBox(height: 10),
+                  _Panel(
+                    child: AnimatedSwitcher(
+                      duration: KMotion.of(context, KMotion.standard),
+                      child: !ready
+                          ? Padding(
+                              key: const ValueKey('loading'),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: KSpacing.xs,
+                              ),
+                              child: Semantics(
+                                container: true,
+                                liveRegion: true,
+                                label: 'Loading your bests',
+                                child: ExcludeSemantics(
+                                  child: Row(
+                                    children: [
+                                      const KRepLoader(
+                                        size: 32,
+                                        semanticsLabel: null,
+                                      ),
+                                      const SizedBox(width: KSpacing.md),
+                                      Expanded(
+                                        child: KLoadingLabel(
+                                          messages: const [
+                                            'Pulling your history…',
+                                          ],
+                                          textAlign: TextAlign.start,
+                                          style: KText.caption.copyWith(
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  Text(
-                                    '${lastTopSet.weight.toStringAsFixed(1)} kg × ${lastTopSet.reps} reps',
-                                    style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            )
+                          : hasLogs
+                          ? Column(
+                              key: const ValueKey('logs'),
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: _StatColumn(
+                                        label: 'Best weight',
+                                        value: maxWeight,
+                                        decimals: 1,
+                                        unit: ' kg',
+                                        color: KColor.textPrimary,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _StatColumn(
+                                        label: 'Best reps',
+                                        value: maxReps,
+                                        unit: ' reps',
+                                        color: KColor.textPrimary,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _StatColumn(
+                                        label: 'Estimated 1RM',
+                                        value: bestE1rm,
+                                        decimals: 1,
+                                        unit: ' kg',
+                                        color: KColor.violet,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (lastTopSet != null) ...[
+                                  const SizedBox(height: KSpacing.md),
+                                  Divider(height: 1, color: KColor.divider),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Last top set',
+                                          style: KText.caption.copyWith(
+                                            color: KColor.textSecondary,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        '${amount(lastTopSet.weight)} kg × ${plural(lastTopSet.reps, 'rep')}',
+                                        style: KText.numSmall.copyWith(fontSize: 14),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            )
+                          : Padding(
+                              key: const ValueKey('empty'),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: KSpacing.sm,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.insights_rounded,
+                                    color: KColor.textMuted,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Nothing logged for this one yet. Your bests show up after your first session.',
+                                      style: KText.caption.copyWith(
+                                        fontSize: 13,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ],
-                          ],
-                        )
-                      : const Center(
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8),
-                            child: Text(
-                              'No historical logs yet. Log your first set today!',
-                              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
                             ),
-                          ),
+                    ),
+                  ),
+
+                  const SizedBox(height: KSpacing.xl),
+
+                  // 3. Step-by-step instructions & cues
+                  if (definition.instructions.isNotEmpty) ...[
+                    const _SectionHeader(
+                      'How to do it',
+                      Icons.format_list_numbered_rounded,
+                    ),
+                    const SizedBox(height: KSpacing.md),
+                    for (final (i, text) in definition.instructions.indexed)
+                      KReveal(
+                        index: i,
+                        maxIndex: 8,
+                        rise: 10,
+                        child: _CueRow(
+                          index: i + 1,
+                          text: text,
+                          isLast: i == definition.instructions.length - 1,
                         ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // 3. Step-by-Step Instructions & Cues
-                if (definition.instructions.isNotEmpty) ...[
-                  _buildSectionHeader('EXECUTION & CUES', Icons.format_list_numbered_rounded),
-                  const SizedBox(height: 10),
-                  ...definition.instructions.asMap().entries.map((entry) {
-                    final index = entry.key + 1;
-                    final text = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 24,
-                            height: 24,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: KColor.green.withValues(alpha: 0.2),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: KColor.green.withValues(alpha: 0.5)),
-                            ),
-                            child: Text(
-                              '$index',
-                              style: const TextStyle(
-                                color: KColor.green,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              text,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13.5,
-                                height: 1.45,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
-                    );
-                  }),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
 
-          // Bottom CTA
+          // ── Bottom CTA
           if (showAddButton)
             Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              decoration: const BoxDecoration(
-                color: Color(0xFF0C0C14),
-                border: Border(top: BorderSide(color: Color(0xFF1E1E2F))),
+              padding: const EdgeInsets.fromLTRB(
+                KSpacing.p,
+                KSpacing.md,
+                KSpacing.p,
+                KSpacing.lg,
+              ),
+              decoration: BoxDecoration(
+                color: KColor.surface,
+                border: Border(top: BorderSide(color: KColor.divider)),
               ),
               child: SafeArea(
                 top: false,
                 child: SizedBox(
                   width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+                  child: KButton(
+                    label: 'Add to workout',
+                    icon: Icons.add_rounded,
+                    onTap: () {
                       Navigator.of(context).pop(definition.toExercise());
                     },
-                    icon: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
-                    label: const Text(
-                      'ADD TO WORKOUT',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: KColor.green,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 0,
-                    ),
                   ),
                 ),
               ),
@@ -358,52 +402,224 @@ class ExerciseDetailSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildPill({required String label, required Color color, required Color bgColor}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-      ),
-    );
-  }
+  static String _typeLabel(ExerciseType type) => switch (type) {
+    ExerciseType.barbellCompound => 'Barbell compound',
+    ExerciseType.dumbbell => 'Dumbbell',
+    ExerciseType.cableMachine => 'Cable or machine',
+    ExerciseType.isolation => 'Isolation',
+    ExerciseType.bodyweight => 'Bodyweight, reps first',
+  };
 
-  Widget _buildSectionHeader(String title, IconData icon) {
+  /// Short descriptive line under the title (equipment · primary muscle),
+  /// written in sentence case so it never duplicates the uppercase tags.
+  String? get _subtitle {
+    final parts = <String>[
+      if (definition.equipment.trim().isNotEmpty) definition.equipment.trim(),
+      if (definition.bodyPart.trim().isNotEmpty)
+        '${definition.bodyPart.trim()} focus',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+}
+
+// ─── Private pieces ──────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  const _SectionHeader(this.title, this.icon);
+
+  @override
+  Widget build(BuildContext context) {
+    // Quiet monochrome header: icon + label, no tinted tile.
     return Row(
       children: [
-        Icon(icon, color: KColor.green, size: 16),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            color: Color(0xFF9CA3AF),
-            fontSize: 11.5,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.8,
+        ExcludeSemantics(
+          child: Icon(icon, color: KColor.textMuted, size: 16),
+        ),
+        const SizedBox(width: KSpacing.sm),
+        Expanded(
+          child: Semantics(
+            header: true,
+            child: Text(
+              title,
+              style: KText.label.copyWith(
+                fontSize: 11.5,
+                color: KColor.textSecondary,
+              ),
+            ),
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildStatColumn(String label, String value, Color valueColor) {
-    return Column(
+/// One fact about the movement: a small glyph and a word, no container.
+class _Fact extends StatelessWidget {
+  final IconData? icon;
+  final String text;
+  final Color? _color;
+  Color get color => _color ?? KColor.textSecondary;
+  const _Fact({this.icon, required this.text, Color? color}) : _color = color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (text.trim().isEmpty) return const SizedBox.shrink();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 28),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            KIcon(icon!, size: KIcons.sm, color: color),
+            const SizedBox(width: 6),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              style: KText.bodyMedium.copyWith(fontSize: 14, color: color == KColor.textSecondary ? KColor.textPrimary : color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Panel extends StatelessWidget {
+  final Widget child;
+  const _Panel({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: KCard(
+        padding: const EdgeInsets.all(KSpacing.lg),
+        borderRadius: KRadius.md,
+        child: child,
+      ),
+    );
+  }
+}
+
+class _LabeledRow extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _LabeledRow({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: KSpacing.sm,
+      runSpacing: KSpacing.xs,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Text(
-          value,
-          style: TextStyle(color: valueColor, fontSize: 16, fontWeight: FontWeight.w900),
+          label,
+          style: KText.caption.copyWith(
+            color: KColor.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 4),
+        child,
+      ],
+    );
+  }
+}
+
+class _StatColumn extends StatelessWidget {
+  final String label;
+  final num value;
+  final int decimals;
+  final String unit;
+  final Color color;
+
+  const _StatColumn({
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.color,
+    this.decimals = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        KAnimatedCount(
+          value: value,
+          decimalPlaces: decimals,
+          suffix: unit,
+          style: KText.numMedium.copyWith(
+            color: color,
+            fontSize: 19,
+          ),
+        ),
+        const SizedBox(height: KSpacing.xs),
         Text(
           label,
-          style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+          textAlign: TextAlign.center,
+          style: KText.caption.copyWith(
+            fontSize: 12,
+            color: KColor.textMuted,
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _CueRow extends StatelessWidget {
+  final int index;
+  final String text;
+  final bool isLast;
+  const _CueRow({
+    required this.index,
+    required this.text,
+    required this.isLast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : KSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05),
+              border: Border.all(
+                color: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.16),
+              ),
+            ),
+            child: Text(
+              '$index',
+              style: KText.numSmall.copyWith(
+                color: KColor.textPrimary,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(width: KSpacing.md),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                text,
+                style: KText.body.copyWith(fontSize: 14.5, height: 1.5),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

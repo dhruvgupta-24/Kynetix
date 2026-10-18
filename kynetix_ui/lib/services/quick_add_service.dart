@@ -12,7 +12,15 @@ import 'nutrition_pipeline.dart';
 import 'meal_memory.dart';
 import 'persistence_service.dart';
 import 'nutrition_target_engine.dart';
+import 'user_session_coordinator.dart';
 import 'user_nutrition_memory.dart';
+import 'food_link_service.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 class QuickAddService {
   QuickAddService._();
@@ -29,16 +37,104 @@ class QuickAddService {
 
   SupabaseClient get _supabase => supabase;
 
+  /// The two items that used to be hard-coded into every Quick Add list.
+  /// They are no longer shown to new accounts. Existing users get them once,
+  /// as ordinary items they can delete (see [_materializeFormerDefaults]).
+  static const _formerDefaults = [
+    (name: '1 scoop whey', calories: 115.0, protein: 22.0, emoji: '🥛'),
+    (name: '4 egg whites + 400ml milk', calories: 328.0, protein: 27.0, emoji: '🥚'),
+  ];
+  static String _defaultsMarkerKey(String userId) =>
+      'quick_add_defaults_materialized_v1_$userId';
+
+  // ── Deletion tombstones ────────────────────────────────────────────────
+  //
+  // Ids the user deleted on this device whose cloud row may still exist (the
+  // delete failed offline, or has not landed yet). Cloud sync never restores
+  // them and retries their cloud delete; an id is dropped only once its
+  // cloud delete succeeded. Stored per user, so account deletion's per-user
+  // key sweep removes it.
+  static String tombstoneKeyFor(String userId) => 'quick_add_tombstones_v1_$userId';
+
+  final Set<String> _tombstones = {};
+  Future<void>? _cloudDeleteRun;
+  bool _cloudDeleteAgain = false;
+
+  /// Ids currently suppressed from cloud sync.
+  Set<String> get deletedTombstones => Set.unmodifiable(_tombstones);
+
+  /// Replaces the cloud delete in tests (the real one needs Supabase).
+  /// Returns true when the delete of [ids] went through for [userId].
+  @visibleForTesting
+  Future<bool> Function(Set<String> ids, String userId)? cloudDeleterOverride;
+
+  /// Completes when any in-flight cloud delete (and its tombstone write) has
+  /// finished.
+  @visibleForTesting
+  Future<void> waitForCloudDeletes() async {
+    while (_cloudDeleteRun != null) {
+      await _cloudDeleteRun;
+    }
+  }
+
   /// Load for specific authenticated user
   Future<void> initForUser(String userId, {SharedPreferences? prefsOverride}) async {
     _currentUserId = userId;
     _customItems.clear();
+    _tombstones.clear();
     await init(prefsOverride: prefsOverride);
+    await _materializeFormerDefaults(userId, prefsOverride);
+    try {
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      if (_currentUserId != userId) return;
+      _tombstones
+        ..clear()
+        ..addAll(prefs.getStringList(tombstoneKeyFor(userId)) ?? const []);
+      // Retry cloud deletes an earlier session could not land.
+      if (_tombstones.isNotEmpty) _pushCloudDeletes();
+    } catch (e) {
+      _debugLog('[QuickAddService] Tombstone load failed: $e');
+    }
+  }
+
+  /// One-time move off the hard-coded defaults. A user who was already using
+  /// the app keeps the two items (now deletable, synced like any other item);
+  /// a brand-new account starts with an empty Quick Add list.
+  Future<void> _materializeFormerDefaults(
+      String userId, SharedPreferences? prefsOverride) async {
+    try {
+      final prefs = prefsOverride ?? await SharedPreferences.getInstance();
+      final marker = _defaultsMarkerKey(userId);
+      if (prefs.getBool(marker) == true) return;
+      final existingUser =
+          dayLogStore.isNotEmpty || PersistenceService.isOnboardingDone;
+      if (existingUser) {
+        for (final d in _formerDefaults) {
+          final taken = _customItems
+              .any((i) => i.name.toLowerCase() == d.name.toLowerCase());
+          if (taken) continue;
+          final item = QuickAddItem(
+            id: generateUuid(),
+            name: d.name,
+            calories: d.calories,
+            protein: d.protein,
+            emoji: d.emoji,
+          );
+          _customItems.add(item);
+          _syncQuickAddBackground(item).ignore();
+        }
+        await _saveLocally(prefs);
+      }
+      await prefs.setBool(marker, true);
+    } catch (e) {
+      _debugLog('[QuickAddService] Default materialization failed: $e');
+    }
   }
 
   /// Flush in-memory state without deleting persisted disk stores
   void clearMemory() {
     _customItems.clear();
+    _tombstones.clear();
     _currentUserId = null;
   }
 
@@ -51,16 +147,19 @@ class QuickAddService {
   ///   6. Awaits PersistenceService.saveDay(date).
   ///   7. Refreshes nutrition targets via NutritionTargetEngine.
   /// Returns the inserted MealEntry upon successful persistence.
+  /// [onInserted] fires as soon as the entry is in the in-memory DayLog
+  /// (before persistence), for optimistic UI.
   Future<MealEntry> addMealToDay({
     required DateTime date,
     required String name,
     required double calories,
     required double protein,
     required MealSection section,
+    void Function(MealEntry entry)? onInserted,
   }) async {
     final sw = Stopwatch()..start();
     final tapTimeMs = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ QuickAddService entered: T+${tapTimeMs.toStringAsFixed(2)} ms');
+    _debugLog('[QuickAddTap] ⏱️ QuickAddService entered: T+${tapTimeMs.toStringAsFixed(2)} ms');
 
     // 1. Hydration check
     if (!NutritionHydrationGuard.instance.isReadyForCurrentUser) {
@@ -71,16 +170,30 @@ class QuickAddService {
     // 2. DayLog retrieval
     final dayLog = logFor(date);
 
-    // 3. Strict Single Source of Truth Lookup Chain
+    // 3. Strict Single Source of Truth Lookup Chain. A name linked to a
+    //    scanned pack logs that pack's label numbers first.
+    final linked = FoodLinkService.instance.resolveMeal(name);
     final userMem = UserNutritionMemory.instance.lookup(name);
     final mealMem = MealMemory.instance.lookupExactKnownFood(name) ??
                     MealMemory.instance.lookupRecurring(name);
 
     final NutritionResult selectedResult;
-    if (userMem != null) {
+    if (linked != null) {
+      selectedResult = linked;
+    } else if (userMem != null) {
       selectedResult = userMem;
     } else if (mealMem != null) {
       selectedResult = mealMem;
+    } else if (calories > 0) {
+      // The Quick Add item carries the numbers the user saw and saved: log
+      // exactly those rather than re-estimating the name.
+      selectedResult = NutritionResult.createCustom(
+        canonicalMeal: name,
+        calories: calories,
+        protein: protein,
+        source: 'quick_add',
+        userCorrected: true,
+      );
     } else {
       selectedResult = await NutritionPipeline.instance.estimateMeal(name);
     }
@@ -99,6 +212,9 @@ class QuickAddService {
 
     // 5. Store in DayLog and MealMemory
     dayLog.add(section, entry);
+    // The in-memory log now holds the entry (source of truth): let the UI
+    // confirm immediately while persistence below completes.
+    onInserted?.call(entry);
     await MealMemory.instance.store(
       name,
       entry.result,
@@ -108,18 +224,20 @@ class QuickAddService {
 
     // 6. Persistence
     final pStartMs = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Persistence started: T+${pStartMs.toStringAsFixed(2)} ms');
+    _debugLog('[QuickAddTap] ⏱️ Persistence started: T+${pStartMs.toStringAsFixed(2)} ms');
 
     await PersistenceService.saveDay(date);
 
     final pEndMs = sw.elapsedMicroseconds / 1000.0;
-    debugPrint('[QuickAddTap] ⏱️ Persistence finished: T+${pEndMs.toStringAsFixed(2)} ms');
+    _debugLog('[QuickAddTap] ⏱️ Persistence finished: T+${pEndMs.toStringAsFixed(2)} ms');
 
-    // 7. Verification trace of zero mutations across pipeline
-    final dayLogReloaded = logFor(date);
-    final reloadedEntry = dayLogReloaded.entriesFor(section).firstWhere((e) => e == entry);
+    // 7. Verification trace of zero mutations across pipeline (debug only:
+    //    building this multi-line string costs real time on every tap).
+    if (kDebugMode) {
+      final dayLogReloaded = logFor(date);
+      final reloadedEntry = dayLogReloaded.entriesFor(section).firstWhere((e) => e == entry);
 
-    debugPrint('''
+      _debugLog('''
 =================== REAL APP RUNTIME AUDIT TRACE (QUICK ADD) ===================
   1. Quick Add item selected     : "$name" (preset: ${calories}kcal, ${protein}g pro)
   2. UserNutritionMemory lookup  : ${userMem != null ? 'Calories=${userMem.calories.mid}, Pro=${userMem.protein.mid}, Carbs=${userMem.carbohydrates?.mid}, Fat=${userMem.fat?.mid}, Score=${userMem.mealQualityScore}' : 'NULL'}
@@ -129,6 +247,7 @@ class QuickAddService {
   6. MealEntry.result after save : Calories=${reloadedEntry.result.calories.mid}, Pro=${reloadedEntry.result.protein.mid}, Carbs=${reloadedEntry.result.carbohydrates?.mid}, Fat=${reloadedEntry.result.fat?.mid}, Score=${reloadedEntry.result.mealQualityScore}
 ================================================================================
 ''');
+    }
 
     await NutritionTargetEngine.instance.refreshTargetForDate(date);
 
@@ -139,8 +258,13 @@ class QuickAddService {
     try {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
       
-      // Load current schema items
-      final raw = prefs.getStringList(_currentPrefsKey) ?? prefs.getStringList(_prefsKey);
+      // Load current schema items. The device-wide (unscoped) list only ever
+      // belongs to the account that owns the device's legacy data; any other
+      // account must not inherit it.
+      final ownsLegacy = _currentUserId == null ||
+          UserSessionCoordinator.legacyOwner(prefs) == _currentUserId;
+      final raw = prefs.getStringList(_currentPrefsKey) ??
+          (ownsLegacy ? prefs.getStringList(_prefsKey) : null);
       if (raw != null) {
         _customItems = raw.map((s) {
           try {
@@ -151,10 +275,10 @@ class QuickAddService {
         }).whereType<QuickAddItem>().toList();
       }
 
-      // Check legacy migration
-      final legacyRaw = prefs.getStringList(_legacyPrefsKey);
+      // Check legacy migration (owner only, same rule as above)
+      final legacyRaw = ownsLegacy ? prefs.getStringList(_legacyPrefsKey) : null;
       if (legacyRaw != null && legacyRaw.isNotEmpty) {
-        debugPrint('[QuickAddService] Migrating legacy custom quick adds...');
+        _debugLog('[QuickAddService] Migrating legacy custom quick adds...');
         final migrated = <QuickAddItem>[];
         for (final s in legacyRaw) {
           try {
@@ -175,34 +299,46 @@ class QuickAddService {
           await _saveLocally(prefs);
         }
         await prefs.remove(_legacyPrefsKey);
-        debugPrint('[QuickAddService] Legacy migration complete. Migrated ${migrated.length} items.');
+        _debugLog('[QuickAddService] Legacy migration complete. Migrated ${migrated.length} items.');
       }
     } catch (e) {
-      debugPrint('[QuickAddService] Init failed: $e');
+      _debugLog('[QuickAddService] Init failed: $e');
     }
   }
 
+  /// Updates memory synchronously (so callers can rebuild this frame), then
+  /// persists.
   Future<void> saveItem(QuickAddItem item) async {
-    final prefs = await SharedPreferences.getInstance();
     final idx = _customItems.indexWhere((i) => i.id == item.id);
+    _tombstones.remove(item.id); // Saved again: no longer deleted.
     if (idx >= 0) {
       _customItems[idx] = item;
     } else {
       _customItems.add(item);
     }
+    final prefs = await SharedPreferences.getInstance();
     await _saveLocally(prefs);
     
     // Background sync to cloud
     _syncQuickAddBackground(item).ignore();
   }
 
+  /// Updates memory synchronously (so callers can rebuild this frame), then
+  /// persists.
+  /// The id is tombstoned first, so a failed (offline) cloud delete can never
+  /// be undone by the next cloud sync.
   Future<void> deleteItem(QuickAddItem item) async {
-    final prefs = await SharedPreferences.getInstance();
     _customItems.removeWhere((i) => i.id == item.id);
+    final owner = _currentUserId;
+    if (owner != null) _tombstones.add(item.id);
+    final prefs = await SharedPreferences.getInstance();
     await _saveLocally(prefs);
-    
-    // Background sync deletion to cloud
-    _deleteQuickAddBackground(item.id).ignore();
+    if (owner != null && _currentUserId == owner) {
+      await _persistTombstones(prefs, owner);
+    }
+
+    // Background sync deletion to cloud (retried until it lands)
+    _pushCloudDeletes();
   }
 
   Future<void> resetAll() async {
@@ -214,13 +350,22 @@ class QuickAddService {
     _currentUserId = null;
   }
 
-  Future<void> syncWithCloud() async {
+  /// Two-way sync with the cloud list. With [expectedUserId] / [stillCurrent]
+  /// (cloud hydration) it stops the moment that user's session is no longer
+  /// the loaded one, so nothing lands under another account (or the
+  /// device-wide key).
+  Future<void> syncWithCloud({
+    String? expectedUserId,
+    bool Function()? stillCurrent,
+  }) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+    if (expectedUserId != null && userId != expectedUserId) return;
+    if (!_isCurrent(userId, stillCurrent)) return;
 
     try {
-      debugPrint('[QuickAddService] Starting custom quick adds cloud sync...');
-      
+      _debugLog('[QuickAddService] Starting custom quick adds cloud sync...');
+
       // 1. Upload local custom items that don't exist on the cloud yet or need update
       if (_customItems.isNotEmpty) {
         final List<Map<String, dynamic>> rows = _customItems.map((item) => {
@@ -234,6 +379,7 @@ class QuickAddService {
         }).toList();
 
         await _supabase.from('user_quick_adds').upsert(rows);
+        if (!_isCurrent(userId, stillCurrent)) return;
       }
 
       // 2. Fetch all custom quick adds from cloud and update local cache
@@ -242,25 +388,49 @@ class QuickAddService {
           .select()
           .eq('user_id', userId);
 
-      final List<QuickAddItem> cloudItems = [];
-      for (final row in response) {
-        cloudItems.add(QuickAddItem(
-          id: row['id'] as String,
-          name: row['name'] as String,
-          calories: (row['calories'] as num).toDouble(),
-          protein: (row['protein'] as num).toDouble(),
-          emoji: (row['emoji'] as String?) ?? '⚡',
-          builtIn: false,
-        ));
-      }
-
-      _customItems = cloudItems;
-      final prefs = await SharedPreferences.getInstance();
-      await _saveLocally(prefs);
-      debugPrint('[QuickAddService] Cloud sync complete. Loaded ${cloudItems.length} items from Supabase.');
+      await applyCloudItems(userId, response, stillCurrent: stillCurrent);
     } catch (e) {
-      debugPrint('[QuickAddService] Cloud sync failed: $e');
+      _debugLog('[QuickAddService] Cloud sync failed: $e');
     }
+  }
+
+  bool _isCurrent(String userId, bool Function()? stillCurrent) =>
+      _currentUserId == userId && (stillCurrent?.call() ?? true);
+
+  /// Replaces the local list with the cloud [rows] for [userId], except ids
+  /// the user deleted on this device (their cloud delete is retried).
+  /// Dropped if [userId]'s session is no longer the loaded one.
+  @visibleForTesting
+  Future<void> applyCloudItems(
+    String userId,
+    List<dynamic> rows, {
+    bool Function()? stillCurrent,
+  }) async {
+    if (!_isCurrent(userId, stillCurrent)) return;
+    final List<QuickAddItem> cloudItems = [];
+    var skippedDeleted = false;
+    for (final row in rows) {
+      final id = row['id'] as String;
+      if (_tombstones.contains(id)) {
+        skippedDeleted = true;
+        continue;
+      }
+      cloudItems.add(QuickAddItem(
+        id: id,
+        name: row['name'] as String,
+        calories: (row['calories'] as num).toDouble(),
+        protein: (row['protein'] as num).toDouble(),
+        emoji: (row['emoji'] as String?) ?? '⚡',
+        builtIn: false,
+      ));
+    }
+
+    _customItems = cloudItems;
+    final prefs = await SharedPreferences.getInstance();
+    if (!_isCurrent(userId, stillCurrent)) return;
+    await _saveLocally(prefs);
+    _debugLog('[QuickAddService] Cloud sync complete. Loaded ${cloudItems.length} items from Supabase.');
+    if (skippedDeleted) _pushCloudDeletes();
   }
 
   Future<void> _saveLocally(SharedPreferences prefs) async {
@@ -286,23 +456,69 @@ class QuickAddService {
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('[QuickAddService] Background quick add sync failed: $e');
+      _debugLog('[QuickAddService] Background quick add sync failed: $e');
     }
   }
 
-  Future<void> _deleteQuickAddBackground(String id) async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    try {
-      await _supabase
-          .from('user_quick_adds')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', userId);
-    } catch (e) {
-      debugPrint('[QuickAddService] Background quick add deletion sync failed: $e');
+  Future<void> _persistTombstones(SharedPreferences prefs, String owner) async {
+    final key = tombstoneKeyFor(owner);
+    if (_tombstones.isEmpty) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setStringList(key, _tombstones.toList());
     }
+  }
+
+  /// Background cloud delete of every tombstoned id. Serialized; a request
+  /// during a run triggers one more run. Ids are un-tombstoned only after a
+  /// successful delete, and only for the user who deleted them.
+  void _pushCloudDeletes() {
+    if (_cloudDeleteRun != null) {
+      _cloudDeleteAgain = true;
+      return;
+    }
+    _cloudDeleteRun = () async {
+      try {
+        do {
+          _cloudDeleteAgain = false;
+          final owner = _currentUserId;
+          if (owner == null || _tombstones.isEmpty) return;
+          final ids = Set<String>.of(_tombstones);
+          bool ok;
+          try {
+            final deleter = cloudDeleterOverride;
+            ok = deleter != null
+                ? await deleter(ids, owner)
+                : await _deleteCloudRows(ids, owner);
+          } catch (e) {
+            _debugLog('[QuickAddService] Background quick add deletion sync failed: $e');
+            ok = false;
+          }
+          if (!ok || _currentUserId != owner) return;
+          final before = _tombstones.length;
+          _tombstones.removeAll(ids);
+          if (_tombstones.length == before) continue;
+          final prefs = await SharedPreferences.getInstance();
+          if (_currentUserId != owner) return;
+          await _persistTombstones(prefs, owner);
+        } while (_cloudDeleteAgain);
+      } finally {
+        _cloudDeleteRun = null;
+      }
+    }();
+  }
+
+  /// Deletes [ids] from [expectedUserId]'s cloud list. True only when the
+  /// delete went through for that user.
+  Future<bool> _deleteCloudRows(Set<String> ids, String expectedUserId) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || userId != expectedUserId) return false;
+    await _supabase
+        .from('user_quick_adds')
+        .delete()
+        .eq('user_id', userId)
+        .inFilter('id', ids.toList());
+    return true;
   }
 
   String generateUuid() {

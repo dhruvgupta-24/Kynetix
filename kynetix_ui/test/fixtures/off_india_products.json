@@ -1,0 +1,1083 @@
+{
+ "_about": "Trimmed Open Food Facts v2 product responses for real Indian packaged foods, fetched 2026-10-16 from https://world.openfoodfacts.org/api/v2/product/<code>.json. Only the fields BarcodeFoodService reads are kept. Data is ODbL (Open Food Facts contributors).",
+ "products": {
+  "8901719134845": {
+   "status": 1,
+   "product": {
+    "code": "8901719134845",
+    "product_name": "Parle-G Biscuit",
+    "product_name_en": "Parle-G Biscuit",
+    "brands": "Parle",
+    "quantity": "45gm",
+    "product_quantity": 45,
+    "product_quantity_unit": "g",
+    "serving_size": "15 g",
+    "serving_quantity": 15,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/171/913/4845/front_en.11.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 78.4,
+     "carbohydrates_serving": 11.8,
+     "energy-kcal_100g": 448,
+     "energy-kcal_serving": 67.2,
+     "energy-kj_100g": 1894,
+     "energy-kj_serving": 284,
+     "energy_100g": 1894,
+     "energy_serving": 284,
+     "fat_100g": 11.8,
+     "fat_serving": 1.77,
+     "fiber_100g": 0.7,
+     "fiber_serving": 0.105,
+     "proteins_100g": 7,
+     "proteins_serving": 1.05,
+     "sugars_100g": 25.5,
+     "sugars_serving": 3.83
+    }
+   }
+  },
+  "8901719120800": {
+   "status": 1,
+   "product": {
+    "code": "8901719120800",
+    "product_name": "Parle-G 250",
+    "product_name_en": "Parle-G 250",
+    "brands": "Parle",
+    "quantity": "250",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/171/912/0800/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 77.3,
+     "energy-kj_100g": 454,
+     "energy_100g": 454,
+     "fat_100g": 13,
+     "proteins_100g": 6.9,
+     "sugars_100g": 25.5
+    }
+   }
+  },
+  "8901063162914": {
+   "status": 1,
+   "product": {
+    "code": "8901063162914",
+    "product_name": "Marie Gold Biscuit",
+    "product_name_en": "Marie Gold Biscuit",
+    "brands": "Britannia",
+    "quantity": "64 g",
+    "product_quantity": 64,
+    "product_quantity_unit": "g",
+    "serving_size": "15 g",
+    "serving_quantity": 15,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/106/316/2914/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 79.5,
+     "carbohydrates_serving": 11.9,
+     "energy-kcal_100g": 445,
+     "energy-kcal_serving": 66.8,
+     "energy-kj_100g": 1863,
+     "energy-kj_serving": 279,
+     "energy_100g": 1863,
+     "energy_serving": 279,
+     "fat_100g": 10.6,
+     "fat_serving": 1.59,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 7.9,
+     "proteins_serving": 1.19,
+     "sugars_100g": 21.2,
+     "sugars_serving": 3.18
+    }
+   }
+  },
+  "8901063091023": {
+   "status": 1,
+   "product": {
+    "code": "8901063091023",
+    "product_name": "Good Day Harmony",
+    "product_name_en": "Good Day Harmony",
+    "brands": "Britannia, Good Day",
+    "quantity": "120 g",
+    "product_quantity": 120,
+    "product_quantity_unit": "g",
+    "serving_size": "10g",
+    "serving_quantity": 10,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/106/309/1023/front_en.4.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 64.8,
+     "carbohydrates_serving": 6.48,
+     "energy-kcal_100g": 513,
+     "energy-kcal_serving": 51.3,
+     "energy_100g": 2146,
+     "energy_serving": 215,
+     "fat_100g": 25,
+     "fat_serving": 2.5,
+     "proteins_100g": 7.2,
+     "proteins_serving": 0.72,
+     "sugars_100g": 21.5,
+     "sugars_serving": 2.15
+    }
+   }
+  },
+  "8901719105913": {
+   "status": 1,
+   "product": {
+    "code": "8901719105913",
+    "product_name": "parle hide & seek 120g",
+    "product_name_en": "parle hide & seek 120g",
+    "brands": "PARLE",
+    "quantity": "120g",
+    "product_quantity": 120,
+    "product_quantity_unit": "g",
+    "serving_size": "100g",
+    "serving_quantity": 100,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/171/910/5913/front_en.22.200.jpg",
+    "nutriments": {
+     "alcohol_100g": 0,
+     "alcohol_serving": 0,
+     "carbohydrates_100g": 73.4,
+     "carbohydrates_serving": 73.4,
+     "energy-kcal_100g": 479,
+     "energy-kcal_serving": 479,
+     "energy-kj_100g": 2014.1,
+     "energy-kj_serving": 2010,
+     "energy_100g": 2014.1,
+     "energy_serving": 2010,
+     "fat_100g": 18,
+     "fat_serving": 18,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 5.9,
+     "proteins_serving": 5.9,
+     "sugars_100g": 32.2,
+     "sugars_serving": 32.2
+    }
+   }
+  },
+  "8901725015275": {
+   "status": 1,
+   "product": {
+    "code": "8901725015275",
+    "product_name": "Dark Fantasy Choco fills",
+    "product_name_en": "Dark Fantasy Choco fills",
+    "brands": "Sunfeast, Sunfeast is sold by ITC Limited",
+    "quantity": "69g (6 packs x 11.5g)",
+    "product_quantity": 69,
+    "product_quantity_unit": "g",
+    "serving_size": "1 cookie (11.5g)",
+    "serving_quantity": 11.5,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/172/501/5275/front_en.51.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 61.1,
+     "carbohydrates_serving": 7.03,
+     "energy-kcal_100g": 507,
+     "energy-kcal_serving": 58.3,
+     "energy-kj_100g": 2172.9,
+     "energy-kj_serving": 250,
+     "energy_100g": 2172.9,
+     "energy_serving": 250,
+     "fat_100g": 27.3,
+     "fat_serving": 3.14,
+     "proteins_100g": 7.3,
+     "proteins_serving": 0.839,
+     "sugars_100g": 35.7,
+     "sugars_serving": 4.11
+    }
+   }
+  },
+  "8901725133979": {
+   "status": 1,
+   "product": {
+    "code": "8901725133979",
+    "product_name": "Sunfeast Dark Fantasy Bourbon, Classic Biscuit",
+    "product_name_en": "Sunfeast Dark Fantasy Bourbon, Classic Biscuit",
+    "generic_name": "Sunfeast Dark Fantasy Bourbon, Classic Biscuit",
+    "brands": "Sunfeast",
+    "quantity": "50g",
+    "product_quantity": 50,
+    "product_quantity_unit": "g",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/172/513/3979/front_en.7.200.jpg",
+    "nutriments": {}
+   }
+  },
+  "8904004400731": {
+   "status": 1,
+   "product": {
+    "code": "8904004400731",
+    "product_name": "Aloo Bhujia Sev",
+    "product_name_en": "Aloo Bhujia Sev",
+    "brands": "Haldiram's",
+    "quantity": "200 gm",
+    "product_quantity": 200,
+    "product_quantity_unit": "g",
+    "serving_size": "20 g",
+    "serving_quantity": 20,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/400/440/0731/front_en.28.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 47.71,
+     "carbohydrates_serving": 9.54,
+     "energy-kcal_100g": 569,
+     "energy-kcal_serving": 114,
+     "energy-kj_100g": 2370,
+     "energy-kj_serving": 474,
+     "energy_100g": 2370,
+     "energy_serving": 474,
+     "fat_100g": 37.48,
+     "fat_serving": 7.5,
+     "fiber_100g": 4.04,
+     "fiber_serving": 0.808,
+     "proteins_100g": 8.97,
+     "proteins_serving": 1.79,
+     "sugars_100g": 0,
+     "sugars_serving": 0
+    }
+   }
+  },
+  "8904004403732": {
+   "status": 1,
+   "product": {
+    "code": "8904004403732",
+    "product_name": "Haldiram moong dal",
+    "product_name_en": "Haldiram moong dal",
+    "brands": "Haldiram",
+    "quantity": "200 g",
+    "product_quantity": 200,
+    "product_quantity_unit": "g",
+    "serving_size": "50.0g",
+    "serving_quantity": 50,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/400/440/3732/front_en.8.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 50.66,
+     "carbohydrates_serving": 25.3,
+     "energy-kcal_100g": 476,
+     "energy-kcal_serving": 238,
+     "energy-kj_100g": 2058.06,
+     "energy-kj_serving": 1030,
+     "energy_100g": 2058.06,
+     "energy_serving": 1030,
+     "fat_100g": 20.93,
+     "fat_serving": 10.5,
+     "fiber_100g": 7.52,
+     "fiber_serving": 3.76,
+     "proteins_100g": 21.31,
+     "proteins_serving": 10.7,
+     "sugars_100g": 0,
+     "sugars_serving": 0
+    }
+   }
+  },
+  "8904004401073": {
+   "status": 1,
+   "product": {
+    "code": "8904004401073",
+    "product_name": "Haldiram khatta mitha",
+    "product_name_en": "Haldiram khatta mitha",
+    "brands": "haldiram",
+    "quantity": "50g",
+    "product_quantity": 50,
+    "product_quantity_unit": "g",
+    "serving_size": "20g",
+    "serving_quantity": 20,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/400/440/1073/front_en.3.200.jpg",
+    "nutriments": {
+     "alcohol_100g": 0,
+     "alcohol_serving": 0,
+     "carbohydrates_100g": 0.05738,
+     "carbohydrates_serving": 0.0115,
+     "energy-kcal_100g": 530,
+     "energy-kcal_serving": 106,
+     "energy-kj_100g": 1272.72546,
+     "energy-kj_serving": 255,
+     "energy_100g": 1272.72546,
+     "energy_serving": 255,
+     "fat_100g": 29.25,
+     "fat_serving": 5.85,
+     "fiber_100g": 4.01,
+     "fiber_serving": 0.802,
+     "proteins_100g": 9.26,
+     "proteins_serving": 1.85,
+     "sugars_100g": 13.1,
+     "sugars_serving": 2.62
+    }
+   }
+  },
+  "8901491503020": {
+   "status": 1,
+   "product": {
+    "code": "8901491503020",
+    "product_name": "Lays India's Magic Masala",
+    "product_name_en": "Lays India's Magic Masala",
+    "brands": "Lay's",
+    "quantity": "26.5g",
+    "product_quantity": 26.5,
+    "product_quantity_unit": "g",
+    "serving_size": "30.5g",
+    "serving_quantity": 30.5,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/149/150/3020/front_en.35.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 51.9,
+     "carbohydrates_serving": 15.8,
+     "energy-kcal_100g": 531,
+     "energy-kcal_serving": 162,
+     "energy-kj_100g": 2215.5,
+     "energy-kj_serving": 676,
+     "energy_100g": 2215.5,
+     "energy_serving": 676,
+     "fat_100g": 33,
+     "fat_serving": 10.1,
+     "proteins_100g": 6.6,
+     "proteins_serving": 2.01,
+     "sugars_100g": 1.6,
+     "sugars_serving": 0.488
+    }
+   }
+  },
+  "8901491361026": {
+   "status": 1,
+   "product": {
+    "code": "8901491361026",
+    "product_name": "Kurkure Masala Munch",
+    "product_name_en": "Kurkure Masala Munch",
+    "generic_name": "Kurkure",
+    "brands": "Kurkure, PepsiCo",
+    "quantity": "41.5g",
+    "product_quantity": 41.5,
+    "product_quantity_unit": "g",
+    "serving_size": "50g",
+    "serving_quantity": 50,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/149/136/1026/front_en.51.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 55.2,
+     "carbohydrates_serving": 27.6,
+     "energy-kcal_100g": 558,
+     "energy-kcal_serving": 279,
+     "energy-kj_100g": 2331.1,
+     "energy-kj_serving": 1170,
+     "energy_100g": 2331.1,
+     "energy_serving": 1170,
+     "fat_100g": 34.7,
+     "fat_serving": 17.4,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 6.4,
+     "proteins_serving": 3.2,
+     "sugars_100g": 1,
+     "sugars_serving": 0.5
+    }
+   }
+  },
+  "8901491100533": {
+   "status": 1,
+   "product": {
+    "code": "8901491100533",
+    "product_name": "Chilli Chatka",
+    "product_name_en": "Chilli Chatka",
+    "brands": "Kurkure",
+    "quantity": "78.9",
+    "serving_size": "20 g",
+    "serving_quantity": 20,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/149/110/0533/front_en.35.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 55.8,
+     "carbohydrates_serving": 11.2,
+     "energy-kcal_100g": 562,
+     "energy-kcal_serving": 112,
+     "energy-kj_100g": 2343,
+     "energy-kj_serving": 469,
+     "energy_100g": 2343,
+     "energy_serving": 469,
+     "fat_100g": 35.1,
+     "fat_serving": 7.02,
+     "proteins_100g": 5.6,
+     "proteins_serving": 1.12,
+     "sugars_100g": 2,
+     "sugars_serving": 0.4
+    }
+   }
+  },
+  "8901725013684": {
+   "status": 1,
+   "product": {
+    "code": "8901725013684",
+    "product_name": "Bingo! Mad Angles Achaari Masti",
+    "product_name_en": "Bingo! Mad Angles Achaari Masti",
+    "brands": "Bingo, ITC Limited",
+    "quantity": "58 gm",
+    "product_quantity": 58,
+    "product_quantity_unit": "g",
+    "serving_size": "20 g",
+    "serving_quantity": 20,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/172/501/3684/front_en.24.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 61.2,
+     "carbohydrates_serving": 12.2,
+     "energy-kcal_100g": 526,
+     "energy-kcal_serving": 105,
+     "energy-kj_100g": 2202,
+     "energy-kj_serving": 440,
+     "energy_100g": 2202,
+     "energy_serving": 440,
+     "fat_100g": 29.5,
+     "fat_serving": 5.9,
+     "proteins_100g": 5.6,
+     "proteins_serving": 1.12,
+     "sugars_100g": 6,
+     "sugars_serving": 1.2
+    }
+   }
+  },
+  "8901058000269": {
+   "status": 1,
+   "product": {
+    "code": "8901058000269",
+    "product_name": "Maggi",
+    "product_name_en": "Maggi",
+    "brands": "Maggi",
+    "quantity": "280g",
+    "product_quantity": 280,
+    "product_quantity_unit": "g",
+    "serving_size": "1 piece (70 g)",
+    "serving_quantity": 70,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/105/800/0269/front_en.39.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 59.5714285714286,
+     "carbohydrates_serving": 41.7,
+     "energy-kcal_100g": 384.285714285714,
+     "energy-kcal_serving": 269,
+     "energy-kj_100g": 1616.28571428571,
+     "energy-kj_serving": 1130,
+     "energy_100g": 1616.28571428571,
+     "energy_serving": 1130,
+     "fat_100g": 12.5714285714286,
+     "fat_serving": 8.8,
+     "proteins_100g": 8.14285714285714,
+     "proteins_serving": 5.7,
+     "sugars_100g": 1.85714285714286,
+     "sugars_serving": 1.3
+    }
+   }
+  },
+  "8901058901542": {
+   "status": 1,
+   "product": {
+    "code": "8901058901542",
+    "product_name": "Maggie",
+    "product_name_en": "Maggie",
+    "brands": "Maggi",
+    "quantity": "140g",
+    "product_quantity": 140,
+    "product_quantity_unit": "g",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/105/890/1542/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 59.6,
+     "energy-kcal_100g": 389,
+     "energy-kj_100g": 1629,
+     "energy_100g": 1629,
+     "fat_100g": 13.5,
+     "fiber_100g": 2,
+     "proteins_100g": 8.2,
+     "sugars_100g": 1.8
+    }
+   }
+  },
+  "8901233030548": {
+   "status": 1,
+   "product": {
+    "code": "8901233030548",
+    "product_name": "Cadbury Dairy Milk",
+    "product_name_en": "Cadbury Dairy Milk",
+    "generic_name": "Chocolate bar with milk",
+    "brands": "Mondelez",
+    "quantity": "13.2 g",
+    "product_quantity": 13.2,
+    "product_quantity_unit": "g",
+    "serving_size": "13.2g",
+    "serving_quantity": 13.2,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/123/303/0548/front_en.16.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 64.2,
+     "carbohydrates_serving": 8.47,
+     "energy-kcal_100g": 527,
+     "energy-kcal_serving": 69.6,
+     "energy_100g": 2204,
+     "energy_serving": 291,
+     "fat_100g": 27.9,
+     "fat_serving": 3.68,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 5.6,
+     "proteins_serving": 0.739,
+     "sugars_100g": 61,
+     "sugars_serving": 8.05
+    }
+   }
+  },
+  "8901233022086": {
+   "status": 1,
+   "product": {
+    "code": "8901233022086",
+    "product_name": "dairy milk silk bubbly",
+    "product_name_en": "dairy milk silk bubbly",
+    "brands": "Cadbury Dairy Milk, Cadbury",
+    "quantity": "50g",
+    "product_quantity": 50,
+    "product_quantity_unit": "g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/123/302/2086/front_en.6.200.jpg",
+    "nutriments": {}
+   }
+  },
+  "8901262152341": {
+   "status": 1,
+   "product": {
+    "code": "8901262152341",
+    "product_name": "Amul Kool Premium Kesar Flavour",
+    "product_name_en": "Amul Kool Premium Kesar Flavour",
+    "brands": "Amul",
+    "quantity": "180ml",
+    "product_quantity": 180,
+    "product_quantity_unit": "ml",
+    "serving_size": "180 ml",
+    "serving_quantity": 180,
+    "nutrition_data_per": "100ml",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/215/2341/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 12.5,
+     "carbohydrates_serving": 22.5,
+     "energy-kcal_100g": 91.1111111111111,
+     "energy-kcal_serving": 164,
+     "energy-kj_100g": 382.555555555555,
+     "energy-kj_serving": 689,
+     "energy_100g": 382.555555555555,
+     "energy_serving": 689,
+     "fat_100g": 3.16666666666667,
+     "fat_serving": 5.7,
+     "proteins_100g": 3.11111111111111,
+     "proteins_serving": 5.6,
+     "sugars_100g": 12.5,
+     "sugars_serving": 22.5
+    }
+   }
+  },
+  "8901262200189": {
+   "status": 1,
+   "product": {
+    "code": "8901262200189",
+    "product_name": "Amul Lassi 200ml",
+    "product_name_en": "Amul Lassi 200ml",
+    "brands": "Amul",
+    "quantity": "200mL",
+    "product_quantity": 200,
+    "product_quantity_unit": "ml",
+    "serving_size": "200ml",
+    "serving_quantity": 200,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/220/0189/front_en.26.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 14.5,
+     "carbohydrates_serving": 29,
+     "energy-kcal_100g": 88.5,
+     "energy-kcal_serving": 177,
+     "energy-kj_100g": 359.9,
+     "energy-kj_serving": 720,
+     "energy_100g": 359.9,
+     "energy_serving": 720,
+     "fat_100g": 2.1,
+     "fat_serving": 4.2,
+     "proteins_100g": 2.1,
+     "proteins_serving": 4.2,
+     "sugars_100g": 14.5,
+     "sugars_serving": 29
+    }
+   }
+  },
+  "8901262153348": {
+   "status": 1,
+   "product": {
+    "code": "8901262153348",
+    "product_name": "Protein Lassi - Rose Flavour",
+    "product_name_en": "Protein Lassi - Rose Flavour",
+    "brands": "Amul",
+    "quantity": "200mL",
+    "product_quantity": 200,
+    "product_quantity_unit": "ml",
+    "serving_size": "200 ml",
+    "serving_quantity": 200,
+    "nutrition_data_per": "100ml",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/215/3348/front_en.18.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 6,
+     "carbohydrates_serving": 12,
+     "energy-kcal_100g": 53.5,
+     "energy-kcal_serving": 107,
+     "energy-kj_100g": 224,
+     "energy-kj_serving": 448,
+     "energy_100g": 224,
+     "energy_serving": 448,
+     "fat_100g": 0.85,
+     "fat_serving": 1.7,
+     "proteins_100g": 7.5,
+     "proteins_serving": 15,
+     "sugars_100g": 1.6,
+     "sugars_serving": 3.2
+    }
+   }
+  },
+  "8902579103057": {
+   "status": 1,
+   "product": {
+    "code": "8902579103057",
+    "product_name": "Frooti",
+    "product_name_en": "Frooti",
+    "brands": "Parle",
+    "quantity": "300ml",
+    "product_quantity": 300,
+    "product_quantity_unit": "ml",
+    "serving_size": "100ml",
+    "serving_quantity": 100,
+    "nutrition_data_per": "100ml",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/257/910/3057/front_en.34.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 16.2,
+     "carbohydrates_serving": 16.2,
+     "energy-kcal_100g": 65,
+     "energy-kcal_serving": 65,
+     "energy_100g": 271,
+     "energy_serving": 271,
+     "fat_100g": 0,
+     "fat_serving": 0,
+     "proteins_100g": 0,
+     "proteins_serving": 0,
+     "sugars_100g": 15.5,
+     "sugars_serving": 15.5
+    }
+   }
+  },
+  "8901888006363": {
+   "status": 1,
+   "product": {
+    "code": "8901888006363",
+    "product_name": "Real Mixed Fruit 180ml",
+    "product_name_en": "Real mixed fruit tpk",
+    "quantity": "180ml",
+    "product_quantity": 180,
+    "product_quantity_unit": "ml",
+    "nutrition_data_per": "100ml",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/188/800/6363/front_fr.15.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 13.1,
+     "energy-kcal_100g": 52,
+     "energy_100g": 217,
+     "fat_100g": 0,
+     "proteins_100g": 0.2,
+     "sugars_100g": 13.1
+    }
+   }
+  },
+  "8906080600180": {
+   "status": 1,
+   "product": {
+    "code": "8906080600180",
+    "product_name": "Paper Boat Apple Drink 150ml",
+    "product_name_en": "Paper Boat Apple Drink 150ml",
+    "generic_name": "Apple juice",
+    "brands": "Paper Boat",
+    "quantity": "150 ml",
+    "product_quantity": 150,
+    "product_quantity_unit": "ml",
+    "nutrition_data_per": "100ml",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/608/060/0180/front_en.5.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 13.8,
+     "energy-kcal_100g": 55.2,
+     "energy_100g": 230,
+     "fat_100g": 0,
+     "fiber_100g": 0,
+     "proteins_100g": 0,
+     "sugars_100g": 13
+    }
+   }
+  },
+  "8906009532998": {
+   "status": 1,
+   "product": {
+    "code": "8906009532998",
+    "product_name": "Nutrition Bar",
+    "product_name_en": "Nutrition Bar",
+    "brands": "RiteBite",
+    "quantity": "40g",
+    "product_quantity": 40,
+    "product_quantity_unit": "g",
+    "serving_size": "40g",
+    "serving_quantity": 40,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/600/953/2998/front_en.13.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 23,
+     "carbohydrates_serving": 9.2,
+     "energy-kcal_100g": 204,
+     "energy-kcal_serving": 81.6,
+     "energy_100g": 853,
+     "energy_serving": 341,
+     "fat_100g": 10.2,
+     "fat_serving": 4.08,
+     "fiber_100g": 2.3,
+     "fiber_serving": 0.92,
+     "proteins_100g": 4.1,
+     "proteins_serving": 1.64,
+     "sugars_100g": 1.3,
+     "sugars_serving": 0.52
+    }
+   }
+  },
+  "8906009532172": {
+   "status": 1,
+   "product": {
+    "code": "8906009532172",
+    "product_name": "Max Protein Daily Choco Almond",
+    "product_name_en": "Max Protein Daily Choco Almond",
+    "brands": "RiteBite",
+    "quantity": "50g",
+    "product_quantity": 50,
+    "product_quantity_unit": "g",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/600/953/2172/front_en.6.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 27.5,
+     "energy-kcal_100g": 179,
+     "energy_100g": 748,
+     "fat_100g": 6.8,
+     "fiber_100g": 5,
+     "polyols_100g": 8.7,
+     "proteins_100g": 10,
+     "sugars_100g": 0.5
+    }
+   }
+  },
+  "8901725016838": {
+   "status": 1,
+   "product": {
+    "code": "8901725016838",
+    "product_name": "Aashirvaad Superior MP Atta",
+    "product_name_en": "Aashirvaad Superior MP Atta",
+    "brands": "Aashirvaad, ITC",
+    "quantity": "1kg",
+    "product_quantity": 1000,
+    "product_quantity_unit": "g",
+    "serving_size": "60g",
+    "serving_quantity": 60,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/172/501/6838/front_en.7.200.jpg",
+    "nutriments": {
+     "alcohol_100g": 0,
+     "alcohol_serving": 0,
+     "carbohydrates_100g": 76,
+     "carbohydrates_serving": 45.6,
+     "energy-kcal_100g": 338,
+     "energy-kcal_serving": 203,
+     "energy-kj_100g": 1605.2,
+     "energy-kj_serving": 963,
+     "energy_100g": 1605.2,
+     "energy_serving": 963,
+     "fat_100g": 1.3,
+     "fat_serving": 0.78,
+     "fiber_100g": 10.4,
+     "fiber_serving": 6.24,
+     "proteins_100g": 10.7,
+     "proteins_serving": 6.42,
+     "sugars_100g": 3.6,
+     "sugars_serving": 2.16
+    }
+   }
+  },
+  "8901725121723": {
+   "status": 1,
+   "product": {
+    "code": "8901725121723",
+    "product_name": "Aashirvaad Superior MP Atta",
+    "product_name_en": "Aashirvaad Superior MP Atta",
+    "brands": "ITC",
+    "quantity": "5kg",
+    "product_quantity": 5000,
+    "product_quantity_unit": "g",
+    "serving_size": "60 g",
+    "serving_quantity": 60,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/172/512/1723/front_en.5.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 76,
+     "carbohydrates_serving": 45.6,
+     "energy-kcal_100g": 338,
+     "energy-kcal_serving": 203,
+     "energy-kj_100g": 1605.2,
+     "energy-kj_serving": 963,
+     "energy_100g": 1605.2,
+     "energy_serving": 963,
+     "fat_100g": 1.3,
+     "fat_serving": 0.78,
+     "fiber_100g": 10.4,
+     "fiber_serving": 6.24,
+     "proteins_100g": 10.7,
+     "proteins_serving": 6.42,
+     "sugars_100g": 3.6,
+     "sugars_serving": 2.16
+    }
+   }
+  },
+  "0690225101103": {
+   "status": 1,
+   "product": {
+    "code": "0690225101103",
+    "product_name": "India gate super Basmati rice 1.5 kg",
+    "product_name_en": "India gate super Basmati rice 1.5 kg",
+    "generic_name": "basmati rice",
+    "brands": "KRBL limited",
+    "quantity": "1.5 kg",
+    "product_quantity": 1500.0,
+    "product_quantity_unit": "g",
+    "serving_size": "100 g",
+    "serving_quantity": 100,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/069/022/510/1103/front_en.9.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 77,
+     "carbohydrates_serving": 77,
+     "energy-kcal_100g": 344,
+     "energy-kcal_serving": 344,
+     "energy-kj_100g": 1441.4112,
+     "energy-kj_serving": 1440,
+     "energy_100g": 1441.4112,
+     "energy_serving": 1440,
+     "fat_100g": 0.5,
+     "fat_serving": 0.5,
+     "fiber_100g": 0.0014,
+     "fiber_serving": 0.0014,
+     "proteins_100g": 6.7,
+     "proteins_serving": 6.7
+    }
+   }
+  },
+  "8901262180146": {
+   "status": 1,
+   "product": {
+    "code": "8901262180146",
+    "product_name": "Amul Malai Paneer",
+    "product_name_en": "Amul Malai Paneer",
+    "brands": "Amul",
+    "quantity": "1kg",
+    "product_quantity": 1000,
+    "product_quantity_unit": "g",
+    "serving_size": "50g",
+    "serving_quantity": 50,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/218/0146/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 4,
+     "carbohydrates_serving": 2,
+     "energy-kcal_100g": 312,
+     "energy-kcal_serving": 156,
+     "energy-kj_100g": 1296,
+     "energy-kj_serving": 648,
+     "energy_100g": 1296,
+     "energy_serving": 648,
+     "fat_100g": 24,
+     "fat_serving": 12,
+     "proteins_100g": 20,
+     "proteins_serving": 10,
+     "sugars_100g": 4,
+     "sugars_serving": 2
+    }
+   }
+  },
+  "8904083300021": {
+   "status": 1,
+   "product": {
+    "code": "8904083300021",
+    "product_name": "Paneer",
+    "product_name_en": "Paneer",
+    "brands": "Milky Mist",
+    "quantity": "200 g",
+    "product_quantity": 200,
+    "product_quantity_unit": "g",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/408/330/0021/front_en.11.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 5.1,
+     "energy-kcal_100g": 283,
+     "energy_100g": 1184,
+     "fat_100g": 22,
+     "proteins_100g": 16.1,
+     "sugars_100g": 5.1
+    }
+   }
+  },
+  "8901262200011": {
+   "status": 1,
+   "product": {
+    "code": "8901262200011",
+    "product_name": "Masti Dahi",
+    "product_name_en": "Masti Dahi",
+    "brands": "Amul",
+    "quantity": "85 g",
+    "product_quantity": 85,
+    "product_quantity_unit": "g",
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/220/0011/front_en.3.200.jpg",
+    "nutriments": {
+     "alcohol_100g": 0,
+     "alcohol_serving": 0,
+     "carbohydrates_100g": 3.9,
+     "energy-kcal_100g": 55,
+     "energy-kj_100g": 220.3,
+     "energy_100g": 220.3,
+     "fat_100g": 2.6,
+     "fiber_100g": 0,
+     "proteins_100g": 3.4,
+     "sugars_100g": 3.9
+    }
+   }
+  },
+  "8901648097983": {
+   "status": 1,
+   "product": {
+    "code": "8901648097983",
+    "product_name": "Mother Dairy Ultimate Dahi",
+    "product_name_en": "Mother Dairy Ultimate Dahi",
+    "brands": "Mother Dairy",
+    "quantity": "400g",
+    "product_quantity": 400,
+    "product_quantity_unit": "g",
+    "serving_size": "100g",
+    "serving_quantity": 100,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/164/809/7983/front_en.12.200.jpg",
+    "nutriments": {
+     "alcohol_100g": 0,
+     "alcohol_serving": 0,
+     "carbohydrates_100g": 5,
+     "carbohydrates_serving": 5,
+     "energy-kcal_100g": 75,
+     "energy-kcal_serving": 75,
+     "energy-kj_100g": 314.4,
+     "energy-kj_serving": 314,
+     "energy_100g": 314.4,
+     "energy_serving": 314,
+     "fat_100g": 4.5,
+     "fat_serving": 4.5,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 3.7,
+     "proteins_serving": 3.7,
+     "sugars_100g": 0,
+     "sugars_serving": 0
+    }
+   }
+  },
+  "8901262010320": {
+   "status": 1,
+   "product": {
+    "code": "8901262010320",
+    "product_name": "Amul Butter",
+    "product_name_en": "Amul Butter",
+    "brands": "AMUL",
+    "quantity": "200gm",
+    "product_quantity": 200,
+    "product_quantity_unit": "g",
+    "serving_size": "10gm",
+    "serving_quantity": 10,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/201/0320/front_en.3.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 0,
+     "carbohydrates_serving": 0,
+     "energy-kcal_100g": 724,
+     "energy-kcal_serving": 72.4,
+     "energy-kj_100g": 3031,
+     "energy-kj_serving": 303,
+     "energy_100g": 3031,
+     "energy_serving": 303,
+     "fat_100g": 80,
+     "fat_serving": 8,
+     "fiber_100g": 0,
+     "fiber_serving": 0,
+     "proteins_100g": 1,
+     "proteins_serving": 0.1,
+     "sugars_100g": 0,
+     "sugars_serving": 0
+    }
+   }
+  },
+  "8901719123917": {
+   "status": 1,
+   "product": {
+    "code": "8901719123917",
+    "product_name": "Parle-G GOLD 1kg",
+    "product_name_en": "Parle-G GOLD 1kg",
+    "brands": "Parle",
+    "quantity": "1 Kg",
+    "product_quantity": 1000,
+    "product_quantity_unit": "g",
+    "serving_size": "18.8g",
+    "serving_quantity": 18.8,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/171/912/3917/front_en.22.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 75.9,
+     "carbohydrates_serving": 14.3,
+     "energy-kcal_100g": 462,
+     "energy-kcal_serving": 86.9,
+     "energy_100g": 1933,
+     "energy_serving": 363,
+     "proteins_100g": 6.7,
+     "proteins_serving": 1.26,
+     "sugars_100g": 27.7,
+     "sugars_serving": 5.21
+    }
+   }
+  },
+  "8901262151863": {
+   "status": 1,
+   "product": {
+    "code": "8901262151863",
+    "product_name": "Amul Fresh Cream",
+    "product_name_en": "Amul Fresh Cream",
+    "brands": "Amul",
+    "quantity": "250 ml",
+    "product_quantity": 250,
+    "product_quantity_unit": "ml",
+    "serving_size": "30 ml",
+    "serving_quantity": 30,
+    "nutrition_data_per": "100g",
+    "image_front_small_url": "https://images.openfoodfacts.org/images/products/890/126/215/1863/front_en.6.200.jpg",
+    "nutriments": {
+     "carbohydrates_100g": 3.5,
+     "carbohydrates_serving": 1.05,
+     "energy-kcal_100g": 247,
+     "energy-kcal_serving": 74.1,
+     "energy-kj_100g": 1018.5,
+     "energy-kj_serving": 306,
+     "energy_100g": 1018.5,
+     "energy_serving": 306,
+     "fat_100g": 25,
+     "fat_serving": 7.5,
+     "proteins_100g": 2,
+     "proteins_serving": 0.6,
+     "sugars_100g": 3.5,
+     "sugars_serving": 1.05
+    }
+   }
+  }
+ }
+}

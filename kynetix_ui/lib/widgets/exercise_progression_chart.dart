@@ -1,9 +1,11 @@
-import 'dart:math';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+
 import '../config/app_theme.dart';
 import '../models/workout_session.dart';
 
-/// Available progression metrics to visualize.
 /// Available progression metrics to visualize.
 enum ProgressionMetric {
   overall('Overall Progress', 'pts'),
@@ -66,12 +68,15 @@ class ExerciseProgressionPoint {
   String formattedValueFor(ProgressionMetric metric) {
     return switch (metric) {
       ProgressionMetric.overall => '${overallScore.toStringAsFixed(1)} pts',
-      ProgressionMetric.volume => totalVolume >= 1000
-          ? '${(totalVolume / 1000).toStringAsFixed(1)}k kg'
-          : '${totalVolume.toStringAsFixed(0)} kg',
-      ProgressionMetric.topWeight => '${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)} kg',
+      ProgressionMetric.volume =>
+        totalVolume >= 1000
+            ? '${(totalVolume / 1000).toStringAsFixed(1)}k kg'
+            : '${totalVolume.toStringAsFixed(0)} kg',
+      ProgressionMetric.topWeight =>
+        '${topWeight.toStringAsFixed(topWeight == topWeight.truncateToDouble() ? 0 : 1)} kg',
       ProgressionMetric.reps => '$bestReps reps',
-      ProgressionMetric.estimated1RM => '${estimatedOneRepMax.toStringAsFixed(1)} kg',
+      ProgressionMetric.estimated1RM =>
+        '${estimatedOneRepMax.toStringAsFixed(1)} kg',
     };
   }
 }
@@ -89,7 +94,8 @@ class ExerciseProgressionPoint {
 /// - Chronologically sorted (oldest -> newest).
 /// - Overall Progress = relative index (100 baseline at oldest session) derived from historical 1RM and Volume.
 List<ExerciseProgressionPoint> extractProgressionPoints(
-    List<({DateTime date, ExerciseEntry entry})> history) {
+  List<({DateTime date, ExerciseEntry entry})> history,
+) {
   final rawPoints = <ExerciseProgressionPoint>[];
 
   for (final item in history) {
@@ -143,17 +149,22 @@ List<ExerciseProgressionPoint> extractProgressionPoints(
       if (e1rm > maxE1RM) maxE1RM = e1rm;
     }
 
-    if (maxWeight <= 0.0 && sumVolume <= 0.0 && maxReps <= 0 && maxE1RM <= 0.0) {
+    if (maxWeight <= 0.0 &&
+        sumVolume <= 0.0 &&
+        maxReps <= 0 &&
+        maxE1RM <= 0.0) {
       continue;
     }
 
-    rawPoints.add(ExerciseProgressionPoint(
-      date: item.date,
-      topWeight: maxWeight,
-      bestReps: maxReps,
-      totalVolume: sumVolume,
-      estimatedOneRepMax: maxE1RM,
-    ));
+    rawPoints.add(
+      ExerciseProgressionPoint(
+        date: item.date,
+        topWeight: maxWeight,
+        bestReps: maxReps,
+        totalVolume: sumVolume,
+        estimatedOneRepMax: maxE1RM,
+      ),
+    );
   }
 
   // Sort chronologically (oldest session first to newest last)
@@ -215,6 +226,11 @@ List<ExerciseProgressionPoint> extractProgressionPoints(
 }
 
 /// Compact, responsive progression graph widget for the workout hero area.
+///
+/// Train world (violet → cyan). The polyline draws in once on first show via a
+/// path-length reveal driven by an [AnimationController] passed to the painter
+/// as `repaint:`, so the reveal never rebuilds the widget tree. Touching the
+/// plot scrubs the summary read-out above it.
 class ExerciseProgressionChart extends StatefulWidget {
   final List<({DateTime date, ExerciseEntry entry})> history;
   final String exerciseName;
@@ -226,12 +242,17 @@ class ExerciseProgressionChart extends StatefulWidget {
   });
 
   @override
-  State<ExerciseProgressionChart> createState() => _ExerciseProgressionChartState();
+  State<ExerciseProgressionChart> createState() =>
+      _ExerciseProgressionChartState();
 }
 
-class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
+class _ExerciseProgressionChartState extends State<ExerciseProgressionChart>
+    with SingleTickerProviderStateMixin {
   ProgressionMetric _selectedMetric = ProgressionMetric.overall;
   int? _hoveredIndex;
+
+  late final AnimationController _reveal;
+  bool _revealStarted = false;
 
   // Memoized points based on history reference
   List<({DateTime date, ExerciseEntry entry})>? _lastHistoryRef;
@@ -246,16 +267,62 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _reveal = AnimationController(vsync: this, duration: KMotion.slow);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _maybeStartReveal();
+  }
+
+  @override
+  void didUpdateWidget(covariant ExerciseProgressionChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeStartReveal();
+  }
+
+  /// Plays the draw-in exactly once, the first time a plottable chart exists.
+  /// Under reduced motion it cuts straight to the end state.
+  void _maybeStartReveal() {
+    if (_revealStarted || _points.length < 2) return;
+    _revealStarted = true;
+    final d = KMotion.of(context, KMotion.slow);
+    if (d == Duration.zero) {
+      _reveal.value = 1;
+    } else {
+      _reveal.duration = d;
+      _reveal.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _reveal.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final points = _points;
 
     return Container(
       margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(
+        KSpacing.md,
+        KSpacing.md,
+        KSpacing.md,
+        10,
+      ),
+      // A recessed well: the page tone sunk into the card, hairline edge.
       decoration: BoxDecoration(
-        color: const Color(0xFF13131C),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border.withValues(alpha: 0.5)),
+        color: KColor.isDark ? KColor.bg.withValues(alpha: 0.6) : KColor.bg,
+        borderRadius: KRadius.md,
+        border: Border.all(
+          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,31 +331,36 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
           // Header Row with Title
           Row(
             children: [
-              const Icon(Icons.show_chart_rounded, color: KColor.green, size: 16),
-              const SizedBox(width: 6),
-              const Text(
-                'EXERCISE PROGRESSION',
-                style: TextStyle(
-                  color: KColor.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
+              const ExcludeSemantics(
+                child: _TrainGlyph(icon: Icons.show_chart_rounded),
+              ),
+              const SizedBox(width: KSpacing.sm),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    'Exercise progression',
+                    style: KText.label.copyWith(
+                      fontSize: 13,
+                      color: KColor.textPrimary,
+                      letterSpacing: 0,
+                    ),
+                  ),
                 ),
               ),
-              const Spacer(),
               if (points.length >= 2)
                 Text(
-                  '${points.length} sessions',
-                  style: const TextStyle(
+                  plural(points.length, 'session'),
+                  style: KText.caption.copyWith(
+                    fontSize: 11,
                     color: KColor.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
+                    fontFeatures: _tabular,
                   ),
                 ),
             ],
           ),
           if (points.length >= 2) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: KSpacing.xs),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
@@ -307,7 +379,7 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
               ),
             ),
           ],
-          const SizedBox(height: 10),
+          const SizedBox(height: KSpacing.xs),
 
           // Content body based on number of stored points
           if (points.isEmpty)
@@ -321,33 +393,57 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
     );
   }
 
+  static const _tabular = [FontFeature.tabularFigures()];
+
   Widget _buildMetricChip(ProgressionMetric metric, String label) {
     final isSelected = _selectedMetric == metric;
-    return GestureDetector(
-      onTap: () {
-        if (_selectedMetric != metric) {
-          setState(() {
-            _selectedMetric = metric;
-            _hoveredIndex = null;
-          });
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: isSelected ? KColor.green.withValues(alpha: 0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected ? KColor.green : KColor.border.withValues(alpha: 0.4),
-            width: 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? KColor.green : KColor.textSecondary,
-            fontSize: 9.5,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: '$label metric',
+      excludeSemantics: true,
+      child: Pressable(
+        scale: 0.94,
+        borderRadius: KRadius.pill,
+        onTap: () {
+          if (_selectedMetric != metric) {
+            KHaptics.select();
+            setState(() {
+              _selectedMetric = metric;
+              _hoveredIndex = null;
+            });
+          }
+        },
+        // 48dp hit area around a compact 32dp visual pill.
+        child: SizedBox(
+          height: 48,
+          child: Center(
+            child: AnimatedContainer(
+              duration: KMotion.of(context, KMotion.quick),
+              curve: KMotion.emphasizedCurve,
+              alignment: Alignment.center,
+              constraints: const BoxConstraints(minHeight: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? KColor.ink
+                    : KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+                borderRadius: KRadius.pill,
+                border: Border.all(
+                  color: isSelected
+                      ? KColor.ink
+                      : KColor.fg.withValues(alpha: KColor.isDark ? 0.09 : 0.1),
+                ),
+              ),
+              child: Text(
+                label,
+                style: KText.caption.copyWith(
+                  fontSize: 12,
+                  color: isSelected ? KColor.onInk : KColor.textSecondary,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -355,19 +451,26 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
   }
 
   Widget _buildEmptyState() {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      alignment: Alignment.center,
-      child: const Row(
+      child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.history_rounded, size: 14, color: KColor.textMuted),
-          SizedBox(width: 6),
+          ExcludeSemantics(
+            child: Icon(
+              Icons.history_rounded,
+              size: 14,
+              color: KColor.textMuted,
+            ),
+          ),
+          const SizedBox(width: 6),
           Flexible(
             child: Text(
               'No previous history for this exercise.',
-              style: TextStyle(color: KColor.textMuted, fontSize: 11),
-              overflow: TextOverflow.ellipsis,
+              style: KText.caption.copyWith(
+                fontSize: 12,
+                color: KColor.textSecondary,
+              ),
             ),
           ),
         ],
@@ -381,20 +484,31 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
     final isOverall = _selectedMetric == ProgressionMetric.overall;
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: KColor.surface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
+        color: KColor.card.withValues(alpha: KColor.isDark ? 0.6 : 1),
+        borderRadius: KRadius.sm,
+        border: Border.all(
+          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.08),
+        ),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: KColor.green.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+          ExcludeSemantics(
+            child: Container(
+              margin: const EdgeInsets.only(top: 2),
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: KColor.violet.withValues(alpha: KColor.isDark ? 0.16 : 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.fiber_manual_record,
+                color: KColor.violet,
+                size: 9,
+              ),
             ),
-            child: const Icon(Icons.fiber_manual_record, color: KColor.green, size: 10),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -403,18 +517,24 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
               children: [
                 Text(
                   isOverall
-                      ? '1 Previous Session ($dateStr): $valStr (Baseline)'
-                      : '1 Previous Session ($dateStr): $valStr',
-                  style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
+                      ? 'Last session ($dateStr): $valStr · your baseline'
+                      : 'Last session ($dateStr): $valStr',
+                  style: KText.caption.copyWith(
+                    fontSize: 12.5,
+                    color: KColor.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: _tabular,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   isOverall
-                      ? 'Relative progression index (100 baseline). Complete another session to track progress.'
-                      : 'Complete another session to plot trend.',
-                  style: const TextStyle(color: KColor.textSecondary, fontSize: 10),
-                  overflow: TextOverflow.ellipsis,
+                      ? '100 is where you started. One more session and the trend shows up.'
+                      : 'One more session and the trend shows up.',
+                  style: KText.caption.copyWith(
+                    fontSize: 11.5,
+                    color: KColor.textSecondary,
+                  ),
                 ),
               ],
             ),
@@ -425,115 +545,237 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
   }
 
   Widget _buildChart(List<ExerciseProgressionPoint> points) {
-    final values = points.map((p) => p.valueFor(_selectedMetric)).toList();
+    final values = points
+        .map((p) => p.valueFor(_selectedMetric))
+        .toList(growable: false);
     final delta = values.last - values.first;
+    final up = delta >= 0;
 
     final firstDateStr = '${points.first.date.day}/${points.first.date.month}';
     final lastDateStr = '${points.last.date.day}/${points.last.date.month}';
 
-    final activePoint = (_hoveredIndex != null && _hoveredIndex! < points.length)
+    final activePoint =
+        (_hoveredIndex != null && _hoveredIndex! < points.length)
         ? points[_hoveredIndex!]
         : points.last;
+
+    var lo = values.first;
+    var hi = values.first;
+    for (final v in values) {
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+
+    final scene = _PolylineScene(
+      values: values,
+      selectedIndex: _hoveredIndex ?? (points.length - 1),
+      scrubbing: _hoveredIndex != null,
+      hairline: 1.0 / MediaQuery.devicePixelRatioOf(context),
+      dark: KColor.isDark,
+    );
+
+    // A dip is information, not a failure: it reads in neutral ink with a
+    // down arrow; only a gain earns the success colour.
+    final deltaColor = up ? KColor.green : KColor.textSecondary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Summary bar: current selected value + change
+        // Scrub read-out: current / touched value + overall change.
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Row(
-              children: [
-                Text(
-                  activePoint.formattedValueFor(_selectedMetric),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
+            Expanded(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.end,
+                spacing: 6,
+                runSpacing: 2,
+                children: [
+                  AnimatedSwitcher(
+                    duration: KMotion.of(context, KMotion.quick),
+                    switchInCurve: KMotion.emphasizedCurve,
+                    switchOutCurve: KMotion.accelerate,
+                    child: Text(
+                      activePoint.formattedValueFor(_selectedMetric),
+                      key: ValueKey(
+                        activePoint.formattedValueFor(_selectedMetric),
+                      ),
+                      style: KText.numMedium.copyWith(fontSize: 20),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '(${activePoint.date.day}/${activePoint.date.month})',
-                  style: const TextStyle(color: KColor.textMuted, fontSize: 10),
-                ),
-              ],
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: delta >= 0
-                    ? KColor.green.withValues(alpha: 0.12)
-                    : Colors.redAccent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      '(${activePoint.date.day}/${activePoint.date.month})',
+                      style: KText.caption.copyWith(
+                        fontSize: 11,
+                        color: KColor.textMuted,
+                        fontFeatures: _tabular,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              child: Text(
-                delta >= 0
-                    ? '+${delta.toStringAsFixed(1)} ${_selectedMetric.unit}'
-                    : '${delta.toStringAsFixed(1)} ${_selectedMetric.unit}',
-                style: TextStyle(
-                  color: delta >= 0 ? KColor.green : Colors.redAccent,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                ),
+            ),
+            const SizedBox(width: KSpacing.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: deltaColor.withValues(alpha: KColor.isDark ? 0.12 : 0.09),
+                borderRadius: KRadius.pill,
+                border: Border.all(color: deltaColor.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ExcludeSemantics(
+                    child: Icon(
+                      up
+                          ? Icons.trending_up_rounded
+                          : Icons.trending_down_rounded,
+                      size: 12,
+                      color: deltaColor,
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    up
+                        ? '+${delta.toStringAsFixed(1)} ${_selectedMetric.unit}'
+                        : '${delta.toStringAsFixed(1)} ${_selectedMetric.unit}',
+                    style: KText.numSmall.copyWith(
+                      fontSize: 11.5,
+                      color: deltaColor,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: KSpacing.sm),
 
-        // Polyline Canvas
+        // Plot + y-axis labels (max on top, min at the bottom).
         SizedBox(
-          height: 54,
-          width: double.infinity,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return GestureDetector(
-                onPanDown: (details) => _handleTouch(details.localPosition.dx, constraints.maxWidth, points.length),
-                onPanUpdate: (details) => _handleTouch(details.localPosition.dx, constraints.maxWidth, points.length),
-                child: CustomPaint(
-                  size: Size(constraints.maxWidth, 54),
-                  painter: _ProgressionPolylinePainter(
-                    points: points,
-                    metric: _selectedMetric,
-                    selectedIndex: _hoveredIndex ?? (points.length - 1),
-                  ),
+          height: 72,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final geo = _PlotGeometry(
+                      constraints.maxWidth,
+                      values.length,
+                    );
+                    return Semantics(
+                      label:
+                          '${_selectedMetric.label}: '
+                          '${points.first.formattedValueFor(_selectedMetric)} on $firstDateStr, '
+                          '${points.last.formattedValueFor(_selectedMetric)} on $lastDateStr, '
+                          '${plural(points.length, 'session')}',
+                      child: ExcludeSemantics(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanDown: (details) => _handleTouch(
+                            geo.indexAt(details.localPosition.dx),
+                          ),
+                          onPanUpdate: (details) => _handleTouch(
+                            geo.indexAt(details.localPosition.dx),
+                          ),
+                          child: RepaintBoundary(
+                            child: CustomPaint(
+                              size: Size(constraints.maxWidth, 72),
+                              isComplex: true,
+                              painter: _ProgressionPolylinePainter(
+                                scene: scene,
+                                reveal: _reveal,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
+              ),
+              const SizedBox(width: 6),
+              ExcludeSemantics(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _compact(hi),
+                      style: KText.numSmall.copyWith(
+                        fontSize: 10.5,
+                        color: KColor.textSecondary,
+                      ),
+                    ),
+                    Text(
+                      _compact(lo),
+                      style: KText.numSmall.copyWith(
+                        fontSize: 10.5,
+                        color: KColor.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
 
-        // Date bounds footer
+        // Date bounds footer (x-axis labels)
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(firstDateStr, style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+            Text(
+              firstDateStr,
+              style: KText.caption.copyWith(
+                fontSize: 10.5,
+                color: KColor.textSecondary,
+                fontFeatures: _tabular,
+              ),
+            ),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
                 _selectedMetric == ProgressionMetric.overall
-                    ? '${points.length} Sessions • 100 Baseline'
-                    : '${points.length} Sessions Trend',
+                    ? '${plural(points.length, 'session')}, 100 = baseline'
+                    : '${points.length}-session trend',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: KColor.textSecondary, fontSize: 9, fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
+                style: KText.caption.copyWith(
+                  fontSize: 10.5,
+                  color: KColor.textMuted,
+                ),
               ),
             ),
             const SizedBox(width: 4),
-            Text(lastDateStr, style: const TextStyle(color: KColor.textMuted, fontSize: 9)),
+            Text(
+              lastDateStr,
+              style: KText.caption.copyWith(
+                fontSize: 10.5,
+                color: KColor.textSecondary,
+                fontFeatures: _tabular,
+              ),
+            ),
           ],
         ),
       ],
     );
   }
 
-  void _handleTouch(double localX, double totalWidth, int count) {
-    if (count <= 1 || totalWidth <= 0) return;
-    final stepX = totalWidth / (count - 1);
-    final index = (localX / stepX).round().clamp(0, count - 1);
+  static String _compact(double v) {
+    if (v.abs() >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v == v.truncateToDouble()
+        ? v.toStringAsFixed(0)
+        : v.toStringAsFixed(1);
+  }
+
+  void _handleTouch(int? index) {
+    if (index == null) return;
     if (_hoveredIndex != index) {
+      KHaptics.select();
       setState(() {
         _hoveredIndex = index;
       });
@@ -541,129 +783,244 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart> {
   }
 }
 
+/// Small gradient glyph used as the chart's leading icon.
+class _TrainGlyph extends StatelessWidget {
+  const _TrainGlyph({required this.icon});
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            KColor.violet.withValues(alpha: KColor.isDark ? 0.2 : 0.12),
+            KColor.cyan.withValues(alpha: KColor.isDark ? 0.1 : 0.06),
+          ],
+        ),
+      ),
+      child: Icon(icon, color: KColor.violet, size: 14),
+    );
+  }
+}
+
+/// The ONE mapping between point index and canvas x, read by both the painter
+/// and the touch handler so they can never disagree.
+@immutable
+class _PlotGeometry {
+  const _PlotGeometry(this.width, this.count);
+  final double width;
+  final int count;
+
+  static const double inset = 6.0;
+
+  double get _step => count <= 1 ? 0 : (width - 2 * inset) / (count - 1);
+
+  double xFor(int i) => count <= 1 ? width / 2 : inset + i * _step;
+
+  int? indexAt(double dx) {
+    if (count <= 1 || width <= 2 * inset) return null;
+    return ((dx - inset) / _step).round().clamp(0, count - 1);
+  }
+}
+
+/// Everything the polyline painter needs, with value equality so
+/// `shouldRepaint` is a single compare.
+@immutable
+class _PolylineScene {
+  const _PolylineScene({
+    required this.values,
+    required this.selectedIndex,
+    required this.scrubbing,
+    required this.hairline,
+    required this.dark,
+  });
+
+  final List<double> values;
+  final int selectedIndex;
+  final bool scrubbing;
+  final double hairline;
+
+  /// Active palette; part of equality so a theme switch repaints.
+  final bool dark;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PolylineScene &&
+      other.selectedIndex == selectedIndex &&
+      other.scrubbing == scrubbing &&
+      other.hairline == hairline &&
+      other.dark == dark &&
+      listEquals(other.values, values);
+
+  @override
+  int get hashCode =>
+      Object.hash(
+        selectedIndex, scrubbing, hairline, dark, Object.hashAll(values),
+      );
+}
+
 /// Custom painter rendering crisp, discrete polyline segments and distinct point markers.
 /// No misleading spline smoothing that fabricates non-existent intermediate workouts.
 class _ProgressionPolylinePainter extends CustomPainter {
-  final List<ExerciseProgressionPoint> points;
-  final ProgressionMetric metric;
-  final int selectedIndex;
+  _ProgressionPolylinePainter({required this.scene, required this.reveal})
+    : super(repaint: reveal);
 
-  _ProgressionPolylinePainter({
-    required this.points,
-    required this.metric,
-    required this.selectedIndex,
-  });
+  final _PolylineScene scene;
+  final Animation<double> reveal;
+
+  static const double _topPad = 8.0;
+  static const double _bottomPad = 8.0;
+
+  // Paints are fields — nothing hoistable is allocated per frame.
+  final Paint _grid = Paint()..style = PaintingStyle.stroke;
+  final Paint _fill = Paint()..style = PaintingStyle.fill;
+  final Paint _line = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+  final Paint _dot = Paint()..style = PaintingStyle.fill;
+  final Paint _ring = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0
+    ..color = KColor.cyan;
+
+  // Geometry cached per size; this painter instance lives for one scene and is
+  // repainted per animation frame through `repaint:`.
+  Size? _cachedSize;
+  List<Offset> _offsets = const [];
+  Path _linePath = Path();
+  Path _areaPath = Path();
+  ui.PathMetric? _metric;
+  List<double> _gridYs = const [];
+
+  void _layout(Size size) {
+    if (_cachedSize == size) return;
+    _cachedSize = size;
+    final values = scene.values;
+    var lo = values.first;
+    var hi = values.first;
+    for (final v in values) {
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    final range = hi == lo ? 1.0 : (hi - lo);
+    final usable = size.height - _topPad - _bottomPad;
+    final geo = _PlotGeometry(size.width, values.length);
+    _offsets = [
+      for (var i = 0; i < values.length; i++)
+        Offset(
+          geo.xFor(i),
+          hi == lo
+              ? size.height / 2
+              : size.height - _bottomPad - ((values[i] - lo) / range) * usable,
+        ),
+    ];
+    _gridYs = [_topPad, size.height / 2, size.height - _bottomPad];
+    _linePath = Path()..moveTo(_offsets.first.dx, _offsets.first.dy);
+    for (var i = 1; i < _offsets.length; i++) {
+      _linePath.lineTo(_offsets[i].dx, _offsets[i].dy);
+    }
+    _areaPath = Path.from(_linePath)
+      ..lineTo(_offsets.last.dx, size.height)
+      ..lineTo(_offsets.first.dx, size.height)
+      ..close();
+    final metrics = _linePath.computeMetrics().toList();
+    _metric = metrics.isEmpty ? null : metrics.first;
+
+    final rect = Offset.zero & size;
+    _line.shader = LinearGradient(
+      colors: KGradient.train,
+    ).createShader(rect);
+    _fill.shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        KColor.violet.withValues(alpha: scene.dark ? 0.24 : 0.14),
+        KColor.cyan.withValues(alpha: 0.0),
+      ],
+    ).createShader(rect);
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
+    if (scene.values.isEmpty || size.width <= 0) return;
+    _layout(size);
 
-    final values = points.map((p) => p.valueFor(metric)).toList();
-    final minVal = values.reduce(min);
-    final maxVal = values.reduce(max);
-    final range = maxVal == minVal ? 1.0 : (maxVal - minVal);
+    // Hairline grid: max, mid, min reference levels.
+    _grid
+      ..strokeWidth = scene.hairline
+      ..color = KColor.fg.withValues(alpha: scene.dark ? 0.08 : 0.1);
+    for (final y in _gridYs) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), _grid);
+    }
 
-    // Padding bounds
-    const topPad = 8.0;
-    const bottomPad = 8.0;
-    final usableHeight = size.height - topPad - bottomPad;
-
-    // Grid lines (min and max reference levels)
-    final gridPaint = Paint()
-      ..color = const Color(0xFF222230)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
-    canvas.drawLine(Offset(0, topPad), Offset(size.width, topPad), gridPaint);
-    canvas.drawLine(Offset(0, size.height - bottomPad), Offset(size.width, size.height - bottomPad), gridPaint);
-
-    if (points.length == 1) {
-      // Single center point
-      final cy = size.height / 2;
-      final cx = size.width / 2;
-      canvas.drawCircle(Offset(cx, cy), 5, Paint()..color = KColor.green);
+    if (_offsets.length == 1) {
+      _dot.color = KColor.violet;
+      canvas.drawCircle(_offsets.first, 5, _dot);
       return;
     }
 
-    final stepX = size.width / (points.length - 1);
+    final metric = _metric;
+    if (metric == null) return;
+    final t = KMotion.emphasizedCurve.transform(reveal.value.clamp(0.0, 1.0));
+    final done = t >= 1.0;
+    final len = metric.length * t;
+    final tipX = done
+        ? size.width
+        : (metric.getTangentForOffset(len)?.position.dx ?? size.width);
 
-    // Calculate discrete points
-    final offsets = <Offset>[];
-    for (int i = 0; i < points.length; i++) {
-      final x = i * stepX;
-      final normalized = (values[i] - minVal) / range;
-      final y = size.height - bottomPad - (normalized * usableHeight);
-      offsets.add(Offset(x, y));
+    // Area fill revealed in lock-step with the line tip.
+    canvas.save();
+    canvas.clipRect(Rect.fromLTRB(0, 0, tipX + 0.5, size.height));
+    canvas.drawPath(_areaPath, _fill);
+    canvas.restore();
+
+    canvas.drawPath(done ? _linePath : metric.extractPath(0, len), _line);
+
+    // Scrub crosshair (only while the user is touching).
+    final sel = scene.selectedIndex.clamp(0, _offsets.length - 1);
+    if (scene.scrubbing && done) {
+      _grid
+        ..strokeWidth = 1.0
+        ..color = KColor.fg.withValues(alpha: scene.dark ? 0.22 : 0.26);
+      canvas.drawLine(
+        Offset(_offsets[sel].dx, 0),
+        Offset(_offsets[sel].dx, size.height),
+        _grid,
+      );
     }
 
-    // Shaded gradient under polyline
-    final fillPath = Path();
-    fillPath.moveTo(offsets.first.dx, size.height);
-    for (final pt in offsets) {
-      fillPath.lineTo(pt.dx, pt.dy);
-    }
-    fillPath.lineTo(offsets.last.dx, size.height);
-    fillPath.close();
-
-    final fillPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          KColor.green.withValues(alpha: 0.18),
-          KColor.green.withValues(alpha: 0.0),
-        ],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-
-    canvas.drawPath(fillPath, fillPaint);
-
-    // Straight polyline connecting verified historical points
-    final linePath = Path();
-    linePath.moveTo(offsets.first.dx, offsets.first.dy);
-    for (int i = 1; i < offsets.length; i++) {
-      linePath.lineTo(offsets[i].dx, offsets[i].dy);
-    }
-
-    final linePaint = Paint()
-      ..color = KColor.green
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    canvas.drawPath(linePath, linePaint);
-
-    // Point dots
-    final dotPaint = Paint()..style = PaintingStyle.fill;
-    final haloPaint = Paint()..style = PaintingStyle.fill;
-
-    for (int i = 0; i < offsets.length; i++) {
-      final isSelected = i == selectedIndex;
-      final pt = offsets[i];
-
-      if (isSelected) {
-        haloPaint.color = KColor.green.withValues(alpha: 0.3);
-        canvas.drawCircle(pt, 7.0, haloPaint);
-
-        dotPaint.color = Colors.white;
-        canvas.drawCircle(pt, 3.8, dotPaint);
-
-        final ringPaint = Paint()
-          ..color = KColor.green
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0;
-        canvas.drawCircle(pt, 4.0, ringPaint);
+    // Point markers appear as the line reaches them.
+    for (var i = 0; i < _offsets.length; i++) {
+      final pt = _offsets[i];
+      if (pt.dx > tipX + 0.5) break;
+      if (i == sel) {
+        _dot.color = KColor.cyan.withValues(alpha: scene.dark ? 0.28 : 0.18);
+        canvas.drawCircle(pt, 7.5, _dot);
+        _dot.color = KColor.textPrimary;
+        canvas.drawCircle(pt, 3.6, _dot);
+        canvas.drawCircle(pt, 4.2, _ring);
       } else {
-        dotPaint.color = KColor.green.withValues(alpha: 0.85);
-        canvas.drawCircle(pt, 2.5, dotPaint);
+        _dot.color = KColor.bg;
+        canvas.drawCircle(pt, 3.4, _dot);
+        _dot.color = Color.lerp(
+          KColor.violet,
+          KColor.cyan,
+          pt.dx / size.width,
+        )!;
+        canvas.drawCircle(pt, 2.3, _dot);
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _ProgressionPolylinePainter oldDelegate) {
-    return oldDelegate.selectedIndex != selectedIndex ||
-        oldDelegate.metric != metric ||
-        oldDelegate.points != points;
-  }
+  bool shouldRepaint(covariant _ProgressionPolylinePainter oldDelegate) =>
+      oldDelegate.scene != scene;
 }

@@ -11,7 +11,6 @@
 // This ensures 60fps scrolling on lower-end Android devices.
 
 import '../models/workout_session.dart';
-import '../models/workout_split.dart';
 import '../services/workout_service.dart';
 import '../services/recovery_service.dart';
 
@@ -97,8 +96,7 @@ class WorkoutDashboardViewModel {
       for (final entry in session.entries) {
         final top = entry.topProgressionSet ?? entry.topWorkingSet ?? entry.topSet;
         if (top == null) continue;
-        final prevBest = svc.bestSetBefore(entry.exercise.id, session.date);
-        if (prevBest == null || top.estimatedOneRepMax > prevBest.estimatedOneRepMax + 0.01) {
+        if (svc.isPersonalRecord(top, entry.exercise.id, session.date)) {
           totalPrs++;
         }
       }

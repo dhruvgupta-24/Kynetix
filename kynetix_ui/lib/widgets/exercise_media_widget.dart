@@ -104,7 +104,18 @@ class ExerciseMediaWidget extends StatefulWidget {
 class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   Timer? _loopCountdownTimer;
   Timer? _watchdogTimer;
+  Timer? _loadTimeoutTimer;
   bool _loopsCompleted = false;
+  // True once the demo could not be shown (missing file, offline, or no
+  // first frame in time). The card then shows the anatomy fallback and
+  // drops the attribution and zoom affordances.
+  bool _loadFailed = false;
+  // The CDN is tried first; the raw GitHub copy is the one retry.
+  bool _usingMirror = false;
+
+  /// How long a demo may take to show its first frame before the card gives
+  /// up and shows the anatomy fallback instead of a skeleton forever.
+  static const Duration _loadTimeout = Duration(seconds: 15);
   bool _firstFrameRendered = false;
   String? _resolvedUrl;
   ExerciseDefinition? _resolvedDefinition;
@@ -137,11 +148,58 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     }
   }
 
+  bool get _isTestEnvironment =>
+      widget.disableNetwork ||
+      ExerciseMediaWidget.disableNetworkForTesting ||
+      WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
+  void _armLoadTimeout() {
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = null;
+    if (_isTestEnvironment || _resolvedUrl == null || _resolvedUrl!.isEmpty) {
+      return;
+    }
+    _loadTimeoutTimer = Timer(_loadTimeout, () {
+      if (mounted && !_firstFrameRendered && !_loadFailed) {
+        _markLoadFailed();
+      }
+    });
+  }
+
+  /// Swaps a failed CDN url for the raw GitHub mirror once, then gives up.
+  void _onImageError(String failedUrl) {
+    // Ignore late reports for a url that has already been replaced.
+    if (_loadFailed || failedUrl != _resolvedUrl) return;
+    final url = _resolvedUrl;
+    if (!_usingMirror && url != null) {
+      final mirror = ExerciseMediaService.mirrorUrlFor(url);
+      if (mirror != null) {
+        setState(() {
+          _usingMirror = true;
+          _resolvedUrl = mirror;
+        });
+        _armLoadTimeout();
+        return;
+      }
+    }
+    _markLoadFailed();
+  }
+
+  void _markLoadFailed() {
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = null;
+    setState(() => _loadFailed = true);
+    if (!_loopsCompleted && _loopCountdownTimer == null) {
+      _scheduleGracefulFallbackTrigger();
+    }
+  }
+
   @override
   void dispose() {
     _detachPlaybackController(widget.playbackController);
     _loopCountdownTimer?.cancel();
     _watchdogTimer?.cancel();
+    _loadTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -176,7 +234,18 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     _currentLoop = 1;
   }
 
+  /// True when a demo url is set and has not failed.
+  bool get _hasLiveMedia =>
+      !_loadFailed && _resolvedUrl != null && _resolvedUrl!.isNotEmpty;
+
   void _resolveMedia() {
+    _loadFailed = false;
+    _usingMirror = false;
+    _resolveMediaUrl();
+    _armLoadTimeout();
+  }
+
+  void _resolveMediaUrl() {
     _resolvedDefinition = widget.definition ??
         (widget.exercise != null
             ? ExerciseLibraryService.instance.getById(widget.exercise!.id)
@@ -257,6 +326,8 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     if (_firstFrameRendered || _loopsCompleted) return;
     _firstFrameRendered = true;
     _watchdogTimer?.cancel();
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = null;
 
     if (widget.onTwoLoopsCompleted == null) return;
 
@@ -284,17 +355,20 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveRadius = widget.borderRadius ?? BorderRadius.circular(16);
+    final effectiveRadius = widget.borderRadius ?? KRadius.md;
     Widget mediaContent;
-    final isTest = widget.disableNetwork ||
-        ExerciseMediaWidget.disableNetworkForTesting ||
-        WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    // True when a real demo image is on screen (not the anatomy fallback).
+    var showsPhoto = false;
+    final isTest = _isTestEnvironment;
     if (isTest) {
       mediaContent = _buildAnatomicalFallback();
-    } else if (_resolvedUrl != null && _resolvedUrl!.isNotEmpty) {
+    } else if (_hasLiveMedia) {
       final image = Image.network(
         _resolvedUrl!,
         fit: widget.fit,
+        // Never decode demo media wider than the screen (they are often
+        // large GIFs; every frame is decoded at this size).
+        cacheWidth: _decodeWidth(context),
         gaplessPlayback: true,
         frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
           if (frame != null && !_firstFrameRendered) {
@@ -310,57 +384,75 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
           return child;
         },
         loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
+          if (loadingProgress == null) return _MediaFadeIn(child: child);
           return _buildLoadingPlaceholder();
         },
         errorBuilder: (context, error, stackTrace) {
-          if (!_loopsCompleted && _loopCountdownTimer == null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && !_loopsCompleted && _loopCountdownTimer == null) {
-                _scheduleGracefulFallbackTrigger();
-              }
-            });
-          }
-          return _buildAnatomicalFallback();
+          final failedUrl = _resolvedUrl!;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _onImageError(failedUrl);
+          });
+          // Paint over the photo matte so the fallback sits on the card.
+          return ColoredBox(
+            color: KColor.isDark ? KColor.card : KColor.cardHigh,
+            child: _buildAnatomicalFallback(),
+          );
         },
       );
-      mediaContent = image;
+      // Demo images are drawn on white. Give them a white matte that fills the
+      // frame, so the picture reads as one plate rather than a white box
+      // inside a cream one. On Carbon the plate is dimmed a touch so it
+      // doesn't glare against true black.
+      showsPhoto = true;
+      mediaContent = KColor.isDark
+          ? ColorFiltered(
+              colorFilter: const ColorFilter.matrix(<double>[
+                0.86, 0, 0, 0, 0,
+                0, 0.86, 0, 0, 0,
+                0, 0, 0.86, 0, 0,
+                0, 0, 0, 1, 0,
+              ]),
+              child: ColoredBox(color: Colors.white, child: image),
+            )
+          : ColoredBox(color: Colors.white, child: image);
     } else {
       mediaContent = _buildAnatomicalFallback();
     }
 
+    final dark = KColor.isDark;
     final mediaCard = Container(
       height: widget.height,
       width: widget.width,
       decoration: BoxDecoration(
-        color: const Color(0xFF141624),
+        color: showsPhoto ? null : (dark ? KColor.card : KColor.cardHigh),
         borderRadius: effectiveRadius,
-        border: Border.all(color: const Color(0xFF24263A), width: 0.8),
+        border: Border.all(
+          color: dark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
+          width: 1,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
           Positioned.fill(child: mediaContent),
 
-          if (widget.showAttribution &&
-              _resolvedUrl != null &&
-              _resolvedUrl!.isNotEmpty &&
-              widget.height >= 100)
+          if (widget.showAttribution && _hasLiveMedia && widget.height >= 100)
             Positioned(
-              left: 8,
+              left: KSpacing.sm,
               bottom: 6,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(4),
+                  color: KColor.surface.withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: KColor.fg.withValues(alpha: dark ? 0.08 : 0.10), width: 0.6),
                 ),
-                child: const Text(
+                child: Text(
                   ExerciseMediaService.attribution,
-                  style: TextStyle(
-                    color: Color(0xFF9CA3AF),
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w500,
+                  style: KText.caption.copyWith(
+                    color: KColor.textSecondary,
+                    fontSize: 10,
+                    height: 1.2,
                   ),
                 ),
               ),
@@ -369,32 +461,36 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
       ),
     );
 
-    if (widget.interactiveZoom &&
-        _resolvedUrl != null &&
-        _resolvedUrl!.isNotEmpty &&
-        widget.height >= 100) {
-      return GestureDetector(
-        onTap: () => _openZoomDialog(context, _resolvedUrl!),
-        child: Stack(
-          children: [
-            mediaCard,
-            Positioned(
-              right: 8,
-              top: 8,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.fullscreen_rounded,
-                  size: 16,
-                  color: Colors.white70,
+    if (widget.interactiveZoom && _hasLiveMedia && widget.height >= 100) {
+      return Semantics(
+        button: true,
+        label: 'Expand exercise demonstration',
+        child: GestureDetector(
+          onTap: () => _openZoomDialog(context, _resolvedUrl!),
+          child: Stack(
+            children: [
+              mediaCard,
+              Positioned(
+                right: KSpacing.sm,
+                top: KSpacing.sm,
+                child: ExcludeSemantics(
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: KColor.surface.withValues(alpha: 0.82),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: KColor.fg.withValues(alpha: dark ? 0.12 : 0.10), width: 0.8),
+                    ),
+                    child: Icon(
+                      Icons.fullscreen_rounded,
+                      size: 18,
+                      color: KColor.textPrimary,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -404,35 +500,40 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
   Widget _buildLoadingPlaceholder() {
     if (widget.height < 70) {
-      return Container(
-        color: const Color(0xFF161626),
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.fitness_center_rounded,
-          size: 16,
-          color: Colors.white.withValues(alpha: 0.18),
+      return ColoredBox(
+        color: KColor.cardHigh,
+        child: Center(
+          child: Icon(
+            Icons.fitness_center_rounded,
+            size: 16,
+            color: KColor.textDisabled,
+          ),
         ),
       );
     }
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(KColor.green),
-            ),
+    // Skeleton shaped like the media slot; the label keeps "loading" legible
+    // even when the shimmer is static (reduced motion).
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: KShimmer(
+            child: ColoredBox(color: KColor.cardHigh),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Loading visual guide...',
-            style: KText.caption.copyWith(color: Colors.white38, fontSize: 11),
+        ),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.fitness_center_rounded, size: 22, color: KColor.textMuted),
+              const SizedBox(height: KSpacing.sm),
+              Text(
+                'Loading the demo…',
+                style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 12),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -441,10 +542,12 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
         widget.disableNetwork ||
         ExerciseMediaWidget.disableNetworkForTesting) {
       return Center(
-        child: Icon(
-          Icons.fitness_center_rounded,
-          size: (widget.height * 0.4).clamp(16.0, 40.0),
-          color: Colors.white.withValues(alpha: 0.15),
+        child: ExcludeSemantics(
+          child: Icon(
+            Icons.fitness_center_rounded,
+            size: (widget.height * 0.4).clamp(16.0, 40.0),
+            color: KColor.textDisabled,
+          ),
         ),
       );
     }
@@ -458,22 +561,40 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
 
     if (widget.height < 70) {
       return Center(
-        child: Icon(
-          Icons.fitness_center_rounded,
-          size: 20,
-          color: Colors.white.withValues(alpha: 0.25),
+        child: ExcludeSemantics(
+          child: Icon(
+            Icons.fitness_center_rounded,
+            size: 20,
+            color: KColor.textMuted,
+          ),
         ),
       );
     }
 
     return Stack(
       children: [
+        // Quiet light pool behind the silhouette (neutral, not a hue).
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                radius: 0.75,
+                colors: [
+                  KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.035),
+                  KColor.fg.withValues(alpha: 0.0),
+                ],
+              ),
+            ),
+          ),
+        ),
         Center(
           child: Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(KSpacing.sm),
             child: MuscleBodyMap(
               view: BodyView.sideBySide,
               highlightedMuscles: targetMuscles,
+              // Primary = jade, secondary = saffron (matches the detail
+              // sheet's agonist / synergist chips).
               muscleColorMap: {
                 if (primary.isNotEmpty) primary: KColor.green,
                 for (final s in secondary) s: KColor.amber,
@@ -484,13 +605,12 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
         ),
         Positioned(
           bottom: 6,
-          right: 8,
+          right: KSpacing.sm,
           child: Text(
-            'Target Anatomy',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.3),
-              fontSize: 9,
-              fontWeight: FontWeight.bold,
+            'Target anatomy',
+            style: KText.caption.copyWith(
+              color: KColor.textMuted,
+              fontSize: 11,
             ),
           ),
         ),
@@ -501,16 +621,16 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
   void _openZoomDialog(BuildContext context, String url) {
     showDialog(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.9),
+      barrierColor: KColor.bg.withValues(alpha: 0.9),
       builder: (ctx) {
         final title = _resolvedDefinition?.displayName ??
             widget.exercise?.name ??
             widget.exerciseName ??
-            'Visual Demonstration';
+            'Visual demonstration';
 
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.all(16),
+          insetPadding: const EdgeInsets.all(KSpacing.lg),
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -520,60 +640,74 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
                 child: Container(
                   constraints: const BoxConstraints(maxWidth: 450, maxHeight: 450),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0C0C14),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF2E2E3E)),
+                    color: KColor.surface,
+                    borderRadius: KRadius.xl,
+                    border: Border.all(
+                      color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
+                    ),
+                    boxShadow: KShadow.card,
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.md, KSpacing.xs, KSpacing.sm),
                         child: Row(
                           children: [
+                            Container(
+                              width: 3,
+                              height: 16,
+                              margin: const EdgeInsetsDirectional.only(end: KSpacing.sm),
+                              decoration: BoxDecoration(
+                                borderRadius: KRadius.pill,
+                                color: KColor.violet,
+                              ),
+                            ),
                             Expanded(
                               child: Text(
                                 title,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                style: KText.h3,
+                                maxLines: 2,
                               ),
                             ),
                             IconButton(
+                              tooltip: 'Close',
                               onPressed: () => Navigator.of(ctx).pop(),
-                              icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                              icon: Icon(Icons.close_rounded, color: KColor.textSecondary),
                             ),
                           ],
                         ),
                       ),
-                      const Divider(height: 1, color: Color(0xFF1E1E2F)),
+                      Divider(height: 1, color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
                       Flexible(
                         child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Image.network(
-                            url,
-                            fit: BoxFit.contain,
-                            gaplessPlayback: true,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Icon(Icons.broken_image_rounded, color: Colors.white30, size: 60),
+                          padding: const EdgeInsets.all(KSpacing.md),
+                          child: ClipRRect(
+                            borderRadius: KRadius.md,
+                            child: Image.network(
+                              url,
+                              fit: BoxFit.contain,
+                              cacheWidth: _decodeWidth(context),
+                              gaplessPlayback: true,
+                              errorBuilder: (context, error, stackTrace) => Padding(
+                                padding: const EdgeInsets.all(KSpacing.lg),
+                                child: Text(
+                                  'The demo could not load right now.',
+                                  textAlign: TextAlign.center,
+                                  style: KText.body.copyWith(color: KColor.textSecondary),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(KSpacing.sm),
                         alignment: Alignment.center,
-                        child: const Text(
+                        child: Text(
                           ExerciseMediaService.attribution,
-                          style: TextStyle(
-                            color: Color(0xFF9CA3AF),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 11),
                         ),
                       ),
                     ],
@@ -587,3 +721,26 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
     );
   }
 }
+
+/// Fades decoded media in once on mount instead of popping it onto the card.
+class _MediaFadeIn extends StatelessWidget {
+  const _MediaFadeIn({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: KMotion.of(context, KMotion.quick),
+      curve: KMotion.decelerate,
+      builder: (context, v, child) => Opacity(opacity: v, child: child),
+      child: child,
+    );
+  }
+}
+
+/// Decode width for exercise media: the screen's physical width.
+int _decodeWidth(BuildContext context) =>
+    (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(1, 1440);

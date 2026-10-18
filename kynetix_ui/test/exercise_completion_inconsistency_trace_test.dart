@@ -99,7 +99,7 @@ void main() {
     // CASE A: 3 working sets, no warmup -> complete
     print('--- TESTING CASE A ---');
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 1}'));
+      await tester.tap(find.text('Log set ${i + 1}'));
       await tester.pumpAndSettle();
     }
     final entryA = state.buildEntry(exCaseA);
@@ -114,13 +114,13 @@ void main() {
     print('--- TESTING CASE B ---');
     await tester.tap(find.text('Warm-up'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('LOG SET 1'));
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Working'));
     await tester.pumpAndSettle();
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 2}'));
+      await tester.tap(find.text('Log set ${i + 2}'));
       await tester.pumpAndSettle();
     }
     final entryB = state.buildEntry(exCaseB);
@@ -135,13 +135,13 @@ void main() {
     print('--- TESTING CASE C ---');
     await tester.tap(find.text('Drop'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('LOG SET 1'));
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Working'));
     await tester.pumpAndSettle();
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 2}'));
+      await tester.tap(find.text('Log set ${i + 2}'));
       await tester.pumpAndSettle();
     }
     final entryC = state.buildEntry(exCaseC);
@@ -155,7 +155,7 @@ void main() {
     // CASE D: Barbell compound with 3 prescribed sets -> complete
     print('--- TESTING CASE D ---');
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 1}'));
+      await tester.tap(find.text('Log set ${i + 1}'));
       await tester.pumpAndSettle();
     }
     final entryD = state.buildEntry(exCaseD);
@@ -169,7 +169,7 @@ void main() {
     // CASE E: Barbell compound with 4 prescribed sets -> requires 4 working sets (3 working sets -> incomplete)
     print('--- TESTING CASE E ---');
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 1}'));
+      await tester.tap(find.text('Log set ${i + 1}'));
       await tester.pumpAndSettle();
     }
     final entryE_3sets = state.buildEntry(exCaseE);
@@ -177,7 +177,7 @@ void main() {
     expect(entryE_3sets.isCompleted, isFalse);
 
     // Log 4th working set
-    await tester.tap(find.text('LOG SET 4'));
+    await tester.tap(find.text('Log set 4'));
     await tester.pumpAndSettle();
     final entryE_4sets = state.buildEntry(exCaseE);
     print('Case E (4 sets logged): isCompleted = ${entryE_4sets.isCompleted}, workingSets = ${entryE_4sets.completedWorkingSetsCount}, target = ${exCaseE.targetSets}');

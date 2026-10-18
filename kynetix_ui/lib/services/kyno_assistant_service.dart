@@ -1,9 +1,11 @@
+import 'kyno_brief_service.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'kyno_context_service.dart';
 import 'kyno_progression_engine.dart';
 import 'kyno_historical_analysis_service.dart';
-import 'saved_meal_service.dart';
 import 'workout_service.dart';
+import '../ui/k_format.dart';
 
 class KynoChatMessage {
   final String id;
@@ -61,7 +63,7 @@ class KynoAssistantService {
 
   /// Processes user query through the single Kyno Context layer.
   Future<KynoChatMessage> processQuery(String query) async {
-    print('[KYNO_QUERY] Processing query: "$query"');
+    debugPrint('[KYNO_QUERY] Processing query: "$query"');
 
     final q = query.toLowerCase().trim();
     final insights = <KynoInsightItem>[];
@@ -108,7 +110,7 @@ class KynoAssistantService {
     if (isLongitudinalOrDrilldown) {
       responseSource =
           'Longitudinal & Historical Meal Drilldown: KynoHistoricalAnalysisService (Intent: ${historicalIntent.name})';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       final analysis = KynoHistoricalAnalysisService.instance.analyzeQuery(query);
       buffer.writeln(analysis.headline);
@@ -125,7 +127,7 @@ class KynoAssistantService {
 
     // LIVE CONTEXT: Force refresh to guarantee 100% up-to-date state
     final snapshot = KynoContextService.instance.getSnapshot(forceRefresh: true);
-    print('[KYNO_CONTEXT] Snapshot loaded: Training=${snapshot.training.hasWorkoutToday ? "${snapshot.training.setsLoggedToday} sets" : "none"}, Nutrition=${snapshot.nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${snapshot.nutrition.consumedProtein.toStringAsFixed(1)}g pro');
+    debugPrint('[KYNO_CONTEXT] Snapshot loaded: Training=${snapshot.training.hasWorkoutToday ? "${snapshot.training.setsLoggedToday} sets" : "none"}, Nutrition=${snapshot.nutrition.consumedCalories.toStringAsFixed(0)} kcal / ${snapshot.nutrition.consumedProtein.toStringAsFixed(1)}g pro');
 
     // ── 1. Cross-Domain Recovery Query ──────────────────────────────────────
     // e.g. "I trained chest today. Am I eating enough protein to recover?"
@@ -134,7 +136,7 @@ class KynoAssistantService {
 
     if (isCrossDomain) {
       responseSource = 'Cross-Domain: Authoritative WorkoutService + DayLog + RecoveryEngine';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       final trained = snapshot.training.hasWorkoutToday;
       final proConsumed = snapshot.nutrition.consumedProtein;
@@ -154,42 +156,42 @@ class KynoAssistantService {
       if (mentionsChest && !trainedChest && trained) {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Chest Training Status',
+          title: 'Chest training status',
           detail: 'You did not log a chest workout today. Today\'s logged session was $splitName (${exercisesTrained.join(", ")}).',
         ));
       } else if (mentionsLegs && !trainedLegs && trained) {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Leg Training Status',
+          title: 'Leg training status',
           detail: 'You did not log a leg workout today. Today\'s logged session was $splitName (${exercisesTrained.join(", ")}).',
         ));
       } else if (trained) {
         final details = snapshot.training.todayDetailedEntries.isNotEmpty
             ? snapshot.training.todayDetailedEntries.take(3).join('\n• ')
-            : '${exercisesTrained.join(", ")} (${snapshot.training.setsLoggedToday} sets, ${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume)';
+            : '${exercisesTrained.join(", ")} (${plural(snapshot.training.setsLoggedToday, 'set')}, ${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume)';
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Verified Training Today ($splitName)',
-          detail: '• $details\nTotal Volume: ${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg across ${snapshot.training.workingSetsLoggedToday} working sets.',
+          title: 'Verified training today ($splitName)',
+          detail: '• $details\nTotal Volume: ${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg across ${plural(snapshot.training.workingSetsLoggedToday, 'working set')}.',
         ));
       } else {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Training Today',
+          title: 'Training today',
           detail: 'No workout has been logged today yet.',
         ));
       }
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Verified Nutrition Today',
+        title: 'Verified nutrition today',
         detail: '${proConsumed.toStringAsFixed(1)}g protein consumed of ${proTarget.toStringAsFixed(0)}g daily target (${snapshot.nutrition.consumedCalories.toStringAsFixed(0)} kcal logged).',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Daily Protein Target Balance',
+        title: 'Daily protein target balance',
         detail: deficit <= 0
             ? 'Daily target met! (${(proConsumed - proTarget).abs().toStringAsFixed(0)}g surplus above ${proTarget.toStringAsFixed(0)}g target).'
             : '${deficit.toStringAsFixed(1)}g protein remaining to reach ${proTarget.toStringAsFixed(0)}g daily target.${snapshot.nutrition.proteinPerKg != null ? " Current intake: ${snapshot.nutrition.proteinPerKg!.toStringAsFixed(2)} g/kg." : ""}',
@@ -197,15 +199,15 @@ class KynoAssistantService {
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.inference,
-        title: 'Training Recovery Demand',
+        title: 'Training recovery demand',
         detail: trained
-            ? 'Today\'s ${snapshot.training.todaySplitDayName ?? "training"} session (${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume across ${snapshot.training.workingSetsLoggedToday} working sets) increases muscle protein synthesis demand, raising the importance of meeting your daily protein target.'
+            ? 'Today\'s ${snapshot.training.todaySplitDayName ?? "training"} session (${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg volume across ${plural(snapshot.training.workingSetsLoggedToday, 'working set')}) increases muscle protein synthesis demand, raising the importance of meeting your daily protein target.'
             : 'Rest day: protein intake supports baseline muscle tissue maintenance and turnover.',
       ));
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.recommendation,
-        title: 'Nutrition Strategy',
+        title: 'Nutrition strategy',
         detail: deficit <= 0
             ? 'Daily protein target fulfilled. Focus on adequate hydration and recovery sleep.'
             : 'Distribute your remaining ${deficit.toStringAsFixed(0)}g protein across your upcoming meals and snacks today.',
@@ -217,7 +219,7 @@ class KynoAssistantService {
     // e.g. "How am I progressing on bench press?", "Should I increase weight?"
     else if (q.contains('bench') || q.contains('progress') || q.contains('increase') || (q.contains('should') && q.contains('weight')) || q.contains('squat') || q.contains('deadlift')) {
       responseSource = 'Authoritative Workout History + KynoProgressionEngine';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       String searchEx = 'Barbell Bench Press';
       if (q.contains('bench')) {
@@ -248,7 +250,7 @@ class KynoAssistantService {
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: '${exercise.name} Logged History',
+          title: '${exercise.name} logged history',
           detail: exHistory.totalSessions > 0
               ? 'Sessions logged: ${exHistory.totalSessions} • Total working sets: ${exHistory.totalSets}.\n'
                   'Recent working sets: ${exHistory.recentWorkingSets.isNotEmpty ? exHistory.recentWorkingSets.join(", ") : "None recorded"}.\n'
@@ -258,13 +260,13 @@ class KynoAssistantService {
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.calculation,
-          title: 'Progression Target',
+          title: 'Progression target',
           detail: advice.todayTarget,
         ));
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.inference,
-          title: 'Performance Analysis',
+          title: 'Performance analysis',
           detail: advice.summary,
         ));
 
@@ -278,12 +280,12 @@ class KynoAssistantService {
       } else {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Exercise Not Found',
+          title: 'Exercise not found',
           detail: 'I do not have logged history for "$searchEx" in your exercise database.',
         ));
         insights.add(KynoInsightItem(
           type: KynoInformationType.recommendation,
-          title: 'General Double Progression Rule',
+          title: 'General double progression rule',
           detail: 'Keep the weight constant until you achieve the top rep target on all working sets before adding weight.',
         ));
         buffer.writeln('Exercise details:');
@@ -293,7 +295,7 @@ class KynoAssistantService {
     // e.g. "How much protein have I had today?", "How many calories do I have left?"
     else if (q.contains('protein') || q.contains('calorie') || q.contains('macro') || q.contains('left') || q.contains('eat') || q.contains('ate') || q.contains('food')) {
       responseSource = 'Authoritative DayLog / Nutrition Store';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       final proConsumed = snapshot.nutrition.consumedProtein;
       final proTarget = snapshot.nutrition.targetProtein;
@@ -304,7 +306,7 @@ class KynoAssistantService {
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.fact,
-        title: 'Logged Nutrition Today',
+        title: 'Logged nutrition today',
         detail: '${calConsumed.toStringAsFixed(0)} kcal • ${proConsumed.toStringAsFixed(1)}g protein • '
             '${snapshot.nutrition.consumedCarbs.toStringAsFixed(0)}g carbs • ${snapshot.nutrition.consumedFat.toStringAsFixed(0)}g fat.',
       ));
@@ -312,50 +314,60 @@ class KynoAssistantService {
       if (snapshot.nutrition.mealsLoggedToday.isNotEmpty) {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Logged Meals (${snapshot.nutrition.mealsLoggedToday.length})',
+          title: 'Logged meals (${snapshot.nutrition.mealsLoggedToday.length})',
           detail: '• ${snapshot.nutrition.mealsLoggedToday.join("\n• ")}',
         ));
       } else {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Logged Meals',
+          title: 'Logged meals',
           detail: 'No individual meals logged yet today.',
         ));
       }
 
       insights.add(KynoInsightItem(
         type: KynoInformationType.calculation,
-        title: 'Remaining Daily Targets',
+        title: 'Remaining daily targets',
         detail: 'Calories: ${remainingCal.toStringAsFixed(0)} kcal remaining (${calConsumed.toStringAsFixed(0)} / ${calTarget.toStringAsFixed(0)} kcal)\n'
             'Protein: ${remainingPro.toStringAsFixed(1)}g remaining (${proConsumed.toStringAsFixed(1)} / ${proTarget.toStringAsFixed(0)}g target)',
       ));
 
-      if (q.contains('dinner') || q.contains('tonight') || q.contains('what should i eat')) {
-        final savedMatches = SavedMealService.instance.search('protein', limit: 2);
-        final suggestion = savedMatches.isNotEmpty
-            ? 'Consider your saved meal "${savedMatches.first.title}" (${savedMatches.first.calories.toStringAsFixed(0)} kcal, ${savedMatches.first.protein.toStringAsFixed(0)}g protein).'
-            : 'Aim for a 30–45g protein meal such as chicken breast (150g), eggs + egg whites, Greek yogurt, or a whey shake with oats.';
+      if (q.contains('dinner') || q.contains('tonight') || q.contains('what should i eat') ||
+          q.contains('macro') || q.contains('hit my')) {
+        // The same planner the Kyno card uses: foods from the user's own log
+        // and everyday options that fit what's left.
+        String suggestion;
+        try {
+          final plan = KynoBriefService.instance.build().fuelPlan;
+          final best = (plan == null || plan.combos.isEmpty) ? null : plan.combos.first;
+          suggestion = best == null
+              ? (plan?.headline ?? 'Aim for a 30-45 g protein meal.')
+              : 'Try ${best.items.map((f) => f.logText).join(' + ')}: about '
+                  '${best.kcal.toStringAsFixed(0)} kcal and ${best.protein.toStringAsFixed(0)} g protein.';
+        } catch (_) {
+          suggestion = 'Aim for a 30-45 g protein meal: paneer, eggs, curd, dal, or a whey shake.';
+        }
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.recommendation,
-          title: 'Suggested Meal',
+          title: 'Suggested meal',
           detail: suggestion,
         ));
       } else if (remainingPro > 5.0) {
         insights.add(KynoInsightItem(
           type: KynoInformationType.inference,
-          title: 'Nutrition State',
+          title: 'Nutrition state',
           detail: 'You have a ${remainingPro.toStringAsFixed(0)}g protein deficit to close before the end of the day.',
         ));
         insights.add(KynoInsightItem(
           type: KynoInformationType.recommendation,
-          title: 'Next Step',
+          title: 'Next step',
           detail: 'Prioritize a protein-dense food for your next meal or snack to stay on track for muscle synthesis.',
         ));
       } else {
         insights.add(KynoInsightItem(
           type: KynoInformationType.inference,
-          title: 'Nutrition State',
+          title: 'Nutrition state',
           detail: 'Daily protein target has been reached!',
         ));
         insights.add(KynoInsightItem(
@@ -371,43 +383,43 @@ class KynoAssistantService {
     // e.g. "What did I train today?", "How was my workout?"
     else if (q.contains('train') || q.contains('workout') || q.contains('gym') || q.contains('exercise') || q.contains('session')) {
       responseSource = 'Authoritative WorkoutService State';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       if (snapshot.training.hasWorkoutToday) {
         final splitName = snapshot.training.todaySplitDayName ?? 'Workout Session';
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'Today\'s Workout: $splitName',
-          detail: 'Completed ${snapshot.training.setsLoggedToday} sets (${snapshot.training.workingSetsLoggedToday} working sets) across '
-              '${snapshot.training.exercisesTrainedToday.length} exercises.\n'
+          title: 'Today\'s workout: $splitName',
+          detail: 'Completed ${plural(snapshot.training.setsLoggedToday, 'set')} (${plural(snapshot.training.workingSetsLoggedToday, 'working set')}) across '
+              '${plural(snapshot.training.exercisesTrainedToday.length, 'exercise')}.\n'
               'Total Volume: ${snapshot.training.volumeTrainedTodayKg.toStringAsFixed(0)} kg.',
         ));
 
         if (snapshot.training.todayDetailedEntries.isNotEmpty) {
           insights.add(KynoInsightItem(
             type: KynoInformationType.fact,
-            title: 'Exercise Details',
+            title: 'Exercise details',
             detail: '• ${snapshot.training.todayDetailedEntries.join("\n• ")}',
           ));
         }
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.calculation,
-          title: 'Session Workload',
+          title: 'Session workload',
           detail: 'Average volume per exercise: ${(snapshot.training.volumeTrainedTodayKg / (snapshot.training.exercisesTrainedToday.isNotEmpty ? snapshot.training.exercisesTrainedToday.length : 1)).toStringAsFixed(0)} kg.',
         ));
 
         if (snapshot.training.previousSessionOfSameSplit != null) {
           insights.add(KynoInsightItem(
             type: KynoInformationType.inference,
-            title: 'Historical Comparison',
+            title: 'Historical comparison',
             detail: 'Previous session: ${snapshot.training.previousSessionOfSameSplit}',
           ));
         }
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.recommendation,
-          title: 'Post-Workout Guidance',
+          title: 'Post-workout guidance',
           detail: snapshot.crossDomain.nutritionAdvice,
         ));
 
@@ -415,14 +427,14 @@ class KynoAssistantService {
       } else {
         insights.add(KynoInsightItem(
           type: KynoInformationType.fact,
-          title: 'No Workout Logged Today',
+          title: 'No workout logged today',
           detail: 'You have not logged any workout sets for today yet.',
         ));
 
         insights.add(KynoInsightItem(
           type: KynoInformationType.calculation,
-          title: 'Training Consistency',
-          detail: 'Averaging ${snapshot.training.averageSessionsPerWeek} sessions/week across ${snapshot.training.totalCompletedSessions} lifetime sessions.',
+          title: 'Training consistency',
+          detail: 'Averaging ${snapshot.training.averageSessionsPerWeek} sessions/week across ${plural(snapshot.training.totalCompletedSessions, 'lifetime session')}.',
         ));
 
         insights.add(KynoInsightItem(
@@ -439,7 +451,7 @@ class KynoAssistantService {
     // ── 5. General Assistant Snapshot ───────────────────────────────────────
     else {
       responseSource = 'Unified Multi-Domain KynoContextSnapshot';
-      print('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
+      debugPrint('[KYNO_RESPONSE_SOURCE] Source: $responseSource');
 
       insights.addAll(snapshot.structuredInsights);
       buffer.writeln('Here is your personal fitness status snapshot:');

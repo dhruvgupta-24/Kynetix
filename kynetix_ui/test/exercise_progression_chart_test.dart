@@ -186,7 +186,7 @@ void main() {
       );
 
       // Verify chart elements rendered
-      expect(find.text('EXERCISE PROGRESSION'), findsOneWidget);
+      expect(find.text('Exercise progression'), findsOneWidget);
       expect(find.text('Overall'), findsOneWidget);
       expect(find.text('Volume'), findsOneWidget);
       expect(find.text('Weight'), findsOneWidget);

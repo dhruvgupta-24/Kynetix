@@ -3,6 +3,8 @@ import '../config/app_theme.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
+import '../services/food_link_service.dart';
+import 'app_shell.dart';
 
 class NutritionIntelligenceScreen extends StatefulWidget {
   const NutritionIntelligenceScreen({super.key});
@@ -13,28 +15,43 @@ class NutritionIntelligenceScreen extends StatefulWidget {
 
 class _SectionHeader {
   final String title;
-  final String emoji;
-  const _SectionHeader({required this.title, required this.emoji});
+  final IconData icon;
+  final String? count;
+  const _SectionHeader({required this.title, required this.icon, this.count});
 }
 
 class _EmptyState {
+  final String title;
   final String message;
-  const _EmptyState({required this.message});
+
+  /// "Nothing matches this search" — offers to clear the query rather than
+  /// pretending the library is empty.
+  final bool isFiltered;
+  const _EmptyState({required this.title, required this.message, this.isFiltered = false});
 }
 
 class _InsightsCard {
   const _InsightsCard();
 }
 
+const _kTabular = [FontFeature.tabularFigures()];
+
 class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScreen> {
   int _selectedTab = 0; // 0 = All, 1 = Customized, 2 = Learned
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
+  /// The first list paints with one staggered entrance; later rebuilds (search,
+  /// tab switches, scrolling) mount items already at rest.
+  bool _revealDone = false;
+
   @override
   void initState() {
     super.initState();
+    // The controller also notifies on cursor / selection moves; only a real
+    // text change re-filters the list.
     _searchCtrl.addListener(() {
+      if (!mounted || _searchCtrl.text == _searchQuery) return;
       setState(() {
         _searchQuery = _searchCtrl.text;
       });
@@ -47,32 +64,61 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     super.dispose();
   }
 
+  // ─── Dialogs ────────────────────────────────────────────────────────────────
+
+  Widget _confirmDialog({
+    required BuildContext context,
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) {
+    return AlertDialog(
+      backgroundColor: KColor.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: KRadius.xl,
+        side: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+      ),
+      icon: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: KColor.danger.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.restart_alt_rounded, color: KColor.danger, size: 22),
+      ),
+      title: Text(title, style: KText.h2, textAlign: TextAlign.center),
+      content: Text(
+        message,
+        style: KText.body.copyWith(color: KColor.textSecondary, height: 1.45),
+        textAlign: TextAlign.center,
+      ),
+      actionsAlignment: MainAxisAlignment.end,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+          child: Text('Cancel', style: KText.bodyMedium.copyWith(color: KColor.textSecondary)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: TextButton.styleFrom(foregroundColor: KColor.danger, minimumSize: const Size(64, 48)),
+          child: Text(confirmLabel, style: KText.bodyMedium.copyWith(color: KColor.danger, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    );
+  }
+
   Future<void> _resetPattern(LearnedPatternEntry entry) async {
     kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: KColor.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Reset Portion Pattern',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          'Are you sure you want to reset the learned portion adjustment pattern for "${entry.key}"?',
-          style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: KColor.danger),
-            child: const Text('Reset', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
+      builder: (context) => _confirmDialog(
+        context: context,
+        title: 'Reset this pattern?',
+        message: 'Kyno forgets what it learned for "${entry.key}" and goes back to standard portions.',
+        confirmLabel: 'Reset',
       ),
     );
 
@@ -81,8 +127,10 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         entry.key.targetRole,
         contextRole: entry.key.contextRole,
       );
+      // Optimistic: the in-memory store is already updated, so the row goes
+      // away this frame; the disk write follows.
+      if (mounted) setState(() {});
       await EatingPatternService.instance.save();
-      setState(() {});
     }
   }
 
@@ -90,244 +138,323 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: KColor.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Remove Custom Food',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          'Are you sure you want to remove the custom ingredients for "${override.canonicalMeal}"? It will revert to standard estimates.',
-          style: const TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: KColor.danger),
-            child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
+      builder: (context) => _confirmDialog(
+        context: context,
+        title: 'Remove custom food?',
+        message: 'Your numbers for "${override.canonicalMeal}" will be removed, and Kyno goes back to its own estimate.',
+        confirmLabel: 'Remove',
       ),
     );
 
     if (confirmed == true) {
-      await UserNutritionMemory.instance.deleteOverride(override.canonicalMeal);
-      setState(() {});
+      // deleteOverride drops the in-memory entry synchronously; rebuild this
+      // frame and let the disk write finish after.
+      final done = UserNutritionMemory.instance.deleteOverride(override.canonicalMeal);
+      if (mounted) setState(() {});
+      await done;
     }
+  }
+
+  /// Unlink every older name from a scanned pack. The hidden entries come
+  /// back as they were; Undo links them again.
+  Future<void> _unlink(FoodLink link) async {
+    kHapticSelect();
+    final messenger = ScaffoldMessenger.of(context);
+    final done = FoodLinkService.instance.unlink(link.barcode);
+    if (mounted) setState(() {});
+    await done;
+    if (mounted) setState(() {});
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('Unlinked. Both names are separate again.'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            for (final a in link.aliases) {
+              await FoodLinkService.instance.link(link.product, a);
+            }
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinkCard(FoodLink link) {
+    final result = link.product.resultForAmount(link.portionGrams);
+    final aliases = link.aliases.join(', ');
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.09))),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: KSpacing.xs, bottom: KSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.qr_code_scanner_rounded, size: 16, color: KColor.textMuted),
+                const SizedBox(width: KSpacing.sm),
+                Expanded(
+                  child: Text(link.name, style: KText.h3.copyWith(fontSize: 15.5)),
+                ),
+                IconButton(
+                  icon: Icon(Icons.link_off_rounded, size: 18, color: KColor.textSecondary),
+                  onPressed: () => _unlink(link),
+                  tooltip: 'Unlink',
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: KSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Also logged as: $aliases',
+                    style: KText.caption.copyWith(fontSize: 13),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Per ${link.product.amountLabel(link.portionGrams)}, from the pack label',
+                    style: KText.caption.copyWith(fontSize: 13, fontFeatures: _kTabular),
+                  ),
+                  const SizedBox(height: KSpacing.sm),
+                  KDotStats([
+                    KDotStat(whole(result.calories.mid), 'kcal', color: KColor.calorie),
+                    KDotStat(amount(result.protein.mid), 'g protein', color: KColor.protein),
+                    if (result.carbohydrates != null) KDotStat(whole(result.carbohydrates!.mid), 'g carbs', color: KColor.blue),
+                    if (result.fat != null) KDotStat(whole(result.fat!.mid), 'g fat', color: KColor.saffron),
+                  ]),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _resetAll() async {
     kHapticMedium();
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: KColor.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Clear Food Library & Portions',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: const Text(
-          'This will permanently clear all portion history and custom foods in your Food Library. This cannot be undone.',
-          style: TextStyle(color: KColor.textSecondary, fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: KColor.textMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: KColor.danger),
-            child: const Text('Clear All', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
+      builder: (context) => _confirmDialog(
+        context: context,
+        title: 'Clear your food library?',
+        message: 'This clears all portion history and custom foods for good. This can\'t be undone.',
+        confirmLabel: 'Clear all',
       ),
     );
 
     if (confirmed == true) {
       EatingPatternService.instance.resetAll();
-      await EatingPatternService.instance.save();
-      for (final override in UserNutritionMemory.instance.allOverrides.toList()) {
-        await UserNutritionMemory.instance.deleteOverride(override.canonicalMeal);
-      }
+      // One write for every custom food instead of one write per food.
+      final cleared = UserNutritionMemory.instance.deleteOverrides(
+        UserNutritionMemory.instance.allOverrides
+            .map((o) => o.canonicalMeal)
+            .toList(),
+      );
+      if (mounted) setState(() {});
+      await Future.wait([EatingPatternService.instance.save(), cleared]);
       if (mounted) {
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('All Food Library customizations have been cleared.'),
-            backgroundColor: KColor.danger,
+            content: Text('Food library cleared. Fresh start.'),
           ),
         );
       }
     }
   }
 
+  // ─── Building blocks ────────────────────────────────────────────────────────
+
   Widget _buildRoleBadge(FoodRole role) {
     final (label, color) = switch (role) {
-      FoodRole.primary       => ('Base/Carb', KColor.blue),
+      FoodRole.primary       => ('Base or carb', KColor.blue),
       FoodRole.protein       => ('Protein', KColor.protein),
-      FoodRole.accompaniment => ('Side/Curry', KColor.amber),
-      FoodRole.addOn         => ('Add-on', const Color(0xFFA78BFA)),
-      FoodRole.completeMeal  => ('Single Unit', KColor.textSecondary),
+      FoodRole.accompaniment => ('Side or curry', KColor.saffron),
+      FoodRole.addOn         => ('Add-on', KColor.violet),
+      FoodRole.completeMeal  => ('Single unit', KColor.textMuted),
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: color,
+    // A quiet label keyed by a dot, not a tinted badge.
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        KDot(color: color, size: 6),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary, fontWeight: FontWeight.w600),
+          ),
         ),
-      ),
+      ],
     );
   }
 
   Widget _buildSectionHeader(_SectionHeader item) {
     return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 10),
+      padding: const EdgeInsets.only(top: KSpacing.xxl, bottom: KSpacing.sm),
       child: Row(
         children: [
-          Text(item.emoji, style: const TextStyle(fontSize: 18)),
-          const SizedBox(width: 8),
-          Text(
-            item.title,
-            style: KText.label,
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(
+                item.title,
+                style: KText.h2.copyWith(fontSize: 18),
+              ),
+            ),
           ),
+          if (item.count != null)
+            Text(item.count!, style: KText.numSmall.copyWith(color: KColor.textMuted, fontSize: 13)),
         ],
       ),
     );
   }
 
   Widget _buildEmptyState(_EmptyState item) {
-    return KCard(
-      padding: const EdgeInsets.all(16),
-      child: Text(
-        item.message,
-        style: const TextStyle(color: KColor.textSecondary, fontSize: 13, height: 1.4),
+    final action = item.isFiltered
+        ? KTextAction('Clear search', onTap: () => _searchCtrl.clear())
+        : (AppShell.addMealAction.value != null
+            ? KTextAction('Log a meal', onTap: _logMealFromEmpty)
+            : null);
+    // Inline and left-aligned: an empty list is a sentence, not a poster.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const KHairline(),
+          const SizedBox(height: KSpacing.md),
+          Text(item.title, style: KText.h3.copyWith(fontSize: 16)),
+          const SizedBox(height: 4),
+          Text(item.message, style: KText.body.copyWith(fontSize: 14, color: KColor.textSecondary)),
+          if (action != null) ...[
+            const SizedBox(height: KSpacing.xs),
+            Transform.translate(offset: const Offset(-4, 0), child: action),
+          ],
+        ],
       ),
     );
   }
 
-  Widget _buildPatternCard(LearnedPatternEntry entry) {
-    final color = entry.scalar < 1.0 ? KColor.protein : KColor.calorie;
-    return Dismissible(
-      key: Key('pattern_${entry.key.targetRole?.name ?? "none"}_${entry.key.contextRole?.name ?? "none"}'),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: KColor.danger.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(18),
+  /// Empty-state action: back to the home tab, then open the same "Log a meal"
+  /// flow the dock's + button uses.
+  void _logMealFromEmpty() {
+    final addMeal = AppShell.addMealAction.value;
+    if (addMeal == null) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    addMeal();
+  }
+
+  Widget _dismissBackground(IconData icon, String label) {
+    return Container(
+      alignment: AlignmentDirectional.centerEnd,
+      padding: const EdgeInsetsDirectional.only(end: KSpacing.xl),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.centerStart,
+          end: AlignmentDirectional.centerEnd,
+          colors: [KColor.danger.withValues(alpha: 0), KColor.danger.withValues(alpha: KColor.isDark ? 0.2 : 0.14)],
         ),
-        child: const Icon(Icons.refresh_rounded, color: KColor.danger),
       ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: KText.bodyMedium.copyWith(color: KColor.danger, fontWeight: FontWeight.w600)),
+          const SizedBox(width: KSpacing.sm),
+          Icon(icon, color: KColor.danger),
+        ],
+      ),
+    );
+  }
+
+  String _confidenceWord(double c) {
+    if (c >= 0.75) return 'High';
+    if (c >= 0.45) return 'Medium';
+    return 'Low';
+  }
+
+  Widget _buildPatternCard(LearnedPatternEntry entry) {
+    final color = KColor.textPrimary;
+    final gradient = KGradient.fuel;
+    final direction = entry.scalar < 1.0
+        ? 'Smaller portions'
+        : (entry.scalar > 1.0 ? 'Larger portions' : 'Standard portions');
+    final confidencePct = (entry.confidence * 100).toInt();
+
+    return Dismissible(
+      key: Key('pattern_${entry.key.targetRole.name}_${entry.key.contextRole?.name ?? "none"}'),
+      direction: DismissDirection.endToStart,
+      background: _dismissBackground(Icons.refresh_rounded, 'Reset'),
       confirmDismiss: (_) async {
         await _resetPattern(entry);
         return false;
       },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: KCard(
-          padding: const EdgeInsets.all(16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.09))),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(top: KSpacing.xs, bottom: KSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildRoleBadge(entry.key.targetRole),
+                  Flexible(child: _buildRoleBadge(entry.key.targetRole)),
+                  const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.refresh_rounded, size: 16, color: KColor.textMuted),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                    icon: Icon(Icons.refresh, size: 18, color: KColor.textMuted),
                     onPressed: () => _resetPattern(entry),
-                    tooltip: 'Reset Portion Pattern',
+                    tooltip: 'Reset this pattern',
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                entry.explanation,
-                style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.45),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
+              Padding(
+                padding: const EdgeInsetsDirectional.only(end: KSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.explanation,
+                      style: KText.body.copyWith(color: KColor.textPrimary, fontSize: 14, height: 1.5),
+                    ),
+                    const SizedBox(height: KSpacing.lg),
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Portion Scale', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              '${entry.scalar.toStringAsFixed(2)}×',
-                              style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w800),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(2),
-                                child: LinearProgressIndicator(
-                                  value: (entry.scalar / 2.0).clamp(0.0, 1.0),
-                                  backgroundColor: KColor.border,
-                                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                                  minHeight: 4,
-                                  ),
-                                ),
-                              ),
-                            ],
+                        Expanded(
+                          child: _MetricBlock(
+                            label: 'Portion scale',
+                            value: '${entry.scalar.toStringAsFixed(2)}×',
+                            valueColor: color,
+                            caption: direction,
+                            progress: (entry.scalar / 2.0).clamp(0.0, 1.0),
+                            colors: gradient,
+                            semantics: 'Portion scale ${entry.scalar.toStringAsFixed(2)} times. $direction',
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Reliability', style: TextStyle(fontSize: 8, color: KColor.textMuted, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              '${(entry.confidence * 100).toInt()}%',
-                              style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(2),
-                                child: LinearProgressIndicator(
-                                  value: entry.confidence.clamp(0.0, 1.0),
-                                  backgroundColor: KColor.border,
-                                  valueColor: const AlwaysStoppedAnimation<Color>(KColor.protein),
-                                  minHeight: 4,
-                                ),
-                              ),
-                            ),
-                          ],
+                        ),
+                        const SizedBox(width: KSpacing.lg),
+                        Expanded(
+                          child: _MetricBlock(
+                            label: 'Reliability',
+                            value: '$confidencePct%',
+                            valueColor: KColor.textPrimary,
+                            caption: '${_confidenceWord(entry.confidence)}, from ${plural(entry.sampleCount, 'meal')}',
+                            progress: entry.confidence.clamp(0.0, 1.0),
+                            colors: [KColor.textSecondary],
+                            semantics: 'Reliability $confidencePct percent, ${_confidenceWord(entry.confidence)} confidence',
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -344,75 +471,56 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     return Dismissible(
       key: Key('override_${override.canonicalMeal}'),
       direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: KColor.danger.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: const Icon(Icons.delete_outline_rounded, color: KColor.danger),
-      ),
+      background: _dismissBackground(Icons.delete_outline_rounded, 'Remove'),
       confirmDismiss: (_) async {
         await _deleteOverride(override);
         return false;
       },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: KCard(
-          padding: const EdgeInsets.all(16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.09))),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(top: KSpacing.xs, bottom: KSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
                     child: Text(
                       override.canonicalMeal,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
+                      style: KText.h3.copyWith(fontSize: 15.5),
                     ),
                   ),
-                  Row(
-                    children: [
-                      _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, size: 16, color: KColor.danger),
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        onPressed: () => _deleteOverride(override),
-                        tooltip: 'Remove Custom Food',
-                      ),
-                    ],
+                  const SizedBox(width: KSpacing.sm),
+                  _buildRoleBadge(FoodRoleClassifier.classify(override.canonicalMeal)),
+                  IconButton(
+                    icon: Icon(KIcons.delete, size: 18, color: KColor.danger),
+                    onPressed: () => _deleteOverride(override),
+                    tooltip: 'Remove custom food',
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                '1 unit = ${override.referenceQuantity == override.referenceQuantity.truncate() ? override.referenceQuantity.toInt().toString() : override.referenceQuantity} ${override.referenceUnit}',
-                style: const TextStyle(color: KColor.textSecondary, fontSize: 11),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 16,
-                runSpacing: 10,
-                children: [
-                  _buildMiniMacro('CAL', '${(override.caloriesPerUnit * override.referenceQuantity).toInt()}', KColor.calorie),
-                  _buildMiniMacro('PRO', '${(override.proteinPerUnit * override.referenceQuantity).toStringAsFixed(1)}g', KColor.protein),
-                  if (carbs != null)
-                    _buildMiniMacro('CARB', '${carbs.toStringAsFixed(0)}g', KColor.blue),
-                  if (fat != null)
-                    _buildMiniMacro('FAT', '${fat.toStringAsFixed(0)}g', KColor.amber),
-                  if (fiber != null)
-                    _buildMiniMacro('FIB', '${fiber.toStringAsFixed(1)}g', const Color(0xFFA78BFA)),
-                ],
+              Padding(
+                padding: const EdgeInsetsDirectional.only(end: KSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Per ${amount(override.referenceQuantity)} ${override.referenceUnit}',
+                      style: KText.caption.copyWith(fontSize: 13, fontFeatures: _kTabular),
+                    ),
+                    const SizedBox(height: KSpacing.sm),
+                    KDotStats([
+                      KDotStat(whole(override.caloriesPerUnit * override.referenceQuantity), 'kcal', color: KColor.calorie),
+                      KDotStat(amount(override.proteinPerUnit * override.referenceQuantity), 'g protein', color: KColor.protein),
+                      if (carbs != null) KDotStat(whole(carbs), 'g carbs', color: KColor.blue),
+                      if (fat != null) KDotStat(whole(fat), 'g fat', color: KColor.saffron),
+                      if (fiber != null) KDotStat(amount(fiber), 'g fiber', color: KColor.violet),
+                    ]),
+                  ],
+                ),
               ),
             ],
           ),
@@ -422,271 +530,466 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
   }
 
   Widget _buildInsightsCard() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: KCard(
-        padding: const EdgeInsets.all(16),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.md),
+      child: Padding(
+        padding: EdgeInsets.zero,
         child: Column(
           children: [
-            _buildStatRow('Total meals tracked', '${EatingPatternService.instance.totalMealsTracked}'),
-            const Divider(color: KColor.divider, height: 24),
-            _buildStatRow('Common meal base', EatingPatternService.instance.dominantPrimaryFood),
-            const Divider(color: KColor.divider, height: 24),
-            _buildStatRow('Average portion size', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
+            _buildStatRow(Icons.receipt_long_outlined, KColor.ember, 'Total meals tracked', '${EatingPatternService.instance.totalMealsTracked}'),
+            const _Hairline(),
+            _buildStatRow(Icons.rice_bowl_outlined, KColor.saffron, 'Common meal base', EatingPatternService.instance.dominantPrimaryFood),
+            const _Hairline(),
+            _buildStatRow(Icons.straighten_outlined, KColor.green, 'Average portion size', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 12.5, color: KColor.textSecondary, fontWeight: FontWeight.w600),
+  Widget _buildStatRow(IconData icon, Color color, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
+      child: Row(
+        children: [
+          KIcon(icon, size: 18),
+          const SizedBox(width: KSpacing.md),
+          Expanded(
+            child: Text(label, style: KText.bodyMedium.copyWith(fontSize: 14, color: KColor.textSecondary)),
           ),
-        ),
-        const SizedBox(width: 12),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800),
-            overflow: TextOverflow.ellipsis,
+          const SizedBox(width: KSpacing.md),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: KText.numSmall.copyWith(fontSize: 15, color: KColor.textPrimary),
+            ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMiniMacro(String name, String val, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(name, style: TextStyle(fontSize: 8, color: color, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-        const SizedBox(height: 2),
-        Text(val, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildTabs() {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final tabWidth = (constraints.maxWidth) / 3;
-          return Stack(
+    return _SegmentedTabs(
+      labels: const ['All', 'Custom foods', 'Portion history'],
+      selected: _selectedTab,
+      accent: KColor.ember,
+      onSelected: (index) {
+        kHapticSelect();
+        setState(() {
+          _selectedTab = index;
+        });
+      },
+    );
+  }
+
+  Widget _buildSummary(int patternCount, int overrideCount) {
+    Widget stat(IconData icon, Color color, String value, String label) {
+      return Expanded(
+        child: Semantics(
+          label: '$value $label',
+          excludeSemantics: true,
+          child: Row(
             children: [
-              AnimatedPositioned(
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeOutCubic,
-                left: _selectedTab * tabWidth,
-                width: tabWidth,
-                top: 0,
-                bottom: 0,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: KColor.cardHigh,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.05), width: 0.5),
-                  ),
-                ),
-              ),
-              Row(
-                children: [
-                  _buildTabButton(0, 'All'),
-                  _buildTabButton(1, 'Custom Foods'),
-                  _buildTabButton(2, 'Portion History'),
-                ],
-              ),
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: KSpacing.sm),
+              Text(value, style: KText.numMedium.copyWith(fontSize: 24)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(label, style: KText.caption.copyWith(fontSize: 13))),
             ],
-          );
-        },
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        stat(Icons.tune_rounded, KColor.textMuted, '$patternCount', patternCount == 1 ? 'pattern learned' : 'patterns learned'),
+        const SizedBox(width: KSpacing.md),
+        stat(Icons.restaurant_menu_rounded, KColor.textMuted, '$overrideCount', overrideCount == 1 ? 'custom food' : 'custom foods'),
+      ],
+    );
+  }
+
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _searchCtrl,
+      style: KText.body.copyWith(color: KColor.textPrimary, fontSize: 14),
+      cursorColor: KColor.ink,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: KColor.isDark ? KColor.surface.withValues(alpha: 0.85) : KColor.card,
+        prefixIcon: Icon(Icons.search_rounded, color: KColor.textMuted, size: 20),
+        hintText: 'Search custom foods',
+        hintStyle: KText.body.copyWith(color: KColor.textMuted, fontSize: 14),
+        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: KSpacing.lg),
+        border: OutlineInputBorder(
+          borderRadius: KRadius.md,
+          borderSide: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: KRadius.md,
+          borderSide: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: KRadius.md,
+          borderSide: BorderSide(color: KColor.ink, width: 1.4),
+        ),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                tooltip: 'Clear search',
+                icon: Icon(Icons.clear_rounded, color: KColor.textMuted, size: 18),
+                onPressed: () {
+                  _searchCtrl.clear();
+                },
+              )
+            : null,
       ),
     );
   }
 
-  Widget _buildTabButton(int index, String label) {
-    final isSelected = _selectedTab == index;
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          kHapticSelect();
-          setState(() {
-            _selectedTab = index;
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          alignment: Alignment.center,
-          child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 200),
-            style: TextStyle(
-              color: isSelected ? Colors.white : KColor.textSecondary,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              fontSize: 12,
-              fontFamily: 'Inter',
-            ),
-            child: Text(label),
-          ),
-        ),
-      ),
-    );
+  Widget _buildItem(Object item) {
+    if (item is _SectionHeader) {
+      return _buildSectionHeader(item);
+    } else if (item is _EmptyState) {
+      return _buildEmptyState(item);
+    } else if (item is LearnedPatternEntry) {
+      return _buildPatternCard(item);
+    } else if (item is UserMealOverride) {
+      return _buildOverrideCard(item);
+    } else if (item is FoodLink) {
+      return _buildLinkCard(item);
+    } else if (item is _InsightsCard) {
+      return _buildInsightsCard();
+    }
+    return const SizedBox.shrink();
   }
 
   @override
   Widget build(BuildContext context) {
     final patterns = EatingPatternService.instance.allLearned;
-    final overrides = UserNutritionMemory.instance.allOverrides;
+    // Older names linked to a scanned pack show under that pack instead
+    // (hidden here, never deleted).
+    final overrides = UserNutritionMemory.instance.allOverrides
+        .where((o) => !FoodLinkService.instance.isHidden(o.canonicalMeal))
+        .toList();
+    final links = FoodLinkService.instance.links;
 
     // Filter overrides
-    final filteredOverrides = overrides.where((o) {
-      if (_searchQuery.isEmpty) return true;
-      return o.canonicalMeal.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
+    final query = _searchQuery.toLowerCase();
+    final filteredOverrides = query.isEmpty
+        ? overrides.toList()
+        : overrides
+            .where((o) => o.canonicalMeal.toLowerCase().contains(query))
+            .toList();
+    final filteredLinks = query.isEmpty
+        ? links
+        : links
+            .where((l) => [l.name, ...l.aliases].any((n) => n.toLowerCase().contains(query)))
+            .toList();
+
+    const patternsEmpty = _EmptyState(
+      title: 'No patterns yet',
+      message: 'Tweak the numbers on a meal you log and Kyno picks up your usual portions.',
+    );
+    final overridesEmpty = _searchQuery.isEmpty
+        ? const _EmptyState(
+            title: 'No custom foods yet',
+            message: 'Turn on "Remember my numbers for next time" when you log a meal, and it lands here.',
+          )
+        : const _EmptyState(
+            title: 'Nothing matches',
+            message: 'No custom foods match that. Try another word.',
+            isFiltered: true,
+          );
 
     // Construct flat items list for the ListView.builder recycler
     final items = <Object>[];
 
     if (_selectedTab == 0) {
       // ALL
-      items.add(const _SectionHeader(title: 'PORTION HISTORY', emoji: '🧠'));
+      items.add(_SectionHeader(title: 'Portion history', icon: Icons.psychology_rounded, count: patterns.isEmpty ? null : '${patterns.length}'));
       if (patterns.isEmpty) {
-        items.add(const _EmptyState(message: 'No portion patterns learned yet. Edit ingredient estimates on logged meals to build portion history.'));
+        items.add(patternsEmpty);
       } else {
         items.addAll(patterns);
       }
 
-      items.add(const _SectionHeader(title: 'CUSTOM FOODS', emoji: '🥛'));
+      items.add(_SectionHeader(title: 'Custom foods', icon: Icons.restaurant_menu_rounded, count: filteredOverrides.isEmpty ? null : '${filteredOverrides.length}'));
       if (filteredOverrides.isEmpty) {
-        items.add(_EmptyState(
-          message: _searchQuery.isEmpty 
-              ? 'No custom foods found. Check "Remember for next time" when saving a meal.' 
-              : 'No matching custom foods found.'
-        ));
+        items.add(overridesEmpty);
       } else {
         items.addAll(filteredOverrides);
       }
 
-      items.add(const _SectionHeader(title: 'PORTION INSIGHTS', emoji: '📊'));
+      if (filteredLinks.isNotEmpty) {
+        items.add(_SectionHeader(title: 'Linked foods', icon: Icons.link_rounded, count: '${filteredLinks.length}'));
+        items.addAll(filteredLinks);
+      }
+
+      items.add(const _SectionHeader(title: 'Portion insights', icon: Icons.insights_rounded));
       items.add(const _InsightsCard());
     } else if (_selectedTab == 1) {
       // CUSTOMIZED
       if (filteredOverrides.isEmpty) {
-        items.add(_EmptyState(
-          message: _searchQuery.isEmpty 
-              ? 'No custom foods found. Check "Remember for next time" when saving a meal.' 
-              : 'No matching custom foods found.'
-        ));
+        items.add(overridesEmpty);
       } else {
         items.addAll(filteredOverrides);
       }
+      if (filteredLinks.isNotEmpty) {
+        items.add(_SectionHeader(title: 'Linked foods', icon: Icons.link_rounded, count: '${filteredLinks.length}'));
+        items.addAll(filteredLinks);
+      }
     } else if (_selectedTab == 2) {
       // LEARNED PATTERNS
-      items.add(const _SectionHeader(title: 'PORTION HISTORY', emoji: '🧠'));
+      items.add(_SectionHeader(title: 'Portion history', icon: Icons.psychology_rounded, count: patterns.isEmpty ? null : '${patterns.length}'));
       if (patterns.isEmpty) {
-        items.add(const _EmptyState(message: 'No portion patterns learned yet. Edit ingredient estimates on logged meals to build portion history.'));
+        items.add(patternsEmpty);
       } else {
         items.addAll(patterns);
       }
 
-      items.add(const _SectionHeader(title: 'PORTION INSIGHTS', emoji: '📊'));
+      items.add(const _SectionHeader(title: 'Portion insights', icon: Icons.insights_rounded));
       items.add(const _InsightsCard());
     }
 
     final showSearch = _selectedTab == 0 || _selectedTab == 1;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final playReveal = !_revealDone;
+    if (playReveal) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealDone = true);
+    }
 
-    return Scaffold(
-      backgroundColor: KColor.bg,
+    return KPage(
+      tone: KTone.fuel,
       appBar: AppBar(
-        backgroundColor: KColor.bg,
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        title: const Text(
-          'Food Library',
-          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
-        ),
+        scrolledUnderElevation: 0,
+        elevation: 0,
+        foregroundColor: KColor.textPrimary,
+        title: Text('Food library', style: KText.h2),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_sweep_rounded, color: KColor.danger),
-            tooltip: 'Reset Food Library',
+            icon: const Icon(Icons.delete_sweep_rounded),
+            color: KColor.danger,
+            disabledColor: KColor.textDisabled,
+            tooltip: 'Reset food library',
             onPressed: (patterns.isNotEmpty || overrides.isNotEmpty) ? _resetAll : null,
           ),
         ],
       ),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: _buildTabs(),
+              padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.xs, KSpacing.p, KSpacing.md),
+              child: KReveal(
+                duration: playReveal ? KMotion.emphasized : Duration.zero,
+                child: _buildSummary(patterns.length, overrides.length),
+              ),
             ),
-            if (showSearch)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Container(
-                  height: 46,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: KColor.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: KColor.border, width: 0.5),
-                  ),
-                  child: TextField(
-                    controller: _searchCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 13.5),
-                    decoration: InputDecoration(
-                      icon: const Icon(Icons.search_rounded, color: KColor.textMuted, size: 18),
-                      hintText: 'Search custom foods...',
-                      hintStyle: const TextStyle(color: KColor.textMuted, fontSize: 13.5),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear_rounded, color: KColor.textMuted, size: 16),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              onPressed: () {
-                                _searchCtrl.clear();
-                              },
-                            )
-                          : null,
-                    ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
+              child: KReveal(
+                index: 1,
+                duration: playReveal ? KMotion.emphasized : Duration.zero,
+                child: _buildTabs(),
+              ),
+            ),
+            AnimatedSize(
+              duration: KMotion.of(context, KMotion.standard),
+              curve: KMotion.emphasizedCurve,
+              alignment: Alignment.topCenter,
+              child: showSearch
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.md, KSpacing.p, 0),
+                      child: _buildSearchField(),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: KMotion.of(context, KMotion.standard),
+                reverseDuration: KMotion.of(context, KMotion.quick),
+                switchInCurve: KMotion.decelerate,
+                switchOutCurve: KMotion.accelerate,
+                layoutBuilder: (current, previous) => Stack(
+                  fit: StackFit.expand,
+                  children: [...previous, ?current],
+                ),
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(begin: const Offset(0, 0.015), end: Offset.zero).animate(animation),
+                    child: child,
                   ),
                 ),
-              ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  if (item is _SectionHeader) {
-                    return _buildSectionHeader(item);
-                  } else if (item is _EmptyState) {
-                    return _buildEmptyState(item);
-                  } else if (item is LearnedPatternEntry) {
-                    return _buildPatternCard(item);
-                  } else if (item is UserMealOverride) {
-                    return _buildOverrideCard(item);
-                  } else if (item is _InsightsCard) {
-                    return _buildInsightsCard();
-                  }
-                  return const SizedBox.shrink();
-                },
+                child: ListView.builder(
+                  key: ValueKey('food_library_tab_$_selectedTab'),
+                  padding: EdgeInsets.fromLTRB(KSpacing.p, KSpacing.xs, KSpacing.p, bottomInset + KSpacing.xxl),
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final play = playReveal && index < 8;
+                    return KReveal(
+                      index: index + 2,
+                      duration: play ? KMotion.emphasized : Duration.zero,
+                      stagger: play ? KMotion.stagger : Duration.zero,
+                      child: _buildItem(items[index]),
+                    );
+                  },
+                ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Private building blocks ──────────────────────────────────────────────────
+
+/// A labelled number with a confidence/scale bar beneath it.
+class _MetricBlock extends StatelessWidget {
+  const _MetricBlock({
+    required this.label,
+    required this.value,
+    required this.valueColor,
+    required this.caption,
+    required this.progress,
+    required this.colors,
+    required this.semantics,
+  });
+
+  final String label;
+  final String value;
+  final Color valueColor;
+  final String caption;
+  final double progress;
+  final List<Color> colors;
+  final String semantics;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: semantics,
+      excludeSemantics: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted)),
+          const SizedBox(height: 4),
+          Text(value, style: KText.numMedium.copyWith(fontSize: 24, color: valueColor)),
+          const SizedBox(height: KSpacing.sm),
+          KBar(progress: progress, colors: colors, height: 4),
+          const SizedBox(height: 6),
+          Text(caption, style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+class _Hairline extends StatelessWidget {
+  const _Hairline();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(height: 1, color: KColor.isDark ? KColor.fg.withValues(alpha: 0.07) : KColor.divider);
+  }
+}
+
+/// Segmented filter control with a sliding lit indicator.
+class _SegmentedTabs extends StatelessWidget {
+  const _SegmentedTabs({
+    required this.labels,
+    required this.selected,
+    required this.onSelected,
+    required this.accent,
+  });
+
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onSelected;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final bold = MediaQuery.boldTextOf(context);
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: KColor.isDark ? KColor.surface.withValues(alpha: 0.82) : KColor.cardHigh,
+        borderRadius: KRadius.pill,
+        border: Border.all(
+          color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
+          width: 1,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / labels.length;
+          return Stack(
+            children: [
+              AnimatedPositionedDirectional(
+                duration: KMotion.of(context, KMotion.standard),
+                curve: KMotion.emphasizedCurve,
+                start: selected * tabWidth,
+                width: tabWidth,
+                top: 0,
+                bottom: 0,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: KColor.ink,
+                    borderRadius: KRadius.pill,
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  for (var i = 0; i < labels.length; i++)
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        selected: i == selected,
+                        label: labels[i],
+                        excludeSemantics: true,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => onSelected(i),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 48),
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                child: AnimatedDefaultTextStyle(
+                                  duration: KMotion.of(context, KMotion.quick),
+                                  textAlign: TextAlign.center,
+                                  style: KText.bodyMedium.copyWith(
+                                    fontSize: 13.5,
+                                    height: 1.2,
+                                    fontWeight: (i == selected || bold) ? FontWeight.w600 : FontWeight.w500,
+                                    color: i == selected ? KColor.onInk : KColor.textSecondary,
+                                  ),
+                                  child: Text(labels[i]),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }

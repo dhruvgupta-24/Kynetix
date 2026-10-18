@@ -181,21 +181,24 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
 
       // Case 1: Standard User B has no override for "roti".
-      // Global food service has canonical "roti" at 200 kcal / 6g protein.
+      // Global food service has canonical "roti" at 100 kcal / 3g protein.
       await UserSessionCoordinator.instance.initializeForUser(userB, prefsOverride: prefs);
 
       final searchResultsB = SavedMealService.instance.search('roti');
       expect(searchResultsB.isNotEmpty, isTrue);
       final rotiMatchB = searchResultsB.first;
       expect(rotiMatchB.title, equals('roti'));
-      expect(rotiMatchB.calories, equals(200.0));
-      expect(rotiMatchB.protein, equals(6.0));
+      expect(rotiMatchB.calories, equals(100.0));
+      expect(rotiMatchB.protein, equals(3.0));
       expect(rotiMatchB.mealType, equals(SavedMealType.globalDefault));
 
-      // Pipeline estimation for User B: should resolve to Global Default (200 kcal)
+      // Pipeline estimation for User B: should resolve to Global Default (100 kcal)
       final estB = await NutritionPipeline.instance.estimateMeal('1 roti');
-      expect(estB.calories.mid, equals(200.0));
-      expect(estB.protein.mid, equals(6.0));
+      expect(estB.calories.mid, equals(100.0));
+      expect(estB.protein.mid, equals(3.0));
+      final estB2 = await NutritionPipeline.instance.estimateMeal('2 roti');
+      expect(estB2.calories.mid, equals(200.0));
+      expect(estB2.protein.mid, equals(6.0));
 
       // Case 2: User A has a custom override for "roti" (e.g. Grandma's small roti: 120 kcal / 4g protein).
       await UserSessionCoordinator.instance.initializeForUser(userA, prefsOverride: prefs);
@@ -208,7 +211,7 @@ void main() {
         referenceQuantity: 1.0,
       );
 
-      // User A searches for "roti" -> must return User A's override (120 kcal), NOT the global default (200 kcal)
+      // User A searches for "roti" -> must return User A's override (120 kcal), NOT the global default (100 kcal)
       final searchResultsA = SavedMealService.instance.search('roti');
       expect(searchResultsA.isNotEmpty, isTrue);
       final rotiMatchA = searchResultsA.first;
@@ -221,11 +224,11 @@ void main() {
       expect(estA.calories.mid, equals(120.0));
       expect(estA.protein.mid, equals(4.0));
 
-      // Case 3: Switch back to User B -> User B still gets Global Default (200 kcal), NOT User A's override!
+      // Case 3: Switch back to User B -> User B still gets Global Default (100 kcal), NOT User A's override!
       await UserSessionCoordinator.instance.initializeForUser(userB, prefsOverride: prefs);
       final estBAfter = await NutritionPipeline.instance.estimateMeal('1 roti');
-      expect(estBAfter.calories.mid, equals(200.0));
-      expect(estBAfter.protein.mid, equals(6.0));
+      expect(estBAfter.calories.mid, equals(100.0));
+      expect(estBAfter.protein.mid, equals(3.0));
     });
 
     test('Curator privacy: Private logs/workouts of curator account never leak to other users', () async {

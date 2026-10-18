@@ -86,8 +86,8 @@ void main() {
         await tester.pumpWidget(createTestWidget());
         await tester.pumpAndSettle();
 
-        expect(find.text('EXERCISE 1 OF 3'), findsOneWidget);
-        final logSetBtn = find.text('LOG SET 1');
+        expect(find.text('Exercise 1 of 3'), findsOneWidget);
+        final logSetBtn = find.text('Log set 1');
         expect(logSetBtn, findsOneWidget);
 
         // Rapid double tap at the button's screen coordinates
@@ -102,7 +102,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Must cleanly auto-advance to Exercise 2 without crashing or locking
-        expect(find.text('EXERCISE 2 OF 3'), findsOneWidget);
+        expect(find.text('Exercise 2 of 3'), findsOneWidget);
         expect(find.text('Incline Dumbbell Press'), findsWidgets);
 
         // Reset for next run
@@ -120,8 +120,8 @@ void main() {
         await tester.pumpWidget(createTestWidget());
         await tester.pumpAndSettle();
 
-        expect(find.text('EXERCISE 1 OF 3'), findsOneWidget);
-        final logSetBtn = find.text('LOG SET 1');
+        expect(find.text('Exercise 1 of 3'), findsOneWidget);
+        final logSetBtn = find.text('Log set 1');
         await tester.tap(logSetBtn);
 
         // Advance timer partially (200ms into the 600ms delay)
@@ -132,7 +132,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Timer should have been cancelled by page change, gesture completed cleanly
-        expect(find.text('EXERCISE 2 OF 3'), findsOneWidget);
+        expect(find.text('Exercise 2 of 3'), findsOneWidget);
         expect(find.text('Incline Dumbbell Press'), findsWidgets);
 
         // Ensure no pending timers crash the widget tree
@@ -153,8 +153,8 @@ void main() {
         await tester.pumpWidget(createTestWidget());
         await tester.pumpAndSettle();
 
-        expect(find.text('EXERCISE 1 OF 3'), findsOneWidget);
-        final logSetBtn = find.text('LOG SET 1');
+        expect(find.text('Exercise 1 of 3'), findsOneWidget);
+        final logSetBtn = find.text('Log set 1');
         await tester.tap(logSetBtn);
 
         // Advance 150ms into delay
@@ -167,12 +167,12 @@ void main() {
         await tester.pumpAndSettle();
 
         // Navigated directly to Exercise 3, auto-advance timer to Exercise 2 was safely cancelled
-        expect(find.text('EXERCISE 3 OF 3'), findsOneWidget);
+        expect(find.text('Exercise 3 of 3'), findsOneWidget);
 
         // Advance time to verify old timer does not fire and jump back to Exercise 2
         await tester.pump(const Duration(milliseconds: 700));
         await tester.pumpAndSettle();
-        expect(find.text('EXERCISE 3 OF 3'), findsOneWidget);
+        expect(find.text('Exercise 3 of 3'), findsOneWidget);
         expect(tester.takeException(), isNull);
 
         await tester.pumpWidget(const SizedBox());
@@ -217,18 +217,18 @@ void main() {
         await tester.pumpAndSettle();
 
         // Log final set on Exercise 1
-        await tester.tap(find.text('LOG SET 1'));
+        await tester.tap(find.text('Log set 1'));
         await tester.pump(const Duration(milliseconds: 650));
         await tester.pumpAndSettle();
 
         // Immediately upon arrival, tap LOG SET 1 on Exercise 2
-        expect(find.text('EXERCISE 2 OF 3'), findsOneWidget);
-        final logSet2Btn = find.text('LOG SET 1');
+        expect(find.text('Exercise 2 of 3'), findsOneWidget);
+        final logSet2Btn = find.text('Log set 1');
         await tester.tap(logSet2Btn);
         await tester.pumpAndSettle();
 
         // Set logged cleanly, next set is now LOG SET 2
-        expect(find.text('LOG SET 2'), findsOneWidget);
+        expect(find.text('Log set 2'), findsOneWidget);
         expect(tester.takeException(), isNull);
 
         await tester.pumpWidget(const SizedBox());

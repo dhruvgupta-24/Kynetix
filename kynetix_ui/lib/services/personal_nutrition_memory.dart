@@ -4,6 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/nutrition_result.dart';
 import '../services/mock_estimation_service.dart' show NutrientRange;
 import '../services/nutrition_hydration_guard.dart';
+import 'internal/scoped_prefs.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 // ─── PersonalNutritionMemory ──────────────────────────────────────────────────
 //
@@ -65,7 +72,7 @@ class PersonalNutritionMemory {
     _initialized = true;
     try {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
-      final raw   = prefs.getString(_currentPrefKey) ?? prefs.getString(_prefKey);
+      final raw   = ScopedPrefs.getString(prefs, _prefKey, _ownerUserId);
       if (raw != null) {
         final map = jsonDecode(raw) as Map<String, dynamic>;
         for (final e in map.entries) {
@@ -78,7 +85,7 @@ class PersonalNutritionMemory {
       _userOverrides.clear();
       _ownerUserId = null;
     }
-    debugPrint('[PersonalMemory] initialized — '
+    _debugLog('[PersonalMemory] initialized, '
                '${_userOverrides.length} user overrides + '
                '${_defaultTemplates.length} built-in templates (owner: $_ownerUserId, key: $_currentPrefKey)');
   }
@@ -86,7 +93,7 @@ class PersonalNutritionMemory {
   /// Internal ownership synchronization method called only by PersistenceService.
   void setOwnerId(String userId) {
     _ownerUserId = userId;
-    debugPrint('[PersonalMemory] 🔒 cached owner ID synchronized to: $userId');
+    _debugLog('[PersonalMemory] 🔒 cached owner ID synchronized to: $userId');
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -101,21 +108,21 @@ class PersonalNutritionMemory {
       if (_ownerUserId != null && _ownerUserId == currentUserId) {
         final override = _userOverrides[key];
         if (override != null) {
-          debugPrint('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
+          _debugLog('[PersonalMemory] ✅ EXACT USER OVERRIDE: "$key"');
           return override.toResult(source: 'personal_exact');
         }
       } else {
-        debugPrint('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+        _debugLog('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
             'cache owned by $_ownerUserId, current user is $currentUserId');
       }
     } else {
-      debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user overrides for "$key"');
+      _debugLog('[PersonalMemory] 🔒 guard not ready, skipping user overrides for "$key"');
     }
 
     // Built-in personal defaults are identical for all users — always safe
     final builtin = _defaultTemplates[key];
     if (builtin != null) {
-      debugPrint('[PersonalMemory] ✅ EXACT BUILT-IN TEMPLATE: "$key"');
+      _debugLog('[PersonalMemory] ✅ EXACT BUILT-IN TEMPLATE: "$key"');
       return builtin.toResult(source: 'personal_exact');
     }
 
@@ -138,24 +145,24 @@ class PersonalNutritionMemory {
         for (final entry in _userOverrides.values) {
           if (entry.keywords.isNotEmpty &&
               _allKeywordsMatch(lc, entry.keywords)) {
-            debugPrint('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
+            _debugLog('[PersonalMemory] ✅ FUZZY USER OVERRIDE: '
                        '"${entry.label}" (keywords: ${entry.keywords})');
             return entry.toResult(source: 'personal_template');
           }
         }
       } else {
-        debugPrint('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
+        _debugLog('[PersonalMemory] ⛔ OWNERSHIP MISMATCH at cache layer: '
             'cache owned by $_ownerUserId, current user is $currentUserId');
       }
     } else {
-      debugPrint('[PersonalMemory] 🔒 guard not ready — skipping user override fuzzy lookup');
+      _debugLog('[PersonalMemory] 🔒 guard not ready, skipping user override fuzzy lookup');
     }
 
     // Built-in templates are identical for all users — always safe
     for (final entry in _defaultTemplates.values) {
       if (entry.keywords.isNotEmpty &&
           _allKeywordsMatch(lc, entry.keywords)) {
-        debugPrint('[PersonalMemory] ✅ FUZZY BUILT-IN TEMPLATE: '
+        _debugLog('[PersonalMemory] ✅ FUZZY BUILT-IN TEMPLATE: '
                    '"${entry.label}"');
         return entry.toResult(source: 'personal_template');
       }
@@ -187,7 +194,7 @@ class PersonalNutritionMemory {
     );
     _ownerUserId = NutritionHydrationGuard.instance.currentUserId;
     await _persist();
-    debugPrint('[PersonalMemory] saved override: "$key" → ${kcal.toInt()} kcal');
+    _debugLog('[PersonalMemory] saved override: "$key" → ${kcal.toInt()} kcal');
   }
 
   Future<void> deleteOverride(String rawInput) async {
@@ -233,7 +240,7 @@ class PersonalNutritionMemory {
     final kcal    = _r(ml * 0.65);
     final protein = _r(ml * 0.0325);
 
-    debugPrint('[PersonalMemory] ✅ milk interpolation: ${ml.toInt()} ml → '
+    _debugLog('[PersonalMemory] ✅ milk interpolation: ${ml.toInt()} ml → '
                '${kcal.toInt()} kcal, ${protein.toStringAsFixed(1)}g protein');
 
     return _makeResult(
@@ -261,7 +268,7 @@ class PersonalNutritionMemory {
       await prefs.remove(_prefKey);
     } catch (_) {}
     _ownerUserId = null;
-    debugPrint('[PersonalMemory] 🗑️  clearAll() complete — user overrides wiped');
+    _debugLog('[PersonalMemory] 🗑️  clearAll() complete, user overrides wiped');
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS, timedFetch } from "../shared/timed_fetch.ts";
 
 declare const Deno: any;
 
@@ -59,15 +60,15 @@ Deno.serve(async (req: Request) => {
     console.log(`[openai-link-start] user=${user.id} — requesting device code`);
 
     // ── 2. Request user_code from OpenAI device auth endpoint ────────────────
-    const deviceRes = await fetch(`${OPENAI_AUTH_BASE}/deviceauth/usercode`, {
+    const deviceRes = await timedFetch(`${OPENAI_AUTH_BASE}/deviceauth/usercode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: CODEX_CLIENT_ID }),
-    });
+    }, AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS);
 
     if (!deviceRes.ok) {
       const errBody = await deviceRes.text();
-      console.error(`[openai-link-start] OpenAI deviceauth failed: ${deviceRes.status} ${errBody.slice(0, 300)}`);
+      console.error(`[openai-link-start] OpenAI deviceauth failed: ${deviceRes.status} (body withheld, ${errBody.length} chars)`);
 
       if (deviceRes.status === 404) {
         return json({

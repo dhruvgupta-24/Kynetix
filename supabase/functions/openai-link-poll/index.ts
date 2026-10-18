@@ -10,9 +10,17 @@
 //   7. Return { status: 'pending' | 'connected' | 'expired' } — NO tokens to client
 //
 // Called by Flutter every interval_seconds while waiting for user to authorize.
+//
+// Logging policy: console output and openai_device_auth_sessions.debug_logs
+// carry only steps, HTTP status codes and short error codes. Never upstream
+// bodies or headers, device codes, user codes, tokens, or stack traces; and
+// none of those are returned to the client either.
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
+import { oauthErrorCode } from "../shared/oauth_refresh.ts";
+import { AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS, timedFetch } from "../shared/timed_fetch.ts";
 
 declare const Deno: any;
 
@@ -24,6 +32,7 @@ const corsHeaders = {
 const CODEX_CLIENT_ID  = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const OPENAI_AUTH_BASE = 'https://auth.openai.com/api/accounts';
 const OPENAI_TOKEN_URL = 'https://auth.openai.com/oauth/token';
+const MAX_POLL_BODY_BYTES = 16 * 1024;
 
 // @ts-ignore
 Deno.serve(async (req: Request) => {
@@ -35,6 +44,7 @@ Deno.serve(async (req: Request) => {
   let currentSessionId = '';
   let supabaseAdmin: any = null;
 
+  /** Only pass safe text: steps, statuses, short codes. */
   const log = (msg: string) => {
     const time = new Date().toISOString();
     logs.push(`[${time}] ${msg}`);
@@ -53,10 +63,10 @@ Deno.serve(async (req: Request) => {
         .update(updateData)
         .eq('id', currentSessionId);
       if (error) {
-        console.error(`[openai-link-poll] Failed to save debug_logs: ${error.message}`);
+        console.error(`[openai-link-poll] Failed to save debug_logs: ${error.code ?? ''}`);
       }
-    } catch (e) {
-      console.error(`[openai-link-poll] Failed to flush logs: ${e}`);
+    } catch (e: any) {
+      console.error(`[openai-link-poll] Failed to flush logs: ${e?.name ?? 'Error'}`);
     }
   };
 
@@ -77,14 +87,20 @@ Deno.serve(async (req: Request) => {
     );
     const { data: { user }, error: userErr } = await supabaseAnon.auth.getUser();
     if (userErr || !user) {
-      log(`Error: Unauthorized userErr=${userErr?.message}`);
+      log(`Error: Unauthorized status=${userErr?.status ?? '-'}`);
       return json({ error: 'Unauthorized' }, 401);
     }
     log(`Auth success: user_id=${user.id}`);
 
     // ── 2. Parse request: need session_id ────────────────────────────────────
-    const body = await req.json().catch(() => ({}));
-    const session_id: string = body.session_id ?? '';
+    let body: any;
+    try {
+      body = await readJsonLimited(req, {}, MAX_POLL_BODY_BYTES);
+    } catch (e) {
+      if (e instanceof BodyTooLargeError) return json({ error: 'payload_too_large' }, 413);
+      throw e;
+    }
+    const session_id: string = typeof body?.session_id === 'string' ? body.session_id : '';
     if (!session_id) {
       log('Error: Missing session_id');
       return json({ error: 'session_id required' }, 400);
@@ -106,8 +122,9 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (sessionErr || !session) {
-      log(`Error: Session not found or error=${sessionErr?.message}`);
-      await flushLogs();
+      log(`Error: Session not found code=${sessionErr?.code ?? '-'}`);
+      // Not this user's session (or none): don't write to it.
+      currentSessionId = '';
       return json({ status: 'expired', message: 'Session not found' }, 404);
     }
 
@@ -128,22 +145,21 @@ Deno.serve(async (req: Request) => {
 
     const device_auth_id = session.device_code;
     const user_code      = session.user_code;
-    log(`device_auth_id=${device_auth_id}, user_code=${user_code}`);
 
     // ── 4. Poll OpenAI device token endpoint ─────────────────────────────────
     log(`Calling OpenAI deviceauth/token...`);
-    const pollRes = await fetch(`${OPENAI_AUTH_BASE}/deviceauth/token`, {
+    const pollRes = await timedFetch(`${OPENAI_AUTH_BASE}/deviceauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device_auth_id, user_code }),
-    });
+    }, AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS);
 
     log(`OpenAI deviceauth/token status=${pollRes.status}`);
 
     if (pollRes.status === 428 || pollRes.status === 400) {
       const pollBody = await pollRes.json().catch(() => ({}));
-      const errCode = pollBody?.error ?? pollBody?.code ?? '';
-      log(`OpenAI pending status. errCode=${errCode}, body=${JSON.stringify(pollBody)}`);
+      const errCode = oauthErrorCode(pollBody) ?? (typeof pollBody?.code === 'string' ? oauthErrorCode({ error: pollBody.code }) : null) ?? '';
+      log(`OpenAI pending status. errCode=${errCode || '-'}`);
 
       if (errCode === 'expired_token' || errCode === 'access_denied') {
         log(`Session expired/denied by OpenAI: ${errCode}`);
@@ -155,8 +171,8 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!pollRes.ok) {
-      const errBody = await pollRes.text();
-      log(`OpenAI error status=${pollRes.status}, body=${errBody}`);
+      await pollRes.body?.cancel().catch(() => {});
+      log(`OpenAI error status=${pollRes.status}`);
       if (pollRes.status === 401 || pollRes.status === 403) {
         await flushLogs();
         return json({ status: 'pending' });
@@ -167,13 +183,13 @@ Deno.serve(async (req: Request) => {
 
     // ── 5. Parse authorized response ─────────────────────────────────────────
     const pollData = await pollRes.json();
-    log(`OpenAI authorized. Response keys: ${Object.keys(pollData).join(', ')}`);
+    log(`OpenAI authorized. Response keys: ${Object.keys(pollData ?? {}).join(', ')}`);
 
     const authorization_code: string = pollData.authorization_code ?? '';
     const code_verifier: string      = pollData.code_verifier ?? '';
 
     if (!authorization_code || !code_verifier) {
-      log(`Error: Missing authorization_code or code_verifier. Response: ${JSON.stringify(pollData)}`);
+      log(`Error: Missing authorization_code or code_verifier. Response keys: ${Object.keys(pollData ?? {}).join(", ")}`);
       await flushLogs('error');
       return json({ status: 'error', message: 'Unexpected poll response format' }, 502);
     }
@@ -183,31 +199,19 @@ Deno.serve(async (req: Request) => {
     // ── 6. PKCE token exchange ────────────────────────────────────────────────
     const exchangeResult = await exchangeCodeForTokens(authorization_code, code_verifier, log);
     if (!exchangeResult.success) {
-      log('Error: Token exchange failed');
+      log(`Error: Token exchange failed status=${exchangeResult.errorStatus ?? '-'} code=${exchangeResult.errorCode ?? '-'}`);
       await flushLogs('error');
-
-      // Surface the actual OpenAI response/error as requested by the user
-      let upstreamError: any = 'Unknown token exchange failure';
-      if (exchangeResult.errorBody) {
-        try {
-          upstreamError = JSON.parse(exchangeResult.errorBody);
-        } catch (_) {
-          upstreamError = exchangeResult.errorBody;
-        }
-      } else if (exchangeResult.errorMessage) {
-        upstreamError = exchangeResult.errorMessage;
-      }
-
+      // Status and short error code only — never the upstream body.
       return json({
         status: 'error',
         message: 'Token exchange failed',
-        upstream_status: exchangeResult.errorStatus,
-        upstream_error: upstreamError,
+        upstream_status: exchangeResult.errorStatus ?? null,
+        upstream_error: exchangeResult.errorCode ?? 'token_exchange_failed',
       }, 502);
     }
 
     const tokens = exchangeResult.tokens!;
-    log(`Token exchange success. access_token_len=${tokens.access_token.length}, has_refresh=${!!tokens.refresh_token}`);
+    log(`Token exchange success. has_refresh=${!!tokens.refresh_token}`);
 
     const expiresAt = tokens.expires_in
       ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
@@ -230,9 +234,21 @@ Deno.serve(async (req: Request) => {
       }, { onConflict: 'user_id' });
 
     if (upsertErr) {
-      log(`Error: DB upsert failed: ${upsertErr.message}`);
+      log(`Error: DB upsert failed code=${upsertErr.code ?? '-'}`);
       await flushLogs('error');
-      return json({ status: 'error', message: `Failed to persist tokens: ${upsertErr.message}` }, 500);
+      return json({ status: 'error', message: 'Failed to persist tokens' }, 500);
+    }
+
+    // Mark this link as a device-code link (it may previously have been a
+    // Sign in with ChatGPT link). Separate, best-effort update so this flow
+    // keeps working even before the siwc migration is applied. The issued
+    // siwc client id is kept so a later browser sign-in can reuse it.
+    {
+      const { error: methodErr } = await supabaseAdmin
+        .from('user_openai_links')
+        .update({ auth_method: 'codex_device', granted_scopes: null, plan_paused_until: null, refresh_lock_until: null })
+        .eq('user_id', user.id);
+      if (methodErr) log(`auth_method not updated (migration pending?): ${methodErr.code ?? ''}`);
     }
 
     log('Marking session as claimed...');
@@ -241,16 +257,15 @@ Deno.serve(async (req: Request) => {
       .update({ status: 'claimed', claimed_at: new Date().toISOString() })
       .eq('id', session_id);
 
-    log('✅ Successfully completed connection flow');
+    log('Successfully completed connection flow');
     await flushLogs();
     return json({ status: 'connected' });
 
   } catch (err: any) {
-    const errMsg = err?.message ?? String(err);
-    const stack = err?.stack ?? '';
-    log(`CRITICAL UNHANDLED EXCEPTION: ${errMsg}\nStack: ${stack}`);
+    // Name only: messages and stacks can carry upstream or token detail.
+    log(`Unhandled exception: ${err?.name ?? 'Error'}`);
     await flushLogs('error');
-    return json({ error: 'Internal Server Error', message: errMsg, stack }, 500);
+    return json({ error: 'Internal Server Error' }, 500);
   }
 });
 
@@ -263,8 +278,7 @@ interface ExchangeResult {
     expires_in?: number;
   };
   errorStatus?: number;
-  errorBody?: string;
-  errorMessage?: string;
+  errorCode?: string;
 }
 
 // ── PKCE token exchange — uses standard OAuth authorization_code + code_verifier
@@ -274,7 +288,7 @@ async function exchangeCodeForTokens(
   log: (msg: string) => void,
 ): Promise<ExchangeResult> {
   const redirect_uri = 'https://auth.openai.com/deviceauth/callback';
-  log(`Performing PKCE token exchange using redirect_uri="${redirect_uri}"`);
+  log('Performing PKCE token exchange');
 
   try {
     const formParams = new URLSearchParams({
@@ -285,42 +299,31 @@ async function exchangeCodeForTokens(
       redirect_uri: redirect_uri,
     });
 
-    const res = await fetch(OPENAI_TOKEN_URL, {
+    const res = await timedFetch(OPENAI_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formParams.toString(),
-    });
+    }, AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS);
 
     log(`Response status=${res.status}`);
-    const headerList: string[] = [];
-    res.headers.forEach((val, key) => {
-      headerList.push(`${key}: ${val}`);
-    });
-    log(`Response headers: ${headerList.join(', ')}`);
 
-    const bodyText = await res.text();
-    if (res.ok) {
-      try {
-        const data = JSON.parse(bodyText);
-        if (data.access_token) {
-          log(`Token exchange SUCCEEDED`);
-          return { success: true, tokens: data };
-        } else {
-          log(`Succeeded but response body missing access_token. Body: ${bodyText}`);
-          return { success: false, errorStatus: res.status, errorBody: bodyText };
-        }
-      } catch (e: any) {
-        log(`Failed to parse JSON: ${e.message}. Body: ${bodyText}`);
-        return { success: false, errorStatus: res.status, errorBody: bodyText };
-      }
-    } else {
-      log(`Token exchange FAILED. Status: ${res.status}. Body: ${bodyText}`);
-      return { success: false, errorStatus: res.status, errorBody: bodyText };
+    let data: any = null;
+    try { data = JSON.parse(await res.text()); } catch { /* non-JSON */ }
+
+    if (res.ok && typeof data?.access_token === 'string' && data.access_token) {
+      log('Token exchange SUCCEEDED');
+      return { success: true, tokens: data };
     }
+    if (res.ok) {
+      log(data ? 'Succeeded but response missing access_token' : 'Succeeded but response was not JSON');
+      return { success: false, errorStatus: res.status, errorCode: 'missing_access_token' };
+    }
+    const code = oauthErrorCode(data);
+    log(`Token exchange FAILED status=${res.status} code=${code ?? '-'}`);
+    return { success: false, errorStatus: res.status, errorCode: code ?? undefined };
   } catch (err: any) {
-    const errMsg = err?.message ?? String(err);
-    log(`Token exchange exception: ${errMsg}`);
-    return { success: false, errorMessage: errMsg };
+    log(`Token exchange exception: ${err?.name ?? 'Error'}`);
+    return { success: false, errorCode: 'network_error' };
   }
 }
 

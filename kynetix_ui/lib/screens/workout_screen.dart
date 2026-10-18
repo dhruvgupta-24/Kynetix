@@ -1,33 +1,63 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_session.dart';
 import '../models/workout_split.dart';
 import '../models/workout_view_model.dart';
+import '../services/persistence_service.dart';
 import '../services/workout_service.dart';
 import '../services/recovery_service.dart';
 import 'workout_setup_screen.dart';
 import 'workout_session_screen.dart';
 import 'workout_history_screen.dart';
+import '../widgets/muscle_body_map.dart';
 
 // ─── WorkoutScreen ────────────────────────────────────────────────────────────
 //
-// Primary Train tab. Displays the training dashboard using a CustomScrollView
-// with slivers to completely eliminate layout overflow issues by design.
+// Primary Train tab (tab root inside AppShell). The shell paints the violet →
+// cyan aurora, so this Scaffold is transparent.
 //
-// States:
-//   1. Not Ready   → Sleek skeleton pulse loader
-//   2. Setup Needed → Premium onboarding prompt
-//   3. Dashboard   → Unified scroll view displaying rings, splits, recovery, and trends.
+// States (resolved in one place, [build]):
+//   1. Not Ready    → shimmer skeleton shaped like the dashboard
+//   2. Setup Needed → onboarding prompt
+//   3. Dashboard    → today's session hero, weekly ring, recovery and trends
+//
+// Motion moments:
+//   • Entrance  — one staggered reveal of the dashboard sections (plays once).
+//   • Hero CTA  — the ink "Start workout" pill breathes a soft violet halo
+//                 (ambient; gated by KMotion.ambientAllowed, stops off-tab via
+//                 TickerMode). This is the screen's one memorable thing; every
+//                 other surface stays monochrome with train colour as accent.
+//   • Data      — weekly ring springs to value, numbers count, bars grow.
+//   • State     — the draft card and hero state cross-fade (AnimatedSwitcher).
 
 class WorkoutScreen extends StatefulWidget {
   const WorkoutScreen({super.key});
+
+  /// Bumped by other tabs (Nutrition's "Start workout") to open today's
+  /// session, or resume the paused one, straight away.
+  static final startRequests = ValueNotifier<int>(0);
 
   @override
   State<WorkoutScreen> createState() => _WorkoutScreenState();
 }
 
 class _WorkoutScreenState extends State<WorkoutScreen> {
+  void _onStartRequest() {
+    if (!mounted || !_svc.isReady || !_svc.isSetupDone) return;
+    // After the tab switch settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final draft = _svc.draftSession;
+      if (draft != null) {
+        _resumeWorkout(draft);
+      } else {
+        _startWorkout();
+      }
+    });
+  }
+
   final _svc = WorkoutService.instance;
   WorkoutDashboardViewModel? _viewModel;
   final ScrollController _scrollController = ScrollController();
@@ -36,6 +66,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   void initState() {
     super.initState();
     _svc.addListener(_onServiceChange);
+    WorkoutScreen.startRequests.addListener(_onStartRequest);
+    // The day's pick on the Nutrition tab (Push, Pull, rest) drives the hero.
+    PersistenceService.dayLogNotifier.addListener(_onServiceChange);
     if (_svc.isReady) {
       _viewModel = WorkoutDashboardViewModel.from(_svc);
     }
@@ -44,6 +77,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   @override
   void dispose() {
     _svc.removeListener(_onServiceChange);
+    WorkoutScreen.startRequests.removeListener(_onStartRequest);
+    PersistenceService.dayLogNotifier.removeListener(_onServiceChange);
     _scrollController.dispose();
     super.dispose();
   }
@@ -60,6 +95,19 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   // ── Navigation Methods ────────────────────────────────────────────────────
 
+  bool _adopting = false;
+
+  Future<void> _adoptDevelopersChoice() async {
+    if (_adopting) return;
+    setState(() => _adopting = true);
+    try {
+      await _svc.adoptDevelopersChoice();
+      KHaptics.success();
+    } finally {
+      if (mounted) setState(() => _adopting = false);
+    }
+  }
+
   Future<void> _openSetup({bool editMode = false}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -71,14 +119,27 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   void _openHistory() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const WorkoutHistoryScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const WorkoutHistoryScreen()));
   }
 
+  /// Starts today's planned session straight away (no confirmation sheet).
+  /// On a rest day there is no plan, so it opens the day picker instead.
   Future<void> _startWorkout() async {
+    final planned = _svc.todaySplitDay;
+    if (planned == null) return _pickAnotherDay();
+    await _launch(_WorkoutStartSelection(splitDay: planned, wasManual: false));
+  }
+
+  /// Secondary path: choose another split day or a custom session.
+  Future<void> _pickAnotherDay() async {
     final picked = await _pickWorkoutDay();
     if (!mounted || picked == null) return;
+    await _launch(picked);
+  }
+
+  Future<void> _launch(_WorkoutStartSelection picked) async {
     final prev = _svc.lastSessionFor(picked.splitDay.name);
     final result = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -121,13 +182,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   Future<_WorkoutStartSelection?> _pickWorkoutDay() async {
-    return showModalBottomSheet<_WorkoutStartSelection>(
+    return showKSheet<_WorkoutStartSelection>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _WorkoutDayPickerSheet(service: _svc),
     );
   }
+
+  double _bottomClearance(BuildContext context) => math.max(
+    KSpacing.dockClearance,
+    MediaQuery.paddingOf(context).bottom + KSpacing.lg,
+  );
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -141,173 +207,188 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
     final vm = _viewModel ?? WorkoutDashboardViewModel.from(_svc);
     final todaySplit = _svc.todaySplitDay;
+    final draft = _svc.draftSession;
+
+    final sections = <Widget>[
+      // 1. Draft session (only while a workout is paused)
+      _AnimatedSlot(
+        key: const ValueKey('draft-slot'),
+        child: draft == null
+            ? const SizedBox(key: ValueKey('no-draft'), width: double.infinity)
+            : Padding(
+                key: ValueKey('draft-${draft.id}'),
+                padding: const EdgeInsets.only(bottom: KSpacing.lg),
+                child: _DraftSessionCard(
+                  session: draft,
+                  onResume: () => _resumeWorkout(_svc.draftSession!),
+                  onDiscard: () => _svc.clearDraftSession(),
+                ),
+              ),
+      ),
+
+      // 2. Hero: today's session or a rest day
+      Padding(
+        key: const ValueKey('hero'),
+        padding: const EdgeInsets.only(bottom: KSpacing.lg),
+        child: todaySplit != null
+            ? _TodaySplitCard(
+                splitDay: todaySplit,
+                viewModel: vm,
+                onStart: _startWorkout,
+                onPickAnother: _pickAnotherDay,
+                hasDraft: draft != null,
+              )
+            : _RecoveryBannerCard(viewModel: vm, onStartManual: _pickAnotherDay),
+      ),
+
+      // 3. Weekly consistency ring
+      Padding(
+        key: const ValueKey('weekly'),
+        padding: const EdgeInsets.fromLTRB(4, KSpacing.md, 4, KSpacing.lg),
+        child: _WeeklyRingCard(viewModel: vm, service: _svc),
+      ),
+
+      // 4. Quick stats
+      Padding(
+        key: const ValueKey('stats'),
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, KSpacing.xxl),
+        child: _QuickStatsRow(viewModel: vm),
+      ),
+
+      // 5. Last workout
+      Padding(
+        key: const ValueKey('recent'),
+        padding: const EdgeInsets.only(bottom: KSpacing.lg),
+        child: _RecentWorkoutCard(
+          viewModel: vm,
+          onStart: _startWorkout,
+          onViewDetails: (session) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    SessionDetailPage(session: session, service: _svc),
+              ),
+            );
+          },
+        ),
+      ),
+
+      // 6. Recovery insights
+      Padding(
+        key: const ValueKey('recovery'),
+        padding: const EdgeInsets.fromLTRB(4, KSpacing.lg, 4, KSpacing.xxl),
+        child: _RecoveryInsightsCard(viewModel: vm),
+      ),
+
+      // 7. Analytics & trends
+      Padding(
+        key: const ValueKey('analytics'),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: _AnalyticsCard(viewModel: vm),
+      ),
+    ];
 
     return Scaffold(
-      backgroundColor: KColor.bg,
-      body: SafeArea(
-        top: false,
-        child: CustomScrollView(
-          controller: _scrollController,
-          slivers: [
-            SliverAppBar(
-              backgroundColor: KColor.surface,
-              surfaceTintColor: Colors.transparent,
-              pinned: true,
-              expandedHeight: 110,
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                title: Text(
-                  'Train',
-                  style: KText.h1.copyWith(color: Colors.white, fontSize: 20),
+      backgroundColor: Colors.transparent,
+      body: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          SliverSafeArea(
+            bottom: false,
+            sliver: SliverToBoxAdapter(
+              child: KReveal(
+                child: _TrainHeader(
+                  onHistory: _openHistory,
+                  onEditSplit: () => _openSetup(editMode: true),
                 ),
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.history_rounded, color: Colors.white),
-                  tooltip: 'Workout History',
-                  onPressed: _openHistory,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.edit_note_rounded, color: Colors.white),
-                  tooltip: 'Edit Split',
-                  onPressed: () => _openSetup(editMode: true),
-                ),
-                const SizedBox(width: 8),
-              ],
             ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  // 1. Weekly Progress Bento Card
-                  _WeeklyRingCard(viewModel: vm),
-                  const SizedBox(height: 16),
-
-                  // 2. Quick Stats Row
-                  _QuickStatsRow(viewModel: vm),
-                  const SizedBox(height: 16),
-
-                  // 3. Draft Session Alert Card
-                  if (_svc.draftSession != null) ...[
-                    _DraftSessionCard(
-                      session: _svc.draftSession!,
-                      onResume: () => _resumeWorkout(_svc.draftSession!),
-                      onDiscard: () => _svc.clearDraftSession(),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // 4. Today's Plan vs Recovery Card
-                  if (todaySplit != null) ...[
-                    _TodaySplitCard(
-                      splitDay: todaySplit,
-                      viewModel: vm,
-                      onStart: _startWorkout,
-                    ),
-                    const SizedBox(height: 16),
-                  ] else ...[
-                    _RecoveryBannerCard(
-                      viewModel: vm,
-                      onStartManual: _startWorkout,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // 5. Recent Workout Card
-                  _RecentWorkoutCard(
-                    viewModel: vm,
-                    onViewDetails: (session) {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SessionDetailPage(session: session, service: _svc),
-                        ),
-                      );
-                    },
+          ),
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              KSpacing.p,
+              KSpacing.sm,
+              KSpacing.p,
+              _bottomClearance(context),
+            ),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                for (var i = 0; i < sections.length; i++)
+                  KReveal(
+                    key: sections[i].key,
+                    index: i + 1,
+                    child: sections[i],
                   ),
-                  const SizedBox(height: 16),
-
-                  // 6. Recovery Insights
-                  _RecoveryInsightsCard(viewModel: vm),
-                  const SizedBox(height: 16),
-
-                  // 7. Analytics & Trends
-                  _AnalyticsCard(viewModel: vm),
-                ]),
-              ),
+              ]),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  // ── Setup Prompt Redesign ──────────────────────────────────────────────────
+  // ── Setup Prompt ───────────────────────────────────────────────────────────
 
   Widget _buildSetupPrompt() => Scaffold(
-    backgroundColor: KColor.bg,
-    body: Container(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment(0.0, -0.3),
-          radius: 1.2,
-          colors: [
-            Color(0xFF132F23), // deep brand green glow
-            Color(0xFF0F0F1A),
-          ],
-        ),
-      ),
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    color: KColor.green.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: KColor.green.withValues(alpha: 0.25),
-                      width: 2,
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.fitness_center_rounded,
-                      color: KColor.green,
-                      size: 40,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-                Text(
-                  'Transform Your Training',
+    backgroundColor: Colors.transparent,
+    body: SafeArea(
+      bottom: false,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            KSpacing.xxxl,
+            KSpacing.xxl,
+            KSpacing.xxxl,
+            _bottomClearance(context),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: kStagger([
+              const _SetupEmblem(),
+              Padding(
+                padding: const EdgeInsets.only(top: KSpacing.xxxl),
+                child: Text(
+                  'Build your training split',
                   textAlign: TextAlign.center,
-                  style: KText.display.copyWith(color: Colors.white),
+                  style: KText.display,
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  'Set up a custom workout split tailored to your experience level and goals. Track volume trends, e1RM progression, and recovery details.',
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Text(
+                  "Start on the split Kynetix's developer runs, or answer three questions and we'll build one around you. Either way it's yours to change.",
                   textAlign: TextAlign.center,
-                  style: KText.body.copyWith(
-                    color: KColor.textSecondary,
-                    height: 1.5,
-                  ),
+                  style: KText.body.copyWith(color: KColor.textSecondary),
                 ),
-                const SizedBox(height: 36),
-                SizedBox(
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 28),
+                child: _DevelopersChoicePreview(),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: SizedBox(
                   width: double.infinity,
                   child: KButton(
-                    label: 'Get Started',
+                    label: "Use Developer's Choice",
                     icon: Icons.arrow_forward_rounded,
+                    loading: _adopting,
+                    onTap: _adoptDevelopersChoice,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: KButton(
+                    label: 'Build my own',
+                    outlined: true,
                     onTap: _openSetup,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ]),
           ),
         ),
       ),
@@ -315,210 +396,190 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   );
 }
 
-// ─── _WeeklyRingCard ─────────────────────────────────────────────────────────
-
-class _WeeklyRingCard extends StatefulWidget {
-  final WorkoutDashboardViewModel viewModel;
-  const _WeeklyRingCard({required this.viewModel});
-
-  @override
-  State<_WeeklyRingCard> createState() => _WeeklyRingCardState();
-}
-
-class _WeeklyRingCardState extends State<_WeeklyRingCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack);
-    _ctrl.forward();
-  }
-
-  @override
-  void didUpdateWidget(_WeeklyRingCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.viewModel.completedDaysThisWeek != widget.viewModel.completedDaysThisWeek) {
-      _ctrl.reset();
-      _ctrl.forward();
-    }
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+/// The seven days of the Developer's Choice, as a strip of chips.
+class _DevelopersChoicePreview extends StatelessWidget {
+  const _DevelopersChoicePreview();
 
   @override
   Widget build(BuildContext context) {
-    final fraction = widget.viewModel.weekCompletionFraction;
-    final label = widget.viewModel.weekCompletionLabel;
-
-    return KCard(
-      padding: const EdgeInsets.all(16),
+    final days = developersChoiceSplit.days;
+    return Container(
+      padding: const EdgeInsets.all(KSpacing.md),
+      decoration: _trainSurface(radius: KRadius.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'WEEKLY PROGRESS',
-                style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-              ),
-              Text(
-                label,
-                style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.bold),
-              ),
+              Icon(Icons.verified_rounded, size: 16, color: KColor.train),
+              const SizedBox(width: 6),
+              Text(developersChoiceName, style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700)),
+              const Spacer(),
+              Text('6 days', style: KText.caption.copyWith(color: KColor.textMuted)),
             ],
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              // Progress Ring
-              SizedBox(
-                width: 76,
-                height: 76,
-                child: AnimatedBuilder(
-                  animation: _anim,
-                  builder: (context, child) {
-                    return Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        CircularProgressIndicator(
-                          value: fraction * _anim.value,
-                          strokeWidth: 8,
-                          backgroundColor: KColor.border,
-                          valueColor: const AlwaysStoppedAnimation<Color>(KColor.green),
-                          strokeCap: StrokeCap.round,
-                        ),
-                        Text(
-                          '${(fraction * _anim.value * 100).toStringAsFixed(0)}%',
-                          style: KText.h2.copyWith(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 16),
-              // 2x2 Bento stats grid
-              Expanded(
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        _BentoStat(
-                          label: 'Volume',
-                          value: '${widget.viewModel.totalVolumeThisWeek.toStringAsFixed(0)} kg',
-                          icon: Icons.fitness_center_rounded,
-                          iconColor: KColor.green,
-                        ),
-                        const SizedBox(width: 8),
-                        _BentoStat(
-                          label: 'Sets',
-                          value: '${widget.viewModel.totalSetsThisWeek}',
-                          icon: Icons.playlist_add_check_rounded,
-                          iconColor: KColor.blue,
-                        ),
-                      ],
+          const SizedBox(height: KSpacing.sm),
+          for (final d in days)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 36,
+                    child: Text(
+                      _weekdayLong[d.weekday - 1].substring(0, 3),
+                      style: KText.caption.copyWith(color: KColor.textMuted, fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _BentoStat(
-                          label: 'Streak',
-                          value: '${widget.viewModel.currentStreak} day${widget.viewModel.currentStreak == 1 ? "" : "s"}',
-                          icon: Icons.local_fire_department_rounded,
-                          iconColor: KColor.amber,
-                        ),
-                        const SizedBox(width: 8),
-                        _BentoStat(
-                          label: 'Consistency',
-                          value: widget.viewModel.consistencyLabel,
-                          icon: Icons.analytics_rounded,
-                          iconColor: KColor.green,
-                        ),
-                      ],
+                  ),
+                  Expanded(
+                    child: Text(
+                      d.isRestDay ? 'Rest' : d.name,
+                      style: KText.body.copyWith(
+                        fontSize: 14,
+                        color: d.isRestDay ? KColor.textMuted : KColor.textPrimary,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                  if (!d.isRestDay)
+                    Text(
+                      '${d.exercises.length} lifts',
+                      style: KText.caption.copyWith(
+                        color: KColor.textMuted,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                ],
               ),
-            ],
-          ),
-          if (widget.viewModel.musclesThisWeek.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            const Divider(color: KColor.border, height: 1),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: widget.viewModel.musclesThisWeek.map((m) => KChip(m)).toList(),
             ),
-          ],
         ],
       ),
     );
   }
 }
 
-class _BentoStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color iconColor;
+// ─── Shared private helpers ──────────────────────────────────────────────────
 
-  const _BentoStat({
+const _weekdayLong = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+];
+
+const _weekdayInitial = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+/// Card surface for Train hero cards. Train colour is an accent, not a wash:
+/// only a faint corner tint that fades into the plain card by mid-card.
+BoxDecoration _trainSurface({
+  double tint = 0.16,
+  Color? accent,
+  Color? borderColor,
+  BorderRadius radius = KRadius.xl,
+  List<BoxShadow>? shadow,
+}) {
+  // Graphite: flat card and hairline. [tint] and [accent] are kept for the
+  // call sites; colour lives in the content, not the surface.
+  return BoxDecoration(
+    borderRadius: radius,
+    color: KColor.card,
+    border: Border.all(color: borderColor ?? KColor.hairline),
+    boxShadow: shadow,
+  );
+}
+
+/// Small sentence-case eyebrow label.
+class _Eyebrow extends StatelessWidget {
+  final String text;
+  final Color? _color;
+  Color get color => _color ?? KColor.textMuted;
+  const _Eyebrow(this.text, {Color? color}) : _color = color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: KText.label.copyWith(
+        color: color,
+        fontSize: 12,
+        letterSpacing: 0.2,
+      ),
+    );
+  }
+}
+
+/// Cross-fades and resizes when its child (by key) changes.
+class _AnimatedSlot extends StatelessWidget {
+  final Widget child;
+  const _AnimatedSlot({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: KMotion.of(context, KMotion.standard),
+      switchInCurve: KMotion.emphasizedCurve,
+      switchOutCurve: KMotion.accelerate,
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SizeTransition(
+          sizeFactor: anim,
+          axisAlignment: -1,
+          child: child,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Compact action button: filled (ink or a semantic colour) or outlined.
+class _ActionButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final List<Color> colors;
+  final Color foreground;
+  final bool outlined;
+
+  const _ActionButton({
     required this.label,
-    required this.value,
     required this.icon,
-    required this.iconColor,
+    required this.onTap,
+    required this.colors,
+    required this.foreground,
+    this.outlined = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    return Pressable(
+      onTap: onTap,
+      borderRadius: KRadius.md,
+      semanticLabel: label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: KColor.bg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: KColor.border, width: 0.5),
+          borderRadius: KRadius.md,
+          gradient: outlined ? null : LinearGradient(colors: colors),
+          border: Border.all(
+            color: outlined
+                ? colors.first.withValues(alpha: 0.45)
+                : Colors.transparent,
+          ),
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: iconColor, size: 14),
+            Icon(icon, size: 18, color: foreground),
             const SizedBox(width: 6),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 9.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    value,
-                    style: KText.bodyMedium.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: KText.h3.copyWith(color: foreground, fontSize: 14),
               ),
             ),
           ],
@@ -528,116 +589,508 @@ class _BentoStat extends StatelessWidget {
   }
 }
 
-// ─── _QuickStatsRow ──────────────────────────────────────────────────────────
+// ─── _TrainHeader ────────────────────────────────────────────────────────────
 
-class _QuickStatsRow extends StatelessWidget {
+class _TrainHeader extends StatelessWidget {
+  final VoidCallback onHistory;
+  final VoidCallback onEditSplit;
+
+  const _TrainHeader({required this.onHistory, required this.onEditSplit});
+
+  @override
+  Widget build(BuildContext context) {
+    final today = _weekdayLong[DateTime.now().weekday - 1];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        KSpacing.p,
+        KSpacing.lg,
+        KSpacing.md,
+        KSpacing.md,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Eyebrow(today, color: KColor.violet),
+                const SizedBox(height: KSpacing.xs),
+                Semantics(
+                  header: true,
+                  child: Text(
+                    'Train',
+                    style: KText.display.copyWith(fontSize: 32),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _HeaderAction(
+            icon: Icons.history_rounded,
+            tooltip: 'Workout history',
+            onPressed: onHistory,
+          ),
+          const SizedBox(width: KSpacing.sm),
+          _HeaderAction(
+            icon: Icons.edit_note_rounded,
+            tooltip: 'Edit split',
+            onPressed: onEditSplit,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderAction extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _HeaderAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(icon, color: KColor.textPrimary),
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        backgroundColor: KColor.isDark
+            ? KColor.fg.withValues(alpha: 0.06)
+            : KColor.card,
+        side: BorderSide(
+          color: KColor.isDark
+              ? KColor.fg.withValues(alpha: 0.09)
+              : KColor.border,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── _TodaySplitCard (hero) ──────────────────────────────────────────────────
+// The one card on the tab with a tint: today's session is a real object. The
+// primary action starts it directly; "Pick another day" is the quiet escape.
+
+class _TodaySplitCard extends StatelessWidget {
+  final SplitDay splitDay;
   final WorkoutDashboardViewModel viewModel;
+  final VoidCallback onStart;
+  final VoidCallback onPickAnother;
+  final bool hasDraft;
 
-  const _QuickStatsRow({required this.viewModel});
+  const _TodaySplitCard({
+    required this.splitDay,
+    required this.viewModel,
+    required this.onStart,
+    required this.onPickAnother,
+    this.hasDraft = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final todaySession = viewModel.recentSessions.where((s) {
+      return s.splitDayName == splitDay.name &&
+          DateUtils.isSameDay(s.date, DateTime.now());
+    }).firstOrNull;
+    final done = todaySession != null;
+
+    final muscles = splitDay.exercises
+        .map((e) => e.muscleGroup)
+        .toSet()
+        .toList();
+    final musclesStr = muscles.isEmpty ? 'All muscles' : muscles.join(', ');
+    final duration = splitDay.exercises.length * 9;
+
+    // Train's jewel card: jamun light over a deep indigo ground, both themes.
+    const done2 = Color(0xFF34E0A1);
+    return KHeroSurface(
+      tone: KTone.train,
+      padding: const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.xl, KSpacing.xl, KSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Status eyebrow
+          AnimatedSwitcher(
+            duration: KMotion.of(context, KMotion.quick),
+            child: Row(
+              key: ValueKey(done),
+              children: [
+                if (done)
+                  KIcon(KIcons.done, color: done2, size: KIcons.sm)
+                else
+                  const KGlowDot(color: Color(0xFFC4B1FF)),
+                const SizedBox(width: KSpacing.sm),
+                Expanded(
+                  child: _Eyebrow(
+                    done ? 'Done for today' : 'On the plan today',
+                    color: done ? done2 : const Color(0xFFC4B1FF),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            splitDay.name,
+            style: KText.display.copyWith(fontSize: 38, height: 1.04, color: KHeroInk.primary),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            musclesStr,
+            style: KText.bodyMedium.copyWith(color: KHeroInk.secondary),
+          ),
+          const SizedBox(height: KSpacing.lg),
+          Wrap(
+            spacing: KSpacing.xxl,
+            runSpacing: KSpacing.md,
+            children: [
+              _HeroMetric(
+                value: splitDay.exercises.length,
+                label: splitDay.exercises.length == 1 ? 'exercise' : 'exercises',
+                icon: Icons.format_list_bulleted_rounded,
+              ),
+              _HeroMetric(
+                value: duration,
+                prefix: '~',
+                label: 'min',
+                icon: KIcons.timer,
+              ),
+            ],
+          ),
+          const SizedBox(height: KSpacing.lg),
+          AnimatedSwitcher(
+            duration: KMotion.of(context, KMotion.standard),
+            switchInCurve: KMotion.emphasizedCurve,
+            child: done
+                ? Column(
+                    key: const ValueKey('done'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: KSpacing.lg),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: KIcon(KIcons.done, color: done2, size: KIcons.sm),
+                            ),
+                            const SizedBox(width: KSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                todaySession.totalWorkingVolume > 0
+                                    ? 'Logged ${plural(todaySession.totalSets, 'set')}, ${thousands(todaySession.totalWorkingVolume)} kg moved.'
+                                    : 'Logged ${plural(todaySession.totalSets, 'set')}, all bodyweight.',
+                                style: KText.bodyMedium.copyWith(
+                                  color: KHeroInk.primary,
+                                  fontSize: 14,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      KButton(
+                        label: 'Log another session',
+                        icon: Icons.refresh_rounded,
+                        outlined: true,
+                        color: Colors.white,
+                        onTap: onPickAnother,
+                      ),
+                      const SizedBox(height: KSpacing.sm),
+                    ],
+                  )
+                : Column(
+                    key: const ValueKey('start'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _TrainCta(
+                        label: 'Start workout',
+                        // When a paused workout exists, Resume owns the glow.
+                        glow: false,
+                        onTap: onStart,
+                      ),
+                      const SizedBox(height: KSpacing.xs),
+                      Center(
+                        child: TextButton(
+                          onPressed: onPickAnother,
+                          style: TextButton.styleFrom(
+                            foregroundColor: KHeroInk.secondary,
+                            minimumSize: const Size(48, 48),
+                            shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
+                          ),
+                          child: Text(
+                            'Pick another day',
+                            style: KText.bodyMedium.copyWith(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: KHeroInk.secondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroMetric extends StatelessWidget {
+  final int value;
+  final String label;
+  final String prefix;
+  final IconData icon;
+
+  const _HeroMetric({
+    required this.value,
+    required this.label,
+    required this.icon,
+    this.prefix = '',
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _QuickStatCard(
-          label: 'Total PRs',
-          value: viewModel.totalPrsAllTime,
-          suffix: '',
-          icon: Icons.workspace_premium_rounded,
-          color: KColor.amber,
+        KIcon(icon, color: KHeroInk.muted, size: KIcons.sm),
+        const SizedBox(width: 6),
+        KAnimatedCount(
+          value: value,
+          prefix: prefix,
+          style: KText.numMedium.copyWith(fontSize: 24, color: KHeroInk.primary),
         ),
-        const SizedBox(width: 8),
-        _QuickStatCard(
-          label: 'Weekly Vol',
-          value: viewModel.totalVolumeThisWeek,
-          suffix: ' kg',
-          icon: Icons.fitness_center_rounded,
-          color: KColor.green,
-          isVolume: true,
-        ),
-        const SizedBox(width: 8),
-        _QuickStatCard(
-          label: 'Weekly Sets',
-          value: viewModel.totalSetsThisWeek,
-          suffix: '',
-          icon: Icons.playlist_add_check_rounded,
-          color: KColor.blue,
-        ),
-        const SizedBox(width: 8),
-        _QuickStatCard(
-          label: 'Streak',
-          value: viewModel.currentStreak,
-          suffix: 'd',
-          icon: Icons.local_fire_department_rounded,
-          color: KColor.amber,
-        ),
+        const SizedBox(width: KSpacing.xs),
+        Text(label, style: KText.caption.copyWith(color: KHeroInk.muted)),
       ],
     );
   }
 }
 
-class _QuickStatCard extends StatelessWidget {
-  final String label;
-  final num value;
-  final String suffix;
-  final IconData icon;
-  final Color color;
-  final bool isVolume;
+// ─── _TrainCta ───────────────────────────────────────────────────────────────
+// The hero's primary action: the monochrome ink pill (warm white on Carbon,
+// near-black on Paper) with a slow "breathing" violet halo — the Train tab's
+// one signature moment. The loop runs only when ambient motion is allowed and
+// pauses automatically when the tab is offstage (AppShell mutes tickers via
+// TickerMode). Without the glow it is a plain ink pill.
 
-  const _QuickStatCard({
+class _TrainCta extends StatefulWidget {
+  final String label;
+  final VoidCallback onTap;
+  final bool glow;
+
+  const _TrainCta({
     required this.label,
-    required this.value,
-    required this.suffix,
-    required this.icon,
-    required this.color,
-    this.isVolume = false,
+    required this.onTap,
+    this.glow = true,
+  });
+
+  @override
+  State<_TrainCta> createState() => _TrainCtaState();
+}
+
+class _TrainCtaState extends State<_TrainCta>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: KMotion.celebrate,
+    value: 0.5,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncLoop();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TrainCta oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.glow != widget.glow) _syncLoop();
+  }
+
+  /// The halo breathes a few times when the tab is shown, then rests. An
+  /// endless loop kept the whole screen re-rendering every frame (on Impeller
+  /// every frame redraws everything), which cost battery and scroll headroom.
+  bool _breathed = false;
+
+  void _syncLoop() {
+    final run = widget.glow && KMotion.ambientAllowed(context);
+    if (run && !_breath.isAnimating && !_breathed) {
+      _breathed = true;
+      _breath.repeat(reverse: true, count: 6).whenCompleteOrCancel(() {
+        if (mounted && !_breath.isAnimating) _breath.value = 0.5;
+      });
+    } else if (!run && _breath.isAnimating) {
+      _breath.stop();
+      _breath.value = 0.5;
+    }
+  }
+
+  @override
+  void dispose() {
+    _breath.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final face = Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(
+        horizontal: KSpacing.xl,
+        vertical: 14,
+      ),
+      // Train's one coloured action: violet, the world's accent.
+      decoration: BoxDecoration(
+        borderRadius: KRadius.pill,
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: KGradient.train,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.play_arrow_rounded, color: Colors.white, size: KIcons.lg),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              widget.label,
+              textAlign: TextAlign.center,
+              style: KText.h3.copyWith(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    void activate() {
+      KHaptics.commit();
+      widget.onTap();
+    }
+
+    // Its own semantics node (container) with a tap action, so a screen
+    // reader can find and activate Start inside the hero card.
+    return Semantics(
+      container: true,
+      button: true,
+      label: widget.label,
+      onTap: activate,
+      excludeSemantics: true,
+      child: Pressable(
+      borderRadius: KRadius.pill,
+      onTap: activate,
+      child: !widget.glow
+          ? face
+          : Stack(
+              children: [
+                // The halo breathes by animating the shadow's own strength.
+                // (Fading a blurred shadow's layer with an opacity is not
+                // supported by Impeller and logs a validation error.) It only
+                // runs for a few breaths, so the re-blur is negligible.
+                Positioned.fill(
+                  child: RepaintBoundary(
+                    child: AnimatedBuilder(
+                      animation: _breath,
+                      builder: (context, _) {
+                        final t = KMotion.emphasizedCurve.transform(_breath.value);
+                        return DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: KRadius.pill,
+                            boxShadow: KShadow.glow(
+                              KColor.violet,
+                              strength: 0.55 + (1.15 - 0.55) * t,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                face,
+              ],
+            ),
+      ),
+    );
+  }
+}
+
+// ─── _RecoveryBannerCard (rest-day hero) ─────────────────────────────────────
+
+class _RecoveryBannerCard extends StatelessWidget {
+  final WorkoutDashboardViewModel viewModel;
+  final VoidCallback onStartManual;
+
+  const _RecoveryBannerCard({
+    required this.viewModel,
+    required this.onStartManual,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: KColor.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: KColor.border, width: 0.5),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 18),
-            const SizedBox(height: 6),
-            TweenAnimationBuilder<double>(
-              tween: Tween<double>(begin: 0, end: value.toDouble()),
-              duration: const Duration(milliseconds: 800),
-              curve: Curves.easeOutCubic,
-              builder: (context, val, child) {
-                String valStr = val.toStringAsFixed(0);
-                if (isVolume && val >= 1000) {
-                  valStr = '${(val / 1000).toStringAsFixed(1)}k';
-                }
-                return Text(
-                  '$valStr$suffix',
-                  style: KText.h2.copyWith(
-                    color: Colors.white,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                );
-              },
+    return Container(
+      padding: const EdgeInsets.all(KSpacing.xl),
+      decoration: _trainSurface(tint: 0.14, accent: KColor.cyan),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.bedtime_rounded, color: KColor.cyan, size: 16),
+              const SizedBox(width: KSpacing.sm),
+              Expanded(
+                child: _Eyebrow('Rest day', color: KColor.cyan),
+              ),
+              ExcludeSemantics(
+                child: Icon(
+                  Icons.spa_rounded,
+                  color: KColor.textDisabled,
+                  size: 20,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Rest and recovery',
+            style: KText.display.copyWith(fontSize: 32, height: 1.05),
+          ),
+          const SizedBox(height: KSpacing.sm),
+          Text(
+            'Nothing on the plan today. Eat well, sleep well, maybe some light mobility. Growth happens here too.',
+            style: KText.body.copyWith(color: KColor.textSecondary),
+          ),
+          const SizedBox(height: KSpacing.xl),
+          SizedBox(
+            width: double.infinity,
+            child: KButton(
+              label: 'Start a workout anyway',
+              icon: Icons.play_arrow_rounded,
+              outlined: true,
+              onTap: onStartManual,
             ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 8.5),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -658,81 +1111,69 @@ class _DraftSessionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.amber.withValues(alpha: 0.3)),
+    return KCard(
+      padding: const EdgeInsets.all(KSpacing.lg),
+      borderRadius: KRadius.lg,
+      border: Border.all(
+        color: KColor.warning.withValues(alpha: KColor.isDark ? 0.35 : 0.45),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.pause_circle_filled_rounded,
-                color: KColor.amber,
+                color: KColor.warning,
                 size: 20,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Workout in progress',
-                  style: KText.h3.copyWith(color: Colors.white),
-                ),
-              ),
+              const SizedBox(width: KSpacing.sm),
+              Expanded(child: Text('Workout in progress', style: KText.h3)),
+              const SizedBox(width: KSpacing.sm),
               Text(
-                '${session.totalSets} set${session.totalSets == 1 ? "" : "s"}',
-                style: KText.caption.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.bold),
+                plural(session.totalSets, 'set'),
+                style: KText.numSmall.copyWith(fontSize: 13, color: KColor.warning),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'You paused "${session.splitDayName}". Resume to finish logging your sets.',
-            style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 13, height: 1.4),
+            'You paused "${session.splitDayName}". Pick up right where you left off.',
+            style: KText.body.copyWith(
+              color: KColor.textSecondary,
+              fontSize: 14,
+            ),
           ),
           const SizedBox(height: 14),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 flex: 2,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
+                child: _ActionButton(
+                  label: 'Resume workout',
+                  icon: Icons.play_arrow_rounded,
+                  colors: [KColor.ink, KColor.ink],
+                  foreground: KColor.onInk,
+                  onTap: () {
+                    KHaptics.commit();
                     onResume();
                   },
-                  icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                  label: const Text('Resume Workout'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: KColor.amber,
-                    foregroundColor: KColor.bg,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: KSpacing.sm),
               Expanded(
                 flex: 1,
-                child: OutlinedButton(
-                  onPressed: () {
-                    HapticFeedback.mediumImpact();
+                child: _ActionButton(
+                  label: 'Discard',
+                  icon: Icons.close_rounded,
+                  colors: [KColor.danger],
+                  foreground: KColor.danger,
+                  outlined: true,
+                  onTap: () {
+                    KHaptics.commit();
                     onDiscard();
                   },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: KColor.danger,
-                    side: const BorderSide(color: KColor.border),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Discard', style: TextStyle(fontSize: 13)),
                 ),
               ),
             ],
@@ -743,133 +1184,208 @@ class _DraftSessionCard extends StatelessWidget {
   }
 }
 
-// ─── _TodaySplitCard ─────────────────────────────────────────────────────────
+// ─── _Section ────────────────────────────────────────────────────────────────
+// Editorial grouping: a sentence-case heading and an optional trailing value,
+// then content on the page itself. No card.
 
-class _TodaySplitCard extends StatelessWidget {
-  final SplitDay splitDay;
-  final WorkoutDashboardViewModel viewModel;
-  final VoidCallback onStart;
+class _Section extends StatelessWidget {
+  final String title;
+  final String? trailing;
+  final Widget child;
 
-  const _TodaySplitCard({
-    required this.splitDay,
-    required this.viewModel,
-    required this.onStart,
-  });
+  const _Section({required this.title, this.trailing, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    final todaySession = viewModel.recentSessions.where((s) {
-      return s.splitDayName == splitDay.name &&
-          DateUtils.isSameDay(s.date, DateTime.now());
-    }).firstOrNull;
-    final done = todaySession != null;
-
-    final muscles = splitDay.exercises.map((e) => e.muscleGroup).toSet().toList();
-    final musclesStr = muscles.isEmpty ? 'All Muscles' : muscles.join(' • ');
-    final duration = splitDay.exercises.length * 9;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: done
-              ? [const Color(0xFF102A1E), const Color(0xFF131F1A)]
-              : [const Color(0xFF1A1F36), const Color(0xFF141624)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(title, style: KText.h2.copyWith(fontSize: 20)),
+              ),
+            ),
+            if (trailing != null)
+              Text(
+                trailing!,
+                style: KText.numSmall.copyWith(
+                  fontSize: 14,
+                  color: KColor.textSecondary,
+                ),
+              ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: done
-              ? KColor.green.withValues(alpha: 0.3)
-              : KColor.green.withValues(alpha: 0.2),
-        ),
-      ),
+        const SizedBox(height: KSpacing.md),
+        child,
+      ],
+    );
+  }
+}
+
+Color _rule() => KColor.isDark ? KColor.fg.withValues(alpha: 0.09) : KColor.border;
+
+// ─── _WeeklyRingCard ─────────────────────────────────────────────────────────
+// "This week": a Mon–Sun strip where each day's state is told by shape
+// (check done, ring planned, dash rest), one slim bar for the week, and the
+// consistency read. Typography and hairlines, no container.
+
+class _WeeklyRingCard extends StatelessWidget {
+  final WorkoutDashboardViewModel viewModel;
+  final WorkoutService service;
+
+  const _WeeklyRingCard({required this.viewModel, required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = viewModel.weekCompletionFraction;
+    final label = viewModel.weekCompletionLabel;
+    final todayWd = DateTime.now().weekday;
+
+    return _Section(
+      title: 'This week',
+      trailing: label,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Text(done ? '✅' : '⚡', style: const TextStyle(fontSize: 16)),
-                  const SizedBox(width: 8),
-                  Text(
-                    done ? 'Workout Done Today' : "TODAY'S PLANNED SPLIT",
-                    style: KText.label.copyWith(
-                      color: done ? KColor.green : KColor.green,
-                      fontSize: 10,
-                      letterSpacing: 0.5,
-                    ),
+              for (var wd = 1; wd <= 7; wd++)
+                Expanded(
+                  child: _DayPip(
+                    initial: _weekdayInitial[wd - 1],
+                    day: service.split.dayFor(wd),
+                    // Done = a workout was logged ON that date (whatever
+                    // split day it was), not "that split day was done
+                    // somewhere this week".
+                    done: () {
+                      final now = DateTime.now();
+                      final date = DateTime(now.year, now.month, now.day)
+                          .subtract(Duration(days: todayWd - wd));
+                      return service.sessionsForDate(date).any((s) => !s.isEmpty);
+                    }(),
+                    isToday: wd == todayWd,
                   ),
-                ],
-              ),
-              const Icon(Icons.fitness_center_rounded, color: Colors.white24, size: 22),
+                ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: KSpacing.md),
+          KBar(
+            progress: fraction,
+            colors: KGradient.train,
+            height: 4,
+          ),
+          const SizedBox(height: KSpacing.sm),
           Text(
-            splitDay.name.toUpperCase(),
-            style: KText.display.copyWith(fontSize: 24, color: Colors.white),
+            'Consistency: ${viewModel.consistencyLabel}',
+            style: KText.caption.copyWith(color: KColor.textSecondary),
           ),
-          const SizedBox(height: 4),
-          Text(
-            musclesStr,
-            style: KText.bodyMedium.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.format_list_bulleted_rounded, color: KColor.textMuted, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                '${splitDay.exercises.length} exercises',
-                style: KText.caption.copyWith(color: KColor.textSecondary),
-              ),
-              const SizedBox(width: 14),
-              const Icon(Icons.schedule_rounded, color: KColor.textMuted, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                '~$duration min',
-                style: KText.caption.copyWith(color: KColor.textSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (done) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: KColor.green.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: KColor.green.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded, color: KColor.green, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Logged: ${todaySession.totalSets} sets (${todaySession.totalWorkingVolume.toStringAsFixed(0)} kg volume)',
-                      style: KText.caption.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+          if (viewModel.musclesThisWeek.isNotEmpty) ...[
+            const SizedBox(height: KSpacing.md),
+            // One body, front and back, with this week's muscles lit, then
+            // their names as plain words.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (viewModel.musclesThisWeek.any(MuscleThumb.canShow)) ...[
+                  SizedBox(
+                    width: 104,
+                    child: MuscleBodyMap(
+                      view: BodyView.sideBySide,
+                      highlightedMuscles: viewModel.musclesThisWeek.toSet(),
+                      height: 96,
                     ),
                   ),
+                  const SizedBox(width: KSpacing.md),
                 ],
-              ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Trained this week',
+                        style: KText.caption.copyWith(color: KColor.textSecondary),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        viewModel.musclesThisWeek.join(', '),
+                        style: KText.bodyMedium.copyWith(color: KColor.textPrimary, height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: done ? 'Log Another Session' : 'Start Workout',
-              icon: done ? Icons.refresh_rounded : Icons.play_arrow_rounded,
-              outlined: done,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                onStart();
-              },
+        ],
+      ),
+    );
+  }
+}
+
+class _DayPip extends StatelessWidget {
+  final String initial;
+  final SplitDay? day;
+  final bool done;
+  final bool isToday;
+
+  const _DayPip({
+    required this.initial,
+    required this.day,
+    required this.done,
+    required this.isToday,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final training = day != null && !day!.isRestDay;
+    final state = done ? 'done' : (training ? 'planned' : 'rest');
+    return Semantics(
+      label: '$initial ${day?.name ?? 'Rest day'}, $state',
+      excludeSemantics: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            initial,
+            style: KText.label.copyWith(
+              color: isToday ? KColor.textPrimary : KColor.textMuted,
+              fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+              letterSpacing: 0,
+            ),
+          ),
+          const SizedBox(height: 6),
+          AnimatedContainer(
+            duration: KMotion.of(context, KMotion.standard),
+            curve: KMotion.overshoot,
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: done ? KColor.violet : null,
+              border: done
+                  ? null
+                  : Border.all(
+                      color: training
+                          ? KColor.violet.withValues(
+                              alpha: isToday ? 0.9 : 0.45,
+                            )
+                          : KColor.fg.withValues(
+                              alpha: KColor.isDark ? 0.12 : 0.14,
+                            ),
+                      width: isToday ? 2 : 1.2,
+                    ),
+            ),
+            child: Center(
+              child: done
+                  ? Icon(Icons.check_rounded, size: 14, color: KColor.onAccent)
+                  : training
+                  ? null
+                  : Container(width: 8, height: 2, color: KColor.textDisabled),
             ),
           ),
         ],
@@ -878,71 +1394,98 @@ class _TodaySplitCard extends StatelessWidget {
   }
 }
 
-// ─── _RecoveryBannerCard ─────────────────────────────────────────────────────
+// ─── _QuickStatsRow ──────────────────────────────────────────────────────────
+// Four numbers on one hairline-ruled row. The numbers are the content; no
+// tiles, no icons.
 
-class _RecoveryBannerCard extends StatelessWidget {
+class _QuickStatsRow extends StatelessWidget {
   final WorkoutDashboardViewModel viewModel;
-  final VoidCallback onStartManual;
 
-  const _RecoveryBannerCard({
-    required this.viewModel,
-    required this.onStartManual,
+  const _QuickStatsRow({required this.viewModel});
+
+  @override
+  Widget build(BuildContext context) {
+    final vol = viewModel.totalVolumeThisWeek;
+    final big = vol >= 1000;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: _rule()),
+          bottom: BorderSide(color: _rule()),
+        ),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _QuickStatCard(
+              label: 'kg lifted',
+              value: big ? vol / 1000 : vol,
+              decimals: big ? 1 : 0,
+              suffix: big ? 'k' : '',
+            ),
+            const _StatRule(),
+            _QuickStatCard(
+              label: viewModel.totalSetsThisWeek == 1 ? 'set' : 'sets',
+              value: viewModel.totalSetsThisWeek,
+            ),
+            const _StatRule(),
+            _QuickStatCard(
+              label: 'day streak',
+              value: viewModel.currentStreak,
+            ),
+            const _StatRule(),
+            _QuickStatCard(
+              label: viewModel.totalPrsAllTime == 1 ? 'PR, all time' : 'PRs, all time',
+              value: viewModel.totalPrsAllTime,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatRule extends StatelessWidget {
+  const _StatRule();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm),
+        child: VerticalDivider(width: 1, thickness: 1, color: _rule()),
+      );
+}
+
+class _QuickStatCard extends StatelessWidget {
+  final String label;
+  final num value;
+  final int decimals;
+  final String suffix;
+
+  const _QuickStatCard({
+    required this.label,
+    required this.value,
+    this.decimals = 0,
+    this.suffix = '',
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF131D33), Color(0xFF0F0F1A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
+    return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Text('😴', style: TextStyle(fontSize: 16)),
-                  const SizedBox(width: 8),
-                  Text(
-                    "TODAY IS A REST DAY",
-                    style: KText.label.copyWith(color: KColor.amber, fontSize: 10, letterSpacing: 0.5),
-                  ),
-                ],
-              ),
-              const Icon(Icons.spa_rounded, color: Colors.white24, size: 22),
-            ],
+          KAnimatedCount(
+            value: value,
+            decimalPlaces: decimals,
+            suffix: suffix,
+            style: KText.numMedium.copyWith(fontSize: 22),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 2),
           Text(
-            'Rest & Recovery',
-            style: KText.display.copyWith(fontSize: 24, color: Colors.white),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'No split planned today. Relax and let muscles recover. Focus on nutrition and mobility.',
-            style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: 'Start Split Manually',
-              icon: Icons.play_arrow_rounded,
-              color: KColor.border,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                onStartManual();
-              },
-            ),
+            label,
+            style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 12),
           ),
         ],
       ),
@@ -955,10 +1498,12 @@ class _RecoveryBannerCard extends StatelessWidget {
 class _RecentWorkoutCard extends StatelessWidget {
   final WorkoutDashboardViewModel viewModel;
   final ValueChanged<WorkoutSession> onViewDetails;
+  final VoidCallback? onStart;
 
   const _RecentWorkoutCard({
     required this.viewModel,
     required this.onViewDetails,
+    this.onStart,
   });
 
   @override
@@ -966,28 +1511,15 @@ class _RecentWorkoutCard extends StatelessWidget {
     final recent = viewModel.recentSessions;
     if (recent.isEmpty) {
       return KCard(
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-        child: Row(
-          children: [
-            const Icon(Icons.history_rounded, color: KColor.textMuted, size: 24),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'No Workout History',
-                    style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Your training stats will appear here as soon as you save your first session.',
-                    style: KText.caption.copyWith(color: KColor.textMuted),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        padding: EdgeInsets.zero,
+        borderRadius: KRadius.xl,
+        child: KEmptyState(
+          type: KEmptyStateType.workout,
+          title: 'Nothing logged yet',
+          message:
+              'Your first session sets the tone. Stats show up here once you save one.',
+          actionLabel: onStart == null ? null : 'Start workout',
+          onAction: onStart,
         ),
       );
     }
@@ -995,68 +1527,63 @@ class _RecentWorkoutCard extends StatelessWidget {
     final session = recent.first;
     final d = session.date;
     final dateStr = '${d.day}/${d.month}/${d.year % 100}';
-    final durationStr = session.durationMinutes != null 
-        ? '${session.durationMinutes} min' 
-        : '45 min';
+    final durationStr = session.durationMinutes != null
+        ? '${session.durationMinutes} min'
+        : '-';
 
-    return Container(
+    return KCard(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
+      borderRadius: KRadius.xl,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'LAST WORKOUT PERFORMED',
-                style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-              ),
+              const Expanded(child: _Eyebrow('Last workout')),
+              const SizedBox(width: KSpacing.sm),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: KColor.bg,
-                  borderRadius: BorderRadius.circular(12),
+                  color: KColor.fg.withValues(
+                    alpha: KColor.isDark ? 0.06 : 0.05,
+                  ),
+                  borderRadius: KRadius.pill,
                 ),
                 child: Text(
                   dateStr,
-                  style: KText.caption.copyWith(
+                  style: KText.numSmall.copyWith(
                     color: KColor.textSecondary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
+                    fontSize: 12,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            session.splitDayName,
-            style: KText.h2.copyWith(color: Colors.white, fontSize: 18),
-          ),
+          const SizedBox(height: KSpacing.md),
+          Text(session.splitDayName, style: KText.h2),
           const SizedBox(height: 14),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _RecentStat(label: 'Volume', value: '${session.totalVolume.toStringAsFixed(0)} kg'),
-              _RecentStat(label: 'Sets', value: '${session.totalSets} sets'),
+              _RecentStat(
+                label: 'Volume',
+                value: '${whole(session.totalVolume)} kg',
+              ),
+              _RecentStat(label: 'Sets', value: plural(session.totalSets, 'set')),
               _RecentStat(label: 'Duration', value: durationStr),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: KSpacing.lg),
           SizedBox(
             width: double.infinity,
             child: KButton(
-              label: 'View Details',
+              label: 'View session details',
               icon: Icons.arrow_forward_rounded,
               outlined: true,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                onViewDetails(session);
-              },
+              onTap: () => onViewDetails(session),
             ),
           ),
         ],
@@ -1078,13 +1605,13 @@ class _RecentStat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
+            style: KText.caption.copyWith(
+              color: KColor.textMuted,
+              fontSize: 12,
+            ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
+          const SizedBox(height: KSpacing.xs),
+          Text(value, style: KText.numSmall.copyWith(fontSize: 15)),
         ],
       ),
     );
@@ -1092,6 +1619,9 @@ class _RecentStat extends StatelessWidget {
 }
 
 // ─── _RecoveryInsightsCard ───────────────────────────────────────────────────
+// Readiness, sleep, HRV and fatigue load as one editorial section: a bar, three
+// plain figures and a single coaching line. Colour marks state and always
+// travels with an icon and a word.
 
 class _RecoveryInsightsCard extends StatelessWidget {
   final WorkoutDashboardViewModel viewModel;
@@ -1109,222 +1639,144 @@ class _RecoveryInsightsCard extends StatelessWidget {
     final acwrBand = viewModel.acwrBand;
 
     final lastSession = viewModel.recentSessions.firstOrNull;
-    final daysSinceLast = lastSession != null 
-        ? DateTime.now().difference(lastSession.date).inDays 
+    final daysSinceLast = lastSession != null
+        ? DateTime.now().difference(lastSession.date).inDays
         : -1;
-    final daysStr = daysSinceLast == -1 
-        ? 'No workouts yet' 
-        : daysSinceLast == 0 
-            ? 'Today' 
-            : '$daysSinceLast day${daysSinceLast == 1 ? "" : "s"} ago';
+    final daysStr = daysSinceLast == -1
+        ? 'nothing logged yet'
+        : daysSinceLast == 0
+        ? 'today'
+        : '${plural(daysSinceLast, 'day')} ago';
 
-    final acwrColor = switch (acwrBand) {
-      AcwrBand.normal   => KColor.green,
-      AcwrBand.elevated => KColor.amber,
-      AcwrBand.high     => KColor.danger,
-      AcwrBand.extreme  => const Color(0xFF9F2B68), // deep purple
+    final (acwrColor, acwrIcon) = switch (acwrBand) {
+      AcwrBand.normal => (KColor.green, Icons.check_circle_outline_rounded),
+      AcwrBand.elevated => (KColor.warning, Icons.trending_up_rounded),
+      AcwrBand.high => (KColor.danger, Icons.warning_amber_rounded),
+      AcwrBand.extreme => (KColor.danger, Icons.report_outlined),
     };
 
-    return KCard(
-      padding: const EdgeInsets.all(16),
+    final (readyColor, readyIcon) = overall >= 0.8
+        ? (KColor.green, Icons.check_circle_outline_rounded)
+        : overall >= 0.6
+        ? (KColor.warning, Icons.adjust_rounded)
+        : (KColor.danger, Icons.error_outline_rounded);
+
+    return _Section(
+      title: 'Recovery',
+      trailing: 'Last workout $daysStr',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'RECOVERY STATUS',
-                style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-              ),
-              Row(
-                children: [
-                  const Icon(Icons.history_rounded, size: 12, color: KColor.textMuted),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Last workout: $daysStr',
-                    style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 10.5, fontWeight: FontWeight.bold),
-                  ),
-                ],
+              KIcon(readyIcon, color: readyColor, size: KIcons.md),
+              const SizedBox(width: KSpacing.sm),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                      text: '${(overall * 100).toStringAsFixed(0)}% ready',
+                      style: KText.h3.copyWith(
+                        fontSize: 17,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    TextSpan(
+                      text: '  $label',
+                      style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 14),
+                    ),
+                  ]),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            'Readiness Score',
-            style: KText.caption.copyWith(color: KColor.textMuted),
+          const SizedBox(height: 10),
+          KBar(
+            progress: overall,
+            colors: [readyColor.withValues(alpha: 0.7), readyColor],
+            height: 4,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: KSpacing.lg),
+
+          // Recovery metrics: plain figures under small labels.
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: overall >= 0.8
-                      ? KColor.green
-                      : overall >= 0.6
-                          ? KColor.amber
-                          : KColor.danger,
-                  shape: BoxShape.circle,
+              Expanded(
+                child: _MetricTile(
+                  label: 'Muscles',
+                  value: recovery.muscles.isEmpty ? 'Fresh' : 'Recovering',
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '${(overall * 100).toStringAsFixed(0)}% — $label',
-                style: KText.h2.copyWith(color: Colors.white, fontSize: 15),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          
-          // Recovery Metrics Row
-          Row(
-            children: [
-              // Muscle Group Recovery Card
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: KColor.bg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: KColor.border, width: 0.5),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.fitness_center_rounded, size: 16, color: KColor.green),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Muscle Status',
-                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        recovery.muscles.isEmpty ? '100% Fresh' : 'Recovering',
-                        style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                      ),
-                    ],
-                  ),
+                child: _MetricTile(
+                  label: 'Sleep',
+                  value: sleepHours != null && sleepScore != null
+                      ? '${sleepHours.toStringAsFixed(1)} h, ${(sleepScore * 100).toStringAsFixed(0)}%'
+                      : 'Not synced',
                 ),
               ),
-              const SizedBox(width: 8),
-              
-              // Sleep Score Card
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: KColor.bg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: KColor.border, width: 0.5),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.king_bed_rounded, size: 16, color: Colors.blueAccent),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Sleep Duration',
-                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        sleepHours != null && sleepScore != null
-                            ? '${sleepHours.toStringAsFixed(1)}h (${(sleepScore * 100).toStringAsFixed(0)}%)'
-                            : 'Not Synced',
-                        style: KText.bodyMedium.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              
-              // HRV Score Card
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: KColor.bg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: KColor.border, width: 0.5),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.favorite_rounded, size: 16, color: KColor.danger),
-                      const SizedBox(height: 6),
-                      Text(
-                        'HRV RMSSD',
-                        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        hrvRmssd != null && hrvScore != null
-                            ? '${hrvRmssd.toStringAsFixed(0)}ms (${(hrvScore * 100).toStringAsFixed(0)}%)'
-                            : 'Not Synced',
-                        style: KText.bodyMedium.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
+                child: _MetricTile(
+                  label: 'HRV (RMSSD)',
+                  value: hrvRmssd != null && hrvScore != null
+                      ? '${hrvRmssd.toStringAsFixed(0)} ms, ${(hrvScore * 100).toStringAsFixed(0)}%'
+                      : 'Not synced',
                 ),
               ),
             ],
           ),
 
           if (recovery.muscles.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 28,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: recovery.muscles.length,
-                itemBuilder: (context, i) {
-                  final m = recovery.muscles[i];
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: KChip(
-                      '${m.muscleGroup} (${m.hoursSinceLastTraining}h ago)',
+            const SizedBox(height: KSpacing.md),
+            for (final m in recovery.muscles)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    KIcon(
+                      m.state == RecoveryState.recovering
+                          ? Icons.hourglass_bottom_rounded
+                          : m.state == RecoveryState.ready
+                          ? Icons.adjust_rounded
+                          : Icons.check_rounded,
+                      size: KIcons.sm,
                       color: m.state == RecoveryState.recovering
                           ? KColor.danger
                           : m.state == RecoveryState.ready
-                              ? KColor.amber
-                              : KColor.green,
+                          ? KColor.warning
+                          : KColor.green,
                     ),
-                  );
-                },
+                    const SizedBox(width: KSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        m.muscleGroup,
+                        style: KText.bodyMedium.copyWith(fontSize: 14),
+                      ),
+                    ),
+                    Text(
+                      '${m.hoursSinceLastTraining} h ago',
+                      style: KText.numSmall.copyWith(fontSize: 13, color: KColor.textSecondary),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
-          
-          const SizedBox(height: 16),
-          const Divider(color: KColor.border, height: 1),
-          const SizedBox(height: 14),
 
-          // ACWR Fatigue Load Coaching Insight Card
+          const SizedBox(height: KSpacing.lg),
+
+          // Fatigue load: one line of coaching, keyed by icon and colour.
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.only(top: KSpacing.md),
             decoration: BoxDecoration(
-              color: acwrColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: acwrColor.withValues(alpha: 0.22)),
+              border: Border(top: BorderSide(color: _rule())),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.analytics_rounded,
-                  color: acwrColor,
-                  size: 20,
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: KIcon(acwrIcon, color: acwrColor, size: KIcons.md),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1332,29 +1784,61 @@ class _RecoveryInsightsCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Fatigue load: ${acwrBand.label}',
-                            style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          Expanded(
+                            child: Text(
+                              'Fatigue load: ${acwrBand.label}',
+                              style: KText.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
                           ),
                           Text(
-                            'ACWR: ${WorkoutService.instance.calculateAcwr().toStringAsFixed(2)}',
-                            style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 10, fontWeight: FontWeight.bold),
+                            'ACWR ${WorkoutService.instance.calculateAcwr().toStringAsFixed(2)}',
+                            style: KText.numSmall.copyWith(
+                              color: KColor.textMuted,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        acwrBand.coachingInsight,
-                        style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.3),
-                      ),
+                      Text(acwrBand.coachingInsight, style: KText.caption),
                     ],
                   ),
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MetricTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(end: KSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: KText.caption.copyWith(
+              color: KColor.textMuted,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(value, style: KText.numSmall.copyWith(fontSize: 14)),
         ],
       ),
     );
@@ -1369,32 +1853,30 @@ class _AnalyticsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return KCard(
+    return _Section(
+      title: 'Training trends',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Training Trends',
-            style: KText.h2.copyWith(color: Colors.white),
-          ),
           if (viewModel.latestPr != null) ...[
-            const SizedBox(height: 14),
             _HighlightCard(
               title: viewModel.latestPr!.title,
               detail: viewModel.latestPr!.detail,
             ),
+            const SizedBox(height: KSpacing.lg),
           ],
-          const SizedBox(height: 18),
           _TrendBlock(
-            title: 'Weekly Volume Trend',
+            title: 'Weekly volume',
             values: viewModel.volumeTrend,
-            valueFormatter: (v) => '${v.toStringAsFixed(0)} kg',
+            valueFormatter: (v) => '${whole(v)} kg',
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: KSpacing.lg),
           _TrendBlock(
-            title: 'Workout Consistency',
-            values: viewModel.consistencyTrend.map((v) => v.toDouble()).toList(),
-            valueFormatter: (v) => '${v.toInt()} workouts',
+            title: 'Workout consistency',
+            values: viewModel.consistencyTrend
+                .map((v) => v.toDouble())
+                .toList(),
+            valueFormatter: (v) => plural(v.round(), 'workout'),
           ),
         ],
       ),
@@ -1403,6 +1885,7 @@ class _AnalyticsCard extends StatelessWidget {
 }
 
 // ─── _HighlightCard ──────────────────────────────────────────────────────────
+// Latest personal record: saffron mark, plain words.
 
 class _HighlightCard extends StatelessWidget {
   final String title;
@@ -1410,43 +1893,33 @@ class _HighlightCard extends StatelessWidget {
   const _HighlightCard({required this.title, required this.detail});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: KColor.amber.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: KColor.amber.withValues(alpha: 0.22)),
-    ),
-    child: Row(
-      children: [
-        const Icon(
-          Icons.workspace_premium_rounded,
-          color: KColor.amber,
-          size: 20,
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 1),
+        child: KIcon(KIcons.record, color: KColor.saffron, size: KIcons.md),
+      ),
+      const SizedBox(width: KSpacing.md),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              detail,
+              style: KText.numSmall.copyWith(fontSize: 13, color: KColor.textSecondary),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                detail,
-                style: KText.caption.copyWith(color: KColor.textSecondary),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
+      ),
+    ],
   );
 }
-
-
 
 // ─── _TrendBlock ─────────────────────────────────────────────────────────────
 
@@ -1467,20 +1940,28 @@ class _TrendBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Text(
                 title,
-                style: KText.caption.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                style: KText.caption.copyWith(
+                  color: KColor.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
+            const SizedBox(width: KSpacing.sm),
             Text(
               valueFormatter(latest),
-              style: KText.caption.copyWith(color: KColor.textSecondary),
+              style: KText.numSmall.copyWith(
+                color: KColor.textSecondary,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: KSpacing.sm),
         _MiniBarChart(values: values),
       ],
     );
@@ -1488,6 +1969,10 @@ class _TrendBlock extends StatelessWidget {
 }
 
 // ─── _MiniBarChart ───────────────────────────────────────────────────────────
+// Bars grow from the baseline once (and re-grow when values change). The
+// latest bar carries the train gradient; older bars are neutral ink at low
+// alpha, so colour marks only the value that matters now. A hairline baseline
+// anchors the bars on both Carbon and Paper.
 
 class _MiniBarChart extends StatelessWidget {
   final List<double> values;
@@ -1500,109 +1985,192 @@ class _MiniBarChart extends StatelessWidget {
         height: 44,
         alignment: Alignment.centerLeft,
         child: Text(
-          'Not enough data yet',
-          style: KText.caption.copyWith(color: KColor.textMuted),
+          'Not enough sessions yet. Give it a week.',
+          style: KText.caption.copyWith(color: KColor.textSecondary),
         ),
       );
     }
     final maxValue = values.reduce((a, b) => a > b ? a : b);
-    return SizedBox(
-      height: 48,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final value in values)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2.5),
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Container(
-                    height: maxValue <= 0
-                        ? 6
-                        : (value / maxValue * 42).clamp(6, 42),
-                    decoration: BoxDecoration(
-                      color: KColor.green.withValues(
-                        alpha: value == values.last ? 0.95 : 0.40,
+    final restBar = KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.12);
+    return Container(
+      height: 49,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: KColor.fg.withValues(alpha: KColor.isDark ? 0.1 : 0.12),
+          ),
+        ),
+      ),
+      child: TweenAnimationBuilder<double>(
+        key: ValueKey(Object.hashAll(values)),
+        tween: Tween(begin: 0, end: 1),
+        duration: KMotion.of(context, KMotion.slow),
+        curve: KMotion.emphasizedCurve,
+        builder: (context, t, _) => Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (var i = 0; i < values.length; i++)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                      height:
+                          (maxValue <= 0
+                              ? 6.0
+                              : (values[i] / maxValue * 42).clamp(6.0, 42.0)) *
+                          (0.15 + 0.85 * t),
+                      decoration: BoxDecoration(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(4),
+                        ),
+                        gradient: i == values.length - 1
+                            ? LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: KGradient.train,
+                              )
+                            : null,
+                        color: i == values.length - 1
+                            ? null
+                            : restBar,
                       ),
-                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 // ─── _WorkoutDashboardSkeleton ───────────────────────────────────────────────
+// Shimmer shaped like the dashboard (header, hero, ring card, stats). The
+// shimmer loop is owned by KShimmer and gated by ambient motion.
 
-class _WorkoutDashboardSkeleton extends StatefulWidget {
+class _WorkoutDashboardSkeleton extends StatelessWidget {
   const _WorkoutDashboardSkeleton();
 
-  @override
-  State<_WorkoutDashboardSkeleton> createState() => _WorkoutDashboardSkeletonState();
-}
-
-class _WorkoutDashboardSkeletonState extends State<_WorkoutDashboardSkeleton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  static Widget _box({
+    double? width,
+    required double height,
+    BorderRadius radius = KRadius.md,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(color: Colors.white, borderRadius: radius),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final opacity = 0.3 + (_controller.value * 0.4);
-        return Opacity(
-          opacity: opacity,
-          child: child,
-        );
-      },
-      child: Scaffold(
-        backgroundColor: KColor.bg,
-        body: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              _skeletonCard(height: 120),
-              const SizedBox(height: 16),
-              _skeletonCard(height: 50),
-              const SizedBox(height: 16),
-              _skeletonCard(height: 160),
-              const SizedBox(height: 16),
-              _skeletonCard(height: 140),
-            ],
+    final bottom = math.max(
+      KSpacing.dockClearance,
+      MediaQuery.paddingOf(context).bottom + KSpacing.lg,
+    );
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        bottom: false,
+        child: Semantics(
+          label: 'Warming up…',
+          child: KShimmer(
+            child: ListView(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                KSpacing.p,
+                KSpacing.lg,
+                KSpacing.p,
+                bottom,
+              ),
+              children: [
+                _box(width: 80, height: 10, radius: KRadius.pill),
+                const SizedBox(height: 10),
+                _box(width: 120, height: 30),
+                const SizedBox(height: KSpacing.xl),
+                // Hero
+                _box(height: 230, radius: KRadius.xl),
+                const SizedBox(height: KSpacing.lg),
+                // Ring card
+                Row(
+                  children: [
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: KSpacing.lg),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _box(width: 90, height: 10, radius: KRadius.pill),
+                          const SizedBox(height: 10),
+                          _box(width: 120, height: 20),
+                          const SizedBox(height: 10),
+                          _box(width: 140, height: 10, radius: KRadius.pill),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: KSpacing.lg),
+                Row(
+                  children: [
+                    Expanded(child: _box(height: 92, radius: KRadius.lg)),
+                    const SizedBox(width: KSpacing.sm),
+                    Expanded(child: _box(height: 92, radius: KRadius.lg)),
+                  ],
+                ),
+                const SizedBox(height: KSpacing.lg),
+                _box(height: 150, radius: KRadius.xl),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _skeletonCard({required double height}) {
-    return Container(
-      height: height,
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
+// ─── _SetupEmblem ────────────────────────────────────────────────────────────
+
+class _SetupEmblem extends StatelessWidget {
+  const _SetupEmblem();
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: RepaintBoundary(
+        child: KRing(
+          progress: 0.72,
+          colors: KGradient.train,
+          size: 104,
+          stroke: 6,
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: KColor.violet.withValues(alpha: KColor.isDark ? 0.12 : 0.08),
+              border: Border.all(
+                color: KColor.violet.withValues(alpha: KColor.isDark ? 0.3 : 0.24),
+              ),
+            ),
+            child: Icon(
+              Icons.fitness_center_rounded,
+              color: KColor.violet,
+              size: 34,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1619,6 +2187,9 @@ class _WorkoutStartSelection {
   });
 }
 
+/// "Pick a day": every training day as one hairline row (today's plan first,
+/// marked "Today"), then a custom session. It never repeats the hero card; the
+/// hero already starts today's plan directly.
 class _WorkoutDayPickerSheet extends StatelessWidget {
   final WorkoutService service;
   const _WorkoutDayPickerSheet({required this.service});
@@ -1628,85 +2199,53 @@ class _WorkoutDayPickerSheet extends StatelessWidget {
     final today = DateTime.now();
     final planned = service.splitDayFor(today);
     final selectable = service.selectableWorkoutDaysFor(today);
+    final others = selectable
+        .where((d) => d.weekday != planned?.weekday)
+        .toList();
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.70,
+      initialChildSize: 0.62,
       maxChildSize: 0.95,
-      minChildSize: 0.5,
+      minChildSize: 0.4,
       expand: true,
       builder: (context, scrollController) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF1E1E2C),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: KColor.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border(
+              top: BorderSide(
+                color: KColor.isDark
+                    ? KColor.fg.withValues(alpha: 0.08)
+                    : KColor.border,
+              ),
+            ),
           ),
           child: SafeArea(
             top: false,
-            child: Stack(
+            child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 24),
+                KSheetHeader(
+                  'Pick a day',
+                  subtitle: planned == null
+                      ? "Rest day on the plan. Train anyway if you're up for it."
+                      : 'Train a different day from your split.',
+                ),
+                Expanded(
                   child: ListView(
                     controller: scrollController,
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                    children: [
-                      Text(
-                        'Start Workout',
-                        style: KText.h2.copyWith(color: Colors.white, fontSize: 18),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Choose today’s planned split or pick another manually.',
-                        style: KText.caption.copyWith(color: KColor.textSecondary),
-                      ),
-                      const SizedBox(height: 18),
-
-                      // Today's Planned Workout Card
-                      if (planned != null) ...[
-                        _buildTodayPlannedCard(context, planned),
-                      ] else ...[
-                        _buildTodayRestCard(context),
-                      ],
-
-                      const SizedBox(height: 24),
-                      Text(
-                        'OTHER WORKOUT DAYS',
-                        style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Selectable split days
-                      ...selectable
-                          .where((d) => d.weekday != planned?.weekday)
-                          .map(
-                            (d) => _buildOtherWorkoutTile(context, d),
-                          ),
-
-                      const SizedBox(height: 24),
-                      Text(
-                        'CUSTOM WORKOUT',
-                        style: KText.label.copyWith(fontSize: 10, letterSpacing: 0.5),
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Custom empty workout
-                      _buildCustomWorkoutTile(context),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  top: 10,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: KColor.border,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                    padding: const EdgeInsets.fromLTRB(
+                      KSpacing.p,
+                      KSpacing.sm,
+                      KSpacing.p,
+                      KSpacing.xxl,
                     ),
+                    children: [
+                      if (planned != null)
+                        _dayRow(context, planned, isToday: true),
+                      for (final d in others) _dayRow(context, d),
+                      _customRow(context),
+                    ],
                   ),
                 ),
               ],
@@ -1717,236 +2256,108 @@ class _WorkoutDayPickerSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildTodayPlannedCard(BuildContext context, SplitDay planned) {
-    final muscles = planned.exercises.map((e) => e.muscleGroup).toSet().toList();
-    final musclesStr = muscles.isEmpty ? 'All Muscles' : muscles.join(' • ');
-    final duration = planned.exercises.length * 9;
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1F3C2C), Color(0xFF131F1A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.green.withValues(alpha: 0.3), width: 1.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "TODAY'S PLANNED WORKOUT",
-                style: KText.label.copyWith(color: KColor.green, fontSize: 9, fontWeight: FontWeight.bold),
-              ),
-              const Icon(Icons.star_rounded, color: KColor.green, size: 16),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            planned.name,
-            style: KText.display.copyWith(color: Colors.white, fontSize: 22),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            musclesStr,
-            style: KText.bodyMedium.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.format_list_bulleted_rounded, color: KColor.textMuted, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                '${planned.exercises.length} exercises',
-                style: KText.caption.copyWith(color: KColor.textSecondary),
-              ),
-              const SizedBox(width: 14),
-              const Icon(Icons.schedule_rounded, color: KColor.textMuted, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                '~$duration min',
-                style: KText.caption.copyWith(color: KColor.textSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: KButton(
-              label: 'Start Planned Workout',
-              icon: Icons.play_arrow_rounded,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                Navigator.of(context).pop(
-                  _WorkoutStartSelection(splitDay: planned, wasManual: false),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTodayRestCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('😴', style: TextStyle(fontSize: 16)),
-              const SizedBox(width: 8),
-              Text(
-                "TODAY IS A REST DAY",
-                style: KText.label.copyWith(color: KColor.amber, fontSize: 9, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Scheduled Rest',
-            style: KText.h2.copyWith(color: Colors.white, fontSize: 18),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Muscles grow when you rest. Focus on recovery today or choose another split day manually below.',
-            style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOtherWorkoutTile(BuildContext context, SplitDay d) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
+  Widget _row(
+    BuildContext context, {
+    required String semanticLabel,
+    required VoidCallback onTap,
+    required Widget leading,
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+  }) {
+    final hairline = KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border;
+    return Semantics(
+      container: true,
+      button: true,
+      label: semanticLabel,
+      onTap: onTap,
+      excludeSemantics: true,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          HapticFeedback.lightImpact();
-          Navigator.of(context).pop(
-            _WorkoutStartSelection(splitDay: d, wasManual: true),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(14),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: hairline)),
+          ),
           child: Row(
             children: [
+              SizedBox(width: 28, child: leading),
+              const SizedBox(width: KSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      d.name,
-                      style: KText.bodyMedium.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${d.exercises.length} exercises • ~${d.exercises.length * 9} min',
-                      style: KText.caption.copyWith(color: KColor.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: KColor.bg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _weekdayLabel(d.weekday),
-                  style: KText.caption.copyWith(
-                    color: KColor.green,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCustomWorkoutTile(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: KColor.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KColor.border, width: 0.5),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          HapticFeedback.lightImpact();
-          Navigator.of(context).pop(
-            _WorkoutStartSelection(
-              splitDay: service.customWorkoutDay(),
-              wasManual: true,
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: KColor.green.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.add_rounded,
-                  color: KColor.green,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Custom / Empty Workout',
-                      style: KText.bodyMedium.copyWith(
-                        color: KColor.green,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      title,
+                      style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Start from scratch and log sets dynamically',
-                      style: KText.caption.copyWith(color: KColor.textMuted),
+                      subtitle,
+                      style: KText.caption.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.arrow_forward_ios_rounded, color: KColor.textMuted, size: 12),
+              if (trailing != null) ...[
+                const SizedBox(width: KSpacing.md),
+                trailing,
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _dayRow(BuildContext context, SplitDay d, {bool isToday = false}) {
+    final n = d.exercises.length;
+    final when = isToday ? 'Today' : _weekdayLabel(d.weekday);
+    return _row(
+      context,
+      semanticLabel: '${d.name}, $when, ${plural(n, 'exercise')}',
+      onTap: () {
+        KHaptics.select();
+        Navigator.of(context).pop(
+          _WorkoutStartSelection(splitDay: d, wasManual: !isToday),
+        );
+      },
+      leading: KIcon(
+        KIcons.split(d.name),
+        size: KIcons.md,
+        color: isToday ? KColor.violet : KColor.textSecondary,
+      ),
+      title: d.name,
+      subtitle: '${plural(n, 'exercise')}, about ${n * 9} min',
+      trailing: Text(
+        when,
+        style: KText.caption.copyWith(
+          fontWeight: FontWeight.w600,
+          color: isToday ? KColor.violet : KColor.textMuted,
+        ),
+      ),
+    );
+  }
+
+  Widget _customRow(BuildContext context) {
+    return _row(
+      context,
+      semanticLabel: 'Custom or empty workout',
+      onTap: () {
+        KHaptics.select();
+        Navigator.of(context).pop(
+          _WorkoutStartSelection(
+            splitDay: service.customWorkoutDay(),
+            wasManual: true,
+          ),
+        );
+      },
+      leading: KIcon(KIcons.add, size: KIcons.md, color: KColor.textPrimary),
+      title: 'Custom or empty workout',
+      subtitle: 'Start empty and add exercises as you go',
     );
   }
 }

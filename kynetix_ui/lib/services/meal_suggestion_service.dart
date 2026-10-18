@@ -98,7 +98,7 @@ class MealSuggestionService {
               title: c.title,
               quantity: c.quantity,
               reason:
-                  'Calories are essentially done — only lean protein makes sense now. '
+                  'Calories are essentially done, only lean protein makes sense now. '
                   '${remaining.protein.toInt()}g protein still to go.',
               prefilledText: c.prefilledText,
             ),
@@ -229,7 +229,7 @@ class MealSuggestionService {
     if (r.calories <= 0) {
       score -= c.caloriesKcal > 100 ? 30 : 0; // over budget: penalise hard
     } else if (r.calories < 200 && c.caloriesKcal > 200) {
-      score -= 20; // calories almost gone — high-cal foods don't fit
+      score -= 20; // calories almost gone, high-cal foods don't fit
     } else if (c.caloriesKcal <= r.calories) {
       score += 20;
     } else if (c.caloriesKcal <= r.calories + 120) {
@@ -363,8 +363,8 @@ class MealSuggestionService {
       reason = 'This works well as your next proper dinner-style meal.';
     } else if (r.protein > 25 && c.isProteinFocused) {
       reason = isWorkoutDoneOrActive
-          ? 'You trained today and protein is still lagging — this closes the gap cleanly.'
-          : 'Protein is still lagging — this closes the gap cleanly.';
+          ? 'You trained today and protein is still lagging, this closes the gap cleanly.'
+          : 'Protein is still lagging, this closes the gap cleanly.';
     } else if (r.protein > 10 && c.isProteinFocused) {
       reason = 'Good fit for what you are actually missing right now.';
     } else if (isWorkoutDoneOrActive &&
@@ -372,9 +372,9 @@ class MealSuggestionService {
         c.caloriesKcal >= 180) {
       reason = 'Good recovery meal option around training.';
     } else if (r.calories < 200 && c.caloriesKcal < 150) {
-      reason = 'Light option — fits within your remaining budget.';
+      reason = 'Light option, fits within your remaining budget.';
     } else if (isTrainingDay && c.isProteinFocused) {
-      reason = 'Training day — keep protein high through dinner.';
+      reason = 'Training day, keep protein high through dinner.';
     } else {
       reason = c.defaultReason;
     }
@@ -631,7 +631,7 @@ const _candidates = <_SuggestionCandidate>[
     caloriesKcal: 294,
     isProteinFocused: true,
     isCarbHeavy: false,
-    defaultReason: 'High protein — covers a large chunk of the daily gap.',
+    defaultReason: 'High protein, covers a large chunk of the daily gap.',
     timingBonus: {'morning': 20, 'evening': 10},
     mealStyles: {_MealStyle.snack, _MealStyle.meal},
   ),
@@ -691,7 +691,7 @@ const _candidates = <_SuggestionCandidate>[
     caloriesKcal: 340,
     isProteinFocused: true,
     isCarbHeavy: false,
-    defaultReason: 'Solid protein + carbs — good balanced meal.',
+    defaultReason: 'Solid protein + carbs, good balanced meal.',
     timingBonus: {'dinner': 18, 'lunch': 12},
     mealStyles: {_MealStyle.dinner, _MealStyle.meal},
   ),
@@ -728,7 +728,7 @@ const _candidates = <_SuggestionCandidate>[
     caloriesKcal: 120,
     isProteinFocused: false,
     isCarbHeavy: false,
-    defaultReason: 'Light protein source — good filler.',
+    defaultReason: 'Light protein source, good filler.',
     timingBonus: {'evening': 12, 'lunch': 8},
     mealStyles: {_MealStyle.snack, _MealStyle.proteinCorrection},
   ),
@@ -752,7 +752,7 @@ const _candidates = <_SuggestionCandidate>[
     caloriesKcal: 330,
     isProteinFocused: false,
     isCarbHeavy: true,
-    defaultReason: 'Standard mess meal — use only when protein is covered.',
+    defaultReason: 'Standard mess meal, use only when protein is covered.',
     timingBonus: {'lunch': 18},
     mealStyles: {_MealStyle.lunch, _MealStyle.meal},
   ),
@@ -769,7 +769,7 @@ const _candidates = <_SuggestionCandidate>[
     mealStyles: {_MealStyle.meal, _MealStyle.snack},
   ),
   _SuggestionCandidate(
-    title: 'Light dinner — skip rice',
+    title: 'Light dinner, skip rice',
     quantity: '2 roti + sabzi',
     prefilledText: '2 roti sabzi',
     proteinG: 9,

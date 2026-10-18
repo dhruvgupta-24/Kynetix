@@ -7,6 +7,15 @@ import 'profile_service.dart';
 import 'workout_service.dart';
 import 'persistence_service.dart';
 
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
+/// Flip to true locally to trace every target calculation.
+const bool _kVerboseTargetLogs = false;
+
+
 // ─── DayTarget ────────────────────────────────────────────────────────────────
 
 class DayTarget {
@@ -27,6 +36,13 @@ class DayTarget {
     this.workoutLoadScore,
     this.workoutCalBonus,
   });
+}
+
+/// Carbohydrate and fat grams for a day's calorie and protein target.
+class MacroSplit {
+  const MacroSplit({required this.carbs, required this.fat});
+  final double carbs;
+  final double fat;
 }
 
 // ─── WeeklyTargetPlan ─────────────────────────────────────────────────────────
@@ -69,27 +85,19 @@ class WeeklyTargetPlan {
 // Single source of truth for all nutrition targets.
 // All formulas are profile-driven — no hardcoded personal values.
 //
-// Calibration design for resistance-training athletes (gym-focused):
-//   • Activity multipliers are LOWER than classic Mifflin tables because
-//     lifting sessions ~350–450 kcal/hr ≠ sustained cardio.
-//   • Step correction is capped at ±120 kcal — a minor modifier, not dominant.
-//   • Fat loss deficit: −500 kcal/day (sustainable for young active males).
-//   • Protein: 1.85 g/kg avg for fat loss — muscle-protective, attainable.
-//   • Calorie cycling: ±120 kcal around weekly avg (realistic food diff).
-//
-// Workout load scoring (added in hardening pass):
-//   • Derived from actual WorkoutSession data (volume, sets, duration).
-//   • Produces a bounded kcal bonus on top of the base training-day target.
-//   • Capped at ±200 kcal so targets don't swing wildly.
-//   • Completely optional — if no session logged, falls back to toggle-based.
-//
-// Validation (65 kg, 180 cm, 20 yr, male, 5–6 gym days, fat loss):
-//   BMR   = 1 680 kcal
-//   TDEE  = 1 680 × 1.41 = 2 369 kcal  (target: 2 325–2 400)
-//   Avg   = 2 369 − 500  = 1 869 kcal  (target: 1 800–1 900)
-//   Train = 1 869 + 120  = 1 989 kcal  (target: 1 900–2 000)
-//   Rest  = 1 869 − 120  = 1 749 kcal  (target: 1 700–1 800)
-//   Prot avg = 65 × 1.85 = 120 g       (target: ~120 g)       
+// Calibration (resistance-trained users):
+//   • BMR: Mifflin-St Jeor.
+//   • Activity multipliers 1.20-1.50 by training days, LOWER than classic
+//     tables (a lifting session is ~300-450 kcal, the rest of the day light).
+//   • Steps: (steps - 7,000) x weight x 0.00041 kcal, clamped to ±400, from
+//     the 14/30-day weighted step average (7,000 is already in the multiplier).
+//   • Goal: cut -22% [350, 550], lean bulk +8% [150, 250], bulk +10%
+//     [200, 350], recomp -9% [120, 250], maintenance 0.
+//   • Training vs rest days differ by 140-220 kcal, weighted by the number of
+//     each so the weekly average equals the goal.
+//   • Floor: BMR + 200.
+//   • Protein: 1.7-2.2 g/kg by goal and day on a reference weight capped at
+//     BMI 27; fat at least 0.6 g/kg; carbs fill the rest (see macroSplit).
 
 class NutritionTargetEngine {
   const NutritionTargetEngine._();
@@ -120,6 +128,9 @@ class NutritionTargetEngine {
     final resolvedLog = log ?? logFor(date);
     final effectiveHealth = health ?? HealthService().lastSyncResult;
 
+    final ws = WorkoutService.instance;
+    final plan = ws.planFor(date, log: resolvedLog);
+
     // Return stored/frozen targets if present and not forcing recalculation
     if (!forceRecalculate && resolvedLog.targetCalories != null && resolvedLog.targetProtein != null) {
       final override = resolvedLog.gymDay?.targetCaloriesOverride;
@@ -127,7 +138,7 @@ class NutritionTargetEngine {
         return DayTarget(
           calories: override,
           protein: resolvedLog.targetProtein!,
-          isTrainingDay: resolvedLog.gymDay?.didGym == true,
+          isTrainingDay: plan.isTraining,
           label: 'Manual Override',
           note: 'Saved Target (Drift Protected)',
         );
@@ -135,45 +146,22 @@ class NutritionTargetEngine {
       return DayTarget(
         calories: resolvedLog.targetCalories!,
         protein: resolvedLog.targetProtein!,
-        isTrainingDay: resolvedLog.gymDay?.didGym == true,
-        label: 'Saved Target',
+        isTrainingDay: plan.isTraining,
+        label: _planLabel(plan),
         note: 'Saved Target (Drift Protected)',
       );
     }
 
     // Pure dynamic calculation for display if target is not stored yet
-    final ws = WorkoutService.instance;
     final session = ws.sessionFor(date);
-    final splitDay = ws.splitDayFor(date);
     final gymDay = resolvedLog.gymDay;
-
-    final bool isGymDay;
-    if (gymDay != null) {
-      isGymDay = gymDay.didGym || (session?.isEmpty == false);
-    } else {
-      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-      isGymDay = splitIsTraining || (session?.isEmpty == false);
-    }
-
-    final String? workoutTypeName;
-    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-      workoutTypeName = session.splitDayName;
-    } else if (gymDay?.workoutType != null) {
-      workoutTypeName = gymDay?.workoutType?.displayName;
-    } else if (gymDay?.splitDayName != null) {
-      workoutTypeName = gymDay?.splitDayName;
-    } else if (splitDay != null && !splitDay.isRestDay) {
-      workoutTypeName = splitDay.name;
-    } else {
-      workoutTypeName = null;
-    }
 
     return dayTarget(
       prof,
-      isGymDay: isGymDay,
+      isGymDay: plan.isTraining,
       health: effectiveHealth,
       session: session,
-      workoutTypeName: workoutTypeName,
+      workoutTypeName: plan.isTraining ? plan.name : null,
       targetCaloriesOverride: gymDay?.targetCaloriesOverride,
       carryForwardAdjustment: resolvedLog.carryForwardAdjustment,
       date: null,
@@ -189,49 +177,35 @@ class NutritionTargetEngine {
     bool force = false,
     bool notify = true,
   }) async {
-    final prof = profile ?? ProfileService.instance.currentUserProfile;
-    if (prof == null) return;
+    final current = profile ?? ProfileService.instance.currentUserProfile;
+    if (current == null) return;
+    // A past day is judged by the profile (weight, goal) in force that day,
+    // not today's.
+    final prof = current.profileActiveOn(date) ?? current;
 
     final log = logFor(date);
 
-    // Preserve manual target override if present
+    // Preserve manual target override if present. The training pick may still
+    // have changed, so the day is saved either way.
     if (log.gymDay?.targetCaloriesOverride != null) {
-      debugPrint('[NutritionTargetEngine] Preserving manual calorie override for ${dateKey(date)}: ${log.gymDay!.targetCaloriesOverride} kcal');
+      _debugLog('[NutritionTargetEngine] Preserving manual calorie override for ${dateKey(date)}: ${log.gymDay!.targetCaloriesOverride} kcal');
+      if (force) {
+        await PersistenceService.saveDayLogsAndSync(date);
+        if (notify) PersistenceService.notifyLogsChanged();
+      }
       return;
     }
 
     final ws = WorkoutService.instance;
     final session = ws.sessionFor(date);
-    final splitDay = ws.splitDayFor(date);
-    final gymDay = log.gymDay;
-
-    final bool isGymDay;
-    if (gymDay != null) {
-      isGymDay = gymDay.didGym || (session?.isEmpty == false);
-    } else {
-      final splitIsTraining = splitDay != null && !splitDay.isRestDay;
-      isGymDay = splitIsTraining || (session?.isEmpty == false);
-    }
-
-    final String? workoutTypeName;
-    if (session != null && !session.isEmpty && session.splitDayName.isNotEmpty) {
-      workoutTypeName = session.splitDayName;
-    } else if (gymDay?.workoutType != null) {
-      workoutTypeName = gymDay?.workoutType?.displayName;
-    } else if (gymDay?.splitDayName != null) {
-      workoutTypeName = gymDay?.splitDayName;
-    } else if (splitDay != null && !splitDay.isRestDay) {
-      workoutTypeName = splitDay.name;
-    } else {
-      workoutTypeName = null;
-    }
+    final plan = ws.planFor(date, log: log);
 
     final freshTarget = dayTarget(
       prof,
-      isGymDay: isGymDay,
+      isGymDay: plan.isTraining,
       health: HealthService().lastSyncResult,
       session: session,
-      workoutTypeName: workoutTypeName,
+      workoutTypeName: plan.isTraining ? plan.name : null,
       targetCaloriesOverride: null, // Only refresh automatic target
       carryForwardAdjustment: log.carryForwardAdjustment,
       date: date,
@@ -261,10 +235,14 @@ class NutritionTargetEngine {
     final floor     = _calFloor(profile);
     final avgCal    = _r(rawAvg.clamp(floor, double.infinity));
     final avgProt   = _baseProtein(profile);
-    final cycle     = _calorieCycle(profile);
+    final spread    = _calorieCycle(profile);
 
-    final trainCal = _r((rawAvg + cycle).clamp(floor, double.infinity));
-    final restCal  = _r((rawAvg - cycle).clamp(floor, double.infinity));
+    // Training days sit [spread] kcal above rest days, weighted by how many of
+    // each the week has, so the weekly average lands exactly on the goal
+    // (5 training days pull rest days down more than they lift training days).
+    final trainDays = _trainingDaysPerWeek(profile);
+    final trainCal = _r((rawAvg + spread * (7 - trainDays) / 7).clamp(floor, double.infinity));
+    final restCal  = _r((rawAvg - spread * trainDays / 7).clamp(floor, double.infinity));
 
     if (profile.useCustomTargets) {
       final maintenance = profile.customMaintenanceCalories ?? tdee;
@@ -348,29 +326,32 @@ class NutritionTargetEngine {
     final isOverride = targetCaloriesOverride != null;
     final finalCal = targetCaloriesOverride ?? calculatedTotalCal;
 
-    // Debug logging for calorie target calculation
-    debugPrint('[NutritionTargetEngine] --- Calorie Target Calculation ---');
-    debugPrint('[NutritionTargetEngine] Date/Day Details: Label: $workoutTypeName, isGymDay: $isGymDay, actuallyTraining: $actuallyTraining');
-    debugPrint('[NutritionTargetEngine] Base calculations:');
-    debugPrint('[NutritionTargetEngine]   - BMR: ${_bmr(profile)} kcal (from UserProfile)');
-    debugPrint('[NutritionTargetEngine]   - TDEE: ${plan.maintenanceCalories} kcal (from NutritionTargetEngine._tdee)');
-    debugPrint('[NutritionTargetEngine] Modifiers applied:');
-    final tdee = plan.maintenanceCalories;
-    final goalDelta = _goalAdjustment(profile.goal, tdee);
-    debugPrint('[NutritionTargetEngine]   - Goal Adjustment (${profile.goal}): $goalDelta kcal (from NutritionTargetEngine._goalAdjustment)');
-    final cycle = _calorieCycle(profile);
-    debugPrint('[NutritionTargetEngine]   - Calorie Cycling (Training/Rest split): ${actuallyTraining ? '+' : '-'}$cycle kcal (from NutritionTargetEngine._calorieCycle)');
-    if (originalCalBonus != 0) {
-      debugPrint('[NutritionTargetEngine]   - Workout Load Calorie Bonus (Score: $loadScore): +0 kcal (originally +$originalCalBonus kcal, removed to prevent double-counting)');
+    // Verbose per-call trace. dayTarget runs for every target lookup (widget,
+    // insights, day screens), so it is opt-in to keep hot paths quiet.
+    if (_kVerboseTargetLogs) {
+      _debugLog('[NutritionTargetEngine] --- Calorie Target Calculation ---');
+      _debugLog('[NutritionTargetEngine] Date/Day Details: Label: $workoutTypeName, isGymDay: $isGymDay, actuallyTraining: $actuallyTraining');
+      _debugLog('[NutritionTargetEngine] Base calculations:');
+      _debugLog('[NutritionTargetEngine]   - BMR: ${_bmr(profile)} kcal (from UserProfile)');
+      _debugLog('[NutritionTargetEngine]   - TDEE: ${plan.maintenanceCalories} kcal (from NutritionTargetEngine._tdee)');
+      _debugLog('[NutritionTargetEngine] Modifiers applied:');
+      final tdee = plan.maintenanceCalories;
+      final goalDelta = _goalAdjustment(profile.goal, tdee);
+      _debugLog('[NutritionTargetEngine]   - Goal Adjustment (${profile.goal}): $goalDelta kcal (from NutritionTargetEngine._goalAdjustment)');
+      final cycle = _calorieCycle(profile);
+      _debugLog('[NutritionTargetEngine]   - Calorie Cycling (Training/Rest split): ${actuallyTraining ? '+' : '-'}$cycle kcal (from NutritionTargetEngine._calorieCycle)');
+      if (originalCalBonus != 0) {
+        _debugLog('[NutritionTargetEngine]   - Workout Load Calorie Bonus (Score: $loadScore): +0 kcal (originally +$originalCalBonus kcal, removed to prevent double-counting)');
+      }
+      if (carryForwardAdjustment != null && carryForwardAdjustment != 0) {
+        _debugLog('[NutritionTargetEngine]   - Carry-Forward Adjustment: ${carryForwardAdjustment > 0 ? '+' : ''}${carryForwardAdjustment.toInt()} kcal (from PersistenceService / DashboardScreen)');
+      }
+      if (isOverride) {
+        _debugLog('[NutritionTargetEngine]   - Manual Calorie Target Override: $targetCaloriesOverride kcal (from GymDay / User settings)');
+      }
+      _debugLog('[NutritionTargetEngine] Final Calorie Target: $finalCal kcal');
+      _debugLog('[NutritionTargetEngine] ----------------------------------');
     }
-    if (carryForwardAdjustment != null && carryForwardAdjustment != 0) {
-      debugPrint('[NutritionTargetEngine]   - Carry-Forward Adjustment: ${carryForwardAdjustment > 0 ? '+' : ''}${carryForwardAdjustment.toInt()} kcal (from PersistenceService / DashboardScreen)');
-    }
-    if (isOverride) {
-      debugPrint('[NutritionTargetEngine]   - Manual Calorie Target Override: $targetCaloriesOverride kcal (from GymDay / User settings)');
-    }
-    debugPrint('[NutritionTargetEngine] Final Calorie Target: $finalCal kcal');
-    debugPrint('[NutritionTargetEngine] ----------------------------------');
 
     // Build a meaningful label from the actual split name / workout type
     final label = _dayLabel(
@@ -473,6 +454,13 @@ class NutritionTargetEngine {
     return 0;
   }
 
+  String _planLabel(DayPlan plan) {
+    if (!plan.isTraining) return 'Rest Day';
+    final n = plan.name;
+    if (n == null || n.isEmpty || n == 'Custom Workout' || n == 'Other') return 'Training Day';
+    return n.endsWith('Day') ? n : '$n Day';
+  }
+
   String _dayLabel({
     WorkoutSession? session,
     String? workoutTypeName,
@@ -499,7 +487,7 @@ class NutritionTargetEngine {
 
   // ── Core formulas ─────────────────────────────────────────────────────────
 
-  double _bmr(UserProfile p) => p.gender == 'Male'
+  double _bmr(UserProfile p) => p.gender.trim().toLowerCase() == 'male'
       ? 10 * p.weight + 6.25 * p.height - 5 * p.age + 5
       : 10 * p.weight + 6.25 * p.height - 5 * p.age - 161;
 
@@ -511,11 +499,11 @@ class NutritionTargetEngine {
     if (avg <= 0.5) return 1.20; // sedentary
     if (avg <= 1.5) return 1.25; // 1 day/wk
     if (avg <= 2.5) return 1.29; // 2 days/wk
-    if (avg <= 3.5) return 1.33; // 3 days/wk — light trainer
-    if (avg <= 4.5) return 1.37; // 4 days/wk — moderate
-    if (avg <= 5.5) return 1.41; // 5 days/wk — active trainer ← most common
-    if (avg <= 6.5) return 1.45; // 6 days/wk — very frequent
-    return 1.50;                 // 7 days  — extreme
+    if (avg <= 3.5) return 1.33; // 3 days/wk, light trainer
+    if (avg <= 4.5) return 1.37; // 4 days/wk, moderate
+    if (avg <= 5.5) return 1.41; // 5 days/wk, active trainer ← most common
+    if (avg <= 6.5) return 1.45; // 6 days/wk, very frequent
+    return 1.50;                 // 7 days, extreme
   }
 
   /// Science-based step-to-calorie correction vs a 7,000-step sedentary baseline.
@@ -532,6 +520,11 @@ class NutritionTargetEngine {
   /// goes to gym, etc.). The correction is the DELTA above/below this.
   ///
   /// Clamped to ±400 kcal to prevent runaway values from bad sensor data.
+  /// The step adjustment the targets use, in kcal (shown on the dashboard
+  /// and profile so every screen quotes the same number).
+  int stepCorrectionKcal(UserProfile p, HealthSyncResult? health) =>
+      _stepCorrectionKcal(p, health);
+
   int _stepCorrectionKcal(UserProfile p, HealthSyncResult? health) {
     final double? steps;
     if (health != null && health.hasData) {
@@ -557,47 +550,92 @@ class NutritionTargetEngine {
       _r(_bmr(p) * _activityMultiplier(p) + _stepCorrectionKcal(p, health));
 
   /// Goal-based calorie adjustment applied to TDEE.
-  double _goalAdjustment(String goal, double tdee) => switch (goal) {
+  ///
+  /// Cut ~22% (about 0.5-1% body weight a week), lean bulk ~8%, bulk ~10%
+  /// (bigger surpluses add mostly fat in trained lifters), recomp a small
+  /// deficit.
+  double _goalAdjustment(String goal, double tdee) => switch (_goalKey(goal)) {
     kFatLoss       => -_bounded(tdee * 0.22, 350, 550),
     kLeanBulk      =>  _bounded(tdee * 0.08, 150, 250),
-    kBulk          =>  _bounded(tdee * 0.15, 250, 450),
+    kBulk          =>  _bounded(tdee * 0.10, 200, 350),
     kRecomposition => -_bounded(tdee * 0.09, 120, 250),
     _              => 0, // Maintenance
   };
 
+  /// Canonical goal constant for stored goal text, including older wording
+  /// ("Fat Loss", "cut", "gain") so every profile gets its goal's numbers.
+  static String _goalKey(String goal) {
+    final g = goal.trim().toLowerCase();
+    if (g.contains('fat loss') || g.contains('cut')) return kFatLoss;
+    if (g.contains('lean bulk')) return kLeanBulk;
+    if (g.contains('bulk') || g.contains('gain')) return kBulk;
+    if (g.contains('recomp')) return kRecomposition;
+    return goal;
+  }
+
+  double _trainingDaysPerWeek(UserProfile p) =>
+      ((p.workoutDaysMin + p.workoutDaysMax) / 2.0).clamp(0.0, 7.0);
+
+  /// Gap between a training day and a rest day, in kcal.
   double _calorieCycle(UserProfile p) {
-    final avgWorkoutDays = (p.workoutDaysMin + p.workoutDaysMax) / 2.0;
-    if (avgWorkoutDays <= 1) return 70;
-    if (avgWorkoutDays <= 3) return 90;
-    if (avgWorkoutDays <= 5) return 105;
-    return 120;
+    final avgWorkoutDays = _trainingDaysPerWeek(p);
+    if (avgWorkoutDays <= 1) return 140;
+    if (avgWorkoutDays <= 3) return 180;
+    if (avgWorkoutDays <= 5) return 200;
+    return 220;
   }
 
   // ── Protein — goal- and day-aware ─────────────────────────────────────────
+  //
+  // g/kg follows the ISSN position stand (1.6-2.2 g/kg for lifters, the top
+  // of the range in a deficit). It is applied to a reference weight capped at
+  // BMI 27 for the user's height, so a heavier user's target tracks lean mass
+  // instead of growing with body fat.
 
-  double _baseProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.85),   // high — protect muscle in deficit
-    kLeanBulk      => _r(p.weight * 1.70),   // enough to drive growth
-    kBulk          => _r(p.weight * 1.85),   // same as fat loss — mass phase protein
-    kRecomposition => _r(p.weight * 2.00),   // highest — simultaneous cut+build
-    _              => _r(p.weight * 1.75),   // Maintenance — still training 4-6×/wk
-  };
+  double _proteinWeight(UserProfile p) {
+    final hM = p.height / 100.0;
+    if (hM <= 0) return p.weight;
+    final cap = 27.0 * hM * hM;
+    return p.weight < cap ? p.weight : cap;
+  }
 
-  double _trainingProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.95),   // peak day — max muscle protection
-    kLeanBulk      => _r(p.weight * 1.80),   // anabolic stimulus day
-    kBulk          => _r(p.weight * 2.00),   // heavy training day
-    kRecomposition => _r(p.weight * 2.15),   // highest of all goals on training day
-    _              => _r(p.weight * 1.85),   // Maintenance training day
-  };
+  double _baseProtein(UserProfile p) => _r(_proteinWeight(p) * switch (_goalKey(p.goal)) {
+    kFatLoss       => 2.10,   // highest: protect muscle in a deficit
+    kRecomposition => 2.00,
+    kLeanBulk      => 1.80,   // a surplus spares protein
+    kBulk          => 1.80,
+    _              => 1.80,   // Maintenance
+  });
 
-  double _restProtein(UserProfile p) => switch (p.goal) {
-    kFatLoss       => _r(p.weight * 1.75),   // reduced but muscle-protective
-    kLeanBulk      => _r(p.weight * 1.60),   // rest day — recovery focused
-    kBulk          => _r(p.weight * 1.70),   // still elevated for mass phase
-    kRecomposition => _r(p.weight * 1.85),   // recomp rest day — never drop low
-    _              => _r(p.weight * 1.65),   // Maintenance rest day
-  };
+  double _trainingProtein(UserProfile p) => _r(_proteinWeight(p) * switch (_goalKey(p.goal)) {
+    kFatLoss       => 2.20,
+    kRecomposition => 2.10,
+    kLeanBulk      => 1.90,
+    kBulk          => 1.90,
+    _              => 1.90,
+  });
+
+  double _restProtein(UserProfile p) => _r(_proteinWeight(p) * switch (_goalKey(p.goal)) {
+    kFatLoss       => 2.00,
+    kRecomposition => 1.90,
+    kLeanBulk      => 1.70,
+    kBulk          => 1.70,
+    _              => 1.70,
+  });
+
+  /// Carb and fat grams for a day: fat is 30% of the non-protein calories but
+  /// never under 0.6 g per kg; carbs take the rest.
+  MacroSplit macroSplit(double calories, double protein, {UserProfile? profile}) {
+    final nonProtein = (calories - protein * 4).clamp(0.0, double.infinity).toDouble();
+    var fat = nonProtein * 0.30 / 9;
+    final prof = profile ?? ProfileService.instance.currentUserProfile;
+    if (prof != null) {
+      final floor = 0.6 * _proteinWeight(prof);
+      if (fat < floor) fat = floor;
+    }
+    final carbs = ((nonProtein - fat * 9) / 4).clamp(0.0, double.infinity).toDouble();
+    return MacroSplit(carbs: carbs.roundToDouble(), fat: fat.roundToDouble());
+  }
 
   double _bounded(double value, double min, double max) =>
       value.clamp(min, max).toDouble();

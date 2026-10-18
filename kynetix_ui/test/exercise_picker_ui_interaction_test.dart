@@ -49,11 +49,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify Header and Search Field
-      expect(find.text('EXERCISE DISCOVERY'), findsOneWidget);
+      expect(find.text('Add an exercise'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
 
       // Verify full catalog count in ALL category chip (should be >= 1358)
-      expect(find.textContaining('ALL (13'), findsWidgets);
+      expect(find.textContaining('All (13'), findsWidgets);
     });
 
     testWidgets('2. Search TextField accepts input, updates controller, and filters results in real-time', (tester) async {
@@ -77,7 +77,7 @@ void main() {
       expect(find.text('bench press'), findsOneWidget);
 
       // Verify "BEST MATCH" header appears
-      expect(find.textContaining('BEST MATCH'), findsOneWidget);
+      expect(find.textContaining('Best match'), findsOneWidget);
 
       // Verify "Barbell Bench Press" appears
       expect(find.text('Barbell Bench Press'), findsWidgets);
@@ -107,7 +107,7 @@ void main() {
       // Verify TextField is cleared
       final tf = tester.widget<TextField>(searchField);
       expect(tf.controller?.text, isEmpty);
-      expect(find.textContaining('ALL (13'), findsWidgets);
+      expect(find.textContaining('All (13'), findsWidgets);
     });
 
     testWidgets('4. Category chips filter the catalog dynamically', (tester) async {
@@ -186,7 +186,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify ExerciseDetailSheet appears with anatomical targets & media widget
-      expect(find.text('ANATOMICAL TARGETS'), findsOneWidget);
+      expect(find.text('Muscles worked'), findsOneWidget);
       expect(find.byType(ExerciseMediaWidget), findsWidgets);
     });
 
@@ -224,7 +224,7 @@ void main() {
 
       // Verify no RenderFlex overflow
       expect(tester.takeException(), isNull);
-      expect(find.text('EXERCISE DISCOVERY'), findsOneWidget);
+      expect(find.text('Add an exercise'), findsOneWidget);
     });
 
     testWidgets('9. ExerciseMediaService resolves deterministic CDN media URLs & attribution', (tester) async {
@@ -234,7 +234,7 @@ void main() {
 
       expect(thumb, contains('hasaneyldrm/exercises-dataset@main/images/0017-kiJ4Z2K.jpg'));
       expect(gif, contains('hasaneyldrm/exercises-dataset@main/videos/0017-kiJ4Z2K.gif'));
-      expect(ExerciseMediaService.attribution, equals('© Gym visual — gymvisual.com'));
+      expect(ExerciseMediaService.attribution, equals('© Gym visual, gymvisual.com'));
     });
 
     testWidgets('10. Zero-result state displays Create Custom Exercise CTA without crashing', (tester) async {

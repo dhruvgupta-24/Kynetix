@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/nutrition_result.dart';
+import '../data/micronutrient_library.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_pipeline.dart';
+import '../services/hidden_extras.dart';
 import '../services/meal_memory.dart';
+import '../services/meal_tombstones.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
@@ -14,6 +18,7 @@ import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/saved_meal_service.dart';
 import '../services/kyno_context_service.dart';
+import 'barcode_scanner_screen.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -26,6 +31,9 @@ class AddMealScreen extends StatefulWidget {
   final MealEntry?  initialEntry;
   /// Pre-filled text from a suggestion tap — also triggers auto-calculate.
   final String?     initialText;
+  /// Rows to start from, e.g. a scanned product's "Edit before logging".
+  /// Loaded as-is (never re-estimated); saving adds a new entry.
+  final NutritionResult? initialResult;
 
   const AddMealScreen({
     super.key,
@@ -33,6 +41,7 @@ class AddMealScreen extends StatefulWidget {
     required this.date,
     this.initialEntry,
     this.initialText,
+    this.initialResult,
   });
 
   static bool hasParsedMealStructureChanged(String oldText, String newText) {
@@ -67,6 +76,11 @@ class _IngredientRow {
   double originalCalories;
   String lastParsedText;
 
+  /// Micronutrients the row's food carried when estimated or scanned, at
+  /// [microsKcal]. Scaled to the saved calories; null means not tracked.
+  Micronutrients? micros;
+  double microsKcal = 0;
+
   _IngredientRow({
     required String rawText,
     required this.parsed,
@@ -98,8 +112,13 @@ class _AddMealScreenState extends State<AddMealScreen>
   bool _loading = false;
   String? _error;
 
+  /// Kyno "thinking" pulse on the composer. Runs ONLY while estimating and
+  /// only when ambient motion is allowed — see [_syncPulse].
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
+
+  bool _composerFocused = false;
+  bool _saving = false;
 
   final List<_IngredientRow> _rows = [];
   bool _rememberEdits = true;
@@ -109,6 +128,10 @@ class _AddMealScreenState extends State<AddMealScreen>
   double _totalFat = 0;
   double _totalFib = 0;
   String? _validationWarning;
+
+  /// Bumped when only the live totals / warning changed (macro typing), so
+  /// just the widgets that show them rebuild instead of the whole screen.
+  final ValueNotifier<int> _totalsTick = ValueNotifier<int>(0);
 
   List<SavedMealMatch> _savedMealMatches = const [];
   Timer? _searchDebounceTimer;
@@ -121,19 +144,51 @@ class _AddMealScreenState extends State<AddMealScreen>
       _controller.text = widget.initialEntry!.finalSavedInput;
       _result = widget.initialEntry!.result;
       _initRowsFromResult(_result!);
+    } else if (widget.initialResult != null) {
+      _controller.text = widget.initialResult!.canonicalMeal;
+      _result = widget.initialResult;
+      _initRowsFromResult(_result!);
     } else if (widget.initialText != null) {
       _controller.text = widget.initialText!;
     }
+    _focusNode.addListener(_onComposerFocusChanged);
     _pulseCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+      duration: KMotion.slow,
+    );
+    _pulse = Tween<double>(begin: 0.35, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: KMotion.emphasizedCurve),
     );
     // Auto-calculate when opened with suggestion text.
     if (widget.initialText != null && widget.initialEntry == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _calculate());
+    }
+  }
+
+  void _onComposerFocusChanged() {
+    if (!mounted) return;
+    final focused = _focusNode.hasFocus;
+    if (focused != _composerFocused) setState(() => _composerFocused = focused);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reduced-motion can flip at runtime; re-resolve the pulse.
+    _syncPulse();
+  }
+
+  /// Starts the Kyno pulse only while estimating and only when ambient motion
+  /// is allowed; otherwise parks it (static glow while estimating, hidden
+  /// otherwise). Never leaves a repeat() running after estimation ends.
+  void _syncPulse() {
+    if (!mounted) return;
+    final shouldRun = _loading && KMotion.ambientAllowed(context);
+    if (shouldRun) {
+      if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+    } else {
+      if (_pulseCtrl.isAnimating) _pulseCtrl.stop();
+      _pulseCtrl.value = _loading ? 1.0 : 0.0;
     }
   }
 
@@ -177,7 +232,7 @@ class _AddMealScreenState extends State<AddMealScreen>
   }
 
   void _useSavedMeal(SavedMealMatch match) {
-    HapticFeedback.lightImpact();
+    KHaptics.commit();
     setState(() {
       _controller.text = match.rawInput;
       _controller.selection = TextSelection.fromPosition(
@@ -194,19 +249,22 @@ class _AddMealScreenState extends State<AddMealScreen>
     _searchDebounceTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _focusNode.removeListener(_onComposerFocusChanged);
     _focusNode.dispose();
+    _pulseCtrl.stop();
     _pulseCtrl.dispose();
     _clearRows();
+    _totalsTick.dispose();
     super.dispose();
   }
 
   void _clearRows() {
     for (final row in _rows) {
-      row.calCtrl.removeListener(_updateTotalsAndValidate);
-      row.proCtrl.removeListener(_updateTotalsAndValidate);
-      row.carbCtrl.removeListener(_updateTotalsAndValidate);
-      row.fatCtrl.removeListener(_updateTotalsAndValidate);
-      row.fibCtrl.removeListener(_updateTotalsAndValidate);
+      row.calCtrl.removeListener(_onMacroFieldChanged);
+      row.proCtrl.removeListener(_onMacroFieldChanged);
+      row.carbCtrl.removeListener(_onMacroFieldChanged);
+      row.fatCtrl.removeListener(_onMacroFieldChanged);
+      row.fibCtrl.removeListener(_onMacroFieldChanged);
 
       row.calCtrl.dispose();
       row.proCtrl.dispose();
@@ -275,13 +333,15 @@ class _AddMealScreenState extends State<AddMealScreen>
         source: source,
         isSaved: stored != null,
         originalCalories: cal,
-      );
+      )
+        ..micros = item.micros
+        ..microsKcal = cal;
 
-      row.calCtrl.addListener(_updateTotalsAndValidate);
-      row.proCtrl.addListener(_updateTotalsAndValidate);
-      row.carbCtrl.addListener(_updateTotalsAndValidate);
-      row.fatCtrl.addListener(_updateTotalsAndValidate);
-      row.fibCtrl.addListener(_updateTotalsAndValidate);
+      row.calCtrl.addListener(_onMacroFieldChanged);
+      row.proCtrl.addListener(_onMacroFieldChanged);
+      row.carbCtrl.addListener(_onMacroFieldChanged);
+      row.fatCtrl.addListener(_onMacroFieldChanged);
+      row.fibCtrl.addListener(_onMacroFieldChanged);
 
       row.focusNode.addListener(() {
         if (!row.focusNode.hasFocus) {
@@ -303,7 +363,7 @@ class _AddMealScreenState extends State<AddMealScreen>
   String _constructItemString(ParsedFoodItem parsed) {
     if (parsed.quantity == 1.0 && parsed.unit == 'serving') return parsed.normalizedName;
     if (parsed.quantity == 1.0) return '${parsed.unit} ${parsed.normalizedName}'.trim();
-    String formattedQty = parsed.quantity == parsed.quantity.toInt() ? '${parsed.quantity.toInt()}' : '${parsed.quantity}';
+    String formattedQty = parsed.quantity == parsed.quantity.toInt() ? '${parsed.quantity.round()}' : '${parsed.quantity}';
     return '$formattedQty ${parsed.unit} ${parsed.normalizedName}'.trim();
   }
 
@@ -320,6 +380,9 @@ class _AddMealScreenState extends State<AddMealScreen>
       setState(() => row.isEstimating = true);
       try {
         final result = await NutritionPipeline.instance.estimateMeal(text);
+        // The screen may have closed, or the row been removed (its
+        // controllers disposed), while the estimate was in flight.
+        if (!mounted || !_rows.contains(row)) return;
         final cal = result.calories.mid;
         final pro = result.protein.mid;
         final carb = result.carbohydrates?.mid ?? 0.0;
@@ -338,10 +401,16 @@ class _AddMealScreenState extends State<AddMealScreen>
         row.isSaved = stored != null;
         row.parsed = p;
         row.originalCalories = cal;
+        row.micros = result.items.isNotEmpty && result.items.every((i) => i.micros != null)
+            ? result.items.fold<Micronutrients>(Micronutrients.empty, (a, i) => a + i.micros!)
+            : null;
+        row.microsKcal = cal;
       } catch (_) {
       } finally {
-        setState(() => row.isEstimating = false);
-        _updateTotalsAndValidate();
+        if (mounted && _rows.contains(row)) {
+          setState(() => row.isEstimating = false);
+          _updateTotalsAndValidate();
+        }
       }
     } else if (p.quantity != row.parsed.quantity && row.parsed.quantity > 0) {
       final scale = p.quantity / row.parsed.quantity;
@@ -358,12 +427,18 @@ class _AddMealScreenState extends State<AddMealScreen>
       row.fibCtrl.text = (oldFib * scale).toStringAsFixed(1);
 
       row.originalCalories = row.originalCalories * scale;
+      row.micros = row.micros?.scaled(scale);
+      row.microsKcal = row.microsKcal * scale;
       row.parsed = p;
       _updateTotalsAndValidate();
     }
   }
 
-  void _updateTotalsAndValidate() {
+  /// Macro field listener. Controllers also notify on cursor / focus moves,
+  /// so this only rebuilds when a total or the warning actually changed.
+  void _onMacroFieldChanged() => _updateTotalsAndValidate(skipIfUnchanged: true);
+
+  void _updateTotalsAndValidate({bool skipIfUnchanged = false}) {
     double calSum = 0;
     double proSum = 0;
     double carbSum = 0;
@@ -378,26 +453,39 @@ class _AddMealScreenState extends State<AddMealScreen>
       fibSum  += double.tryParse(_rows[i].fibCtrl.text) ?? 0;
     }
 
-    if (mounted) {
-      setState(() {
-        _totalCal = calSum;
-        _totalPro = proSum;
-        _totalCarb = carbSum;
-        _totalFat = fatSum;
-        _totalFib = fibSum;
+    final impliedCalories = proSum * 4 + carbSum * 4 + fatSum * 9;
+    final String? warning;
+    if (calSum > 0 && impliedCalories > 0 &&
+        ((impliedCalories - calSum) / calSum).abs() > 0.15) {
+      warning = "The macros don't quite add up to the calories. Worth a quick look.";
+    } else {
+      warning = null;
+    }
+    if (skipIfUnchanged &&
+        calSum == _totalCal &&
+        proSum == _totalPro &&
+        carbSum == _totalCarb &&
+        fatSum == _totalFat &&
+        fibSum == _totalFib &&
+        warning == _validationWarning) {
+      return;
+    }
 
-        final impliedCal = proSum * 4 + carbSum * 4 + fatSum * 9;
-        if (calSum > 0 && impliedCal > 0) {
-          final deviation = ((impliedCal - calSum) / calSum).abs();
-          if (deviation > 0.15) {
-            _validationWarning = "Please check your calories and macros.";
-          } else {
-            _validationWarning = null;
-          }
-        } else {
-          _validationWarning = null;
-        }
-      });
+    if (!mounted) return;
+    void apply() {
+      _totalCal = calSum;
+      _totalPro = proSum;
+      _totalCarb = carbSum;
+      _totalFat = fatSum;
+      _totalFib = fibSum;
+      _validationWarning = warning;
+    }
+    if (skipIfUnchanged) {
+      // Typing in a macro field: only the totals and warning changed.
+      apply();
+      _totalsTick.value++;
+    } else {
+      setState(apply);
     }
   }
 
@@ -428,11 +516,11 @@ class _AddMealScreenState extends State<AddMealScreen>
       originalCalories: 100,
     );
 
-    row.calCtrl.addListener(_updateTotalsAndValidate);
-    row.proCtrl.addListener(_updateTotalsAndValidate);
-    row.carbCtrl.addListener(_updateTotalsAndValidate);
-    row.fatCtrl.addListener(_updateTotalsAndValidate);
-    row.fibCtrl.addListener(_updateTotalsAndValidate);
+    row.calCtrl.addListener(_onMacroFieldChanged);
+    row.proCtrl.addListener(_onMacroFieldChanged);
+    row.carbCtrl.addListener(_onMacroFieldChanged);
+    row.fatCtrl.addListener(_onMacroFieldChanged);
+    row.fibCtrl.addListener(_onMacroFieldChanged);
 
     row.focusNode.addListener(() {
       if (!row.focusNode.hasFocus) {
@@ -448,11 +536,11 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   void _deleteRow(int index) {
     final row = _rows[index];
-    row.calCtrl.removeListener(_updateTotalsAndValidate);
-    row.proCtrl.removeListener(_updateTotalsAndValidate);
-    row.carbCtrl.removeListener(_updateTotalsAndValidate);
-    row.fatCtrl.removeListener(_updateTotalsAndValidate);
-    row.fibCtrl.removeListener(_updateTotalsAndValidate);
+    row.calCtrl.removeListener(_onMacroFieldChanged);
+    row.proCtrl.removeListener(_onMacroFieldChanged);
+    row.carbCtrl.removeListener(_onMacroFieldChanged);
+    row.fatCtrl.removeListener(_onMacroFieldChanged);
+    row.fibCtrl.removeListener(_onMacroFieldChanged);
 
     row.calCtrl.dispose();
     row.proCtrl.dispose();
@@ -471,10 +559,21 @@ class _AddMealScreenState extends State<AddMealScreen>
   Future<void> _calculate() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _loading) return;
+    // Just a number ("3") isn't a meal: say what's missing instead of
+    // returning a confident 0 kcal.
+    if (!RegExp(r'[A-Za-zऀ-ॿ]').hasMatch(text)) {
+      setState(() {
+        _result = null;
+        _error = 'Add what you ate too, like "3 roti" or "1 katori dal".';
+      });
+      return;
+    }
 
     _focusNode.unfocus();
-    HapticFeedback.lightImpact();
+    // Haptic for the commit is fired by the tap surface (KButton / keyboard
+    // submit), so this method stays silent and fires exactly once per action.
     setState(() { _loading = true; _result = null; _error = null; });
+    _syncPulse();
     try {
       final result = await NutritionPipeline.instance.estimateMeal(text);
       if (mounted) {
@@ -483,10 +582,185 @@ class _AddMealScreenState extends State<AddMealScreen>
           _loading = false;
           _initRowsFromResult(result);
         });
+        _syncPulse();
       }
     } catch (e) {
-      if (mounted) setState(() { _loading = false; _error = e.toString(); });
+      if (mounted) {
+        debugPrint('[AddMeal] estimate failed: $e');
+        setState(() {
+          _loading = false;
+          _error = "Couldn't estimate that just now. Check your connection and try again.";
+        });
+        _syncPulse();
+      }
     }
+  }
+
+  /// Scan a packaged product into this meal. The scanner returns the exact
+  /// portion (e.g. 40 g) as label figures; they land in the editable rows and
+  /// save through the normal path. An empty editor takes the product as the
+  /// meal; an existing meal gets it as one more row.
+  Future<void> _scanBarcode() async {
+    if (_loading || _saving) return;
+    _focusNode.unfocus();
+    final outcome = await openBarcodeFlow(
+      context,
+      date: widget.date,
+      section: widget.section,
+      mode: BarcodeFlowMode.fill,
+    );
+    if (outcome == null || !mounted) return;
+    final scanned = outcome.result;
+    final scannedText = scanned.canonicalMeal;
+
+    if (_result == null || _rows.isEmpty) {
+      setState(() {
+        _result = scanned;
+        _controller.text = scannedText;
+        _controller.selection = TextSelection.collapsed(offset: scannedText.length);
+        _savedMealMatches = const [];
+        _error = null;
+        _initRowsFromResult(scanned);
+      });
+      return;
+    }
+
+    final existing = _rows.toList(growable: false);
+    final carried = <NutritionItem>[
+      for (final row in existing)
+        NutritionItem(
+          name: row.parsed.normalizedName,
+          quantity: row.parsed.quantity,
+          unit: row.parsed.unit,
+          estimated: false,
+          mode: EstimationMode.directQuantity,
+          calories: _exact(row.calCtrl.text),
+          protein: _exact(row.proCtrl.text),
+          carbohydrates: _exact(row.carbCtrl.text),
+          fat: _exact(row.fatCtrl.text),
+          fiber: _exact(row.fibCtrl.text),
+          micros: _microsForRow(row, double.tryParse(row.calCtrl.text) ?? 0),
+        ),
+      ...scanned.items,
+    ];
+    final current = _controller.text.trim();
+    final text = current.isEmpty ? scannedText : '$current + $scannedText';
+    NutrientRange sum(NutrientRange? Function(NutritionItem) f) {
+      var v = 0.0;
+      for (final i in carried) {
+        v += f(i)?.mid ?? 0;
+      }
+      return NutrientRange(min: v, max: v);
+    }
+
+    final merged = NutritionResult(
+      canonicalMeal: text,
+      items: carried,
+      calories: sum((i) => i.calories),
+      protein: sum((i) => i.protein),
+      carbohydrates: sum((i) => i.carbohydrates),
+      fat: sum((i) => i.fat),
+      fiber: sum((i) => i.fiber),
+      sugar: sum((i) => i.sugar),
+      confidence: _result!.confidence,
+      warnings: const [],
+      source: _result!.source,
+      createdAt: _result!.createdAt,
+    );
+    setState(() {
+      _result = merged;
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+      _savedMealMatches = const [];
+      _initRowsFromResult(_result!);
+    });
+  }
+
+  /// Adds a forgotten extra (ghee, oil, sugar) as one more row, keeping any
+  /// numbers already edited in the rows above.
+  void _addExtra(HiddenExtra extra) {
+    final base = _result;
+    if (base == null) return;
+    KHaptics.commit();
+    NutrientRange n(double v) => NutrientRange(min: v, max: v);
+    final carried = <NutritionItem>[
+      for (final row in _rows)
+        NutritionItem(
+          name: row.parsed.normalizedName,
+          quantity: row.parsed.quantity,
+          unit: row.parsed.unit,
+          estimated: false,
+          mode: EstimationMode.directQuantity,
+          calories: _exact(row.calCtrl.text),
+          protein: _exact(row.proCtrl.text),
+          carbohydrates: _exact(row.carbCtrl.text),
+          fat: _exact(row.fatCtrl.text),
+          fiber: _exact(row.fibCtrl.text),
+        ),
+      NutritionItem(
+        name: extra.label.replaceFirst(RegExp(r'^[\d.]+\s*(tsp|tbsp)\s*'), ''),
+        quantity: 1,
+        unit: extra.label.contains('tbsp') ? 'tbsp' : 'tsp',
+        estimated: false,
+        mode: EstimationMode.directQuantity,
+        calories: n(extra.kcal),
+        protein: n(extra.protein),
+        carbohydrates: n(extra.carbs),
+        fat: n(extra.fat),
+        fiber: n(0),
+      ),
+    ];
+    NutrientRange sum(NutrientRange? Function(NutritionItem) f) {
+      var v = 0.0;
+      for (final i in carried) {
+        v += f(i)?.mid ?? 0;
+      }
+      return NutrientRange(min: v, max: v);
+    }
+
+    final text = '${_controller.text.trim()}, ${extra.label}';
+    setState(() {
+      _result = NutritionResult(
+        canonicalMeal: text,
+        items: carried,
+        calories: sum((i) => i.calories),
+        protein: sum((i) => i.protein),
+        carbohydrates: sum((i) => i.carbohydrates),
+        fat: sum((i) => i.fat),
+        fiber: sum((i) => i.fiber),
+        confidence: base.confidence,
+        warnings: const [],
+        source: base.source,
+        createdAt: base.createdAt,
+      );
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: text.length);
+      _savedMealMatches = const [];
+      _initRowsFromResult(_result!);
+    });
+  }
+
+  static NutrientRange _exact(String text) {
+    final v = double.tryParse(text.trim()) ?? 0;
+    return NutrientRange(min: v, max: v);
+  }
+
+  Future<void> _onSavePressed() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _saveMeal();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// The row's micros at [kcal]: what it carried (pack label or estimate),
+  /// scaled to the saved calories, with the food library filling any gaps.
+  Micronutrients? _microsForRow(_IngredientRow row, double kcal) {
+    var own = row.micros;
+    if (own != null && row.microsKcal > 0 && kcal >= 0) own = own.scaled(kcal / row.microsKcal);
+    return MicronutrientLibrary.instance.enrich(row.parsed.normalizedName, kcal, own, preferExisting: true);
   }
 
   Future<void> _saveMeal() async {
@@ -518,6 +792,7 @@ class _AddMealScreenState extends State<AddMealScreen>
         carbohydrates: NutrientRange(min: carbVal, max: carbVal),
         fat: NutrientRange(min: fatVal, max: fatVal),
         fiber: NutrientRange(min: fibVal, max: fibVal),
+        micros: _microsForRow(row, cVal),
       ));
       
       totalCal += cVal;
@@ -582,11 +857,13 @@ class _AddMealScreenState extends State<AddMealScreen>
       userCorrected: true,
     );
     
-    debugPrint('''
+    if (kDebugMode) {
+      debugPrint('''
 =================== REAL APP RUNTIME AUDIT TRACE (AFTER CALCULATE / SAVE) ===================
   9. Detail sheet values after Calc: Calories=${finalResult.calories.mid}, Pro=${finalResult.protein.mid}, Carbs=${finalResult.carbohydrates?.mid}, Fat=${finalResult.fat?.mid}, Fiber=${finalResult.fiber?.mid}, Score=${finalResult.mealQualityScore}
 =============================================================================================
 ''');
+    }
     
     final isEditing = widget.initialEntry != null;
     final entry = MealEntry(
@@ -600,106 +877,152 @@ class _AddMealScreenState extends State<AddMealScreen>
       editCount: (widget.initialEntry?.editCount ?? 0) + (isEditing ? 1 : 0),
       finalSavedInput: text,
       userCorrected: true,
+      // An edit keeps the entry's identity and is stamped so it wins the
+      // cross-device merge over older copies.
+      id: widget.initialEntry?.id,
+      updatedAt: isEditing ? DateTime.now().toUtc() : null,
     );
-    
+
     if (isEditing) {
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
+      MealTombstones.instance.recordReplace(dateKey(widget.date), widget.initialEntry!, entry);
     } else {
       logFor(widget.date).add(widget.section, entry);
     }
     
-    await MealMemory.instance.store(
+    // The in-memory log above is the source of truth, so the screen closes
+    // right away. Both writes below update memory synchronously and then
+    // persist through coalesced writers that are flushed on app pause/logout.
+    MealMemory.instance.store(
       entry.rawInput,
       entry.result,
       finalSavedInput: entry.finalSavedInput,
       canonicalMeal: entry.result.canonicalMeal,
-    );
-    
-    await PersistenceService.saveDay(widget.date);
+    ).ignore();
+
+    PersistenceService.saveDay(widget.date).ignore();
     KynoContextService.instance.invalidate();
     if (!mounted) return;
     Navigator.of(context).pop(entry);
   }
 
+
   Future<void> _deleteEntry() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          'Delete Entry',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        backgroundColor: KColor.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: KRadius.xl,
+          side: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
         ),
-        content: const Text(
-          'This meal entry will be permanently removed from your log.',
-          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14, height: 1.4),
+        title: Text('Delete this meal?', style: KText.h2),
+        content: Text(
+          "It'll be removed from your log for good. This can't be undone.",
+          style: KText.body.copyWith(color: KColor.textSecondary, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Color(0xFF6B7280)),
+            style: TextButton.styleFrom(
+              foregroundColor: KColor.textSecondary,
+              minimumSize: const Size(64, 48),
             ),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
-            child: const Text(
-              'Delete',
-              style: TextStyle(fontWeight: FontWeight.w700),
+            style: TextButton.styleFrom(
+              foregroundColor: KColor.danger,
+              minimumSize: const Size(64, 48),
+              textStyle: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700),
             ),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
     if (confirmed == true && mounted) {
-      HapticFeedback.heavyImpact();
+      KHaptics.commit();
       KynoContextService.instance.invalidate();
       Navigator.of(context).pop(const DeleteSentinel());
     }
   }
 
-  Widget _buildField(String label, TextEditingController ctrl, Color color, {bool isProminent = false}) {
+  // ─── Small building blocks ──────────────────────────────────────────────────
+
+  Widget _buildField(
+    String label,
+    TextEditingController ctrl,
+    Color color, {
+    bool isProminent = false,
+  }) {
+    final radius = KRadius.sm;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 8.5,
-            fontWeight: isProminent ? FontWeight.w800 : FontWeight.w600,
-            color: color.withOpacity(isProminent ? 0.95 : 0.7),
-            letterSpacing: 0.5,
-          ),
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                style: KText.caption.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isProminent ? KColor.textSecondary : KColor.textMuted,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 13.5,
-            fontWeight: isProminent ? FontWeight.bold : FontWeight.normal,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+          ],
+          cursorColor: KColor.ink,
+          style: KText.numSmall.copyWith(
+            color: KColor.textPrimary,
+            fontSize: isProminent ? 17 : 15,
+            fontWeight: isProminent ? FontWeight.w700 : FontWeight.w600,
           ),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF0F0F14),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            fillColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 10,
+            ),
             isDense: true,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(isProminent ? 0.25 : 0.15)),
+              borderRadius: radius,
+              borderSide: BorderSide(
+                color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
+              ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(isProminent ? 0.2 : 0.1)),
+              borderRadius: radius,
+              borderSide: BorderSide(
+                color: isProminent
+                    ? color.withValues(alpha: KColor.isDark ? 0.32 : 0.36)
+                    : (KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+              ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color, width: isProminent ? 1.5 : 1.0),
+              borderRadius: radius,
+              borderSide: BorderSide(
+                color: KColor.ink,
+                width: 1.4,
+              ),
             ),
           ),
         ),
@@ -709,76 +1032,44 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   Widget _buildRoleBadge(FoodRole role) {
     final (label, color) = switch (role) {
-      FoodRole.primary       => ('Base/Carb', const Color(0xFF60A5FA)),
-      FoodRole.protein       => ('Protein', const Color(0xFF52B788)),
-      FoodRole.accompaniment => ('Side/Curry', const Color(0xFFFBBF24)),
-      FoodRole.addOn         => ('Add-on', const Color(0xFFA78BFA)),
-      FoodRole.completeMeal  => ('Single Unit', const Color(0xFF9CA3AF)),
+      FoodRole.primary => ('Base / carb', KColor.blue),
+      FoodRole.protein => ('Protein', KColor.green),
+      FoodRole.accompaniment => ('Side / curry', KColor.saffron),
+      FoodRole.addOn => ('Add-on', KColor.violet),
+      FoodRole.completeMeal => ('Single unit', KColor.textMuted),
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
+    return _Tag(label: label, color: color);
   }
 
   Widget _buildSourceBadge(OverrideSource source) {
     final (label, color) = switch (source) {
-      OverrideSource.userCorrected => ('✏️ Saved', const Color(0xFF60A5FA)),
+      OverrideSource.userCorrected => ('Your numbers', KColor.blue),
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
+    return _Tag(label: label, color: color);
   }
-
 
   Widget _buildMealTypeBadge(SavedMealType type) {
     final (label, col) = switch (type) {
-      SavedMealType.recurringMeal => ('RECURRING', const Color(0xFF10B981)),
-      SavedMealType.savedMeal => ('SAVED', const Color(0xFF60A5FA)),
-      SavedMealType.rememberedFood => ('REMEMBERED', const Color(0xFFF59E0B)),
-      SavedMealType.globalDefault => ('DEFAULT', const Color(0xFF34D399)),
-      SavedMealType.oneOffMeal => ('RECENT', const Color(0xFFA78BFA)),
+      SavedMealType.recurringMeal => ('Recurring', KColor.textSecondary),
+      SavedMealType.savedMeal => ('Saved', KColor.textSecondary),
+      SavedMealType.rememberedFood => ('Remembered', KColor.textSecondary),
+      SavedMealType.globalDefault => ('Default', KColor.textMuted),
+      SavedMealType.oneOffMeal => ('Recent', KColor.textMuted),
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: col.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: col.withValues(alpha: 0.35), width: 0.5),
+        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
+        borderRadius: const BorderRadius.all(Radius.circular(6)),
       ),
       child: Text(
         label,
-        style: TextStyle(
+        style: KText.label.copyWith(
           color: col,
-          fontSize: 8,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.5,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0,
         ),
       ),
     );
@@ -788,16 +1079,14 @@ class _AddMealScreenState extends State<AddMealScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'SAVED MEALS',
-          style: TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w800,
-            color: KColor.textMuted,
-            letterSpacing: 0.8,
-          ),
+        Row(
+          children: [
+            KIcon(Icons.bookmark_border, size: 16, color: KColor.textMuted),
+            const SizedBox(width: 6),
+            Text('Saved meals', style: KText.h3.copyWith(fontSize: 14, color: KColor.textSecondary)),
+          ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: KSpacing.sm),
         ..._savedMealMatches.map((match) {
           final calStr = match.calories.toStringAsFixed(0);
           final proVal = match.protein;
@@ -810,92 +1099,91 @@ class _AddMealScreenState extends State<AddMealScreen>
               : '';
 
           return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            margin: const EdgeInsets.only(bottom: KSpacing.sm),
+            padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E1E2C),
-              borderRadius: BorderRadius.circular(14),
+              color: KColor.card,
+              borderRadius: KRadius.md,
               border: Border.all(
-                color: KColor.blue.withValues(alpha: 0.25),
+                color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
                 width: 1,
               ),
             ),
             child: Row(
               children: [
-                Text(
-                  match.emoji,
-                  style: const TextStyle(fontSize: 22),
-                ),
-                const SizedBox(width: 12),
+                KIcon(KIcons.food(match.title), size: KIcons.lg),
+                const SizedBox(width: KSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              match.title,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              softWrap: true,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          _buildMealTypeBadge(match.mealType),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
                       Text(
-                        '$calStr kcal • ${proStr}g protein$carbStr',
-                        style: const TextStyle(
-                          color: KColor.textSecondary,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
+                        match.title,
+                        style: KText.h3.copyWith(
+                          fontSize: 15,
+                          color: KColor.textPrimary,
                         ),
+                        softWrap: true,
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _buildMealTypeBadge(match.mealType),
+                          KDotStat(calStr, 'kcal', color: KColor.ember),
+                          KDotStat(proStr, 'g protein', color: KColor.green),
+                          if (carbStr.isNotEmpty)
+                            KDotStat(amount(match.carbohydrates), 'g carbs', color: KColor.blue),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                InkWell(
+                const SizedBox(width: 4),
+                Pressable(
                   onTap: () => _useSavedMeal(match),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
+                  semanticLabel: 'Use saved meal ${match.title}',
+                  borderRadius: KRadius.pill,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
                     ),
-                    decoration: BoxDecoration(
-                      color: KColor.green.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: KColor.green.withValues(alpha: 0.4),
+                    child: Center(
+                      widthFactor: 1,
+                      heightFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: KColor.ink,
+                          borderRadius: KRadius.pill,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Use',
+                              style: KText.label.copyWith(
+                                color: KColor.onInk,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 14,
+                              color: KColor.onInk,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'USE',
-                          style: TextStyle(
-                            color: KColor.green,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        SizedBox(width: 3),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 13,
-                          color: KColor.green,
-                        ),
-                      ],
                     ),
                   ),
                 ),
@@ -907,363 +1195,874 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
   }
 
+  // ─── Composer ───────────────────────────────────────────────────────────────
+
+  Widget _buildComposer() {
+    final focused = _composerFocused;
+    return Stack(
+      children: [
+        AnimatedContainer(
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
+          decoration: BoxDecoration(
+            color: focused ? KColor.cardHigh : KColor.card,
+            borderRadius: KRadius.lg,
+            border: Border.all(
+              color: focused
+                  ? KColor.ink
+                  : (KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+              width: focused ? 1.5 : 1,
+            ),
+            boxShadow: KShadow.card,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: KSpacing.lg,
+            vertical: 4,
+          ),
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            style: KText.body.copyWith(fontSize: 17, color: KColor.textPrimary),
+            cursorColor: KColor.ink,
+            minLines: 2,
+            maxLines: 5,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) {
+              if (_controller.text.trim().isNotEmpty && !_loading) {
+                KHaptics.commit();
+              }
+              _calculate();
+            },
+            decoration: InputDecoration(
+              hintText: 'e.g. 2 roti, a katori of dal, some salad',
+              hintStyle: KText.body.copyWith(color: KColor.textDisabled),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+        // Kyno pulse — only visible while estimating. The controller repeats
+        // only when ambient motion is allowed (see _syncPulse).
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
+              child: AnimatedOpacity(
+                opacity: _loading ? 1 : 0,
+                duration: KMotion.of(context, KMotion.quick),
+                child: FadeTransition(
+                  opacity: _pulse,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: KRadius.lg,
+                      border: Border.all(
+                        color: KColor.violet.withValues(alpha: 0.8),
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Estimate states ────────────────────────────────────────────────────────
+
+  Widget _buildStateArea() {
+    final Widget child;
+    if (_loading) {
+      child = const _EstimateSkeleton(key: ValueKey('loading'));
+    } else if (_result != null) {
+      child = KeyedSubtree(
+        key: const ValueKey('result'),
+        // Live totals repaint on their own while macro fields are typed in.
+        child: ValueListenableBuilder<int>(
+          valueListenable: _totalsTick,
+          builder: (context, tick, child) => _buildEstimateSummary(),
+        ),
+      );
+    } else if (_error != null) {
+      child = Padding(
+        key: const ValueKey('error'),
+        padding: const EdgeInsets.only(bottom: KSpacing.xxl),
+        child: KErrorCard(
+          title: "Couldn't estimate that",
+          message: 'Check your connection and try again, or reword the meal a little.',
+          onRetry: _calculate,
+        ),
+      );
+    } else {
+      child = const _ComposerHint(key: ValueKey('idle'));
+    }
+    return AnimatedSwitcher(
+      duration: KMotion.of(context, KMotion.standard),
+      switchInCurve: KMotion.decelerate,
+      switchOutCurve: KMotion.accelerate,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.topCenter,
+        children: [...previous, ?current],
+      ),
+      child: child,
+    );
+  }
+
+  /// The estimate preview: calories → protein → confidence & macro split,
+  /// revealed in one stagger. Values are the live totals (single numbers —
+  /// no fabricated ranges).
+  Widget _buildEstimateSummary() {
+    final r = _result!;
+    final confirmed = r.userCorrected || r.macrosLockedByUser;
+    final confColor = confirmed
+        ? KColor.blue
+        : (r.confidence >= 0.86
+              ? KColor.green
+              : (r.confidence >= 0.62 ? KColor.saffron : KColor.ember));
+    final confLabel = confirmed ? 'Your confirmed macros' : r.confidenceLabel;
+    final confIcon = confirmed
+        ? Icons.lock_rounded
+        : (r.confidence >= 0.86 ? Icons.verified_rounded : Icons.tune_rounded);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: KReveal(
+                  index: 0,
+                  child: _HeroStat(
+                    label: 'Calories',
+                    icon: KIcons.calories,
+                    value: _totalCal,
+                    decimals: 0,
+                    unit: 'kcal',
+                    colors: KGradient.fuel,
+                  ),
+                ),
+              ),
+              const SizedBox(width: KSpacing.md),
+              Expanded(
+                child: KReveal(
+                  index: 1,
+                  child: _HeroStat(
+                    label: 'Protein',
+                    icon: KIcons.protein,
+                    value: _totalPro,
+                    decimals: 1,
+                    unit: 'g',
+                    colors: KGradient.protein,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: KSpacing.md),
+          KReveal(
+            index: 2,
+            child: Wrap(
+              spacing: KSpacing.sm,
+              runSpacing: KSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                KChip(confLabel, color: confColor, icon: confIcon),
+                _MiniMacro(
+                  label: 'Carbs',
+                  value: _totalCarb,
+                  color: KColor.blue,
+                ),
+                _MiniMacro(
+                  label: 'Fat',
+                  value: _totalFat,
+                  color: KColor.saffron,
+                ),
+                _MiniMacro(
+                  label: 'Fiber',
+                  value: _totalFib,
+                  color: KColor.violet,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "Anything on top?": one-tap extras people forget (ghee on roti, sugar
+  /// in chai), shown under the ingredients.
+  Widget _buildExtras() {
+    final extras = HiddenExtras.suggest(_controller.text);
+    if (extras.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Anything on top?',
+            style: KText.caption.copyWith(color: KColor.textMuted, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: KSpacing.xs),
+          Wrap(
+            spacing: KSpacing.sm,
+            runSpacing: KSpacing.sm,
+            children: [
+              for (final e in extras)
+                ActionChip(
+                  avatar: Icon(Icons.add_rounded, size: 16, color: KColor.fuel),
+                  label: Text('${e.label} · ${e.kcal.round()} kcal', style: KText.caption.copyWith(color: KColor.textPrimary)),
+                  side: BorderSide(color: KColor.fuel.withValues(alpha: 0.3)),
+                  backgroundColor: KColor.tint(KColor.fuel, dark: 0.06, light: 0.04),
+                  onPressed: () => _addExtra(e),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRememberToggle() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(KSpacing.lg, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: KColor.card.withValues(alpha: KColor.isDark ? 0.7 : 1),
+        borderRadius: KRadius.md,
+        border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.psychology_alt_rounded,
+            size: 16,
+            color: KColor.textSecondary,
+          ),
+          const SizedBox(width: KSpacing.sm),
+          Expanded(
+            child: Text(
+              'Remember my numbers for next time',
+              style: KText.bodyMedium.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: KColor.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: KSpacing.sm),
+          Switch(
+            value: _rememberEdits,
+            onChanged: (v) {
+              KHaptics.select();
+              setState(() => _rememberEdits = v);
+            },
+            activeThumbColor: KColor.onInk,
+            activeTrackColor: KColor.ink,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIngredientsHeader() {
+    return KReveal(
+      index: 3,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text('Ingredients', style: KText.h2),
+                ),
+              ),
+              const SizedBox(width: KSpacing.sm),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05),
+                    borderRadius: KRadius.pill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.edit_rounded,
+                        size: 13,
+                        color: KColor.textSecondary,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Tap any number to adjust',
+                          style: KText.label.copyWith(
+                            fontSize: 12,
+                            letterSpacing: 0,
+                            color: KColor.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: KSpacing.md),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIngredientCard(int i) {
+    final row = _rows[i];
+    return KReveal(
+      key: ObjectKey(row),
+      index: 4 + i,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: KSpacing.lg),
+        padding: const EdgeInsets.fromLTRB(KSpacing.lg, 10, 6, 10),
+        decoration: BoxDecoration(
+          color: KColor.card,
+          borderRadius: KRadius.lg,
+          border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+          boxShadow: KShadow.card,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: row.textCtrl,
+                    focusNode: row.focusNode,
+                    cursorColor: KColor.ink,
+                    style: KText.h3.copyWith(
+                      fontSize: 15,
+                      color: KColor.textPrimary,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. 2 roti',
+                      hintStyle: KText.body.copyWith(
+                        color: KColor.textDisabled,
+                      ),
+                      isDense: true,
+                      filled: false,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      suffixIcon: row.isEstimating
+                          ? Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: KSpinner(
+                                size: 14,
+                                color: KColor.textSecondary,
+                                semanticsLabel: 'Re-estimating this one',
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    color: KColor.danger,
+                    size: 20,
+                  ),
+                  tooltip: 'Remove ingredient',
+                  onPressed: () => _deleteRow(i),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _buildRoleBadge(row.role),
+                  row.isSaved
+                      ? _buildSourceBadge(row.source)
+                      : _Tag(
+                          label: "Kyno's estimate",
+                          color: KColor.textMuted,
+                          filled: true,
+                        ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Divider(
+                color: KColor.isDark ? KColor.fg.withValues(alpha: 0.07) : KColor.divider,
+                height: 22,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _buildField(
+                          'Calories (kcal)',
+                          row.calCtrl,
+                          KColor.calorie,
+                          isProminent: true,
+                        ),
+                      ),
+                      const SizedBox(width: KSpacing.md),
+                      Expanded(
+                        child: _buildField(
+                          'Protein (g)',
+                          row.proCtrl,
+                          KColor.protein,
+                          isProminent: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: KSpacing.md),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _buildField(
+                          'Carbs (g)',
+                          row.carbCtrl,
+                          KColor.blue,
+                        ),
+                      ),
+                      const SizedBox(width: KSpacing.sm),
+                      Expanded(
+                        child: _buildField(
+                          'Fat (g)',
+                          row.fatCtrl,
+                          KColor.amber,
+                        ),
+                      ),
+                      const SizedBox(width: KSpacing.sm),
+                      Expanded(
+                        child: _buildField(
+                          'Fiber (g)',
+                          row.fibCtrl,
+                          KColor.violet,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: () => _resetItemToOriginal(i),
+                icon: const Icon(Icons.undo_rounded, size: 14),
+                label: const Text('Reset to estimate'),
+                style: TextButton.styleFrom(
+                  foregroundColor: KColor.textSecondary,
+                  textStyle: KText.caption.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(48, 48),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssumptions() {
+    final warnings = _result?.userFacingWarnings ?? const <String>[];
+    if (warnings.isEmpty) return const SizedBox.shrink();
+    return KReveal(
+      index: 4 + _rows.length,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: KSpacing.lg),
+        padding: const EdgeInsets.all(KSpacing.lg),
+        decoration: BoxDecoration(
+          color: KColor.saffron.withValues(alpha: KColor.isDark ? 0.06 : 0.07),
+          borderRadius: KRadius.lg,
+          border: Border.all(color: KColor.saffron.withValues(alpha: KColor.isDark ? 0.22 : 0.28)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'How Kyno estimated this',
+              style: KText.h3.copyWith(fontSize: 14, color: KColor.saffron),
+            ),
+            const SizedBox(height: KSpacing.sm),
+            for (final w in warnings)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.only(top: 3),
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        color: KColor.saffron,
+                        size: 13,
+                      ),
+                    ),
+                    const SizedBox(width: KSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        w,
+                        style: KText.caption.copyWith(
+                          fontSize: 13,
+                          color: KColor.textSecondary,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    final isEditing = widget.initialEntry != null;
+    return KReveal(
+      rise: 24,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          KSpacing.p,
+          KSpacing.md,
+          KSpacing.p,
+          KSpacing.md + MediaQuery.paddingOf(context).bottom,
+        ),
+        decoration: BoxDecoration(
+          color: KColor.surface.withValues(alpha: 0.96),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border(
+            top: BorderSide(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Warning + running total repaint on their own while macro
+            // fields are typed in; the rest of the bar stays as built.
+            ValueListenableBuilder<int>(
+              valueListenable: _totalsTick,
+              builder: (context, tick, child) => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                    AnimatedSize(
+                      duration: KMotion.of(context, KMotion.standard),
+                      curve: KMotion.emphasizedCurve,
+                      alignment: Alignment.topCenter,
+                      child: _validationWarning == null
+                          ? const SizedBox(width: double.infinity)
+                          : Semantics(
+                              liveRegion: true,
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                margin: const EdgeInsets.only(bottom: KSpacing.md),
+                                decoration: BoxDecoration(
+                                  color: KColor.warning.withValues(alpha: 0.1),
+                                  borderRadius: KRadius.sm,
+                                  border: Border.all(
+                                    color: KColor.warning.withValues(alpha: 0.4),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: KColor.warning,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: KSpacing.sm),
+                                    Expanded(
+                                      child: Text(
+                                        _validationWarning!,
+                                        style: KText.caption.copyWith(
+                                          fontSize: 13,
+                                          color: KColor.warning,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                    // Running total — compact, tabular, always visible while editing rows.
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: KSpacing.md),
+                      child: Wrap(
+                        spacing: KSpacing.lg,
+                        runSpacing: 2,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            'Total',
+                            style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(color: KColor.calorie, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  '${_totalCal.toStringAsFixed(0)} kcal',
+                                  style: KText.numSmall.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(color: KColor.protein, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  '${_totalPro.toStringAsFixed(1)}g protein',
+                                  style: KText.numSmall.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            KButton(
+              label: isEditing ? 'Save changes' : 'Log meal',
+              icon: isEditing ? Icons.check_rounded : Icons.add_task_rounded,
+              loading: _saving,
+              onTap: _onSavePressed,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialEntry != null;
-    return Scaffold(
-      backgroundColor: const Color(0xFF13131F),
+    return KPage(
+      tone: KTone.fuel,
+      intensity: 0.8,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF13131F),
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.close_rounded, color: Colors.white),
+          icon: Icon(Icons.close_rounded, color: KColor.textPrimary),
+          tooltip: 'Close',
           onPressed: () => Navigator.of(context).pop(null),
         ),
         title: Text(
           !isEditing
               ? 'Add to ${widget.section.displayName}'
               : 'Edit ${widget.section.displayName}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-          ),
+          style: KText.h2,
         ),
         centerTitle: false,
         actions: [
           if (isEditing)
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.delete_outline_rounded,
-                color: Color(0xFFEF4444),
+                color: KColor.danger,
               ),
-              tooltip: 'Delete entry',
+              tooltip: 'Delete meal',
               onPressed: _deleteEntry,
             ),
         ],
       ),
       body: SafeArea(
+        bottom: _result == null,
         child: CustomScrollView(
+          // Keep the (few) ingredient editors mounted when scrolled away so
+          // focus-loss re-estimation and live totals never lose a row.
+          cacheExtent: 1600,
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                padding: const EdgeInsets.fromLTRB(
+                  KSpacing.p,
+                  4,
+                  KSpacing.p,
+                  0,
+                ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'MEAL NAME',
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w800,
-                        color: KColor.textMuted,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    AnimatedBuilder(
-                      animation: _pulse,
-                      builder: (context, child) {
-                        final borderColor = _loading
-                            ? Color.lerp(
-                                const Color(0xFF2E2E3E),
-                                const Color(0xFF52B788),
-                                _pulse.value,
-                              )!
-                            : const Color(0xFF2E2E3E);
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E2C),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: borderColor),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4),
-                          child: child,
-                        );
-                      },
-                      child: TextField(
-                        controller:      _controller,
-                        focusNode:       _focusNode,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 15),
-                        minLines: 2,
-                        maxLines: 5,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _calculate(),
-                        decoration: InputDecoration(
-                          hintText:
-                              '${widget.section.emoji}  Describe your meal…',
-                          hintStyle: const TextStyle(
-                              color: Color(0xFF4B5563), fontSize: 14),
-                          border:        InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled:        false,
+                    // Wraps under the label when large text leaves no room.
+                    // Label and scan pill share a line; under large text the
+                    // pill drops below, left-aligned.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('What did you eat?', style: KText.h3.copyWith(color: KColor.textSecondary)),
                         ),
-                      ),
-                    ),
-                    if (_savedMealMatches.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _buildSavedMealsAutocompleteSection(),
-                    ],
-                    const SizedBox(height: 10),
-
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _loading ? null : _calculate,
-                        child: _loading
-                            ? const SizedBox(
-                                height: 20, width: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    color: Colors.white),
-                              )
-                            : const Text('Calculate'),
-                      ),
-                    ),
-
-                    if (_error != null) ...[
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          const Icon(Icons.warning_amber_rounded,
-                              size: 14, color: Color(0xFFFFB347)),
-                          const SizedBox(width: 6),
-                          const Expanded(
-                            child: Text(
-                              'Could not estimate meal. Using local data.',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFFFFB347)),
-                            ),
+                        const SizedBox(width: KSpacing.sm),
+                        // Large text shrinks the pill instead of overflowing.
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: _ScanPill(onTap: _scanBarcode),
                           ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: KSpacing.md),
+                    _buildComposer(),
+                    // Layout lands instantly (matches are tappable on the very
+                    // next frame); only opacity/offset animate.
+                    AnimatedSwitcher(
+                      duration: KMotion.of(context, KMotion.standard),
+                      switchInCurve: KMotion.decelerate,
+                      switchOutCurve: KMotion.accelerate,
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.topCenter,
+                        children: [
+                          for (final p in previous) IgnorePointer(child: p),
+                          ?current,
                         ],
                       ),
-                    ],
-                    const SizedBox(height: 24),
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: SlideTransition(
+                          position: Tween(begin: const Offset(0, -0.04), end: Offset.zero)
+                              .animate(anim),
+                          child: child,
+                        ),
+                      ),
+                      child: _savedMealMatches.isNotEmpty
+                          ? Padding(
+                              key: const ValueKey('saved-matches'),
+                              padding: const EdgeInsets.only(top: KSpacing.md),
+                              child: _buildSavedMealsAutocompleteSection(),
+                            )
+                          : const SizedBox(key: ValueKey('no-matches'), width: double.infinity),
+                    ),
+                    const SizedBox(height: KSpacing.md),
+                    KButton(
+                      label: _result == null ? 'Estimate macros' : 'Re-estimate',
+                      loading: _loading,
+                      // Once a preview exists, re-calculating is secondary to saving.
+                      outlined: _result != null,
+                      onTap: _loading ? null : _calculate,
+                    ),
+                    const SizedBox(height: KSpacing.xl),
+                    _buildStateArea(),
                   ],
                 ),
               ),
             ),
 
             if (_result != null) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+              // A meal has a handful of ingredients: build them eagerly so every
+              // row's controllers/fields stay mounted while the user edits.
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
+                sliver: SliverToBoxAdapter(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Remember edits for future logs',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFD1D5DB),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Switch(
-                            value: _rememberEdits,
-                            onChanged: (v) => setState(() => _rememberEdits = v),
-                            activeThumbColor: KColor.green,
-                            activeTrackColor: const Color(0xFF1E3A2F),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      const Divider(color: KColor.border, height: 1),
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Ingredients',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: KColor.green.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: KColor.green.withOpacity(0.2), width: 0.8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.bookmark_rounded, size: 11, color: KColor.green),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    'Saved to Food Library',
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: KColor.green,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+                      _buildIngredientsHeader(),
+                      for (var i = 0; i < _rows.length; i++)
+                        _buildIngredientCard(i),
                     ],
                   ),
                 ),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, i) {
-                      final row = _rows[i];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 20),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E1E2C),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFF2E2E3E)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: row.textCtrl,
-                                    focusNode: row.focusNode,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                    decoration: InputDecoration(
-                                      hintText: 'e.g., 4 bread slices',
-                                      hintStyle: const TextStyle(color: Color(0xFF4B5563)),
-                                      isDense: true,
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                                      border: InputBorder.none,
-                                      suffixIcon: row.isEstimating
-                                          ? const SizedBox(
-                                              width: 14,
-                                              height: 14,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Color(0xFF52B788),
-                                              ),
-                                            )
-                                          : null,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _buildRoleBadge(row.role),
-                                const SizedBox(width: 6),
-                                row.isSaved
-                                    ? _buildSourceBadge(row.source)
-                                    : Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF374151),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: const Text(
-                                          '🤖 AI',
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF9CA3AF),
-                                          ),
-                                        ),
-                                      ),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
-                                  onPressed: () => _deleteRow(i),
-                                  constraints: const BoxConstraints(),
-                                  padding: EdgeInsets.zero,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ],
-                            ),
-                            const Divider(color: Color(0xFF2E2E3E), height: 16),
-                            Row(
-                              children: [
-                                Expanded(child: _buildField('Calories (kcal)', row.calCtrl, KColor.calorie, isProminent: true)),
-                                const SizedBox(width: 12),
-                                Expanded(child: _buildField('Protein (g)', row.proCtrl, KColor.protein, isProminent: true)),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(child: _buildField('Carbs (g)', row.carbCtrl, KColor.blue)),
-                                const SizedBox(width: 8),
-                                Expanded(child: _buildField('Fat (g)', row.fatCtrl, KColor.amber)),
-                                const SizedBox(width: 8),
-                                Expanded(child: _buildField('Fiber (g)', row.fibCtrl, const Color(0xFFA78BFA))),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton.icon(
-                                  onPressed: () => _resetItemToOriginal(i),
-                                  icon: const Icon(Icons.undo_rounded, size: 11),
-                                  label: const Text('Reset to Estimate', style: TextStyle(fontSize: 10.5)),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: KColor.textMuted,
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    childCount: _rows.length,
-                  ),
-                ),
-              ),
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: KSpacing.p,
+                    vertical: KSpacing.sm,
+                  ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextButton.icon(
-                        onPressed: _addRow,
-                        icon: const Icon(Icons.add_rounded, color: Color(0xFF52B788)),
-                        label: const Text(
-                          'Add Ingredient Row',
-                          style: TextStyle(color: Color(0xFF52B788), fontWeight: FontWeight.bold),
-                        ),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(color: const Color(0xFF52B788).withOpacity(0.3)),
+                      _buildExtras(),
+                      _buildAssumptions(),
+                      _buildRememberToggle(),
+                      const SizedBox(height: KSpacing.lg),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () {
+                            KHaptics.select();
+                            _addRow();
+                          },
+                          icon: Icon(
+                            Icons.add_rounded,
+                            color: KColor.textPrimary,
+                          ),
+                          label: const Text('Add ingredient'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: KColor.textPrimary,
+                            textStyle: KText.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                            minimumSize: const Size(48, 48),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 12,
+                              horizontal: 18,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: KRadius.pill,
+                              side: BorderSide(
+                                color: KColor.fg.withValues(alpha: KColor.isDark ? 0.18 : 0.2),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1272,126 +2071,365 @@ class _AddMealScreenState extends State<AddMealScreen>
                   ),
                 ),
               ),
-            ]
+            ],
           ],
         ),
       ),
-      bottomNavigationBar: _result != null
-          ? Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: Color(0xFF0F0F14),
-                border: Border(top: BorderSide(color: Color(0xFF1E1E2C))),
+      bottomNavigationBar: _result != null ? _buildBottomBar() : null,
+    );
+  }
+}
+
+// ─── Private presentational widgets ───────────────────────────────────────────
+
+/// Small rounded tag used for ingredient role / source.
+/// Inline "Scan a barcode" affordance beside the composer label: a quiet
+/// outlined pill, 48dp tall, that reads as a second way in, not chrome.
+class _ScanPill extends StatelessWidget {
+  const _ScanPill({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Scan barcode',
+      excludeFromSemantics: true,
+      child: Pressable(
+        onTap: () {
+          KHaptics.select();
+          onTap();
+        },
+        semanticLabel: 'Scan a barcode',
+        borderRadius: KRadius.pill,
+        scale: 0.96,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          alignment: Alignment.center,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: KColor.card,
+              borderRadius: KRadius.pill,
+              border: Border.all(
+                color: KColor.isDark ? KColor.fg.withValues(alpha: 0.12) : KColor.border,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_validationWarning != null)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFB347).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFFB347).withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFB347), size: 14),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _validationWarning!,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                color: Color(0xFFFFB347),
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E2C),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: KColor.border, width: 0.5),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'RUNNING TOTAL',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: KColor.textMuted,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            Text(
-                              '${_totalCal.toStringAsFixed(0)} kcal',
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                color: KColor.calorie,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              '${_totalPro.toStringAsFixed(1)}g Protein',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: KColor.protein,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${_totalCarb.toStringAsFixed(0)}g Carbs  •  ${_totalFat.toStringAsFixed(0)}g Fat  •  ${_totalFib.toStringAsFixed(0)}g Fiber',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: KColor.textSecondary,
-                          ),
-                        ),
-                      ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                KIcon(KIcons.scan, size: 16, color: KColor.textPrimary),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'Scan a barcode',
+                    style: KText.caption.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: KColor.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _saveMeal,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: KColor.greenDark,
-                        foregroundColor: Colors.white,
-                        elevation: 1.5,
-                        shadowColor: Colors.black.withOpacity(0.2),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: Text(
-                        widget.initialEntry != null ? 'Save Changes' : 'Add to Log',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag({required this.label, required this.color, this.filled = false});
+  final String label;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: filled ? KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06) : null,
+        borderRadius: KRadius.xs,
+        border: filled
+            ? null
+            : Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.16 : 0.14)),
+      ),
+      child: Text(
+        label,
+        style: KText.label.copyWith(
+          fontSize: 12,
+          letterSpacing: 0,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+/// One hero number of the estimate preview (calories / protein). The number
+/// counts to its live value; the unit is a separate label.
+class _HeroStat extends StatelessWidget {
+  const _HeroStat({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.decimals,
+    required this.unit,
+    required this.colors,
+  });
+
+  final String label;
+  final IconData icon;
+  final double value;
+  final int decimals;
+  final String unit;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = colors.first;
+    final shown = value.toStringAsFixed(decimals);
+    return Semantics(
+      container: true,
+      label: '$label $shown $unit',
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.only(top: 10),
+          decoration: BoxDecoration(
+            // Printed, not boxed: an ink rule on top, the number below.
+            border: Border(top: BorderSide(color: accent, width: 2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  KIcon(icon, size: 15, color: accent),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: KText.caption.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: KColor.textSecondary,
                       ),
                     ),
                   ),
                 ],
               ),
-            )
-          : null,
+              const SizedBox(height: KSpacing.sm),
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.end,
+                spacing: 4,
+                children: [
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: value),
+                    duration: KMotion.of(context, KMotion.slow),
+                    curve: KMotion.emphasizedCurve,
+                    builder: (context, v, _) => Text(
+                      v.toStringAsFixed(decimals),
+                      style: KText.numDisplay.copyWith(
+                        fontSize: 34,
+                        color: KColor.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      unit,
+                      style: KText.caption.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: accent,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniMacro extends StatelessWidget {
+  const _MiniMacro({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  final String label;
+  final double value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          '$label ${value.toStringAsFixed(0)}g',
+          style: KText.caption.copyWith(
+            fontSize: 13,
+            color: KColor.textSecondary,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Idle / empty state below the composer: how to talk to Kyno.
+class _ComposerHint extends StatelessWidget {
+  const _ComposerHint({super.key});
+
+  static const _examples = [
+    '2 roti + dal',
+    'rice thoda, rajma',
+    '1 scoop whey in milk',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: KSpacing.xxl),
+      child: KReveal(
+        child: Container(
+          padding: const EdgeInsets.only(top: KSpacing.lg),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.09))),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const KynoMark(size: 20),
+                  const SizedBox(width: KSpacing.sm),
+                  Expanded(
+                    child: Text('Type it like you’d say it', style: KText.h3),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Katori, roti, thoda, scoop. Kyno gets everyday portions.',
+                style: KText.caption.copyWith(fontSize: 13),
+              ),
+              const SizedBox(height: KSpacing.md),
+              Wrap(
+                spacing: KSpacing.lg,
+                runSpacing: KSpacing.xs,
+                children: [
+                  for (final e in _examples)
+                    Text(
+                      '“$e”',
+                      style: KText.body.copyWith(
+                        fontSize: 14,
+                        color: KColor.textSecondary,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Estimating state: a skeleton shaped like the estimate preview.
+class _EstimateSkeleton extends StatelessWidget {
+  const _EstimateSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget box(double h, {double? w, BorderRadius? r}) => Container(
+      width: w ?? double.infinity,
+      height: h,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: r ?? KRadius.sm,
+      ),
+    );
+
+    return Semantics(
+      liveRegion: true,
+      label: 'Crunching your macros',
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: KSpacing.xxl),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ExcludeSemantics(
+              child: Row(
+                children: [
+                  const KMacroLoader(size: 32, semanticsLabel: null),
+                  const SizedBox(width: KSpacing.md),
+                  Expanded(
+                    child: KLoadingLabel(
+                      textAlign: TextAlign.start,
+                      style: KText.bodyMedium.copyWith(color: KColor.textSecondary),
+                      messages: const [
+                        'Crunching your macros…',
+                        'Reading the portions…',
+                        'Adding it all up…',
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: KSpacing.md),
+            ExcludeSemantics(
+              child: RepaintBoundary(
+                child: KShimmer(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: box(104, r: KRadius.lg)),
+                          const SizedBox(width: KSpacing.md),
+                          Expanded(child: box(104, r: KRadius.lg)),
+                        ],
+                      ),
+                      const SizedBox(height: KSpacing.md),
+                      Row(
+                        children: [
+                          box(24, w: 110, r: KRadius.pill),
+                          const SizedBox(width: KSpacing.sm),
+                          Expanded(child: box(12)),
+                        ],
+                      ),
+                      const SizedBox(height: KSpacing.xl),
+                      box(132, r: KRadius.lg),
+                      const SizedBox(height: KSpacing.md),
+                      box(132, r: KRadius.lg),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

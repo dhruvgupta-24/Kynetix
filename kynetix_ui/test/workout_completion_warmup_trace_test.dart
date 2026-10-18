@@ -101,7 +101,7 @@ void main() {
 
     // Log the warm-up set
     print('--- STEP 2: LOG WARM UP SET ---');
-    await tester.tap(find.text('LOG SET 1'));
+    await tester.tap(find.text('Log set 1'));
     await tester.pumpAndSettle();
 
     // Change type back to "W" (Working)
@@ -113,7 +113,7 @@ void main() {
     // Log 4 working sets
     for (int i = 0; i < 4; i++) {
       print('--- STEP 4.${i+1}: LOG WORKING SET ${i+1} ---');
-      await tester.tap(find.text('LOG SET ${i + 2}'));
+      await tester.tap(find.text('Log set ${i + 2}'));
       await tester.pumpAndSettle();
     }
 
@@ -156,7 +156,7 @@ void main() {
 
     // 6. Log Set button remains unlocked for extra sets
     print('VERIFY: Log Set button remains persistent for logging extra sets');
-    expect(find.textContaining('LOG SET'), findsAtLeastNWidgets(1));
+    expect(find.textContaining('Log set'), findsAtLeastNWidgets(1));
 
     // 7. Workout score (completion ratio) for this exercise remains 1.0
     final targetSetsVal = entry.exercise.targetSets;
@@ -175,7 +175,7 @@ void main() {
     final entryAfterRemoval = state.buildEntry(exerciseWith4Sets);
     print('VERIFY AFTER WARM UP REMOVAL: entry.isCompleted is ${entryAfterRemoval.isCompleted}');
     expect(entryAfterRemoval.isCompleted, isTrue);
-    expect(find.textContaining('LOG SET'), findsAtLeastNWidgets(1));
+    expect(find.textContaining('Log set'), findsAtLeastNWidgets(1));
 
     print('--- STEP 6: VERIFY FINAL STATE ---');
     await tester.pump(const Duration(seconds: 5));

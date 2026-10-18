@@ -9,6 +9,41 @@ import 'exercise_display_enhancer.dart';
 /// Singleton service managing the comprehensive 1,300+ exercise library,
 /// fast multi-token fuzzy search, dynamic categorical & equipment filters,
 /// and custom exercise indexing.
+/// Parses and display-enhances the bundled library. Pure and top-level so it
+/// can run in a background isolate.
+({List<ExerciseDefinition> defs, ExerciseSearchIndex index}) _parseLibraryJson(
+    String jsonString) {
+  final List<dynamic> parsed = jsonDecode(jsonString) as List<dynamic>;
+  final defs = parsed.map((item) {
+    final def = ExerciseDefinition.fromJson(item as Map<String, dynamic>);
+    final displayName = ExerciseDisplayEnhancer.deriveDisplayName(def.canonicalName, def.equipment);
+    final enhancedAliases = ExerciseDisplayEnhancer.buildEnhancedAliases(def);
+    return ExerciseDefinition(
+      id: def.id,
+      name: def.canonicalName,
+      canonicalName: def.canonicalName,
+      displayName: displayName,
+      category: def.category,
+      bodyPart: def.bodyPart,
+      equipment: def.equipment,
+      equipmentGroup: def.equipmentGroup,
+      targetMuscle: def.targetMuscle,
+      muscleGroup: def.muscleGroup,
+      secondaryMuscles: def.secondaryMuscles,
+      instructions: def.instructions,
+      aliases: enhancedAliases,
+      exerciseType: def.exerciseType,
+      imageRef: def.imageRef,
+      gifRef: def.gifRef,
+      notes: def.notes,
+      defaultTargetSets: def.defaultTargetSets,
+      defaultRepMin: def.defaultRepMin,
+      defaultRepMax: def.defaultRepMax,
+    );
+  }).toList();
+  return (defs: defs, index: ExerciseSearchIndex(defs));
+}
+
 class ExerciseLibraryService extends ChangeNotifier {
   ExerciseLibraryService._();
   static final ExerciseLibraryService instance = ExerciseLibraryService._();
@@ -41,41 +76,22 @@ class ExerciseLibraryService extends ChangeNotifier {
   Future<void> _doInitialize() async {
     try {
       final jsonString = await rootBundle.loadString(_kAssetPath);
-      final List<dynamic> parsed = jsonDecode(jsonString) as List<dynamic>;
-      _allDefinitions = parsed.map((item) {
-        final def = ExerciseDefinition.fromJson(item as Map<String, dynamic>);
-        final displayName = ExerciseDisplayEnhancer.deriveDisplayName(def.canonicalName, def.equipment);
-        final enhancedAliases = ExerciseDisplayEnhancer.buildEnhancedAliases(def);
-        return ExerciseDefinition(
-          id: def.id,
-          name: def.canonicalName,
-          canonicalName: def.canonicalName,
-          displayName: displayName,
-          category: def.category,
-          bodyPart: def.bodyPart,
-          equipment: def.equipment,
-          equipmentGroup: def.equipmentGroup,
-          targetMuscle: def.targetMuscle,
-          muscleGroup: def.muscleGroup,
-          secondaryMuscles: def.secondaryMuscles,
-          instructions: def.instructions,
-          aliases: enhancedAliases,
-          exerciseType: def.exerciseType,
-          imageRef: def.imageRef,
-          gifRef: def.gifRef,
-          notes: def.notes,
-          defaultTargetSets: def.defaultTargetSets,
-          defaultRepMin: def.defaultRepMin,
-          defaultRepMax: def.defaultRepMax,
-        );
-      }).toList();
+      // 1.5 MB of JSON: decode and enhance off the UI isolate so first
+      // frames and the boot loader never stall on it.
+      final parsed = await compute(_parseLibraryJson, jsonString,
+          debugLabel: 'parseExerciseLibrary');
+      _allDefinitions = parsed.defs;
 
       _byId.clear();
       for (final def in _allDefinitions) {
         _byId[def.id] = def;
       }
       _initialized = true;
-      ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
+      if (_customDefinitions.isEmpty) {
+        ExerciseSearchEngine.instance.setPrebuiltIndex(parsed.index);
+      } else {
+        ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
+      }
       notifyListeners();
     } catch (e) {
       debugPrint('ExerciseLibraryService asset load fallback: $e');

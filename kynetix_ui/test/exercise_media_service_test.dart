@@ -55,15 +55,15 @@ void main() {
     });
 
     test('T-Bar Row resolves from hyphenated and unhyphenated names', () {
-      expect(service.getAnimationUrl('T-Bar Row'), contains('1349-BgljGjd.gif'));
-      expect(service.getAnimationUrl('t bar row'), contains('1349-BgljGjd.gif'));
-      expect(service.getAnimationUrl('tbar row'), contains('1349-BgljGjd.gif'));
+      expect(service.getAnimationUrl('T-Bar Row'), contains('0606-aaXr7ld.gif'));
+      expect(service.getAnimationUrl('t bar row'), contains('0606-aaXr7ld.gif'));
+      expect(service.getAnimationUrl('tbar row'), contains('0606-aaXr7ld.gif'));
     });
 
     test('Standing Military Press / OHP resolves cleanly', () {
-      expect(service.getAnimationUrl('ohp'), contains('0091-gAeez7P.gif'));
-      expect(service.getAnimationUrl('standing overhead press'), contains('0091-gAeez7P.gif'));
-      expect(service.getAnimationUrl('military press'), contains('0091-gAeez7P.gif'));
+      expect(service.getAnimationUrl('ohp'), contains('1456-wdRZISl.gif'));
+      expect(service.getAnimationUrl('standing overhead press'), contains('1456-wdRZISl.gif'));
+      expect(service.getAnimationUrl('military press'), contains('1456-wdRZISl.gif'));
     });
 
     test('Exercise with genuine absence of media returns null for graceful fallback', () {
@@ -78,7 +78,7 @@ void main() {
     });
 
     test('Attribution string is strictly present and unmodified', () {
-      expect(ExerciseMediaService.attribution, equals('© Gym visual — gymvisual.com'));
+      expect(ExerciseMediaService.attribution, equals('© Gym visual, gymvisual.com'));
     });
   });
 }

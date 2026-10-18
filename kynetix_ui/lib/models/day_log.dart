@@ -1,4 +1,8 @@
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import 'nutrition_result.dart';
 import 'carry_forward_record.dart';
 
@@ -85,6 +89,13 @@ class GymDay {
   /// Rollover event prompted/resolved on this day
   final CarryForwardRecord? carryForwardRecord;
 
+  /// True when [didGym] / [splitDayName] is a real choice: the user picked it
+  /// on the day screen, or a logged workout set it. False when this record
+  /// only exists to carry a calorie override or a carry-forward record; the
+  /// day's plan then comes from the split (see WorkoutService.planFor).
+  /// Records saved before this field existed count as a choice.
+  final bool manual;
+
   const GymDay({
     required this.didGym,
     this.workoutType,
@@ -92,7 +103,16 @@ class GymDay {
     this.splitOverridden = false,
     this.targetCaloriesOverride,
     this.carryForwardRecord,
+    this.manual = true,
   });
+
+  /// A record that holds no training choice (override / carry-forward only).
+  const GymDay.unpicked({this.targetCaloriesOverride, this.carryForwardRecord})
+      : didGym = false,
+        workoutType = null,
+        splitDayName = null,
+        splitOverridden = false,
+        manual = false;
 
   /// Returns a copy with the user's manually-chosen split day name and type.
   /// This explicitly updates the `splitDayName` to match the chip they clicked,
@@ -104,14 +124,36 @@ class GymDay {
     splitOverridden: true,
     targetCaloriesOverride: targetCaloriesOverride,
     carryForwardRecord: carryForwardRecord,
+    manual:          true,
   );
 
   /// Returns a copy that marks the day as gym without changing the split prefill.
+  /// Rest ("No") clears the split name too, so a rest day is never labelled
+  /// "Chest + Triceps Day".
   GymDay withGym(bool did) => GymDay(
     didGym:          did,
     workoutType:     did ? workoutType : null,
-    splitDayName:    splitDayName,
+    splitDayName:    did ? splitDayName : null,
     splitOverridden: did ? splitOverridden : false,
+    targetCaloriesOverride: targetCaloriesOverride,
+    carryForwardRecord: carryForwardRecord,
+    manual:          true,
+  );
+
+  /// The day as actually trained: a logged workout named [splitName].
+  GymDay withSession(String splitName) => GymDay(
+    didGym:          true,
+    workoutType:     WorkoutType.fromSplitName(splitName),
+    splitDayName:    splitName,
+    splitOverridden: true,
+    targetCaloriesOverride: targetCaloriesOverride,
+    carryForwardRecord: carryForwardRecord,
+    manual:          true,
+  );
+
+  /// Drops the training choice (keeps override and carry-forward), so the
+  /// day falls back to the split.
+  GymDay withoutPick() => GymDay.unpicked(
     targetCaloriesOverride: targetCaloriesOverride,
     carryForwardRecord: carryForwardRecord,
   );
@@ -124,6 +166,7 @@ class GymDay {
     splitOverridden: splitOverridden,
     targetCaloriesOverride: override,
     carryForwardRecord: carryForwardRecord,
+    manual:          manual,
   );
 
   /// Returns a copy with a carry-forward record.
@@ -134,6 +177,7 @@ class GymDay {
     splitOverridden: splitOverridden,
     targetCaloriesOverride: targetCaloriesOverride,
     carryForwardRecord: record,
+    manual:          manual,
   );
 
   Map<String, dynamic> toJson() => {
@@ -143,6 +187,7 @@ class GymDay {
     if (splitOverridden)      'splitOverridden': splitOverridden,
     if (targetCaloriesOverride != null) 'targetCaloriesOverride': targetCaloriesOverride,
     if (carryForwardRecord != null) 'carryForwardRecord': carryForwardRecord!.toJson(),
+    'manual':          manual,
   };
 
   factory GymDay.fromJson(Map<String, dynamic> j) => GymDay(
@@ -156,6 +201,8 @@ class GymDay {
     carryForwardRecord: j['carryForwardRecord'] != null
         ? CarryForwardRecord.fromJson(j['carryForwardRecord'] as Map<String, dynamic>)
         : null,
+    // Absent on records saved before the field existed: those were choices.
+    manual:          j['manual'] as bool? ?? true,
   );
 
   static WorkoutType? _safeWorkoutType(String name) {
@@ -208,7 +255,42 @@ class MealEntry {
   final String           finalSavedInput;
   final bool             userCorrected;
 
-  NutritionResult get result => _result.rebuildFromIngredientsAndOverrides();
+  /// Explicit id (persisted once serialized); null = derived, see [id].
+  final String?          _id;
+
+  /// When this entry was last changed by the user (UTC); null for entries
+  /// never edited since being logged (and for legacy data). Cross-device
+  /// merge: newest wins, absent counts as oldest.
+  final DateTime?        updatedAt;
+
+  /// Stable identity across devices. Entries saved before ids existed derive
+  /// it from `addedAt` (as serialized) + `rawInput`, exactly like the
+  /// server's `kx_meal_entry_id`, so old data keeps its identity without any
+  /// value being rewritten.
+  String get id => _id ?? legacyIdFor(addedAt.toIso8601String(), rawInput);
+
+  /// `'l-' + md5(addedAtIso + '|' + rawInput)`.
+  static String legacyIdFor(String addedAtIso, String rawInput) =>
+      'l-${md5.convert(utf8.encode('$addedAtIso|$rawInput'))}';
+
+  /// True when this copy was changed strictly after [other] (an absent
+  /// [updatedAt] is the oldest possible).
+  bool isNewerThan(MealEntry other) {
+    final mine = updatedAt;
+    if (mine == null) return false;
+    final theirs = other.updatedAt;
+    return theirs == null || mine.isAfter(theirs);
+  }
+
+  /// A copy stamped as changed now (wins merges against older copies and
+  /// against tombstones recorded before now).
+  MealEntry touched([DateTime? at]) =>
+      copyWith(updatedAt: (at ?? DateTime.now()).toUtc());
+
+  /// The numbers as logged. A food correction saved later applies to new
+  /// logs (the pipeline reads it) but never rewrites a meal already eaten;
+  /// editing this meal is how its numbers change.
+  NutritionResult get result => _result;
 
   const MealEntry({
     required this.rawInput,
@@ -221,9 +303,16 @@ class MealEntry {
     this.editCount = 0,
     required this.finalSavedInput,
     this.userCorrected = false,
-  }) : _result = result;
+    String? id,
+    this.updatedAt,
+  }) : _result = result,
+       _id = id;
 
+  /// Keeps [id] unless [addedAt] changes (a re-log is a new entry) or a new
+  /// [id] is given.
   MealEntry copyWith({
+    String? id,
+    DateTime? updatedAt,
     String? rawInput,
     NutritionResult? result,
     DateTime? addedAt,
@@ -236,7 +325,7 @@ class MealEntry {
     bool? userCorrected,
   }) => MealEntry(
     rawInput: rawInput ?? this.rawInput,
-    result: result ?? this._result,
+    result: result ?? _result,
     addedAt: addedAt ?? this.addedAt,
     section: section ?? this.section,
     dayOfWeek: dayOfWeek ?? this.dayOfWeek,
@@ -245,6 +334,11 @@ class MealEntry {
     editCount: editCount ?? this.editCount,
     finalSavedInput: finalSavedInput ?? this.finalSavedInput,
     userCorrected: userCorrected ?? this.userCorrected,
+    id: id ??
+        (addedAt != null && !addedAt.isAtSameMomentAs(this.addedAt)
+            ? null
+            : this.id),
+    updatedAt: updatedAt ?? this.updatedAt,
   );
 
 
@@ -262,11 +356,20 @@ class MealEntry {
     'finalSavedInput': finalSavedInput,
     'result':   result.toJson(),
     'userCorrected': userCorrected || result.userCorrected,
+    'id': id,
+    if (updatedAt != null) 'updatedAt': updatedAt!.toUtc().toIso8601String(),
   };
 
   factory MealEntry.fromJson(Map<String, dynamic> j) {
     final res = NutritionResult.fromJson(j['result'] as Map<String, dynamic>? ?? {});
+    final rawId = j['id'];
     return MealEntry(
+      // Derive from the stored strings (not the parsed values) so the id
+      // matches the server's derivation byte for byte.
+      id: rawId is String && rawId.isNotEmpty
+          ? rawId
+          : legacyIdFor(j['addedAt'] as String? ?? '', j['rawInput'] as String? ?? ''),
+      updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? '')?.toUtc(),
       rawInput: j['rawInput'] as String? ?? '',
       addedAt:  DateTime.tryParse(j['addedAt'] as String? ?? '') ?? DateTime.now(),
       section: MealSection.values.byName(j['section'] as String? ?? MealSection.breakfast.name),

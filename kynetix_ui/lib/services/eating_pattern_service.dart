@@ -4,6 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'food_role_classifier.dart';
 import '../models/user_profile.dart' show PortionAnchor;
+import 'internal/scoped_prefs.dart';
+
+// Logging in this file is debug-only: release builds skip the console I/O.
+void _debugLog(String? message, {int? wrapWidth}) {
+  if (kDebugMode) debugPrint(message, wrapWidth: wrapWidth);
+}
+
 
 // ─── EatingPatternService ─────────────────────────────────────────────────────
 //
@@ -268,7 +275,7 @@ class EatingPatternService {
     }
 
     _dirty = true;
-    debugPrint('[EatingPatternService] ✍️  Recorded '
+    _debugLog('[EatingPatternService] ✍️  Recorded '
         '${correctedItemRole.name}+${contextRole?.name ?? "solo"} '
         'ratio=${ratio.toStringAsFixed(3)} '
         '($pipelineCalEstimate→$userCorrectedCal kcal)');
@@ -329,7 +336,7 @@ class EatingPatternService {
     }
     if (wTotal == 0) return null;
     final scalar = (wSum / wTotal).clamp(0.3, 2.5);
-    debugPrint('[EatingPatternService] 📐 Scalar for $key = '
+    _debugLog('[EatingPatternService] 📐 Scalar for $key = '
         '${scalar.toStringAsFixed(3)} (${records.length} samples)');
     return scalar;
   }
@@ -430,7 +437,7 @@ class EatingPatternService {
   ///   balanced       → no synthetic seed (population average = 1.0 baseline)
   void seedFromPortionAnchor(PortionAnchor anchor) {
     if (_seededAnchor == anchor) {
-      debugPrint('[EatingPatternService] 🌱 Seed already applied for ${anchor.name}. No-op.');
+      _debugLog('[EatingPatternService] 🌱 Seed already applied for ${anchor.name}. No-op.');
       return;
     }
 
@@ -440,7 +447,7 @@ class EatingPatternService {
 
     if (anchor == PortionAnchor.balanced) {
       // Balanced = population average. No synthetic tilt needed.
-      debugPrint('[EatingPatternService] 🌱 balanced anchor — no synthetic seed applied.');
+      _debugLog('[EatingPatternService] 🌱 balanced anchor, no synthetic seed applied.');
       _dirty = true;
       return;
     }
@@ -495,7 +502,7 @@ class EatingPatternService {
     }
 
     _dirty = true;
-    debugPrint('[EatingPatternService] 🌱 Seeded patterns for ${anchor.name}: '
+    _debugLog('[EatingPatternService] 🌱 Seeded patterns for ${anchor.name}: '
         '${_records.values.fold(0, (s, l) => s + l.length)} total records');
   }
 
@@ -513,7 +520,7 @@ class EatingPatternService {
     }
     _seededAnchor = null;
     _dirty = true;
-    debugPrint('[EatingPatternService] 🗑️  Removed seed records for anchor change.');
+    _debugLog('[EatingPatternService] 🗑️  Removed seed records for anchor change.');
   }
 
   // ── Reset ───────────────────────────────────────────────────────────────────
@@ -522,7 +529,7 @@ class EatingPatternService {
     final key = PatternKey(targetRole, contextRole: contextRole);
     _records.remove(key);
     _dirty = true;
-    debugPrint('[EatingPatternService] 🗑️  Reset pattern: $key');
+    _debugLog('[EatingPatternService] 🗑️  Reset pattern: $key');
   }
 
   void resetAll() {
@@ -530,7 +537,7 @@ class EatingPatternService {
     _contextRecords.clear();
     _seededAnchor = null;
     _dirty = true;
-    debugPrint('[EatingPatternService] 🗑️  Reset ALL patterns');
+    _debugLog('[EatingPatternService] 🗑️  Reset ALL patterns');
   }
 
   // ── Cloud Sync ───────────────────────────────────────────────────────────────
@@ -613,12 +620,12 @@ class EatingPatternService {
         ));
         added++;
       } catch (e) {
-        debugPrint('[EatingPatternService] ⚠️  Failed to merge cloud row: $e');
+        _debugLog('[EatingPatternService] ⚠️  Failed to merge cloud row: $e');
       }
     }
     if (added > 0) {
       _dirty = true;
-      debugPrint('[EatingPatternService] ☁️  Merged $added records from cloud');
+      _debugLog('[EatingPatternService] ☁️  Merged $added records from cloud');
     }
   }
 
@@ -646,12 +653,12 @@ class EatingPatternService {
         ));
         added++;
       } catch (e) {
-        debugPrint('[EatingPatternService] ⚠️  Failed to merge context row: $e');
+        _debugLog('[EatingPatternService] ⚠️  Failed to merge context row: $e');
       }
     }
     if (added > 0) {
       _dirty = true;
-      debugPrint('[EatingPatternService] ☁️  Merged $added context records from cloud');
+      _debugLog('[EatingPatternService] ☁️  Merged $added context records from cloud');
     }
   }
 
@@ -662,7 +669,7 @@ class EatingPatternService {
       final prefs = prefsOverride ?? await SharedPreferences.getInstance();
 
       // Load correction records
-      final patternsRaw = prefs.getString(_currentPatternsKey) ?? prefs.getString(_kPatterns);
+      final patternsRaw = ScopedPrefs.getString(prefs, _kPatterns, _currentUserId);
       if (patternsRaw != null) {
         final list = jsonDecode(patternsRaw) as List<dynamic>;
         for (final item in list) {
@@ -672,7 +679,7 @@ class EatingPatternService {
       }
 
       // Load context records
-      final ctxRaw = prefs.getString(_currentContextKey) ?? prefs.getString(_kContext);
+      final ctxRaw = ScopedPrefs.getString(prefs, _kContext, _currentUserId);
       if (ctxRaw != null) {
         final list = jsonDecode(ctxRaw) as List<dynamic>;
         for (final item in list) {
@@ -682,7 +689,7 @@ class EatingPatternService {
       }
 
       // Restore seeded anchor sentinel
-      final seededRaw = prefs.getString(_currentSeededKey) ?? prefs.getString(_kSeeded);
+      final seededRaw = ScopedPrefs.getString(prefs, _kSeeded, _currentUserId);
       if (seededRaw != null) {
         _seededAnchor = PortionAnchor.values.firstWhere(
           (e) => e.name == seededRaw,
@@ -691,11 +698,11 @@ class EatingPatternService {
       }
 
       _dirty = false;
-      debugPrint('[EatingPatternService] ✅ Loaded '
+      _debugLog('[EatingPatternService] ✅ Loaded '
           '${_records.length} pattern keys, '
           '${_contextRecords.length} context records (key: $_currentPatternsKey)');
     } catch (e) {
-      debugPrint('[EatingPatternService] ⚠️  Load failed: $e');
+      _debugLog('[EatingPatternService] ⚠️  Load failed: $e');
     }
   }
 
@@ -734,9 +741,9 @@ class EatingPatternService {
       }
 
       _dirty = false;
-      debugPrint('[EatingPatternService] 💾 Saved patterns');
+      _debugLog('[EatingPatternService] 💾 Saved patterns');
     } catch (e) {
-      debugPrint('[EatingPatternService] ⚠️  Save failed: $e');
+      _debugLog('[EatingPatternService] ⚠️  Save failed: $e');
     }
   }
 

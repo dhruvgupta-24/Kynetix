@@ -67,7 +67,7 @@ void main() {
 
     // Log 3 working sets
     for (int i = 0; i < 3; i++) {
-      await tester.tap(find.text('LOG SET ${i + 1}'));
+      await tester.tap(find.text('Log set ${i + 1}'));
       await tester.pumpAndSettle();
     }
 
@@ -75,10 +75,10 @@ void main() {
     expect(entry3.isCompleted, isTrue);
 
     // Verify button to log set 4 is STILL enabled and visible!
-    expect(find.text('LOG SET 4'), findsOneWidget);
+    expect(find.text('Log set 4'), findsOneWidget);
 
     // Tap to log set 4 (extra set)
-    await tester.tap(find.text('LOG SET 4'));
+    await tester.tap(find.text('Log set 4'));
     await tester.pumpAndSettle();
 
     final entry4 = state.buildEntry(ex1);

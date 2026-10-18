@@ -97,6 +97,13 @@ Deno.serve(async (req: Request) => {
       last_refreshed_at:       activeLink.last_refreshed_at ?? null,
       fallback_reason:         activeLink.fallback_reason ?? null,
       test_generation_snippet:  activeLink.test_generation_snippet ?? null,
+      // Sign in with ChatGPT (plan usage). Non-secret; absent before migration.
+      auth_method:             activeLink.auth_method ?? 'codex_device',
+      oauth_client_id:         activeLink.oauth_client_id ?? null,
+      plan_usage_enabled:      activeLink.auth_method === 'siwc'
+                                 && typeof activeLink.granted_scopes === 'string'
+                                 && activeLink.granted_scopes.split(/\s+/).includes('chatgpt.tokens.use.direct'),
+      plan_paused_until:       activeLink.plan_paused_until ?? null,
     });
 
   } catch (err: any) {

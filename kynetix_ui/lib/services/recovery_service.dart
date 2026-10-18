@@ -77,7 +77,7 @@ class SleepData {
 
 /// HRV data from Health Connect.
 class HrvData {
-  final double? rmssd;      // ms — standard HRV metric
+  final double? rmssd;      // ms, standard HRV metric
   final double? sdnn;       // ms
   final double? baselineRmssd; // user's personal baseline for scoring
   const HrvData({this.rmssd, this.sdnn, this.baselineRmssd});

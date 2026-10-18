@@ -60,25 +60,25 @@ class MessCalibration {
 
   /// Injected into every AI nutrition request.
   static String toPromptContext() => '''
-PERSONAL MESS CALIBRATION — use these values, not generic references:
+PERSONAL MESS CALIBRATION, use these values, not generic references:
 - 1 milk glass = $milkGlassMl ml of Indian TONED milk ($milkKcalPer100ml kcal/100ml, NOT 46)
-- 1 roti (mess) = $messRotiKcalMin–$messRotiKcalMax kcal, ~3g protein
-- 1 rice ladle  = $riceLadleGMin–$riceLadleGMax g cooked = ~$riceLadleKcal kcal, ~$riceLadleProtein g protein
+- 1 roti (mess) = $messRotiKcalMin-$messRotiKcalMax kcal, ~3g protein
+- 1 rice ladle  = $riceLadleGMin-$riceLadleGMax g cooked = ~$riceLadleKcal kcal, ~$riceLadleProtein g protein
   (1.5 ladles = 195 kcal | 2 ladles = 260 kcal)
-- 1 full dal serving = $dalFullServingMlMin–$dalFullServingMlMax ml
-- 1 sabzi serving = $sabziFullGMin–$sabziFullGMax g (CONSUMED, not served)
-- Mess paneer serving = $paneerServingGMin–$paneerServingGMax g dish, $paneerMessServingKcalMin–$paneerMessServingKcalMax kcal consumed
+- 1 full dal serving = $dalFullServingMlMin-$dalFullServingMlMax ml
+- 1 sabzi serving = $sabziFullGMin-$sabziFullGMax g (CONSUMED, not served)
+- Mess paneer serving = $paneerServingGMin-$paneerServingGMax g dish, $paneerMessServingKcalMin-$paneerMessServingKcalMax kcal consumed
 
 MESS COMPARTMENT SIZES (critical for thali/tray meals):
-- Small / round / circular compartment  = $smallCompartmentGMin–$smallCompartmentGMax g per compartment
-- Large / rectangular compartment       = $largeCompartmentGMin–$largeCompartmentGMax g per compartment
+- Small / round / circular compartment  = $smallCompartmentGMin-$smallCompartmentGMax g per compartment
+- Large / rectangular compartment       = $largeCompartmentGMin-$largeCompartmentGMax g per compartment
 - WHEN "N compartments" has NO size qualifier → default to SMALL compartments
-  → 3 small compartments paneer = ~180–240 g dish total consumed (not 3 full bowls)
+  → 3 small compartments paneer = ~180-240 g dish total consumed (not 3 full bowls)
 
-CONSUMED PORTION RULES (hostel/mess context — estimate EATEN, not SERVED):
-- Dal/sabzi alongside roti/rice: estimate what was used to finish carbs (~60–80% of one katori)
-- Rajma/chole alongside roti/rice: ~70–90g cooked (one ladle-sized portion, ~160–200 kcal)
-- Dal alongside roti: ~70–85 ml per 2 roti (~100–130 kcal from dal portion)
-- Paneer: eat ALL paneer pieces, leave ~35% of gravy/oil → net ~220–290 kcal per mess serving
+CONSUMED PORTION RULES (hostel/mess context, estimate EATEN, not SERVED):
+- Dal/sabzi alongside roti/rice: estimate what was used to finish carbs (~60-80% of one katori)
+- Rajma/chole alongside roti/rice: ~70-90g cooked (one ladle-sized portion, ~160-200 kcal)
+- Dal alongside roti: ~70-85 ml per 2 roti (~100-130 kcal from dal portion)
+- Paneer: eat ALL paneer pieces, leave ~35% of gravy/oil → net ~220-290 kcal per mess serving
 - Full thali (roti + rice + curry): estimate TOTAL consumed, not all compartments at full value''';
 }
