@@ -144,10 +144,17 @@ void main() {
     // Let initState run and auto-calculate complete
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    // The progress line closes out and the estimate cross-fades in.
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     // The screen should now show ingredient containers for egg and toast.
     // Let's verify that the running totals card shows initial total calories: 230 kcal (150 egg + 80 toast).
-    expect(find.textContaining('230 kcal'), findsOneWidget);
+    // The total's digits roll as separate glyphs, so it is read as one
+    // phrase through its semantics label.
+    final semantics = tester.ensureSemantics();
+    expect(find.bySemanticsLabel('230 kcal'), findsOneWidget);
 
     // Find the textfield for egg calories. The text should be '150'.
     // Let's enter a new value for egg calories: '400'.
@@ -161,6 +168,7 @@ void main() {
     await tester.pump();
 
     // Verify running totals card updated live to 480 kcal (400 egg + 80 toast).
-    expect(find.textContaining('480 kcal'), findsOneWidget);
+    expect(find.bySemanticsLabel('480 kcal'), findsOneWidget);
+    semantics.dispose();
   });
 }

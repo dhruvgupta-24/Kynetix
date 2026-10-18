@@ -227,7 +227,7 @@ List<ExerciseProgressionPoint> extractProgressionPoints(
 
 /// Compact, responsive progression graph widget for the workout hero area.
 ///
-/// Train world (violet → cyan). The polyline draws in once on first show via a
+/// Drawn in ink, with the scrubbed point in the accent. The polyline draws in once on first show via a
 /// path-length reveal driven by an [AnimationController] passed to the painter
 /// as `repaint:`, so the reveal never rebuilds the widget tree. Touching the
 /// plot scrubs the summary read-out above it.
@@ -500,12 +500,12 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart>
               margin: const EdgeInsets.only(top: 2),
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
-                color: KColor.violet.withValues(alpha: KColor.isDark ? 0.16 : 0.1),
+                color: KColor.ink.withValues(alpha: KColor.isDark ? 0.12 : 0.08),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.fiber_manual_record,
-                color: KColor.violet,
+                color: KColor.ink,
                 size: 9,
               ),
             ),
@@ -795,16 +795,9 @@ class _TrainGlyph extends StatelessWidget {
       height: 22,
       decoration: BoxDecoration(
         borderRadius: const BorderRadius.all(Radius.circular(8)),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            KColor.violet.withValues(alpha: KColor.isDark ? 0.2 : 0.12),
-            KColor.cyan.withValues(alpha: KColor.isDark ? 0.1 : 0.06),
-          ],
-        ),
+        color: KColor.ink.withValues(alpha: KColor.isDark ? 0.10 : 0.07),
       ),
-      child: Icon(icon, color: KColor.violet, size: 14),
+      child: Icon(icon, color: KColor.ink, size: 14),
     );
   }
 }
@@ -889,7 +882,7 @@ class _ProgressionPolylinePainter extends CustomPainter {
   final Paint _ring = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.0
-    ..color = KColor.cyan;
+    ..color = KColor.ember;
 
   // Geometry cached per size; this painter instance lives for one scene and is
   // repainted per animation frame through `repaint:`.
@@ -935,15 +928,13 @@ class _ProgressionPolylinePainter extends CustomPainter {
     _metric = metrics.isEmpty ? null : metrics.first;
 
     final rect = Offset.zero & size;
-    _line.shader = LinearGradient(
-      colors: KGradient.train,
-    ).createShader(rect);
+    _line.color = KColor.ink;
     _fill.shader = LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        KColor.violet.withValues(alpha: scene.dark ? 0.24 : 0.14),
-        KColor.cyan.withValues(alpha: 0.0),
+        KColor.ink.withValues(alpha: scene.dark ? 0.14 : 0.08),
+        KColor.ink.withValues(alpha: 0.0),
       ],
     ).createShader(rect);
   }
@@ -962,7 +953,7 @@ class _ProgressionPolylinePainter extends CustomPainter {
     }
 
     if (_offsets.length == 1) {
-      _dot.color = KColor.violet;
+      _dot.color = KColor.ink;
       canvas.drawCircle(_offsets.first, 5, _dot);
       return;
     }
@@ -1002,7 +993,7 @@ class _ProgressionPolylinePainter extends CustomPainter {
       final pt = _offsets[i];
       if (pt.dx > tipX + 0.5) break;
       if (i == sel) {
-        _dot.color = KColor.cyan.withValues(alpha: scene.dark ? 0.28 : 0.18);
+        _dot.color = KColor.ember.withValues(alpha: scene.dark ? 0.24 : 0.16);
         canvas.drawCircle(pt, 7.5, _dot);
         _dot.color = KColor.textPrimary;
         canvas.drawCircle(pt, 3.6, _dot);
@@ -1010,11 +1001,7 @@ class _ProgressionPolylinePainter extends CustomPainter {
       } else {
         _dot.color = KColor.bg;
         canvas.drawCircle(pt, 3.4, _dot);
-        _dot.color = Color.lerp(
-          KColor.violet,
-          KColor.cyan,
-          pt.dx / size.width,
-        )!;
+        _dot.color = KColor.ink;
         canvas.drawCircle(pt, 2.3, _dot);
       }
     }

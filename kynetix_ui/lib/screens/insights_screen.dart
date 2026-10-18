@@ -346,19 +346,19 @@ class _InsightsScreenState extends State<InsightsScreen>
           const SizedBox(height: KSpacing.xl),
           const _Hairline(),
           const SizedBox(height: KSpacing.lg),
-          // Monochrome for logging (no data meaning); meaning colours for
-          // protein (mint), calories / meals (fuel) and training (violet).
+          // Calories wear the accent and protein wears ink; the rest are ink
+          // tints so the accent keeps one meaning. Every bar has its label.
           _buildMetricRow('Tracking consistency', score.loggingConsistency,
-              '${(score.loggingConsistency * 100).round()}%', KColor.textPrimary, KGradient.primary),
+              '${(score.loggingConsistency * 100).round()}%', KColor.textPrimary, [KColor.fiber, KColor.fiber]),
           _buildMetricRow('Protein target hit rate', score.proteinAdherence,
               '${(score.proteinAdherence * 100).round()}%', KColor.protein, KGradient.protein),
           _buildMetricRow('Calorie target hit rate', score.calorieAdherence,
               '${(score.calorieAdherence * 100).round()}%', KColor.calorie, KGradient.fuel),
           _buildMetricRow('Workout consistency', score.gymAttendance,
-              '${(score.gymAttendance * 100).round()}%', KColor.violet, [KColor.violet, KColor.violet]),
+              '${(score.gymAttendance * 100).round()}%', KColor.textPrimary, [KColor.fat, KColor.fat]),
           if (score.mealQuality > 0)
             _buildMetricRow('Meal quality', score.mealQuality,
-                '${(score.mealQuality * 100).round()}', KColor.saffron, KGradient.fuel),
+                '${(score.mealQuality * 100).round()}', KColor.textPrimary, [KColor.carbs, KColor.carbs]),
           _buildDeltaStrips(delta),
           const SizedBox(height: KSpacing.lg),
           Row(
@@ -704,7 +704,7 @@ class _InsightsScreenState extends State<InsightsScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.fitness_center_rounded, size: 15, color: KColor.violet),
+              Icon(Icons.fitness_center_rounded, size: 15, color: KColor.textPrimary),
               const SizedBox(width: KSpacing.sm),
               Expanded(child: Text('Weekly training review', style: KText.h3)),
             ],
@@ -729,9 +729,12 @@ class _InsightsScreenState extends State<InsightsScreen>
   }
 
   Widget _buildScoreItem(String label, int score, String explanation) {
+    // Strong in ink, fair set back, low in the accent. The grade word says it
+    // too, so colour is never the only signal.
     final Color color = score >= 85
-        ? KColor.success
-        : (score >= 65 ? KColor.warning : KColor.danger);
+        ? KColor.ink
+        : (score >= 65 ? KColor.fat : KColor.ember);
+    final Color gradeColor = score >= 65 && score < 85 ? KColor.textSecondary : color;
     final String grade = score >= 85 ? 'Strong' : (score >= 65 ? 'Fair' : 'Low');
     return Padding(
       padding: const EdgeInsets.only(bottom: KSpacing.lg),
@@ -748,7 +751,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                 ),
               ),
               const SizedBox(width: KSpacing.sm),
-              Text(grade, style: KText.caption.copyWith(fontSize: 11.5, color: color, fontWeight: FontWeight.w600)),
+              Text(grade, style: KText.caption.copyWith(fontSize: 11.5, color: gradeColor, fontWeight: FontWeight.w600)),
               const SizedBox(width: 8),
               Text('$score', style: KText.numMedium.copyWith(fontSize: 20, color: KColor.textPrimary)),
             ],
@@ -840,7 +843,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                   : (gap < 2.0 ? '${gap.toStringAsFixed(1)}d · tight' : '${gap.toStringAsFixed(1)}d · good');
               final Color spacingColor = gap == null
                   ? KColor.textMuted
-                  : (gap < 2.0 ? KColor.danger : KColor.success);
+                  : (gap < 2.0 ? KColor.ember : KColor.textPrimary);
 
               return TableRow(
                 children: [
@@ -914,7 +917,7 @@ class _InsightsScreenState extends State<InsightsScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.calendar_view_week_rounded, size: 15, color: KColor.violet),
+              Icon(Icons.calendar_view_week_rounded, size: 15, color: KColor.textPrimary),
               const SizedBox(width: KSpacing.sm),
               Expanded(child: Text('Workout consistency', style: KText.h3)),
             ],
@@ -940,21 +943,21 @@ class _InsightsScreenState extends State<InsightsScreen>
                     children: [
                       Text(weekdays[i], style: KText.caption.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.w600)),
                       const SizedBox(height: KSpacing.sm),
-                      // Trained = solid violet (training meaning) + check;
-                      // rest = quiet outline + cross. Shape and icon carry it too.
+                      // Trained = solid ink + check; rest = quiet outline +
+                      // cross. Shape and icon carry it too.
                       Container(
                         width: 34,
                         height: 34,
                         decoration: BoxDecoration(
                           color: didGym
-                              ? KColor.violet
+                              ? KColor.ink
                               : KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.03),
                           shape: BoxShape.circle,
                           border: didGym ? null : Border.all(color: _hairlineColor(), width: 1),
                         ),
                         child: Center(
                           child: didGym
-                              ? Icon(Icons.check_rounded, size: 17, color: Colors.white)
+                              ? Icon(Icons.check_rounded, size: 17, color: KColor.onInk)
                               : Icon(Icons.close_rounded, size: 13, color: KColor.textDisabled),
                         ),
                       ),
@@ -1120,12 +1123,14 @@ class _InsightsScreenState extends State<InsightsScreen>
 
   ({String label, Color color}) _getOutcomeDetails(DayOutcome outcome) {
     return switch (outcome) {
-      DayOutcome.hitCaloriesAndProtein => (label: 'Calories and protein met', color: KColor.success),
-      DayOutcome.hitCaloriesMissedProtein => (label: 'Calories hit, protein low', color: KColor.saffron),
-      DayOutcome.hitProteinOverCalories => (label: 'Protein met, calories high', color: KColor.ember),
-      DayOutcome.underCaloriesUnderProtein => (label: 'Under calories and protein', color: KColor.blue),
-      DayOutcome.overCaloriesSignificantly => (label: 'Calorie surplus', color: KColor.danger),
-      DayOutcome.veryGoodFatLoss => (label: 'Fat loss on track', color: KColor.success),
+      // Met days in ink, the surplus in the accent, the in-between days in
+      // tints. The legend names every swatch.
+      DayOutcome.hitCaloriesAndProtein => (label: 'Calories and protein met', color: KColor.ink),
+      DayOutcome.hitCaloriesMissedProtein => (label: 'Calories hit, protein low', color: KColor.fat),
+      DayOutcome.hitProteinOverCalories => (label: 'Protein met, calories high', color: KColor.carbs),
+      DayOutcome.underCaloriesUnderProtein => (label: 'Under calories and protein', color: KColor.fiber),
+      DayOutcome.overCaloriesSignificantly => (label: 'Calorie surplus', color: KColor.ember),
+      DayOutcome.veryGoodFatLoss => (label: 'Fat loss on track', color: KColor.ink),
       DayOutcome.maintenanceLike => (label: 'Maintenance day', color: KColor.textSecondary),
       DayOutcome.incomplete => (label: 'Incomplete log', color: KColor.textMuted),
       DayOutcome.unlogged => (label: 'Not logged', color: KColor.textDisabled),
@@ -1327,7 +1332,7 @@ class _InsightsScreenState extends State<InsightsScreen>
             children: [
               stat('Logged days', '$logged', 'of $maxDays days', KColor.textSecondary, Icons.edit_calendar_rounded),
               const SizedBox(width: KSpacing.md),
-              stat('Gym sessions', '$gym', 'workouts', KColor.violet, Icons.fitness_center_rounded),
+              stat('Gym sessions', '$gym', 'workouts', KColor.textSecondary, Icons.fitness_center_rounded),
             ],
           ),
         ],
@@ -1512,7 +1517,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                     if (highlight)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
-                        child: _NewPill(label: 'New', color: KColor.saffron),
+                        child: _NewPill(label: 'New', color: KColor.ember),
                       ),
                     Text(value, style: KText.numSmall.copyWith(fontSize: 16), textAlign: TextAlign.end),
                   ],
@@ -1659,7 +1664,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                         child: Text(pr.exerciseName, style: KText.h3),
                       ),
                       const SizedBox(width: KSpacing.sm),
-                      _NewPill(label: 'Record', color: KColor.violet, icon: Icons.emoji_events_rounded),
+                      _NewPill(label: 'Record', color: KColor.textPrimary, icon: Icons.emoji_events_rounded),
                     ],
                   ),
                   const SizedBox(height: KSpacing.md),
@@ -2415,11 +2420,7 @@ class _InferenceCard extends StatelessWidget {
               width: 3,
               decoration: BoxDecoration(
                 borderRadius: KRadius.pill,
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [accent, accent.withValues(alpha: 0.15)],
-                ),
+                color: accent,
               ),
             ),
           ),
@@ -2559,14 +2560,7 @@ class _ScoreColumn extends StatelessWidget {
               height: 4 + 68 * v,
               // Scores are not protein: monochrome ink bars.
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    KColor.fg.withValues(alpha: KColor.isDark ? 0.35 : 0.3),
-                    KColor.fg.withValues(alpha: KColor.isDark ? 0.9 : 0.85),
-                  ],
-                ),
+                color: KColor.ink.withValues(alpha: KColor.isDark ? 0.9 : 0.85),
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(4), bottom: Radius.circular(2)),
               ),
             ),
@@ -2656,7 +2650,7 @@ class _EarnedBadge extends StatelessWidget {
           '${achievement.title}. ${achievement.description}. Earned $dateLabel${isNew ? '. New' : ''}',
       child: KCard(
         padding: const EdgeInsets.all(14),
-        border: isNew ? Border.all(color: KColor.saffron.withValues(alpha: 0.45), width: 1) : null,
+        border: isNew ? Border.all(color: KColor.ember.withValues(alpha: 0.45), width: 1) : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2665,7 +2659,7 @@ class _EarnedBadge extends StatelessWidget {
               children: [
                 _Medallion(id: achievement.id, size: 44, state: _MedalState.earned),
                 const Spacer(),
-                if (isNew) _NewPill(label: 'New', color: KColor.saffron),
+                if (isNew) _NewPill(label: 'New', color: KColor.ember),
               ],
             ),
             const SizedBox(height: KSpacing.md),
@@ -2686,7 +2680,7 @@ class _EarnedBadge extends StatelessWidget {
 
 // ─── Pulsing Badge Widget (Micro-animation) ───────────────────────────────────
 // Newly unlocked badge: a one-time sheen sweeps across it on mount, then a
-// thin saffron ring breathes while it is still "new" (no glow). The breathing loop only runs
+// thin accent ring breathes while it is still "new" (no glow). The breathing loop only runs
 // when ambient motion is allowed (off under reduced motion and in tests), is
 // muted by TickerMode when the route is covered, and stops for good once the
 // badge is no longer new (this widget is removed).
@@ -2762,43 +2756,12 @@ class _PulsingBadgeState extends State<_PulsingBadge> with TickerProviderStateMi
                   decoration: BoxDecoration(
                     borderRadius: KRadius.lg,
                     border: Border.all(
-                      color: KColor.saffron.withValues(alpha: 0.2 + 0.4 * _pulse.value),
+                      color: KColor.ember.withValues(alpha: 0.2 + 0.4 * _pulse.value),
                       width: 1.5,
                     ),
                   ),
                 ),
               ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ClipRRect(
-                borderRadius: KRadius.lg,
-                child: AnimatedBuilder(
-                  animation: _sheen,
-                  builder: (context, _) {
-                    if (_sheen.value <= 0 || _sheen.value >= 1) return const SizedBox.shrink();
-                    final t = KMotion.emphasizedCurve.transform(_sheen.value);
-                    return FractionalTranslation(
-                      translation: Offset(-1.0 + 2.0 * t, 0),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: const Alignment(-1, -0.5),
-                            end: const Alignment(1, 0.5),
-                            colors: [
-                              KColor.saffron.withValues(alpha: 0),
-                              KColor.saffron.withValues(alpha: KColor.isDark ? 0.14 : 0.12),
-                              KColor.saffron.withValues(alpha: 0),
-                            ],
-                            stops: const [0.3, 0.5, 0.7],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
               ),
             ),
           ),

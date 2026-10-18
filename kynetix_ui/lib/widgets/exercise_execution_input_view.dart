@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
+import '../ui/k_rolling.dart';
 import 'barbell_plate_calculator.dart';
+import 'k_ticking_text.dart';
 
 /// Validation logic for exercise execution modes.
 class ExecutionModeValidator {
@@ -122,6 +124,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   ];
 
   bool _isInternalUpdating = false;
+
+  /// Index a stepper is gliding the dial to, or null when the dial is free.
+  int? _weightGlideTarget;
+  int? _repsGlideTarget;
 
   @override
   void initState() {
@@ -244,6 +250,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     selectedItem: widget.selectedWeight,
                     labelBuilder: (w) => '${w.toStringAsFixed(1)} kg',
                     onSelectedItemChanged: _onWeightWheelChanged,
+                    onUserDrag: () => _weightGlideTarget = null,
                   ),
                   const SizedBox(height: 8),
                   _StepRow(children: [
@@ -272,6 +279,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     selectedItem: widget.selectedReps,
                     labelBuilder: (r) => '$r reps',
                     onSelectedItemChanged: _onRepsWheelChanged,
+                    onUserDrag: () => _repsGlideTarget = null,
                   ),
                   const SizedBox(height: 8),
                   _StepRow(children: [
@@ -343,13 +351,19 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          currentExternal > 0 ? '+${currentExternal.toStringAsFixed(1)} kg' : 'Bodyweight only',
-                          textAlign: TextAlign.center,
-                          style: currentExternal > 0
-                              ? _InputText.readoutSmall
-                              : _InputText.eyebrow.copyWith(fontSize: 15, color: KColor.textPrimary),
-                        ),
+                        if (currentExternal > 0)
+                          _RollingReadout(
+                            prefix: '+',
+                            value: currentExternal.toStringAsFixed(1),
+                            unit: ' kg',
+                            style: _InputText.readoutSmall,
+                          )
+                        else
+                          Text(
+                            'Bodyweight only',
+                            textAlign: TextAlign.center,
+                            style: _InputText.eyebrow.copyWith(fontSize: 15, color: KColor.textPrimary),
+                          ),
                         if (currentExternal > 0)
                           Text('External load', style: _InputText.hint),
                       ],
@@ -382,6 +396,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     selectedItem: widget.selectedReps,
                     labelBuilder: (r) => '$r reps',
                     onSelectedItemChanged: _onRepsWheelChanged,
+                    onUserDrag: () => _repsGlideTarget = null,
                   ),
                   const SizedBox(height: 8),
                   _StepRow(children: [
@@ -455,7 +470,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                               if (running)
                                 ValueListenableBuilder<int>(
                                   valueListenable: _stopwatchElapsed,
-                                  builder: (context, elapsed, _) => Text(
+                                  // Digits tick over in fixed tabular cells.
+                                  builder: (context, elapsed, _) => KTickingText(
                                     '${(elapsed ~/ 60).toString().padLeft(2, '0')}:${(elapsed % 60).toString().padLeft(2, '0')}',
                                     style: _InputText.readout.copyWith(fontSize: 28, color: KColor.onInk),
                                   ),
@@ -500,7 +516,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(durStr, style: _InputText.readout),
+                        _RollingReadout(value: durStr, style: _InputText.readout),
                         Text('$curDuration seconds', style: _InputText.hint),
                       ],
                     ),
@@ -545,9 +561,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                   const SizedBox(height: 8),
                   _ReadoutWell(
                     height: 100,
-                    child: Text(
-                      '${curDuration ~/ 60}m ${(curDuration % 60).toString().padLeft(2, '0')}s',
-                      textAlign: TextAlign.center,
+                    child: _RollingReadout(
+                      value: '${curDuration ~/ 60}m ${(curDuration % 60).toString().padLeft(2, '0')}s',
                       style: _InputText.readoutSmall,
                     ),
                   ),
@@ -574,11 +589,11 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                   const SizedBox(height: 8),
                   _ReadoutWell(
                     height: 100,
-                    child: Text(
-                      curMeters >= 1000
-                          ? '${(curMeters / 1000).toStringAsFixed(2)} km'
-                          : '${curMeters.toStringAsFixed(0)} m',
-                      textAlign: TextAlign.center,
+                    child: _RollingReadout(
+                      value: curMeters >= 1000
+                          ? (curMeters / 1000).toStringAsFixed(2)
+                          : curMeters.toStringAsFixed(0),
+                      unit: curMeters >= 1000 ? ' km' : ' m',
                       style: _InputText.readoutSmall,
                     ),
                   ),
@@ -601,6 +616,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   // ───────────────────────────────────────────────────────────────────────────
   void _onWeightWheelChanged(int idx) {
     if (_isInternalUpdating) return;
+    if (_weightGlideTarget != null) {
+      if (idx == _weightGlideTarget) _weightGlideTarget = null;
+      return;
+    }
     if (idx < 0 || idx >= _weightOptions.length) return;
     final w = _weightOptions[idx];
     if (w != widget.selectedWeight) {
@@ -613,6 +632,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
 
   void _onRepsWheelChanged(int idx) {
     if (_isInternalUpdating) return;
+    if (_repsGlideTarget != null) {
+      if (idx == _repsGlideTarget) _repsGlideTarget = null;
+      return;
+    }
     if (idx < 0 || idx >= _repsOptions.length) return;
     final r = _repsOptions[idx];
     if (r != widget.selectedReps) {
@@ -623,40 +646,60 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
     }
   }
 
-  /// Glide the dial to [idx]; jumps under reduced motion.
-  void _animateWheel(FixedExtentScrollController controller, int idx) {
-    if (!controller.hasClients) return;
+  /// Glide the dial to [idx]; jumps under reduced motion. Returns false
+  /// when there was nothing to move.
+  bool _animateWheel(FixedExtentScrollController controller, int idx, {required bool weight}) {
+    void setTarget(int? t) => weight ? _weightGlideTarget = t : _repsGlideTarget = t;
+    int? target() => weight ? _weightGlideTarget : _repsGlideTarget;
+    if (!controller.hasClients) return false;
+    if (controller.selectedItem == idx) {
+      setTarget(null);
+      return false;
+    }
     final d = KMotion.of(context, const Duration(milliseconds: 200));
     if (d == Duration.zero) {
+      setTarget(null);
+      _isInternalUpdating = true;
       controller.jumpToItem(idx);
+      _isInternalUpdating = false;
     } else {
-      controller.animateToItem(idx, duration: d, curve: KMotion.emphasizedCurve);
+      setTarget(idx);
+      controller.animateToItem(idx, duration: d, curve: KMotion.emphasizedCurve).whenComplete(() {
+        // A newer glide (rapid taps, hold-to-repeat) owns the target now.
+        if (mounted && target() == idx) setTarget(null);
+      });
     }
+    return true;
   }
 
+  /// A stepper tick: one value change, one selection haptic. At a limit the
+  /// value can't move, so nothing ticks.
   void _adjustWeight(double delta) {
     final next = (widget.selectedWeight + delta).clamp(0.0, 350.0);
+    if (next == widget.selectedWeight) return;
     _isInternalUpdating = true;
     widget.onWeightChanged(next);
     _isInternalUpdating = false;
     final idx = (next / 0.5).round().clamp(0, 700);
-    _animateWheel(_weightController, idx);
+    _animateWheel(_weightController, idx, weight: true);
     KHaptics.select();
   }
 
   void _adjustReps(int delta) {
     final next = (widget.selectedReps + delta).clamp(1, 100);
+    if (next == widget.selectedReps) return;
     _isInternalUpdating = true;
     widget.onRepsChanged(next);
     _isInternalUpdating = false;
     final idx = (next - 1).clamp(0, 99);
-    _animateWheel(_repsController, idx);
+    _animateWheel(_repsController, idx, weight: false);
     KHaptics.select();
   }
 
   void _adjustExternalLoad(double delta) {
     final current = widget.externalLoadKg ?? 0.0;
     final next = (current + delta).clamp(0.0, 150.0);
+    if (next == current && widget.externalLoadKg != null) return;
     widget.onExternalLoadChanged(next);
     KHaptics.select();
   }
@@ -664,6 +707,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   void _adjustDuration(int deltaSeconds) {
     final cur = widget.durationSeconds ?? 60;
     final next = (cur + deltaSeconds).clamp(5, 7200);
+    if (next == cur && widget.durationSeconds != null) return;
     widget.onDurationChanged(next);
     KHaptics.select();
   }
@@ -671,6 +715,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   void _adjustDistance(double deltaMeters) {
     final cur = widget.distanceMeters ?? 2000.0;
     final next = (cur + deltaMeters).clamp(50.0, 50000.0);
+    if (next == cur && widget.distanceMeters != null) return;
     widget.onDistanceChanged(next);
     KHaptics.select();
   }
@@ -720,19 +765,94 @@ class _ReadoutWell extends StatelessWidget {
   }
 }
 
-class _StepButton extends StatelessWidget {
+/// A value in a readout well whose digits roll when it changes. Letters and
+/// units ("m", "s", "kg") stay put. Fits the well instead of overflowing.
+class _RollingReadout extends StatelessWidget {
+  final String prefix;
+  final String value;
+  final String unit;
+  final TextStyle style;
+  const _RollingReadout({this.prefix = '', required this.value, this.unit = '', required this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '$prefix$value$unit',
+      excludeSemantics: true,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            if (prefix.isNotEmpty) Text(prefix, style: style),
+            KRollingNumber(value, style: style, duration: KMotion.standard),
+            if (unit.isNotEmpty) Text(unit, style: style),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Quick-adjust step. Tap for one step; press and hold to repeat, starting
+/// slow and speeding up (about 3 then 6 then 12 steps a second). Each step
+/// is one value change and one selection haptic, fired by [onTap].
+class _StepButton extends StatefulWidget {
   final String label;
   final VoidCallback onTap;
 
   const _StepButton({required this.label, required this.onTap});
 
   @override
+  State<_StepButton> createState() => _StepButtonState();
+}
+
+class _StepButtonState extends State<_StepButton> {
+  Timer? _repeat;
+  int _repeats = 0;
+
+  void _startRepeat() {
+    _repeats = 0;
+    widget.onTap();
+    _scheduleNext();
+  }
+
+  void _scheduleNext() {
+    final ms = _repeats < 4 ? 320 : (_repeats < 12 ? 160 : 80);
+    _repeat = Timer(Duration(milliseconds: ms), () {
+      if (!mounted) return;
+      _repeats++;
+      widget.onTap();
+      _scheduleNext();
+    });
+  }
+
+  void _stopRepeat() {
+    _repeat?.cancel();
+    _repeat = null;
+  }
+
+  @override
+  void dispose() {
+    _stopRepeat();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // 48dp minimum for sweaty, mid-set thumbs.
-    return Material(
+    final label = widget.label;
+    // 48dp minimum for sweaty, mid-set thumbs. The outer detector owns the
+    // hold (start / release); the ink well owns the single tap.
+    return GestureDetector(
+      onLongPressStart: (_) => _startRepeat(),
+      onLongPressEnd: (_) => _stopRepeat(),
+      onLongPressCancel: _stopRepeat,
+      child: Material(
       type: MaterialType.transparency,
       child: InkWell(
-        onTap: onTap,
+        onTap: widget.onTap,
         borderRadius: KRadius.sm,
         splashColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.10),
         highlightColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05),
@@ -747,6 +867,7 @@ class _StepButton extends StatelessWidget {
           ),
           child: Text(label, style: _InputText.step),
         ),
+      ),
       ),
     );
   }
@@ -769,6 +890,7 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
   final T selectedItem;
   final String Function(T item) labelBuilder;
   final ValueChanged<int> onSelectedItemChanged;
+  final VoidCallback? onUserDrag;
   final double height;
   final double itemExtent;
 
@@ -778,6 +900,7 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
     required this.selectedItem,
     required this.labelBuilder,
     required this.onSelectedItemChanged,
+    this.onUserDrag,
     this.height = 164.0,
     this.itemExtent = 40.0,
   });
@@ -816,7 +939,12 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
             ),
 
             // Native 3D ListWheelScrollView with cylindrical perspective & momentum physics
-            ListWheelScrollView.useDelegate(
+            NotificationListener<ScrollStartNotification>(
+              onNotification: (n) {
+                if (n.dragDetails != null) onUserDrag?.call();
+                return false;
+              },
+              child: ListWheelScrollView.useDelegate(
               controller: controller,
               itemExtent: itemExtent,
               physics: const FixedExtentScrollPhysics(),
@@ -875,21 +1003,20 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
                         fontWeight = FontWeight.w500;
                       }
 
+                      // The fade rides on the text colour: no Opacity layer
+                      // (and its offscreen pass) per row per scroll frame.
                       return Center(
-                        child: Opacity(
-                          opacity: opacity,
-                          child: Transform.scale(
-                            scale: scale,
-                            child: Text(
-                              label,
-                              style: _InputText.wheel.copyWith(
-                                color: textColor,
-                                fontWeight: fontWeight,
-                                letterSpacing: absDelta < 0.4 ? -0.4 : 0.0,
-                              ),
-                              maxLines: 1,
-                              softWrap: false,
+                        child: Transform.scale(
+                          scale: scale,
+                          child: Text(
+                            label,
+                            style: _InputText.wheel.copyWith(
+                              color: textColor.withValues(alpha: textColor.a * opacity),
+                              fontWeight: fontWeight,
+                              letterSpacing: absDelta < 0.4 ? -0.4 : 0.0,
                             ),
+                            maxLines: 1,
+                            softWrap: false,
                           ),
                         ),
                       );
@@ -898,6 +1025,7 @@ class _Kynetix3DWheelPicker<T> extends StatelessWidget {
                 },
                 childCount: items.length,
               ),
+            ),
             ),
 
             // Top cylinder depth fade

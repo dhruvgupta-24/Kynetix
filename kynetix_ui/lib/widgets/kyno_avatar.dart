@@ -31,7 +31,7 @@ enum KynoMood {
 
 /// Kyno's character: a small rounded robot with a visor, two light-up eyes,
 /// an antenna and a stubby body. It is drawn, not an image, so it follows the
-/// theme (ink body, cyan eyes) and costs a single painter.
+/// theme (ink body, base visor, ember eyes) and costs a single painter.
 ///
 /// Motion layers:
 /// • ambient — breathing and antenna drift, only when ambient motion is on;
@@ -177,13 +177,14 @@ class _KynoAvatarState extends State<KynoAvatar> with TickerProviderStateMixin {
                 talking: widget.mood == KynoMood.talking,
                 thinking: widget.mood == KynoMood.thinking,
                 body: KColor.ink,
-                // Warm-white Kyno on Carbon, ink Kyno on Paper; the visor is
-                // always dark glass so the cyan eyes read.
-                visor: KColor.isDark ? const Color(0xFF0B0B0C) : const Color(0xFF2A2830),
-                eye: KColor.isDark ? KColor.cyan : const Color(0xFF5FD4F5),
-                accent: KColor.cyan,
+                // An ink body with a base-coloured visor and mouth, and ember
+                // for the eyes, chest light and antenna: Bone and Graphite on
+                // the dark theme, Ink and Paper on the light one.
+                visor: KColor.onInk,
+                eye: KColor.ember,
+                accent: KColor.ember,
                 shade: KColor.isDark ? KColor.bg : KColor.onInk,
-                mouth: KColor.isDark ? const Color(0xFF0B0B0C) : KColor.onInk,
+                mouth: KColor.onInk,
               ),
             ),
           ),

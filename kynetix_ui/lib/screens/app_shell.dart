@@ -55,8 +55,12 @@ class AppShellState extends State<AppShell> {
     });
   }
 
+  void _expandDock() => _compact.value = false;
+
   @override
   void dispose() {
+    _coverAnim?.removeStatusListener(_onCovered);
+    _compact.dispose();
     // The handler captures this state. A replacement shell can mount before
     // this one is disposed, so only clear it if no newer shell took over.
     if (identical(_handlerOwner, this)) {
@@ -128,14 +132,14 @@ class AppShellState extends State<AppShell> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: KColor.violet.withValues(
-                    alpha: KColor.isDark ? 0.16 : 0.1,
+                  color: KColor.ink.withValues(
+                    alpha: KColor.isDark ? 0.10 : 0.07,
                   ),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.fitness_center_rounded,
-                  color: KColor.violet,
+                  color: KColor.ink,
                   size: 16,
                 ),
               ),
@@ -496,14 +500,12 @@ class AppShellState extends State<AppShell> {
   void switchToTab(int index) {
     if (!mounted) return;
     if (index == _tab) {
-      if (_compact) setState(() => _compact = false);
+      _compact.value = false;
       return;
     }
     KHaptics.select();
-    setState(() {
-      _tab = index;
-      _compact = false;
-    });
+    _compact.value = false;
+    setState(() => _tab = index);
     AppShell.currentTab.value = index;
   }
 
@@ -512,14 +514,38 @@ class AppShellState extends State<AppShell> {
   // reaching the top, grows it back. Only vertical scrolls of the page itself
   // count (not horizontal strips or nested lists).
 
-  bool _compact = false;
+  // A notifier, not State: a threshold crossing rebuilds only the dock, never
+  // the shell, the aurora or the tabs. ValueNotifier ignores same-value sets,
+  // so scroll updates that don't cross a threshold cost nothing.
+  final _compact = ValueNotifier<bool>(false);
+
+  // Another screen on top (a pushed page or sheet) owns the scroll; its
+  // movement, or the dashboard settling underneath it, must not shrink the
+  // dock. Coming back always shows the full dock.
+  Animation<double>? _coverAnim;
+
+  void _onCovered(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) _compact.value = false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final anim = ModalRoute.of(context)?.secondaryAnimation;
+    if (!identical(anim, _coverAnim)) {
+      _coverAnim?.removeStatusListener(_onCovered);
+      _coverAnim = anim?..addStatusListener(_onCovered);
+    }
+  }
 
   bool _onScroll(ScrollNotification n) {
     if (n.depth != 0 || n.metrics.axis != Axis.vertical || n is! ScrollUpdateNotification) return false;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
     final d = n.scrollDelta ?? 0;
     final px = n.metrics.pixels;
-    final next = px < 80 ? false : (d > 6 ? true : (d < -6 ? false : _compact));
-    if (next != _compact) setState(() => _compact = next);
+    final now = _compact.value;
+    final next = px < 80 ? false : (d > 6 ? true : (d < -6 ? false : now));
+    if (next != now) _compact.value = next;
     return false;
   }
 
@@ -553,17 +579,20 @@ class AppShellState extends State<AppShell> {
             ],
           ),
         ),
-        bottomNavigationBar: ValueListenableBuilder<VoidCallback?>(
-          valueListenable: AppShell.addMealAction,
-          // Own layer: the dock's spring indicator and press feedback never
-          // repaint the tab content scrolling beneath it.
-          builder: (context, addMeal, _) => RepaintBoundary(
-            child: _KDock(
-              currentIndex: _tab,
-              onTap: switchToTab,
-              compact: _compact,
-              onExpand: () => setState(() => _compact = false),
-              action: _tab == 0 ? addMeal : null,
+        // Own layer: the dock's morph and press feedback never repaint the
+        // tab content scrolling beneath it.
+        bottomNavigationBar: RepaintBoundary(
+          child: ValueListenableBuilder<VoidCallback?>(
+            valueListenable: AppShell.addMealAction,
+            builder: (context, addMeal, _) => ValueListenableBuilder<bool>(
+              valueListenable: _compact,
+              builder: (context, compact, _) => _KDock(
+                currentIndex: _tab,
+                onTap: switchToTab,
+                compact: compact,
+                onExpand: _expandDock,
+                action: _tab == 0 ? addMeal : null,
+              ),
             ),
           ),
         ),
@@ -573,10 +602,15 @@ class AppShellState extends State<AppShell> {
 }
 
 // ─── _FadeThroughTabs ─────────────────────────────────────────────────────────
-// IndexedStack semantics (every tab keeps its state) with a Material
-// fade-through between tabs: the old tab fades out quickly, the new one fades
-// in while settling from 97% scale. Inactive tabs are offstage with tickers
-// muted, so their animations don't run in the background.
+// IndexedStack semantics (every tab keeps its state) with a fade-through
+// between tabs: the old tab fades out fast, the new one fades in while
+// settling from 98% scale. Inactive tabs are offstage with tickers muted, so
+// their animations don't run in the background.
+//
+// Cost: the transitions are FadeTransition / ScaleTransition driven straight
+// by the controller, so a frame only updates an opacity and a transform layer
+// over each tab's cached RepaintBoundary. Nothing rebuilds per frame; the
+// tree only rebuilds when a switch starts and when it ends.
 
 class _FadeThroughTabs extends StatefulWidget {
   const _FadeThroughTabs({required this.index, required this.children});
@@ -591,21 +625,47 @@ class _FadeThroughTabsState extends State<_FadeThroughTabs>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(
     vsync: this,
-    duration: KMotion.emphasized,
+    duration: KMotion.tab,
     value: 1,
+  )..addStatusListener(_onStatus);
+
+  // The incoming tab: fades in after a short beat, scales 0.98 to 1.
+  static const _inFade = Interval(0.18, 1, curve: KMotion.easeOut);
+  late final Animation<double> _inOpacity = _ctrl.drive(CurveTween(curve: _inFade));
+  late final Animation<double> _inScale = _ctrl.drive(
+    Tween(begin: 0.98, end: 1.0).chain(CurveTween(curve: KMotion.easeOut)),
   );
+
+  // The outgoing tab: gone in the first ~45%, so the two never read as a
+  // double exposure. Starts from whatever opacity it had (a switch can
+  // interrupt a switch).
+  static const _outFade = Interval(0, 0.45, curve: KMotion.easeOut);
+  Animation<double> _outOpacity = kAlwaysDismissedAnimation;
+
   int _prev = -1;
+
+  void _onStatus(AnimationStatus s) {
+    if (s == AnimationStatus.completed && _prev != -1 && mounted) {
+      setState(() => _prev = -1);
+    }
+  }
 
   @override
   void didUpdateWidget(covariant _FadeThroughTabs old) {
     super.didUpdateWidget(old);
-    if (old.index != widget.index) {
-      _prev = old.index;
-      _ctrl.duration = KMotion.of(context, KMotion.emphasized);
-      _ctrl.forward(from: 0).whenCompleteOrCancel(() {
-        if (mounted) setState(() => _prev = -1);
-      });
+    if (old.index == widget.index) return;
+    if (KMotion.reduced(context)) {
+      _prev = -1;
+      _ctrl.value = 1;
+      return;
     }
+    final from = _inOpacity.value;
+    _prev = old.index;
+    _outOpacity = _ctrl.drive(
+      Tween(begin: from, end: 0.0).chain(CurveTween(curve: _outFade)),
+    );
+    _ctrl.duration = KMotion.tab;
+    _ctrl.forward(from: 0);
   }
 
   @override
@@ -628,42 +688,28 @@ class _FadeThroughTabsState extends State<_FadeThroughTabs>
   Widget _layer(int i, Widget child) {
     final active = i == widget.index;
     final leaving = i == _prev;
-    final visible = active || leaving;
+    // The same widget shape for every role, so a tab's state is never
+    // remounted when it changes role.
     return Offstage(
-      offstage: !visible,
+      offstage: !(active || leaving),
       child: TickerMode(
         enabled: active,
         child: IgnorePointer(
           ignoring: !active,
-          child: AnimatedBuilder(
-            animation: _ctrl,
-            // Each tab paints into its own layer, so the fade-through only
-            // re-composites it (no repaint of the tab's content per frame),
-            // and repaints inside one tab never dirty the shell.
-            child: RepaintBoundary(child: child),
-            builder: (context, child) {
-              final t = _ctrl.value;
-              double opacity;
-              double scale;
-              if (active) {
-                final v = KMotion.decelerate.transform(
-                  ((t - 0.3) / 0.7).clamp(0.0, 1.0),
-                );
-                opacity = v;
-                scale = 0.97 + 0.03 * v;
-              } else if (leaving) {
-                opacity =
-                    1 - KMotion.accelerate.transform((t / 0.3).clamp(0.0, 1.0));
-                scale = 1.0;
-              } else {
-                opacity = 0;
-                scale = 1.0;
-              }
-              return Opacity(
-                opacity: opacity,
-                child: Transform.scale(scale: scale, child: child),
-              );
-            },
+          child: ExcludeSemantics(
+            excluding: !active,
+            child: ScaleTransition(
+              scale: active ? _inScale : kAlwaysCompleteAnimation,
+              child: FadeTransition(
+                opacity: active
+                    ? _inOpacity
+                    : (leaving ? _outOpacity : kAlwaysDismissedAnimation),
+                // Each tab paints into its own layer, so the fade only
+                // re-composites it, and repaints inside one tab never dirty
+                // the shell.
+                child: RepaintBoundary(child: child),
+              ),
+            ),
           ),
         ),
       ),
@@ -681,7 +727,9 @@ class _FadeThroughTabsState extends State<_FadeThroughTabs>
 // Smoothness: the whole bar is one layout computed every frame from three
 // eased values (which tab, how shrunk, whether "+" is there) and the
 // capsule's actual width. Nothing animates on its own clock, so the pill,
-// the icons, the label and the capsule edge can never drift apart.
+// the icons, the label and the capsule edge can never drift apart. Fades are
+// folded into colour alpha (no Opacity layers), and the width is measured
+// once outside the animation, not re-laid out by a LayoutBuilder per frame.
 
 class _KDock extends StatelessWidget {
   const _KDock({
@@ -717,8 +765,8 @@ class _KDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).padding.bottom;
-    final dur = KMotion.of(context, const Duration(milliseconds: 460));
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    final dur = KMotion.of(context, KMotion.emphasized);
     const curve = KMotion.emphasizedCurve;
     // Content dissolves into the page colour before it reaches the island,
     // so nothing reads through the gaps around the floating chrome.
@@ -735,20 +783,20 @@ class _KDock extends StatelessWidget {
         padding: EdgeInsets.fromLTRB(20, 16, 20, bottom + 12),
         child: SizedBox(
           height: _height,
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(end: currentIndex.toDouble()),
-            duration: dur,
-            curve: curve,
-            builder: (context, sel, _) => TweenAnimationBuilder<double>(
-              tween: Tween(end: compact ? 1 : 0),
+          child: LayoutBuilder(
+            builder: (context, box) => TweenAnimationBuilder<double>(
+              tween: Tween(end: currentIndex.toDouble()),
               duration: dur,
               curve: curve,
-              builder: (context, shrink, _) => TweenAnimationBuilder<double>(
-                tween: Tween(end: action == null ? 0 : 1),
+              builder: (context, sel, _) => TweenAnimationBuilder<double>(
+                tween: Tween(end: compact ? 1 : 0),
                 duration: dur,
                 curve: curve,
-                builder: (context, act, _) => LayoutBuilder(
-                  builder: (context, box) => _frame(context, box.maxWidth, sel, shrink, act),
+                builder: (context, shrink, _) => TweenAnimationBuilder<double>(
+                  tween: Tween(end: action == null ? 0 : 1),
+                  duration: dur,
+                  curve: curve,
+                  builder: (context, act, _) => _frame(box.maxWidth, sel, shrink, act),
                 ),
               ),
             ),
@@ -770,7 +818,7 @@ class _KDock extends StatelessWidget {
 
   /// One frame of the bar for the eased values [sel] (fractional tab),
   /// [shrink] (0 full, 1 compact) and [act] (0 no "+", 1 "+" shown).
-  Widget _frame(BuildContext context, double maxW, double sel, double shrink, double act) {
+  Widget _frame(double maxW, double sel, double shrink, double act) {
     final n = _items.length;
     final full = maxW - act * (_height + _actionGap);
     final capW = full + (_compactWidth - full) * shrink;
@@ -803,6 +851,8 @@ class _KDock extends StatelessWidget {
     }
 
     final dark = KColor.isDark;
+    final iconsFade = (1 - shrink).clamp(0.0, 1.0);
+    final a = act.clamp(0.0, 1.0);
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -819,7 +869,7 @@ class _KDock extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: KRadius.pill,
                 color: dark ? KColor.cardHigh : KColor.card,
-                border: Border.all(color: dark ? const Color(0xFF2C2C30) : KColor.border),
+                border: Border.all(color: KColor.border),
               ),
               child: ClipRRect(
                 borderRadius: KRadius.pill,
@@ -843,15 +893,15 @@ class _KDock extends StatelessWidget {
                           width: widths[i],
                           child: IgnorePointer(
                             ignoring: shrink > 0.5,
-                            child: Opacity(
-                              opacity: i == open ? 1 : (1 - shrink).clamp(0.0, 1.0),
-                              child: _NavItem(
-                                data: _items[i],
-                                selected: i == currentIndex,
-                                openness: f[i],
-                                labelReveal: _reveal(f[i], i == currentIndex) * (1 - shrink),
-                                onTap: () => onTap(i),
-                              ),
+                            child: _NavItem(
+                              data: _items[i],
+                              selected: i == currentIndex,
+                              openness: f[i],
+                              // The open tab stays; the others fade with
+                              // the shrink, through their colour alpha.
+                              fade: i == open ? 1 : iconsFade,
+                              labelReveal: _reveal(f[i], i == currentIndex) * (1 - shrink),
+                              onTap: () => onTap(i),
                             ),
                           ),
                         ),
@@ -868,10 +918,7 @@ class _KDock extends StatelessWidget {
             top: 0,
             bottom: 0,
             width: _height,
-            child: Opacity(
-              opacity: act.clamp(0.0, 1.0),
-              child: _DockAction(onTap: action ?? () {}),
-            ),
+            child: _DockAction(onTap: action, fade: a),
           ),
       ],
     );
@@ -880,23 +927,37 @@ class _KDock extends StatelessWidget {
 
 /// Round ember button beside the island (Nutrition: "Log a meal").
 class _DockAction extends StatelessWidget {
-  const _DockAction({required this.onTap});
-  final VoidCallback onTap;
+  const _DockAction({required this.onTap, required this.fade});
+  final VoidCallback? onTap;
+
+  /// 0 gone, 1 fully shown; folded into the fill and glyph alpha.
+  final double fade;
 
   @override
   Widget build(BuildContext context) {
+    final tap = onTap;
     return Pressable(
-      onTap: () {
-        KHaptics.select();
-        onTap();
-      },
+      onTap: tap == null
+          ? null
+          : () {
+              KHaptics.select();
+              tap();
+            },
       semanticLabel: 'Log a meal',
       scale: 0.92,
-      child: Container(
-        width: 64,
-        height: 64,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: KColor.ember),
-        child: const Icon(KIcons.add, color: Colors.white, size: 28),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: KColor.ember.withValues(alpha: KColor.ember.a * fade),
+        ),
+        child: SizedBox.square(
+          dimension: 64,
+          child: Icon(
+            KIcons.add,
+            color: KColor.onAccent.withValues(alpha: KColor.onAccent.a * fade),
+            size: 28,
+          ),
+        ),
       ),
     );
   }
@@ -916,6 +977,7 @@ class _NavItem extends StatelessWidget {
     required this.data,
     required this.selected,
     required this.openness,
+    required this.fade,
     required this.labelReveal,
     required this.onTap,
   });
@@ -927,18 +989,24 @@ class _NavItem extends StatelessWidget {
   /// pill slides.
   final double openness;
 
+  /// Overall visibility (0 hidden, 1 shown), folded into colour alpha.
+  final double fade;
+
   /// How much of the label shows (0 none, 1 all).
   final double labelReveal;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = Color.lerp(KColor.textSecondary, KColor.onInk, openness)!;
+    final base = Color.lerp(KColor.textSecondary, KColor.onInk, openness)!;
+    final color = base.withValues(alpha: base.a * fade);
     final Widget glyph = switch (data.kind) {
-      _NavKind.kyno => KynoMark(size: 22, outlined: true, color: color),
-      _NavKind.avatar => KAvatar(
-          size: 28,
-          ring: openness > 0.5 ? null : KColor.fg.withValues(alpha: 0.18),
+      _NavKind.kyno => KynoMark(size: 22, outlined: true, alive: true, selected: selected, color: color),
+      // A photo can't take a colour, so the avatar alone keeps an Opacity
+      // (28 px, and only while the island shrinks).
+      _NavKind.avatar => Opacity(
+          opacity: fade,
+          child: _CachedAvatar(ring: openness > 0.5 ? null : KColor.fg.withValues(alpha: 0.18)),
         ),
       _NavKind.icon => Icon(data.icon, color: color, size: 22),
     };
@@ -959,27 +1027,24 @@ class _NavItem extends StatelessWidget {
                 children: [
                   glyph,
                   // The name unrolls from the icon as the tab opens: its
-                  // width and opacity follow the same eased value.
+                  // width and alpha follow the same eased value.
                   if (labelReveal > 0.01)
                     ClipRect(
                       child: Align(
                         alignment: Alignment.centerLeft,
                         widthFactor: labelReveal,
-                        child: Opacity(
-                          opacity: labelReveal,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: Text(
-                              data.label,
-                              maxLines: 1,
-                              softWrap: false,
-                              style: TextStyle(
-                                fontFamily: KText.family,
-                                color: color,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: -0.2,
-                              ),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text(
+                            data.label,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: TextStyle(
+                              fontFamily: KText.family,
+                              color: color.withValues(alpha: color.a * labelReveal),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.2,
                             ),
                           ),
                         ),
@@ -992,5 +1057,30 @@ class _NavItem extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The profile avatar for the dock. The dock rebuilds every animation frame;
+/// handing back the same [KAvatar] instance while the ring is unchanged lets
+/// Flutter skip rebuilding the photo subtree on those frames.
+class _CachedAvatar extends StatefulWidget {
+  const _CachedAvatar({required this.ring});
+  final Color? ring;
+
+  @override
+  State<_CachedAvatar> createState() => _CachedAvatarState();
+}
+
+class _CachedAvatarState extends State<_CachedAvatar> {
+  Widget? _avatar;
+  Color? _ring;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_avatar == null || _ring != widget.ring) {
+      _ring = widget.ring;
+      _avatar = KAvatar(size: 28, ring: _ring);
+    }
+    return _avatar!;
   }
 }

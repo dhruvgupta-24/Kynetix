@@ -5,6 +5,7 @@ import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../config/app_theme.dart';
 import 'rest_timer_prefs.dart';
 
 /// How the background "Rest over" alert is armed for the current rest.
@@ -84,9 +85,9 @@ class RestTimerNotifications {
   static const int _overScheduledId = 7403;
   static const String _countdownChannel = 'kynetix_rest_countdown';
   static const String _overChannel = 'kynetix_rest_over';
-  // Train violet (Carbon). Notification chrome is drawn by the OS, outside
-  // the app theme, so a fixed brand tint is right here.
-  static const Color _accent = Color(0xFF8E7DFF);
+  // Ember, the brand accent. Notification chrome is drawn by the OS, outside
+  // the app theme, so it always takes the dark palette's ember.
+  static Color get _accent => KPalette.dark.ember;
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;

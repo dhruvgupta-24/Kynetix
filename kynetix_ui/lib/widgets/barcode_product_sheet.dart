@@ -7,6 +7,7 @@ import '../models/day_log.dart';
 import '../models/nutrition_result.dart';
 import '../services/barcode_meal_logger.dart';
 import '../services/food_link_service.dart';
+import 'k_success_check.dart';
 
 /// What the product sheet is for.
 /// - [log]: the primary button logs straight to the day ("Log 40 g to
@@ -82,6 +83,10 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
   final _customCtrl = TextEditingController();
   late MealSection _section;
   bool _logging = false;
+
+  /// Presentation only: the entry is already logged and the button shows its
+  /// drawn check; the sheet closes with the same result when that ends.
+  BarcodeSheetResult? _loggedResult;
 
   static const _countStep = 0.5;
   static const _countMax = 20.0;
@@ -196,7 +201,9 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
         date: widget.date,
         section: _section,
       );
-      Navigator.of(context).pop(BarcodeSheetResult(
+      // Logged. The button turns into its "Logged" face (the commit haptic
+      // already fired once on the tap), then the sheet closes as before.
+      setState(() => _loggedResult = BarcodeSheetResult(
         action: action,
         grams: grams,
         section: _section,
@@ -223,7 +230,11 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
         ? 'Log $amount to ${_section.displayName}'
         : 'Add $amount to this meal';
 
-    return Padding(
+    return PopScope(
+      // Hold the sheet while the "Logged" moment plays so the caller still
+      // receives the logged entry.
+      canPop: _loggedResult == null,
+      child: Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SafeArea(
         child: SingleChildScrollView(
@@ -340,17 +351,37 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
               const SizedBox(height: KSpacing.xl),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
-                child: KButton(
-                  label: primary,
-                  icon: widget.mode == BarcodeSheetMode.log
-                      ? Icons.check_rounded
-                      : Icons.add_rounded,
-                  loading: _logging,
-                  onTap: valid
-                      ? () => _commit(widget.mode == BarcodeSheetMode.log
-                          ? BarcodeSheetAction.logged
-                          : BarcodeSheetAction.fill)
-                      : null,
+                child: AnimatedSwitcher(
+                  duration: KMotion.of(context, KMotion.quick),
+                  switchInCurve: KMotion.decelerate,
+                  switchOutCurve: KMotion.accelerate,
+                  layoutBuilder: (current, previous) => Stack(
+                    fit: StackFit.passthrough,
+                    alignment: Alignment.center,
+                    children: [...previous, ?current],
+                  ),
+                  child: _loggedResult != null
+                      ? KSuccessPill(
+                          key: const ValueKey('logged'),
+                          label: 'Logged',
+                          onFinished: () {
+                            final r = _loggedResult;
+                            if (mounted && r != null) Navigator.of(context).pop(r);
+                          },
+                        )
+                      : KButton(
+                          key: const ValueKey('log'),
+                          label: primary,
+                          icon: widget.mode == BarcodeSheetMode.log
+                              ? Icons.check_rounded
+                              : Icons.add_rounded,
+                          loading: _logging,
+                          onTap: valid
+                              ? () => _commit(widget.mode == BarcodeSheetMode.log
+                                  ? BarcodeSheetAction.logged
+                                  : BarcodeSheetAction.fill)
+                              : null,
+                        ),
                 ),
               ),
               if (widget.mode == BarcodeSheetMode.log) ...[
@@ -371,6 +402,7 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -425,7 +457,7 @@ class _LinkPrompt extends StatelessWidget {
                   child: Icon(
                     linked ? Icons.check_circle_outline_rounded : Icons.link_rounded,
                     size: 18,
-                    color: linked ? KColor.green : KColor.textSecondary,
+                    color: linked ? KColor.ink : KColor.textSecondary,
                   ),
                 ),
                 const SizedBox(width: KSpacing.sm),
@@ -845,9 +877,9 @@ class _Macros extends StatelessWidget {
               spacing: KSpacing.lg,
               runSpacing: 6,
               children: [
-                _MacroLine(label: 'Protein', value: protein, color: KColor.green, strong: true),
-                _MacroLine(label: 'Carbs', value: carbs, color: KColor.saffron),
-                _MacroLine(label: 'Fat', value: fat, color: KColor.textMuted),
+                _MacroLine(label: 'Protein', value: protein, color: KColor.protein, strong: true),
+                _MacroLine(label: 'Carbs', value: carbs, color: KColor.carbs),
+                _MacroLine(label: 'Fat', value: fat, color: KColor.fat),
               ],
             ),
           ],
@@ -895,7 +927,7 @@ class _MacroLine extends StatelessWidget {
                   style: KText.numSmall.copyWith(
                     fontSize: strong ? 15 : 13,
                     fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
-                    color: strong ? KColor.green : KColor.textPrimary,
+                    color: KColor.textPrimary,
                   ),
                 ),
               ],

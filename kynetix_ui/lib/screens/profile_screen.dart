@@ -20,6 +20,8 @@ import '../services/insights_report_service.dart';
 import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
+import '../ui/k_rolling.dart';
+import '../widgets/k_equal_height_row.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
 
@@ -335,7 +337,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   return _SheetOption(
                     label: anchor.displayLabel,
                     selected: isSel,
-                    accent: KColor.ember,
+                    accent: KColor.textSecondary,
                     onTap: () {
                       Navigator.pop(ctx);
                       _saveProfile(_profile.copyWith(portionAnchor: anchor));
@@ -346,7 +348,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _SheetOption(
                   label: 'Not specified',
                   selected: _profile.portionAnchor == null,
-                  accent: KColor.ember,
+                  accent: KColor.textSecondary,
                   onTap: () {
                     Navigator.pop(ctx);
                     // Only the eating style changes; custom targets, their
@@ -712,56 +714,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.height_rounded,
-                      label: 'Height',
-                      value: _profile.height,
-                      decimals: 1,
-                      unit: 'cm',
-                      tint: KColor.textSecondary,
-                      onTap: _editBodyMetrics,
-                    ),
-                  ),
-                  const _StatRule(),
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.monitor_weight_outlined,
-                      label: 'Weight',
-                      value: _profile.weight,
-                      decimals: 1,
-                      unit: 'kg',
-                      tint: KColor.textSecondary,
-                      onTap: _editBodyMetrics,
-                    ),
-                  ),
-                  const _StatRule(),
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.local_fire_department_rounded,
-                      // A weekly average; training/rest days differ, so say so.
-                      label: 'kcal a day',
-                      value: plan.avgDailyCalories,
-                      unit: 'kcal',
-                      tint: KColor.ember,
-                    ),
-                  ),
-                  const _StatRule(),
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.egg_outlined,
-                      label: 'Protein a day',
-                      value: plan.avgDailyProtein,
-                      unit: 'g',
-                      tint: KColor.green,
-                    ),
-                  ),
-                ],
-              ),
+            // Equal columns with painted hairline rules: the same look as
+            // a stretched row, without an intrinsic-height pass.
+            child: KEqualHeightRow(
+              gap: 1,
+              ruleColor: KColor.fg.withValues(alpha: 0.1),
+              ruleInset: KSpacing.md,
+              children: [
+                _StatTile(
+                  icon: Icons.height_rounded,
+                  label: 'Height',
+                  value: _profile.height,
+                  decimals: 1,
+                  unit: 'cm',
+                  tint: KColor.textSecondary,
+                  onTap: _editBodyMetrics,
+                ),
+                _StatTile(
+                  icon: Icons.monitor_weight_outlined,
+                  label: 'Weight',
+                  value: _profile.weight,
+                  decimals: 1,
+                  unit: 'kg',
+                  tint: KColor.textSecondary,
+                  onTap: _editBodyMetrics,
+                ),
+                _StatTile(
+                  icon: Icons.local_fire_department_rounded,
+                  // A weekly average; training/rest days differ, so say so.
+                  label: 'kcal a day',
+                  value: plan.avgDailyCalories,
+                  unit: 'kcal',
+                  tint: KColor.ember,
+                ),
+                _StatTile(
+                  icon: Icons.egg_outlined,
+                  label: 'Protein a day',
+                  value: plan.avgDailyProtein,
+                  unit: 'g',
+                  tint: KColor.protein,
+                ),
+              ],
             ),
           ),
         ],
@@ -901,7 +894,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         _SettingRow(
           icon: Icons.restaurant_outlined,
-          tint: KColor.ember,
+          tint: KColor.textSecondary,
           label: 'Eating style',
           value: _profile.portionAnchor?.displayLabel ?? 'Not specified',
           isEditable: true,
@@ -921,13 +914,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         _SettingRow(
           icon: Icons.bolt_rounded,
-          tint: KColor.saffron,
+          tint: KColor.ember,
           label: 'Base target',
           value: '${plan.avgDailyCalories.toStringAsFixed(0)} kcal',
         ),
         _SettingRow(
           icon: Icons.egg_outlined,
-          tint: KColor.green,
+          tint: KColor.protein,
           label: 'Base protein',
           value: '${plan.avgDailyProtein.toStringAsFixed(0)} g',
         ),
@@ -1030,7 +1023,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         size: 13,
                                         color: syncOk
                                             ? KColor.green
-                                            : KColor.saffron,
+                                            : KColor.ember,
                                       ),
                                     ),
                                     const SizedBox(width: 4),
@@ -1041,7 +1034,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           fontSize: 11,
                                           color: syncOk
                                               ? KColor.green
-                                              : KColor.saffron,
+                                              : KColor.ember,
                                           fontFeatures: const [
                                             FontFeature.tabularFigures(),
                                           ],
@@ -1507,7 +1500,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         _SettingRow(
           icon: Icons.psychology_rounded,
-          tint: KColor.saffron,
+          tint: KColor.textSecondary,
           label: 'Food library',
           value: 'Portion history & custom foods',
           onTap: () => Navigator.push(
@@ -1551,7 +1544,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         _SettingRow(
           icon: Icons.restaurant_menu_rounded,
-          tint: KColor.ember,
+          tint: KColor.textSecondary,
           label: 'Baseline formula',
           value: 'Kynetix Indian Caloric Baseline',
         ),
@@ -1603,31 +1596,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
-                child: IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildSourceChip(
-                        label: 'Calculated',
-                        selected: !profile.useCustomTargets,
-                        onTap: () {
-                          if (profile.useCustomTargets) {
-                            _changeTargetSource(useCustom: false);
-                          }
-                        },
-                      ),
-                      const SizedBox(width: 4),
-                      _buildSourceChip(
-                        label: 'Custom',
-                        selected: profile.useCustomTargets,
-                        onTap: () {
-                          if (!profile.useCustomTargets) {
-                            _changeTargetSource(useCustom: true);
-                          }
-                        },
-                      ),
-                    ],
-                  ),
+                child: Row(
+                  children: [
+                    _buildSourceChip(
+                      label: 'Calculated',
+                      selected: !profile.useCustomTargets,
+                      onTap: () {
+                        if (profile.useCustomTargets) {
+                          _changeTargetSource(useCustom: false);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    _buildSourceChip(
+                      label: 'Custom',
+                      selected: profile.useCustomTargets,
+                      onTap: () {
+                        if (!profile.useCustomTargets) {
+                          _changeTargetSource(useCustom: true);
+                        }
+                      },
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1643,7 +1633,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _SettingRow(
             icon: Icons.bolt_rounded,
-            tint: KColor.saffron,
+            tint: KColor.ember,
             label: 'Training day calories',
             value: '${activePlan.trainingDayCalories.toStringAsFixed(0)} kcal',
           ),
@@ -1655,7 +1645,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _SettingRow(
             icon: Icons.egg_outlined,
-            tint: KColor.green,
+            tint: KColor.protein,
             label: 'Daily protein target',
             value: '${activePlan.avgDailyProtein.toStringAsFixed(0)} g',
           ),
@@ -1684,7 +1674,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _SettingRow(
             icon: Icons.bolt_rounded,
-            tint: KColor.saffron,
+            tint: KColor.ember,
             label: 'Training day calories',
             value:
                 '${(profile.customTrainingDayCalories ?? enginePlan.trainingDayCalories).toStringAsFixed(0)} kcal',
@@ -1725,7 +1715,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           _SettingRow(
             icon: Icons.egg_outlined,
-            tint: KColor.green,
+            tint: KColor.protein,
             label: 'Daily protein target',
             value:
                 '${(profile.customProteinTarget ?? enginePlan.avgDailyProtein).toStringAsFixed(0)} g',
@@ -2242,14 +2232,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 // ─── Shared styling helpers ───────────────────────────────────────────────────
 
-Color _goalColor(String goal) => switch (goal) {
-  kFatLoss => KColor.ember,
-  kMaintenance => KColor.green,
-  kLeanBulk => KColor.cyan,
-  kBulk => KColor.blue,
-  kRecomposition => KColor.violet,
-  _ => KColor.green,
-};
+// Goals are told apart by their name, not a hue: one neutral dot for all.
+Color _goalColor(String goal) => KColor.textSecondary;
 
 TextStyle get _dialogBody =>
     KText.body.copyWith(color: KColor.textSecondary, fontSize: 13, height: 1.5);
@@ -2448,22 +2432,6 @@ class _Hairline extends StatelessWidget {
       child: Container(
         height: 1,
         color: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.09),
-      ),
-    );
-  }
-}
-
-/// Vertical hairline between the profile numbers.
-class _StatRule extends StatelessWidget {
-  const _StatRule();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
-      child: Container(
-        width: 1,
-        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.1 : 0.1),
       ),
     );
   }
@@ -2934,28 +2902,30 @@ class _StatTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0, end: value.isFinite ? value : 0),
-            duration: KMotion.of(context, KMotion.slow),
-            curve: KMotion.emphasizedCurve,
-            builder: (context, v, _) => Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: _fmt(v),
-                    style: KText.numMedium.copyWith(fontSize: 19),
+          // Rolls up from 0 when the screen opens, then rolls only the
+          // digits that change after an edit.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                KRollingNumber(
+                  _fmt(value.isFinite ? value : 0),
+                  style: KText.numMedium.copyWith(fontSize: 19),
+                  fromZero: true,
+                  alignment: Alignment.center,
+                ),
+                Text(
+                  ' $unit',
+                  style: KText.caption.copyWith(
+                    color: KColor.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
                   ),
-                  TextSpan(
-                    text: ' $unit',
-                    style: KText.caption.copyWith(
-                      color: KColor.textMuted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              textAlign: TextAlign.center,
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 4),
@@ -3232,7 +3202,7 @@ class _DialogConfirm extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = danger ? KColor.danger : KColor.ink;
-    final fg = danger ? Colors.white : KColor.onInk;
+    final fg = danger ? KColor.onAccent : KColor.onInk;
     return FilledButton(
       onPressed: () {
         KHaptics.commit();
@@ -3432,7 +3402,7 @@ class _SizeGlyph extends StatelessWidget {
                     height: cell,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(2.5),
-                      color: (c < w && r < h) ? KColor.ember : KColor.cardHigh,
+                      color: (c < w && r < h) ? KColor.ink : KColor.cardHigh,
                     ),
                   ),
               ],

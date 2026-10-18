@@ -33,12 +33,15 @@
 /// Widgets
 /// - `KIcon(data, {size, color, semanticLabel})` — an [Icon] at a scale size,
 ///   neutral by default, excluded from semantics unless labelled.
-/// - `KynoMark({size, outlined, color})` — Kyno's monochrome mark: a solid ink
-///   disc with a lowercase "k" knocked out (or a hairline ring when
+/// - `KynoMark({size, outlined, color})` — Kyno's monochrome mark: the Kyno
+///   robot's head, solid with the visor knocked out (or a line drawing when
 ///   [outlined]). Use it wherever Kyno speaks or is summoned. On an ink fill
 ///   pass `color: KColor.onInk`. Never pair it with a gradient.
 /// - `KDot({color, size})` — the 6dp colour dot used in "● 201 kcal" stats.
 library;
+
+import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -192,50 +195,339 @@ class KDot extends StatelessWidget {
       );
 }
 
-/// Kyno's mark: a monochrome ink disc with a lowercase "k" knocked out of it.
-/// [outlined] draws a hairline ring with an ink "k" instead, for places where
-/// a solid disc would be too loud (inline in text, list rows).
+/// Kyno's mark: the head of the Kyno robot (squircle head, antenna, visor,
+/// two eyes), drawn on a 24 grid so it sits with the line icons around it.
+/// Solid fills the head and knocks the visor out; [outlined] draws the head
+/// as a line with solid eyes, for the dock and list rows.
+///
+/// [alive] gives the mark a quiet idle life: it blinks, glances around, tilts
+/// its head and now and then looks up as if thinking, with the antenna
+/// lagging behind each move. [selected] going true earns a happy squint and
+/// a small hop. Moves are short tweens with still holds between them, so no
+/// frame is drawn while Kyno just looks at you. Reduced motion keeps it still.
 class KynoMark extends StatelessWidget {
-  const KynoMark({super.key, this.size = 28, this.outlined = false, Color? color})
-      : _color = color;
+  const KynoMark({
+    super.key,
+    this.size = 28,
+    this.outlined = false,
+    this.alive = false,
+    this.selected = false,
+    Color? color,
+  }) : _color = color;
 
   final double size;
   final bool outlined;
+  final bool alive;
+  final bool selected;
   final Color? _color;
   Color get color => _color ?? KColor.ink;
 
   @override
   Widget build(BuildContext context) {
-    final letter = Text(
-      'k',
-      textScaler: TextScaler.noScaling,
-      style: TextStyle(
-        fontFamily: KText.family,
-        fontWeight: FontWeight.w800,
-        fontSize: size * 0.62,
-        height: 1.0,
-        letterSpacing: 0,
-        color: outlined ? color : (color == KColor.ink ? KColor.onInk : KColor.ink),
-      ),
-    );
+    final knock = color == KColor.ink ? KColor.onInk : KColor.ink;
+    if (alive) {
+      return _AliveKynoMark(size: size, color: color, knock: knock, outlined: outlined, selected: selected);
+    }
     return ExcludeSemantics(
-      child: SizedBox.square(
-        dimension: size,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: outlined ? null : color,
-            border: outlined
-                ? Border.all(color: color.withValues(alpha: 0.55), width: 1.2)
-                : null,
-          ),
-          // Optical centring: the "k" has an ascender and no descender.
-          child: Padding(
-            padding: EdgeInsets.only(bottom: size * 0.06, left: size * 0.02),
-            child: Center(child: letter),
-          ),
+      child: RepaintBoundary(
+        child: CustomPaint(
+          size: Size.square(size),
+          painter: _KynoMarkPainter(color: color, knock: knock, outlined: outlined),
         ),
       ),
     );
   }
+}
+
+/// Where Kyno is looking and how its head sits. Eyes in -1..1 of their
+/// travel, tilt in radians, hop in grid units, happy 0..1.
+@immutable
+class _MarkPose {
+  const _MarkPose({this.lookX = 0, this.lookY = 0, this.tilt = 0, this.hop = 0, this.happy = 0});
+
+  final double lookX, lookY, tilt, hop, happy;
+
+  static const rest = _MarkPose();
+
+  bool get isRest => lookX == 0 && lookY == 0 && tilt == 0 && happy == 0;
+
+  static _MarkPose lerp(_MarkPose a, _MarkPose b, double t) => _MarkPose(
+        lookX: a.lookX + (b.lookX - a.lookX) * t,
+        lookY: a.lookY + (b.lookY - a.lookY) * t,
+        tilt: a.tilt + (b.tilt - a.tilt) * t,
+        hop: a.hop + (b.hop - a.hop) * t,
+        happy: a.happy + (b.happy - a.happy) * t,
+      );
+}
+
+class _AliveKynoMark extends StatefulWidget {
+  const _AliveKynoMark({
+    required this.size,
+    required this.color,
+    required this.knock,
+    required this.outlined,
+    required this.selected,
+  });
+
+  final double size;
+  final Color color, knock;
+  final bool outlined, selected;
+
+  @override
+  State<_AliveKynoMark> createState() => _AliveKynoMarkState();
+}
+
+class _AliveKynoMarkState extends State<_AliveKynoMark> with TickerProviderStateMixin {
+  // One controller per layer: moves (head and eyes), blinks, and the hop.
+  late final AnimationController _move = AnimationController(vsync: this, value: 1);
+  late final AnimationController _blink =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 110));
+  late final AnimationController _hop =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+  late final Listenable _repaint = Listenable.merge([_move, _blink, _hop]);
+
+  final _rng = math.Random();
+  _MarkPose _from = _MarkPose.rest;
+  _MarkPose _to = _MarkPose.rest;
+  Curve _curve = KMotion.easeOut;
+  Timer? _next;
+  Timer? _nextBlink;
+  bool _live = false;
+
+  _MarkPose get _pose {
+    final base = _MarkPose.lerp(_from, _to, _curve.transform(_move.value));
+    // The hop: up and back down, with a happy squint that lets go near the
+    // end of it.
+    final h = _hop.value;
+    if (h == 0) return base;
+    return _MarkPose(
+      lookX: base.lookX,
+      lookY: base.lookY,
+      tilt: base.tilt,
+      hop: base.hop + math.sin(h * math.pi) * 1.6,
+      happy: math.max(base.happy, h < 0.75 ? 1.0 : (1 - h) * 4),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final live = KMotion.ambientAllowed(context);
+    if (live == _live) return;
+    _live = live;
+    if (live) {
+      _schedule(const Duration(milliseconds: 1200));
+      _scheduleBlink();
+    } else {
+      _stop();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_AliveKynoMark old) {
+    super.didUpdateWidget(old);
+    // Opening Kyno's tab makes it happy to see you.
+    if (_live && widget.selected && !old.selected) {
+      _hop.forward(from: 0);
+      _goTo(const _MarkPose(lookY: -0.2), const Duration(milliseconds: 320));
+      _schedule(const Duration(milliseconds: 1400));
+    }
+  }
+
+  void _stop() {
+    _next?.cancel();
+    _nextBlink?.cancel();
+    _move.stop();
+    _hop.stop();
+    _blink.value = 0;
+    _hop.value = 0;
+    _from = _to = _MarkPose.rest;
+    _move.value = 1;
+  }
+
+  void _goTo(_MarkPose target, Duration d, {Curve curve = KMotion.easeOut}) {
+    _from = _pose;
+    _to = target;
+    _curve = curve;
+    _move.duration = d;
+    _move.forward(from: 0);
+  }
+
+  void _schedule(Duration after) {
+    _next?.cancel();
+    _next = Timer(after, _act);
+  }
+
+  /// Picks Kyno's next small move. Mostly it rests and glances; the bigger
+  /// beats are rare, so it reads as calm and attentive, never twitchy.
+  void _act() {
+    if (!mounted || !_live) return;
+    final roll = _rng.nextDouble();
+    final side = _rng.nextBool() ? 1.0 : -1.0;
+    Duration hold;
+    if (!_to.isRest && roll < 0.55) {
+      // Back to looking at you.
+      _goTo(_MarkPose.rest, const Duration(milliseconds: 380));
+      hold = Duration(milliseconds: 2400 + _rng.nextInt(3600));
+    } else if (roll < 0.62) {
+      // Thinking: eyes up and aside, head tipped back a touch.
+      _goTo(_MarkPose(lookX: 0.55 * side, lookY: -0.9, tilt: -0.07 * side), const Duration(milliseconds: 460));
+      hold = Duration(milliseconds: 1300 + _rng.nextInt(900));
+    } else if (roll < 0.74) {
+      // Curious: a slow head tilt with a little settle, eyes follow.
+      _goTo(_MarkPose(lookX: 0.3 * side, tilt: 0.2 * side), const Duration(milliseconds: 520), curve: Curves.easeOutBack);
+      hold = Duration(milliseconds: 1100 + _rng.nextInt(900));
+    } else if (roll < 0.78) {
+      // A pleased little squint, now and then.
+      _goTo(const _MarkPose(happy: 1, lookY: -0.2), const Duration(milliseconds: 260));
+      hold = const Duration(milliseconds: 900);
+    } else {
+      // A glance: eyes lead, the head turns slightly with them.
+      final x = (0.55 + _rng.nextDouble() * 0.45) * side;
+      final y = (_rng.nextDouble() - 0.5) * 0.6;
+      _goTo(_MarkPose(lookX: x, lookY: y, tilt: x * 0.1), Duration(milliseconds: 240 + _rng.nextInt(140)));
+      hold = Duration(milliseconds: 900 + _rng.nextInt(1500));
+    }
+    _schedule(hold);
+  }
+
+  void _scheduleBlink() {
+    _nextBlink?.cancel();
+    _nextBlink = Timer(Duration(milliseconds: 2600 + _rng.nextInt(4200)), () async {
+      if (!mounted || !_live) return;
+      try {
+        await _blink.forward(from: 0).orCancel;
+        await _blink.reverse().orCancel;
+        // Now and then a double blink, like a person.
+        if (_rng.nextDouble() < 0.2) {
+          await _blink.forward(from: 0).orCancel;
+          await _blink.reverse().orCancel;
+        }
+      } on TickerCanceled {
+        return;
+      }
+      if (mounted && _live) _scheduleBlink();
+    });
+  }
+
+  @override
+  void dispose() {
+    _next?.cancel();
+    _nextBlink?.cancel();
+    _move.dispose();
+    _blink.dispose();
+    _hop.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: RepaintBoundary(
+          child: CustomPaint(
+            size: Size.square(widget.size),
+            painter: _KynoMarkPainter(
+              color: widget.color,
+              knock: widget.knock,
+              outlined: widget.outlined,
+              pose: () => _pose,
+              blink: () => _blink.value,
+              repaint: _repaint,
+            ),
+          ),
+        ),
+      );
+}
+
+class _KynoMarkPainter extends CustomPainter {
+  _KynoMarkPainter({
+    required this.color,
+    required this.knock,
+    required this.outlined,
+    this.pose,
+    this.blink,
+    super.repaint,
+  });
+
+  final Color color;
+  final Color knock;
+  final bool outlined;
+
+  /// Read at paint time, so a move repaints without rebuilding the widget.
+  final _MarkPose Function()? pose;
+  final double Function()? blink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = pose?.call() ?? _MarkPose.rest;
+    final shut = blink?.call() ?? 0.0;
+    final u = size.width / 24;
+    canvas.scale(u);
+    final ink = Paint()
+      ..color = color
+      ..isAntiAlias = true;
+    final line = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = outlined ? 1.8 : 2
+      ..strokeCap = StrokeCap.round;
+
+    // The head turns about the chin and hops straight up.
+    canvas.translate(0, -p.hop);
+    if (p.tilt != 0) {
+      canvas.translate(12, 20);
+      canvas.rotate(p.tilt);
+      canvas.translate(-12, -20);
+    }
+
+    // Antenna, with the light on top. Its tip trails the head's turn, like a
+    // light spring.
+    canvas.drawLine(const Offset(12, 6.6), Offset(12 - p.tilt * 2.4, 4.4), line);
+    canvas.drawCircle(Offset(12 - p.tilt * 5, 3.2 + p.hop * 0.25), 1.5, ink);
+
+    // Head.
+    final head = RRect.fromLTRBR(3.4, 6.6, 20.6, 20, const Radius.circular(5.4));
+    if (outlined) {
+      canvas.drawRRect(head.deflate(0.9), line);
+    } else {
+      canvas.drawRRect(head, ink);
+      canvas.drawRRect(
+        RRect.fromLTRBR(6.2, 9.8, 17.8, 16.8, const Radius.circular(3.5)),
+        Paint()..color = knock,
+      );
+    }
+
+    // Eyes: they travel inside the face, close for blinks and curve into
+    // "^ ^" when happy.
+    final dx = p.lookX * 1.5;
+    final dy = p.lookY * 1.2;
+    final h = (outlined ? 3.4 : 3.2) * (1 - shut).clamp(0.12, 1.0);
+    for (final x in const [9.5, 14.5]) {
+      final c = Offset(x + dx, 13.3 + dy);
+      if (p.happy > 0.5) {
+        final arc = Path()
+          ..moveTo(c.dx - 1.4, c.dy + 0.7)
+          ..quadraticBezierTo(c.dx, c.dy - 1.3, c.dx + 1.4, c.dy + 0.7);
+        canvas.drawPath(
+          arc,
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..strokeCap = StrokeCap.round,
+        );
+      } else {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(center: c, width: 2.2, height: h),
+            const Radius.circular(1.1),
+          ),
+          ink,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_KynoMarkPainter old) =>
+      old.color != color || old.knock != knock || old.outlined != outlined || old.pose != pose;
 }

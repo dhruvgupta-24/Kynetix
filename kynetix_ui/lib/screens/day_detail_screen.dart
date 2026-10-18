@@ -752,11 +752,11 @@ class _DayDetailContentState extends State<_DayDetailContent> {
 
     // Keyed blocks so conditional sections never steal another block's state.
     var revealIndex = 0;
-    Widget block(String key, Widget child) {
+    Widget block(String key, Widget child, {bool reveal = true}) {
       // Only the first few blocks take part in the entrance; the rest are
       // below the fold and should simply be there.
       final i = revealIndex++;
-      if (!widget.entrance || i > 6) {
+      if (!widget.entrance || i > 6 || !reveal) {
         return KeyedSubtree(key: ValueKey(key), child: child);
       }
       return KReveal(key: ValueKey(key), index: i, child: child);
@@ -765,6 +765,9 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.sm, KSpacing.p, 112),
       children: [
+        // The rings arrive by Hero from the dashboard on the day the screen
+        // opened on: already drawn, and not faded (a fading target would
+        // flicker when the flight lands).
         block(
           'summary',
           _DaySummaryBanner(
@@ -772,7 +775,10 @@ class _DayDetailContentState extends State<_DayDetailContent> {
             target: target,
             dayStatus: dayStatus,
             onEditTarget: _editDailyTarget,
+            heroTag: FuelLabel.heroTagFor(widget.date),
+            sweepIn: !widget.entrance,
           ),
+          reveal: false,
         ),
         // ── Coach insights ───────────────────────────────────────
         if (insights.isNotEmpty)
@@ -1121,7 +1127,7 @@ class _GymSegmented extends StatelessWidget {
           _GymToggleButton(
             label: 'Yes',
             active: didGym,
-            activeColor: KColor.violet,
+            activeColor: KColor.ink,
             onTap: onYes,
           ),
           _GymToggleButton(
@@ -1195,7 +1201,16 @@ class _DaySummaryBanner extends StatelessWidget {
   final DayTarget? target;
   final DayOutcomeResult? dayStatus;
   final VoidCallback? onEditTarget;
-  const _DaySummaryBanner({required this.log, this.target, this.dayStatus, this.onEditTarget});
+  final Object? heroTag;
+  final bool sweepIn;
+  const _DaySummaryBanner({
+    required this.log,
+    this.target,
+    this.dayStatus,
+    this.onEditTarget,
+    this.heroTag,
+    this.sweepIn = true,
+  });
 
   static String _targetTitle(DayTarget t) => switch (t.label) {
         'Manual Override' => 'Custom target for this day',
@@ -1214,6 +1229,8 @@ class _DaySummaryBanner extends StatelessWidget {
         status.outcome != DayOutcome.unlogged;
 
     return FuelLabel(
+      heroTag: heroTag,
+      sweepIn: sweepIn,
       title: t == null ? 'Fuel' : _targetTitle(t),
       trailing: (t != null && onEditTarget != null)
           ? KTextAction('Edit target', onTap: onEditTarget, semanticLabel: 'Edit daily target')
@@ -1442,7 +1459,7 @@ class _EntryTile extends StatelessWidget {
 
   static Color _qualityColor(int score) => score >= 80
       ? KColor.success
-      : (score >= 60 ? KColor.warning : KColor.danger);
+      : (score >= 60 ? KColor.textSecondary : KColor.ember);
 
   @override
   Widget build(BuildContext context) {
@@ -1500,7 +1517,7 @@ class _EntryTile extends StatelessWidget {
                     const SizedBox(height: 4),
                     KDotStats([
                       KDotStat('$kcalN', 'kcal', color: KColor.ember),
-                      KDotStat('$protN', 'g protein', color: KColor.green),
+                      KDotStat('$protN', 'g protein', color: KColor.protein),
                       if (calMid >= 50 && entry.result.mealQualityScore != null)
                         Text(
                           'Quality ${entry.result.mealQualityScore}',
@@ -1555,7 +1572,7 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
           ? KColor.textMuted
           : (score >= 80
               ? KColor.success
-              : (score >= 60 ? KColor.warning : KColor.danger));
+              : (score >= 60 ? KColor.textSecondary : KColor.ember));
       return SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -1639,18 +1656,18 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                   final locked = entry.result.macrosLockedByUser;
                   final cards = <Widget>[
                     _buildGridMacroCell('Calories', _macroLabel(entry.result.calories.min, entry.result.calories.max, 'kcal'), KColor.ember, locked: locked),
-                    _buildGridMacroCell('Protein',  _macroLabel(entry.result.protein.min,  entry.result.protein.max,  'g'),    KColor.green, locked: locked),
+                    _buildGridMacroCell('Protein',  _macroLabel(entry.result.protein.min,  entry.result.protein.max,  'g'),    KColor.protein, locked: locked),
                     // When macros are locked always show carbs/fat/fiber, even if 0.
                     if (locked || (carbs != null && (carbs.max > 0 || carbs.min > 0)))
-                      _buildGridMacroCell('Carbs', _macroLabel(carbs?.min ?? 0, carbs?.max ?? 0, 'g'), KColor.blue, locked: locked),
+                      _buildGridMacroCell('Carbs', _macroLabel(carbs?.min ?? 0, carbs?.max ?? 0, 'g'), KColor.carbs, locked: locked),
                     if (locked || (fat != null && (fat.max > 0 || fat.min > 0)))
-                      _buildGridMacroCell('Fat', _macroLabel(fat?.min ?? 0, fat?.max ?? 0, 'g'), KColor.saffron, locked: locked),
+                      _buildGridMacroCell('Fat', _macroLabel(fat?.min ?? 0, fat?.max ?? 0, 'g'), KColor.fat, locked: locked),
                     if (locked || (fiber != null && (fiber.max > 0 || fiber.min > 0)))
-                      _buildGridMacroCell('Fiber', _macroLabel(fiber?.min ?? 0, fiber?.max ?? 0, 'g'), KColor.violet, locked: locked),
+                      _buildGridMacroCell('Fiber', _macroLabel(fiber?.min ?? 0, fiber?.max ?? 0, 'g'), KColor.fiber, locked: locked),
                     if (sugar != null && (sugar.max > 0 || sugar.min > 0))
-                      _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), KColor.cyan),
+                      _buildGridMacroCell('Sugar', _macroLabel(sugar.min, sugar.max, 'g'), KColor.carbs),
                     if (satFat != null && (satFat.max > 0 || satFat.min > 0))
-                      _buildGridMacroCell('Sat. fat', _macroLabel(satFat.min, satFat.max, 'g'), KColor.danger),
+                      _buildGridMacroCell('Sat. fat', _macroLabel(satFat.min, satFat.max, 'g'), KColor.fat),
                     if (sodium != null && (sodium.max > 0 || sodium.min > 0))
                       _buildGridMacroCell('Sodium', _macroLabel(sodium.min, sodium.max, 'mg'), KColor.textSecondary),
                   ];
@@ -1793,10 +1810,10 @@ class _CoachInsightCard extends StatelessWidget {
   const _CoachInsightCard({required this.insights});
 
   static Color _tone(CoachInsightType type) => switch (type) {
-    CoachInsightType.protein => KColor.green,
-    CoachInsightType.overGoal => KColor.warning,
+    CoachInsightType.protein => KColor.protein,
+    CoachInsightType.overGoal => KColor.ember,
     CoachInsightType.underEaten => KColor.ember,
-    CoachInsightType.balance => KColor.violet,
+    CoachInsightType.balance => KColor.textSecondary,
     CoachInsightType.info => KColor.textMuted,
   };
 
@@ -1840,42 +1857,54 @@ class _CoachInsightRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            width: 2,
-            margin: const EdgeInsets.only(left: 10, right: 16, top: 3, bottom: 3),
-            decoration: BoxDecoration(color: tone, borderRadius: KRadius.pill),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  insight.message,
-                  style: KText.bodyMedium.copyWith(
-                    color: KColor.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    height: 1.4,
-                  ),
-                ),
-                if (insight.actionHint != null) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    insight.actionHint!,
-                    style: KText.body.copyWith(fontSize: 14, color: KColor.textSecondary, height: 1.45),
-                  ),
-                ],
-              ],
+    // The tone rule runs the text's full height. Painted behind the text
+    // rather than stretched in a row, so no intrinsic-height pass is needed.
+    return CustomPaint(
+      painter: _ToneRulePainter(tone),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              insight.message,
+              style: KText.bodyMedium.copyWith(
+                color: KColor.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
             ),
-          ),
-        ],
+            if (insight.actionHint != null) ...[
+              const SizedBox(height: 3),
+              Text(
+                insight.actionHint!,
+                style: KText.body.copyWith(fontSize: 14, color: KColor.textSecondary, height: 1.45),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
+}
+
+/// A 2 px rounded rule at x = 10, inset 3 px top and bottom.
+class _ToneRulePainter extends CustomPainter {
+  const _ToneRulePainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.height <= 6) return;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(10, 3, 2, size.height - 6), const Radius.circular(1)),
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ToneRulePainter old) => old.color != color;
 }
 
 // ─── Quick Add item model ─────────────────────────────────────────────────────
@@ -2145,7 +2174,7 @@ class _QuickAddRow extends StatelessWidget {
                     const SizedBox(height: 3),
                     KDotStats([
                       KDotStat('$calories', 'kcal', color: KColor.ember),
-                      KDotStat('$protein', 'g protein', color: KColor.green),
+                      KDotStat('$protein', 'g protein', color: KColor.protein),
                     ]),
                   ],
                 ),
@@ -2413,7 +2442,7 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
                                             key: const ValueKey('chips'),
                                             [
                                               KDotStat('${_calories!.round()}', 'kcal', color: KColor.ember, size: 16),
-                                              KDotStat('${_protein!.round()}', 'g protein', color: KColor.green, size: 16),
+                                              KDotStat('${_protein!.round()}', 'g protein', color: KColor.protein, size: 16),
                                             ],
                                           )
                                         : Row(
@@ -2421,7 +2450,7 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
                                             children: [
                                               Expanded(child: _NumField(controller: _calCtrl, label: 'kcal', color: KColor.ember)),
                                               const SizedBox(width: 10),
-                                              Expanded(child: _NumField(controller: _proCtrl, label: 'g protein', color: KColor.green)),
+                                              Expanded(child: _NumField(controller: _proCtrl, label: 'g protein', color: KColor.protein)),
                                             ],
                                           ),
                                   ),

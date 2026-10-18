@@ -152,19 +152,18 @@ class BarbellPlateCalculator {
     return (candidate * 100).round() / 100.0;
   }
 
-  /// Colour coding for Olympic and standard gym plates.
-  ///
-  /// These are real-world IWF plate colours (data, not theme) and are pinned
-  /// by production_readiness_audit_test, so they stay literal. Size and the
-  /// kg label always accompany them, so colour is never the only cue.
+  /// Colour coding for plates, drawn from the three-colour palette: the
+  /// heaviest plate wears the accent, the next ink, then softer tints of
+  /// each. Size and the kg label always accompany them, so colour is never
+  /// the only cue. Read at paint time so it follows the active theme.
   static Color plateColor(double weight) {
-    if (weight >= 25.0) return const Color(0xFFDC2626); // Red
-    if (weight >= 20.0) return const Color(0xFF2563EB); // Blue
-    if (weight >= 15.0) return const Color(0xFFEAB308); // Yellow
-    if (weight >= 10.0) return const Color(0xFF16A34A); // Green
-    if (weight >= 5.0) return const Color(0xFFF1F5F9); // White
-    if (weight >= 2.5) return const Color(0xFF334155); // Black / Dark Slate
-    return const Color(0xFF94A3B8); // Silver / Micro-plates
+    if (weight >= 25.0) return KColor.ember;
+    if (weight >= 20.0) return KColor.ink;
+    if (weight >= 15.0) return KColor.carbs;
+    if (weight >= 10.0) return KColor.fat;
+    if (weight >= 5.0) return KColor.fiber;
+    if (weight >= 2.5) return Color.lerp(KColor.ember, KColor.bg, 0.68)!;
+    return KColor.border;
   }
 }
 

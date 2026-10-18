@@ -297,22 +297,22 @@ class _BarcodeProductFormState extends State<BarcodeProductForm> {
           children: [
             Expanded(child: _Field(label: 'kcal', controller: _kcal, accent: KColor.ember, onChanged: _rebuild)),
             const SizedBox(width: KSpacing.md),
-            Expanded(child: _Field(label: 'Protein', controller: _protein, suffix: 'g', accent: KColor.green, onChanged: _rebuild)),
+            Expanded(child: _Field(label: 'Protein', controller: _protein, suffix: 'g', accent: KColor.protein, onChanged: _rebuild)),
           ],
         ),
         const SizedBox(height: KSpacing.md),
         Row(
           children: [
-            Expanded(child: _Field(label: 'Carbs', controller: _carbs, suffix: 'g', onChanged: _rebuild)),
+            Expanded(child: _Field(label: 'Carbs', controller: _carbs, suffix: 'g', accent: KColor.carbs, onChanged: _rebuild)),
             const SizedBox(width: KSpacing.md),
-            Expanded(child: _Field(label: 'Fat', controller: _fat, suffix: 'g', onChanged: _rebuild)),
+            Expanded(child: _Field(label: 'Fat', controller: _fat, suffix: 'g', accent: KColor.fat, onChanged: _rebuild)),
           ],
         ),
         if (_isLabel) ...[
           const SizedBox(height: KSpacing.md),
           Row(
             children: [
-              Expanded(child: _Field(label: 'Fibre', controller: _fibre, suffix: 'g', hint: 'Optional')),
+              Expanded(child: _Field(label: 'Fibre', controller: _fibre, suffix: 'g', accent: KColor.fiber, hint: 'Optional')),
               const SizedBox(width: KSpacing.md),
               Expanded(child: _Field(label: 'Sugar', controller: _sugar, suffix: 'g', hint: 'Optional')),
             ],
@@ -359,7 +359,7 @@ class _ReadingState extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: KSpacing.xl),
         child: Column(
           children: [
-            KSpinner(size: 28, color: KColor.violet),
+            KSpinner(size: 28, color: KColor.ink),
             const SizedBox(height: KSpacing.md),
             Text('Reading the label…', style: KText.bodyMedium),
             const SizedBox(height: 4),

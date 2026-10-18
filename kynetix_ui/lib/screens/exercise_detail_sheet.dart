@@ -124,14 +124,14 @@ class ExerciseDetailSheet extends StatelessWidget {
                 runSpacing: 6,
                 children: [
                   // Plain labelled facts, not tinted pills. Only the target
-                  // muscle carries the train accent.
+                  // muscle is drawn in ink.
                   // The demo below shows the muscle; here it is a word.
                   _Fact(text: definition.category),
                   _Fact(icon: KIcons.train, text: definition.equipment),
                   _Fact(
                     icon: KIcons.target,
                     text: definition.targetMuscle,
-                    color: KColor.violet,
+                    color: KColor.ink,
                   ),
                 ],
               ),
@@ -181,7 +181,7 @@ class ExerciseDetailSheet extends StatelessWidget {
                             alignment: AlignmentDirectional.centerStart,
                             child: KChip(
                               definition.targetMuscle,
-                              color: KColor.violet,
+                              color: KColor.ink,
                             ),
                           ),
                         ),
@@ -288,7 +288,7 @@ class ExerciseDetailSheet extends StatelessWidget {
                                         value: bestE1rm,
                                         decimals: 1,
                                         unit: ' kg',
-                                        color: KColor.violet,
+                                        color: KColor.ink,
                                       ),
                                     ),
                                   ],

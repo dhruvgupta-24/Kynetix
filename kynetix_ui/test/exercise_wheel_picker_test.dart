@@ -173,20 +173,16 @@ void main() {
       expect(adjacentScale, lessThan(centerScale));
       expect(secondAdjacentScale, lessThan(adjacentScale));
 
-      // Inspect Opacity falloff
-      final centerOpacity = tester.widget<Opacity>(
-        find.ancestor(of: find.text('60.0 kg'), matching: find.byType(Opacity)).first,
-      );
-      final adjacentOpacity = tester.widget<Opacity>(
-        find.ancestor(of: find.text('60.5 kg'), matching: find.byType(Opacity)).first,
-      );
-      final secondAdjacentOpacity = tester.widget<Opacity>(
-        find.ancestor(of: find.text('61.0 kg'), matching: find.byType(Opacity)).first,
-      );
+      // Inspect the fade falloff. It rides on each row's text colour alpha
+      // (no Opacity layer per row), so read it from the Text style.
+      double alphaOf(String label) => tester.widget<Text>(find.text(label)).style!.color!.a;
+      final centerAlpha = alphaOf('60.0 kg');
+      final adjacentAlpha = alphaOf('60.5 kg');
+      final secondAdjacentAlpha = alphaOf('61.0 kg');
 
-      expect(centerOpacity.opacity, 1.0);
-      expect(adjacentOpacity.opacity, lessThan(1.0));
-      expect(secondAdjacentOpacity.opacity, lessThan(adjacentOpacity.opacity));
+      expect(centerAlpha, greaterThan(0.9));
+      expect(adjacentAlpha, lessThan(centerAlpha));
+      expect(secondAdjacentAlpha, lessThan(adjacentAlpha));
     });
 
     testWidgets('Flinging the wheel triggers natural inertia and snaps to nearest valid value', (tester) async {

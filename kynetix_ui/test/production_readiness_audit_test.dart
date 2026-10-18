@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kynetix/config/app_theme.dart';
 import 'package:kynetix/models/workout_session.dart';
 import 'package:kynetix/models/workout_split.dart';
 import 'package:kynetix/models/exercise_definition.dart';
@@ -154,14 +155,14 @@ void main() {
       expect(r23.remainder, closeTo(0.4, 0.05));
     });
 
-    test('Assigns distinct Olympic color palette', () {
-      expect(BarbellPlateCalculator.plateColor(25.0), const Color(0xFFDC2626)); // Red
-      expect(BarbellPlateCalculator.plateColor(20.0), const Color(0xFF2563EB)); // Blue
-      expect(BarbellPlateCalculator.plateColor(15.0), const Color(0xFFEAB308)); // Yellow
-      expect(BarbellPlateCalculator.plateColor(10.0), const Color(0xFF16A34A)); // Green
-      expect(BarbellPlateCalculator.plateColor(5.0), const Color(0xFFF1F5F9));  // White
-      expect(BarbellPlateCalculator.plateColor(2.5), const Color(0xFF334155));  // Dark Slate
-      expect(BarbellPlateCalculator.plateColor(1.25), const Color(0xFF94A3B8)); // Silver
+    test('Assigns distinct plate colours from the palette', () {
+      expect(BarbellPlateCalculator.plateColor(25.0), KColor.ember);
+      expect(BarbellPlateCalculator.plateColor(20.0), KColor.ink);
+      expect(BarbellPlateCalculator.plateColor(15.0), KColor.carbs);
+      expect(BarbellPlateCalculator.plateColor(10.0), KColor.fat);
+      expect(BarbellPlateCalculator.plateColor(5.0), KColor.fiber);
+      expect(BarbellPlateCalculator.plateColor(2.5), Color.lerp(KColor.ember, KColor.bg, 0.68));
+      expect(BarbellPlateCalculator.plateColor(1.25), KColor.border);
     });
   });
 

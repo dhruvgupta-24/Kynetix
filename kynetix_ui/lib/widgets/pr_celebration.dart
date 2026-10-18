@@ -9,8 +9,10 @@ import '../services/pr_classifier.dart';
 //   trigger: a logged working set breaks a record (PrClassifier), never on the
 //            first-ever log of an exercise
 //   change:  the PR strip opens under the header naming the record type; one
-//            bounded burst of 26 violet sparks from the strip's badge
-//   duration role: ~700 ms burst, strip holds 4.5 s
+//            bounded burst of 20 sparks from the strip's badge, alternating
+//            the ember accent and ink (the only two colours it uses), with
+//            one thin ring. Flat strokes and dots: no blur, no glow.
+//   duration role: ~700 ms burst, plays once per record, strip holds 4.5 s
 //   haptic:  milestone, fired once by the screen on the commit frame
 //   skip:    the burst ignores input and ends on its own; strip is inline
 //   reduced motion: no burst, the strip simply appears
@@ -53,11 +55,15 @@ import '../services/pr_classifier.dart';
   return (title: title, detail: '$exerciseName. ${parts.join('. ')}.');
 }
 
-/// One-shot spark burst in the Train accent. Re-key it (e.g. with a PR epoch)
-/// to play again. Renders nothing under reduced motion.
+/// One-shot spark burst in the accent, every other spark in ink. Plays once
+/// per mount; re-key it (e.g. with a PR epoch) to play again. Paints nothing
+/// once finished and nothing at all under reduced motion.
 class PrBurst extends StatefulWidget {
   final Color color;
-  const PrBurst({super.key, required this.color});
+
+  /// Second colour for alternate sparks. Defaults to the theme ink.
+  final Color? ink;
+  const PrBurst({super.key, required this.color, this.ink});
 
   @override
   State<PrBurst> createState() => _PrBurstState();
@@ -74,13 +80,15 @@ class _PrBurstState extends State<PrBurst> with SingleTickerProviderStateMixin {
     super.initState();
     _c = AnimationController(vsync: this, duration: _duration);
     final rnd = math.Random();
-    _sparks = List.unmodifiable(List.generate(26, (i) {
-      final a = (i / 26) * math.pi * 2 + rnd.nextDouble() * 0.3;
+    const count = 20;
+    _sparks = List.unmodifiable(List.generate(count, (i) {
+      final a = (i / count) * math.pi * 2 + rnd.nextDouble() * 0.3;
       return _Spark(
         angle: a,
-        distance: 36 + rnd.nextDouble() * 46,
-        size: 1.6 + rnd.nextDouble() * 2.2,
+        distance: 34 + rnd.nextDouble() * 40,
+        size: 1.6 + rnd.nextDouble() * 1.8,
         stretch: rnd.nextBool(),
+        inked: i.isOdd,
       );
     }));
   }
@@ -106,7 +114,7 @@ class _PrBurstState extends State<PrBurst> with SingleTickerProviderStateMixin {
       child: ExcludeSemantics(
         child: RepaintBoundary(
           child: CustomPaint(
-            painter: _BurstPainter(sparks: _sparks, progress: _c, color: widget.color),
+            painter: _BurstPainter(sparks: _sparks, progress: _c, color: widget.color, ink: widget.ink ?? KColor.ink),
             size: const Size(180, 180),
           ),
         ),
@@ -118,14 +126,16 @@ class _PrBurstState extends State<PrBurst> with SingleTickerProviderStateMixin {
 class _Spark {
   final double angle, distance, size;
   final bool stretch;
-  const _Spark({required this.angle, required this.distance, required this.size, required this.stretch});
+  final bool inked;
+  const _Spark({required this.angle, required this.distance, required this.size, required this.stretch, required this.inked});
 }
 
 class _BurstPainter extends CustomPainter {
-  _BurstPainter({required this.sparks, required this.progress, required this.color}) : super(repaint: progress);
+  _BurstPainter({required this.sparks, required this.progress, required this.color, required this.ink}) : super(repaint: progress);
   final List<_Spark> sparks;
   final Animation<double> progress;
   final Color color;
+  final Color ink;
   final Paint _p = Paint()..strokeCap = StrokeCap.round;
 
   @override
@@ -142,10 +152,13 @@ class _BurstPainter extends CustomPainter {
       ..color = color.withValues(alpha: 0.35 * fade);
     canvas.drawCircle(c, 14 + 40 * ease, _p);
     _p.style = PaintingStyle.fill;
+    // Two colours per frame, resolved once (not once per spark).
+    final accentNow = color.withValues(alpha: fade);
+    final inkNow = ink.withValues(alpha: fade * 0.85);
     for (final s in sparks) {
       final d = s.distance * ease;
       final pos = c + Offset(math.cos(s.angle) * d, math.sin(s.angle) * d);
-      _p.color = color.withValues(alpha: fade);
+      _p.color = s.inked ? inkNow : accentNow;
       if (s.stretch) {
         final tail = c + Offset(math.cos(s.angle) * d * 0.78, math.sin(s.angle) * d * 0.78);
         _p
@@ -161,5 +174,5 @@ class _BurstPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _BurstPainter old) =>
-      !identical(old.sparks, sparks) || old.progress != progress || old.color != color;
+      !identical(old.sparks, sparks) || old.progress != progress || old.color != color || old.ink != ink;
 }

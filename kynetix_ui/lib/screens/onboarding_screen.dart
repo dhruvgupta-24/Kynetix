@@ -1287,7 +1287,7 @@ class _StepLifestyle extends StatelessWidget {
               title: opt.label,
               subtitle: opt.subtitle,
               leading: Icon(_workoutIcon(i), size: 20),
-              accent: KGradient.train,
+              accent: KGradient.primary,
               selected: workoutIdx == i,
               onTap: () => onWorkout(i),
             );
@@ -1407,13 +1407,7 @@ class _ToggleSegment extends StatelessWidget {
         vertical: 8,
       ),
       decoration: BoxDecoration(
-        gradient: active
-            ? LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: KGradient.primary,
-              )
-            : null,
+        color: active ? KColor.ink : null,
         borderRadius: KRadius.pill,
       ),
       child: Text(
@@ -1618,7 +1612,7 @@ class _StepEatingStyle extends StatelessWidget {
         title: title,
         subtitle: subtitle,
         leading: Icon(icon, size: 20),
-        accent: KGradient.fuel,
+        accent: KGradient.primary,
         selected: selected == value,
         onTap: () => onSelect(value),
       );

@@ -24,6 +24,7 @@ import '../widgets/kyno_avatar.dart';
 import '../widgets/kyno_notes_sheet.dart';
 import '../services/kyno_notes_service.dart';
 import '../widgets/kyno_presence.dart';
+import '../widgets/k_typing_dots.dart';
 import 'add_meal_screen.dart';
 import 'day_detail_screen.dart';
 
@@ -215,7 +216,9 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   void didChangeMetrics() {
     // Keyboard opened/closed — scroll to bottom so last message stays visible
     final kb = WidgetsBinding.instance.platformDispatcher.views.first.viewInsets.bottom;
-    if (kb > 50) _scrollToBottom();
+    // Follows the keyboard frame by frame with jumps (only when the reader
+    // is at the end); restarting an eased scroll every frame would stutter.
+    if (kb > 50) _scrollToBottom(follow: true);
   }
 
   Future<void> _loadPlanStatus() async {
@@ -279,25 +282,63 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     super.dispose();
   }
 
-  /// Coalesces scroll requests: streaming calls this once per token, which used
-  /// to queue a post-frame callback and restart the scroll animation for every
-  /// token. Now a frame runs at most one scroll.
+  /// Coalesces scroll requests: streaming calls this once per token, so a
+  /// frame runs at most one scroll, after layout (when the new extent is known).
   bool _scrollQueued = false;
 
-  void _scrollToBottom() {
+  /// True while the reader is at the end of the thread. A drag away from the
+  /// end clears it (Kyno stops pulling them down mid-read); coming back to
+  /// the end, or sending, sets it again.
+  bool _pinned = true;
+  bool _userDragging = false;
+  bool _easing = false;
+
+  /// [follow]: content is growing under the reader (streaming tokens, the
+  /// keyboard opening). The end is held with a jump each frame, and only
+  /// when pinned: the growth itself is the motion. Otherwise one eased
+  /// scroll to the end (a new message).
+  void _scrollToBottom({bool follow = false}) {
     if (_scrollQueued) return;
     _scrollQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollQueued = false;
       if (!mounted || !_scrollCtrl.hasClients) return;
-      final target = _scrollCtrl.position.maxScrollExtent;
+      final pos = _scrollCtrl.position;
+      final target = pos.maxScrollExtent;
+      if ((target - pos.pixels).abs() < 0.5) return;
+      if (follow) {
+        // An eased scroll in flight lands first, then catches up (below).
+        if (!_pinned || _easing || _userDragging) return;
+        _scrollCtrl.jumpTo(target);
+        return;
+      }
+      _pinned = true;
       final d = KMotion.of(context, KMotion.standard);
       if (d == Duration.zero) {
         _scrollCtrl.jumpTo(target);
-      } else {
-        _scrollCtrl.animateTo(target, duration: d, curve: KMotion.emphasizedCurve);
+        return;
       }
+      _easing = true;
+      _scrollCtrl.animateTo(target, duration: d, curve: Curves.easeOutCubic).whenComplete(() {
+        _easing = false;
+        if (mounted) _scrollToBottom(follow: true);
+      });
     });
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    if (n is ScrollStartNotification && n.dragDetails != null) {
+      _userDragging = true;
+    } else if (n is ScrollUpdateNotification && n.dragDetails != null) {
+      _userDragging = true;
+      _pinned = false;
+    } else if (n is ScrollEndNotification && _userDragging) {
+      _userDragging = false;
+      final m = n.metrics;
+      _pinned = m.maxScrollExtent - m.pixels < 48;
+    }
+    return false;
   }
 
   /// The coach backend accepts at most this many photos per message.
@@ -479,7 +520,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           firstChunk   = false;
         }
         _streamingTextNotifier.value += token;
-        _scrollToBottom();
+        _scrollToBottom(follow: true);
       }
 
       // Stream completed — commit to history
@@ -501,7 +542,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         }
         _streamingTextNotifier.value = '';
       });
-      _scrollToBottom();
+      _scrollToBottom(follow: true);
 
     } catch (e) {
       if (!mounted) return;
@@ -682,7 +723,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
               onPressed: () => showKynoNotesSheet(context),
               icon: Badge(
                 isLabelVisible: notes.isNotEmpty,
-                backgroundColor: KColor.kyno,
+                backgroundColor: KColor.ember,
                 smallSize: 7,
                 child: Icon(Icons.bookmark_border_rounded, color: KColor.textSecondary),
               ),
@@ -732,14 +773,14 @@ class _AiCoachScreenState extends State<AiCoachScreen>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: KColor.tint(KColor.kyno, dark: 0.08, light: 0.06),
+                color: KColor.card,
                 borderRadius: KRadius.pill,
-                border: Border.all(color: KColor.kyno.withValues(alpha: 0.28)),
+                border: Border.all(color: KColor.border),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 16, color: KColor.kyno),
+                  Icon(icon, size: 16, color: KColor.textPrimary),
                   const SizedBox(width: 6),
                   Text(label, style: KText.bodyMedium.copyWith(fontSize: 14, fontWeight: FontWeight.w600)),
                 ],
@@ -932,38 +973,44 @@ class _AiCoachScreenState extends State<AiCoachScreen>
 
   Widget _buildMessageList() {
     final hasTail = _loading || _isStreaming;
-    return ListView.builder(
-      controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.sm, KSpacing.lg, KSpacing.lg),
-      itemCount: _messages.length + (hasTail ? 1 : 0),
-      itemBuilder: (_, i) {
-        if (i == _messages.length) {
-          // Typing dots, then the live streaming bubble — one entrance.
+    // Lazily built; every row keyed by its message (the tail by its reply
+    // number), so rows keep their element and entrance state as the
+    // thread grows.
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: ListView.builder(
+        controller: _scrollCtrl,
+        padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.sm, KSpacing.lg, KSpacing.lg),
+        itemCount: _messages.length + (hasTail ? 1 : 0),
+        itemBuilder: (_, i) {
+          if (i == _messages.length) {
+            // Typing dots, then the live streaming bubble — one entrance.
+            return _Entrance(
+              key: ValueKey('kyno_tail_$_tailSeq'),
+              animate: _enteredTails.add(_tailSeq),
+              child: _KynoTail(
+                streaming: _isStreaming,
+                textListenable: _streamingTextNotifier,
+                lookingAtPhoto: _messages.isNotEmpty &&
+                    _messages.last.role == _Role.user &&
+                    (_messages.last.imagesBytes?.isNotEmpty ?? false),
+              ),
+            );
+          }
+          final msg = _messages[i];
           return _Entrance(
-            key: ValueKey('kyno_tail_$_tailSeq'),
-            animate: _enteredTails.add(_tailSeq),
-            child: _KynoTail(
-              streaming: _isStreaming,
-              textListenable: _streamingTextNotifier,
-              lookingAtPhoto: _messages.isNotEmpty &&
-                  _messages.last.role == _Role.user &&
-                  (_messages.last.imagesBytes?.isNotEmpty ?? false),
+            key: ObjectKey(msg),
+            animate: _entered.add(msg),
+            fromUser: msg.role == _Role.user,
+            child: _ChatBubble(
+              message: msg,
+              role: msg.role,
+              imagesBytes: msg.imagesBytes,
+              onLog: _logSuggestion,
             ),
           );
-        }
-        final msg = _messages[i];
-        return _Entrance(
-          key: ObjectKey(msg),
-          animate: _entered.add(msg),
-          fromUser: msg.role == _Role.user,
-          child: _ChatBubble(
-            message: msg,
-            role: msg.role,
-            imagesBytes: msg.imagesBytes,
-            onLog: _logSuggestion,
-          ),
-        );
-      },
+        },
+      ),
     );
   }
 
@@ -1174,7 +1221,9 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   }
 }
 
-// ─── _Entrance — slide + fade a row in, decided once at mount ────────────────
+// ─── _Entrance — rise + fade a row in, decided once at mount ─────────────────
+// A short 8 px rise and fade (220 ms, ease-out): quick enough to feel like
+// the message just landed. Reduced motion: it is simply there.
 
 class _Entrance extends StatefulWidget {
   final Widget child;
@@ -1200,9 +1249,9 @@ class _EntranceState extends State<_Entrance> {
   Widget build(BuildContext context) {
     if (!_animate) return widget.child;
     return KReveal(
-      rise: 16,
-      slideX: widget.fromUser ? 14 : -10,
-      fromScale: 0.97,
+      rise: 8,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
       child: widget.child,
     );
   }
@@ -1449,12 +1498,24 @@ class _KynoTail extends StatelessWidget {
                               label: 'Kyno is thinking',
                               liveRegion: true,
                               excludeSemantics: true,
-                              child: KLoadingLabel(
-                                messages: lookingAtPhoto
-                                    ? const ['Looking at your photo…', 'Crunching your macros…', 'Checking your targets…']
-                                    : const ['Reading your meals…', 'Checking your targets…', 'Crunching your macros…'],
-                                textAlign: TextAlign.start,
-                                style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15),
+                              child: Row(
+                                children: [
+                                  // Three dots breathing in turn: opacity
+                                  // only, no bounce.
+                                  KTypingDots(color: KColor.textSecondary),
+                                  const SizedBox(width: KSpacing.md),
+                                  Flexible(
+                                    child: RepaintBoundary(
+                                      child: KLoadingLabel(
+                                        messages: lookingAtPhoto
+                                            ? const ['Looking at your photo…', 'Crunching your macros…', 'Checking your targets…']
+                                            : const ['Reading your meals…', 'Checking your targets…', 'Crunching your macros…'],
+                                        textAlign: TextAlign.start,
+                                        style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -1715,21 +1776,32 @@ class _SendBtnState extends State<_SendBtn> with SingleTickerProviderStateMixin 
           builder: (context, value, _) {
             final ready = !widget.loading &&
                 (value.text.trim().isNotEmpty || widget.hasImages);
-            return AnimatedContainer(
-              duration: KMotion.of(context, KMotion.quick),
-              curve: KMotion.emphasizedCurve,
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: ready ? KColor.ink : KColor.cardHigh,
-              ),
-              child: Icon(
-                Icons.arrow_upward_rounded,
-                color: ready
-                    ? KColor.onInk
-                    : KColor.textMuted.withValues(alpha: widget.loading ? 0.5 : 1),
-                size: 20,
+            // Disabled to enabled as one morph: fill, arrow colour and a
+            // small settle of the arrow move on the same eased value.
+            // Keystrokes that keep the same state don't restart it.
+            final idleArrow = KColor.textMuted.withValues(alpha: widget.loading ? 0.5 : 1);
+            return TweenAnimationBuilder<double>(
+              tween: Tween(end: ready ? 1.0 : 0.0),
+              duration: KMotion.of(context, const Duration(milliseconds: 220)),
+              curve: Curves.easeOutCubic,
+              builder: (context, t, _) => DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color.lerp(KColor.cardHigh, KColor.ink, t),
+                ),
+                child: SizedBox.square(
+                  dimension: 48,
+                  child: Center(
+                    child: Transform.scale(
+                      scale: 0.88 + 0.12 * t,
+                      child: Icon(
+                        Icons.arrow_upward_rounded,
+                        color: Color.lerp(idleArrow, KColor.onInk, t),
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
               ),
             );
           },
@@ -1962,7 +2034,7 @@ class _TodayBand extends StatelessWidget {
           ),
         );
 
-    // Kyno's jewel card: teal light under an indigo sky.
+    // Kyno's lead card: flat surface, calories in the accent, protein in ink.
     return KHeroSurface(
       tone: KTone.kyno,
       radius: KRadius.lg,
@@ -1972,7 +2044,7 @@ class _TodayBand extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(isRest ? Icons.bedtime_outlined : Icons.fitness_center_rounded, size: 14, color: const Color(0xFF7EE8F8)),
+              Icon(isRest ? Icons.bedtime_outlined : Icons.fitness_center_rounded, size: 14, color: KColor.textSecondary),
               const SizedBox(width: 6),
               Text(
                 isRest ? 'Today, rest day' : 'Today, $dayType',
@@ -2009,10 +2081,10 @@ class _CheckInCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (color, icon) = switch (insight.severity) {
-      KynoInsightSeverity.needsAttention => (KColor.warning, Icons.error_outline_rounded),
-      KynoInsightSeverity.coaching => (KColor.cyan, Icons.lightbulb_outline_rounded),
-      KynoInsightSeverity.progress => (KColor.success, Icons.trending_up_rounded),
-      KynoInsightSeverity.resolved => (KColor.success, Icons.check_circle_outline_rounded),
+      KynoInsightSeverity.needsAttention => (KColor.ember, Icons.error_outline_rounded),
+      KynoInsightSeverity.coaching => (KColor.textSecondary, Icons.lightbulb_outline_rounded),
+      KynoInsightSeverity.progress => (KColor.ink, Icons.trending_up_rounded),
+      KynoInsightSeverity.resolved => (KColor.ink, Icons.check_circle_outline_rounded),
     };
     return Container(
       decoration: BoxDecoration(
@@ -2129,21 +2201,21 @@ class _FuelPlanCard extends StatelessWidget {
       margin: const EdgeInsets.only(top: KSpacing.md),
       padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.md, KSpacing.lg, KSpacing.xs),
       decoration: BoxDecoration(
-        color: Color.alphaBlend(KColor.green.withValues(alpha: KColor.isDark ? 0.05 : 0.04), KColor.card),
+        color: Color.alphaBlend(KColor.ink.withValues(alpha: KColor.isDark ? 0.05 : 0.04), KColor.card),
         borderRadius: KRadius.lg,
-        border: Border.all(color: KColor.green.withValues(alpha: 0.25)),
+        border: Border.all(color: KColor.ink.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.restaurant_outlined, size: 14, color: KColor.green),
+              Icon(Icons.restaurant_outlined, size: 14, color: KColor.ink),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Fits what you have left',
-                  style: KText.caption.copyWith(color: KColor.green, fontWeight: FontWeight.w700),
+                  style: KText.caption.copyWith(color: KColor.ink, fontWeight: FontWeight.w700),
                 ),
               ),
             ],

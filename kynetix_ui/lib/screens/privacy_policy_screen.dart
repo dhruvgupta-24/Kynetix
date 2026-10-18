@@ -225,9 +225,9 @@ class _PolicyBody extends StatelessWidget {
       blockquote: body,
       blockquotePadding: const EdgeInsets.all(KSpacing.lg),
       blockquoteDecoration: BoxDecoration(
-        color: KColor.saffron.withValues(alpha: dark ? 0.08 : 0.07),
+        color: KColor.ember.withValues(alpha: dark ? 0.06 : 0.05),
         borderRadius: KRadius.md,
-        border: Border.all(color: KColor.saffron.withValues(alpha: dark ? 0.30 : 0.35)),
+        border: Border.all(color: KColor.ember.withValues(alpha: dark ? 0.30 : 0.35)),
       ),
       listBullet: body.copyWith(color: KColor.textMuted),
       listIndent: KSpacing.xxl,

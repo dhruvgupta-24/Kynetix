@@ -829,13 +829,13 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: KColor.violet.withValues(alpha: KColor.isDark ? 0.16 : 0.10),
+                              color: KColor.ink.withValues(alpha: KColor.isDark ? 0.10 : 0.07),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               'In split',
                               style: KText.caption.copyWith(
-                                color: KColor.violet,
+                                color: KColor.textPrimary,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -984,10 +984,10 @@ class _TrainBadge extends StatelessWidget {
         height: 40,
         decoration: BoxDecoration(
           borderRadius: KRadius.sm,
-          color: KColor.violet.withValues(alpha: KColor.isDark ? 0.16 : 0.10),
-          border: Border.all(color: KColor.violet.withValues(alpha: 0.28), width: 1),
+          color: KColor.ink.withValues(alpha: KColor.isDark ? 0.08 : 0.06),
+          border: Border.all(color: KColor.ink.withValues(alpha: 0.20), width: 1),
         ),
-        child: Icon(icon, color: KColor.violet, size: 20),
+        child: Icon(icon, color: KColor.ink, size: 20),
       ),
     );
   }
@@ -1034,18 +1034,18 @@ class _ReasonPill extends StatelessWidget {
   static (Color, IconData) _style(MatchReason r) {
     // Empty-query personal labels reuse the exact-match type.
     if (r.label == 'Favorite') return (KColor.ember, Icons.favorite_rounded);
-    if (r.label == 'Recent') return (KColor.cyan, Icons.history_rounded);
+    if (r.label == 'Recent') return (KColor.textSecondary, Icons.history_rounded);
     switch (r.type) {
       case MatchReasonType.exactMatch:
         return (KColor.green, Icons.check_rounded);
       case MatchReasonType.phraseMatch:
-        return (KColor.violet, Icons.format_quote_rounded);
+        return (KColor.ink, Icons.format_quote_rounded);
       case MatchReasonType.aliasMatch:
-        return (KColor.cyan, Icons.alternate_email_rounded);
+        return (KColor.textSecondary, Icons.alternate_email_rounded);
       case MatchReasonType.synonymMatch:
         return (KColor.blue, Icons.short_text_rounded);
       case MatchReasonType.typoCorrection:
-        return (KColor.saffron, Icons.spellcheck_rounded);
+        return (KColor.ember, Icons.spellcheck_rounded);
       case MatchReasonType.categoryMatch:
       case MatchReasonType.equipmentMatch:
       case MatchReasonType.tokenMatch:

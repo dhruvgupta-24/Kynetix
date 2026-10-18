@@ -441,7 +441,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                     label: 'Step ${_step + 1} of 5',
                     child: KBar(
                       progress: (_step + 1) / 5,
-                      colors: KGradient.train,
+                      colors: KGradient.primary,
                       height: 4,
                       duration: KMotion.emphasized,
                     ),
@@ -826,7 +826,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                         height: isTraining ? 5 : 2,
                         decoration: BoxDecoration(
                           color: isTraining
-                              ? (isActive ? KColor.onInk : KColor.violet)
+                              ? (isActive ? KColor.onInk : KColor.ink)
                               : (isActive
                                     ? KColor.onInk.withValues(alpha: 0.5)
                                     : KColor.textDisabled),
@@ -866,20 +866,6 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
         decoration: BoxDecoration(
           borderRadius: KRadius.xl,
           color: KColor.card,
-          // Train colour as a corner accent only, fading out by mid-card.
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: const Alignment(0.4, 0.4),
-            colors: [
-              Color.alphaBlend(
-                (isTraining ? KColor.violet : KColor.cyan).withValues(
-                  alpha: KColor.isDark ? 0.06 : 0.04,
-                ),
-                KColor.card,
-              ),
-              KColor.card,
-            ],
-          ),
           border: Border.all(color: _hairline),
           boxShadow: KShadow.card,
         ),
@@ -989,19 +975,19 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                       width: 72,
                       height: 72,
                       decoration: BoxDecoration(
-                        color: KColor.cyan.withValues(
-                          alpha: KColor.isDark ? 0.1 : 0.07,
+                        color: KColor.ink.withValues(
+                          alpha: KColor.isDark ? 0.07 : 0.05,
                         ),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: KColor.cyan.withValues(alpha: 0.25),
+                          color: KColor.ink.withValues(alpha: 0.18),
                           width: 1.5,
                         ),
                       ),
                       child: Center(
                         child: Icon(
                           Icons.spa_rounded,
-                          color: KColor.cyan,
+                          color: KColor.textSecondary,
                           size: 34,
                         ),
                       ),
@@ -1453,10 +1439,10 @@ class _WeekdayBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: KColor.violet.withValues(alpha: KColor.isDark ? 0.12 : 0.08),
+        color: KColor.ink.withValues(alpha: KColor.isDark ? 0.08 : 0.06),
         borderRadius: KRadius.pill,
         border: Border.all(
-          color: KColor.violet.withValues(alpha: KColor.isDark ? 0.3 : 0.24),
+          color: KColor.ink.withValues(alpha: KColor.isDark ? 0.24 : 0.20),
         ),
       ),
       child: Text(

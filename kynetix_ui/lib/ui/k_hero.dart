@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
@@ -20,9 +21,8 @@ class KToneScope extends InheritedWidget {
 }
 
 // ─── Hero surface ─────────────────────────────────────────────────────────────
-// The one rich surface per world: a deep jewel ground (the same in both
-// themes, like a premium card) lit by two coloured lamps. Gradients only, no
-// blur, so it costs nothing while scrolling. Content on it uses [KHeroInk].
+// The lead card per world. Content on it uses [KHeroInk], which maps to the
+// regular text tokens now that the hero is a plain card.
 
 abstract final class KHeroInk {
   static Color get primary => KColor.textPrimary;
@@ -64,8 +64,8 @@ class KHeroSurface extends StatelessWidget {
 
 // ─── Dabba rings ──────────────────────────────────────────────────────────────
 // Concentric rings like the round tins of a masala dabba: calories (mirchi),
-// protein (elaichi). Each sweeps from 12
-// o'clock with a two-tone gradient and eases to its value.
+// protein (elaichi). Each sweeps from 12 o'clock in one flat colour and
+// eases to its value.
 
 class KRingSpec {
   const KRingSpec(this.progress, this.colors);
@@ -74,13 +74,23 @@ class KRingSpec {
 }
 
 abstract final class KRingColors {
+  // Calories wear the accent, protein its own green. Going over is drawn as a
+  // second lap by the painter, never as a new colour.
   static List<Color> get calories => [KColor.ember, KColor.ember];
-  static List<Color> get over => [KColor.danger, KColor.danger];
-  static List<Color> get protein => [KColor.green, KColor.green];
+  static List<Color> get over => [KColor.ember, KColor.ember];
+  static List<Color> get protein => [KColor.protein, KColor.protein];
 }
 
-class KDabbaRings extends StatelessWidget {
-  const KDabbaRings({super.key, required this.rings, this.size = 128, this.stroke = 11, Color? track, this.child}) : _track = track;
+class KDabbaRings extends StatefulWidget {
+  const KDabbaRings({
+    super.key,
+    required this.rings,
+    this.size = 128,
+    this.stroke = 11,
+    Color? track,
+    this.child,
+    this.sweepIn = true,
+  }) : _track = track;
 
   final List<KRingSpec> rings;
   final double size;
@@ -88,77 +98,212 @@ class KDabbaRings extends StatelessWidget {
   final Color? _track;
   final Widget? child;
 
+  /// Sweep up from empty the first time it shows. Off for a copy that is
+  /// arriving already drawn (the far end of a Hero flight).
+  final bool sweepIn;
+
+  /// The same rings, already drawn: what a Hero flight carries, so the
+  /// shuttle never replays the sweep mid-air.
+  KDabbaRings settled() => KDabbaRings(
+        rings: rings,
+        size: size,
+        stroke: stroke,
+        track: _track,
+        sweepIn: false,
+        child: child,
+      );
+
+  /// Flight shuttle for a Hero whose child is a [KDabbaRings]: flies the
+  /// rings of the screen being opened (or left), settled, on a transparent
+  /// Material so the centre text keeps its style in the overlay. Rings and
+  /// centre move as one piece, so nothing inside jumps.
+  static Widget heroShuttle(
+    BuildContext flightContext,
+    Animation<double> animation,
+    HeroFlightDirection direction,
+    BuildContext fromHeroContext,
+    BuildContext toHeroContext,
+  ) {
+    final hero = (direction == HeroFlightDirection.push ? toHeroContext : fromHeroContext).widget as Hero;
+    final child = hero.child;
+    return Material(
+      type: MaterialType.transparency,
+      child: child is KDabbaRings ? child.settled() : child,
+    );
+  }
+
+  @override
+  State<KDabbaRings> createState() => _KDabbaRingsState();
+}
+
+class _KDabbaRingsState extends State<KDabbaRings> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(vsync: this);
+  late final CurvedAnimation _curve = CurvedAnimation(parent: _ctrl, curve: KMotion.emphasizedCurve);
+
+  // Each ring eases from where it was drawn to where it should be.
+  List<double> _from = const [];
+  List<double> _to = const [];
+  bool _started = false;
+
+  static List<double> _progressOf(List<KRingSpec> rings) => [
+        for (final r in rings) r.progress.isFinite ? r.progress : 0.0,
+      ];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _to = _progressOf(widget.rings);
+    final d = KMotion.of(context, KMotion.slow);
+    if (!widget.sweepIn || d == Duration.zero) {
+      _from = _to;
+      _ctrl.value = 1;
+      return;
+    }
+    _from = List.filled(_to.length, 0.0);
+    _ctrl
+      ..duration = d
+      ..forward(from: 0);
+  }
+
+  @override
+  void didUpdateWidget(covariant KDabbaRings old) {
+    super.didUpdateWidget(old);
+    final next = _progressOf(widget.rings);
+    if (listEquals(next, _to)) return;
+    // Start from what is on screen right now, so a change mid-sweep
+    // carries on smoothly instead of restarting from empty.
+    final now = _current();
+    _from = [for (var i = 0; i < next.length; i++) i < now.length ? now[i] : 0.0];
+    _to = next;
+    final d = KMotion.of(context, KMotion.slow);
+    if (d == Duration.zero) {
+      _from = _to;
+      _ctrl.value = 1;
+    } else {
+      _ctrl
+        ..duration = d
+        ..forward(from: 0);
+    }
+  }
+
+  List<double> _current() {
+    final t = _curve.value;
+    return [
+      for (var i = 0; i < _to.length; i++)
+        (i < _from.length ? _from[i] : 0.0) + (_to[i] - (i < _from.length ? _from[i] : 0.0)) * t,
+    ];
+  }
+
+  @override
+  void dispose() {
+    _curve.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final d = KMotion.of(context, KMotion.slow);
-    return SizedBox.square(
-      dimension: size,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: d,
-        curve: KMotion.emphasizedCurve,
-        builder: (context, t, c) => CustomPaint(
-          painter: _RingsPainter(rings, stroke, _track ?? KColor.track, t),
-          child: c,
+    final child = widget.child;
+    // Own layer, and the painter listens to the animation itself: the sweep
+    // repaints the rings only, with no widget rebuilds per frame.
+    return RepaintBoundary(
+      child: SizedBox.square(
+        dimension: widget.size,
+        child: CustomPaint(
+          painter: _RingsPainter(
+            colors: [for (final r in widget.rings) r.colors.first],
+            from: _from,
+            to: _to,
+            t: _curve,
+            stroke: widget.stroke,
+            track: widget._track ?? KColor.track,
+            lapColor: KColor.ink,
+            lapOnInk: KColor.bg,
+          ),
+          child: child == null ? null : Center(child: child),
         ),
-        child: child == null ? null : Center(child: child),
       ),
     );
   }
 }
 
+/// Flat rings, outside in. Each inner ring is a touch thinner, so the two
+/// read apart by shape as well as colour. Going past 100% draws a second
+/// lap in ink over the full ring instead of changing colour. On a ring that
+/// is already ink (protein), the lap is cut in base colour so it still shows.
 class _RingsPainter extends CustomPainter {
-  _RingsPainter(this.rings, this.stroke, this.track, this.t);
-  final List<KRingSpec> rings;
+  _RingsPainter({
+    required this.colors,
+    required this.from,
+    required this.to,
+    required this.t,
+    required this.stroke,
+    required this.track,
+    required this.lapColor,
+    required this.lapOnInk,
+  }) : super(repaint: t);
+  final List<Color> colors;
+  final List<double> from;
+  final List<double> to;
+  final Animation<double> t;
   final double stroke;
   final Color track;
-  final double t;
+  final Color lapColor;
+  final Color lapOnInk;
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = size.center(Offset.zero);
-    final gap = stroke * 0.38;
-    for (var i = 0; i < rings.length; i++) {
-      final ring = rings[i];
-      final radius = size.shortestSide / 2 - stroke / 2 - i * (stroke + gap);
-      if (radius <= stroke) break;
-      canvas.drawCircle(
-        c,
-        radius,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..color = track,
-      );
-      final p = (ring.progress.clamp(0.0, 1.0)) * t;
+    final gap = stroke * 0.42;
+    final k = t.value;
+    var outer = size.shortestSide / 2;
+    final base = Paint()..style = PaintingStyle.stroke;
+    for (var i = 0; i < colors.length; i++) {
+      final w = stroke * (i == 0 ? 1.0 : 0.78);
+      final radius = outer - w / 2;
+      outer = radius - w / 2 - gap;
+      if (radius <= w) break;
+      base
+        ..strokeWidth = w
+        ..strokeCap = StrokeCap.butt
+        ..color = track;
+      canvas.drawCircle(c, radius, base);
+      final a = i < from.length ? from[i] : 0.0;
+      final b = i < to.length ? to[i] : 0.0;
+      final raw = a + (b - a) * k;
+      final p = raw.clamp(0.0, 1.0);
       if (p <= 0) continue;
-      final sweep = math.max(p * 2 * math.pi, 0.08);
       final rect = Rect.fromCircle(center: c, radius: radius);
-      final shader = SweepGradient(
-        startAngle: 0,
-        endAngle: math.max(sweep, 0.3),
-        colors: ring.colors,
-        transform: const GradientRotation(-math.pi / 2),
-      ).createShader(rect);
-      canvas.drawArc(
-        rect,
-        -math.pi / 2,
-        sweep,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeCap = sweep >= 2 * math.pi ? StrokeCap.butt : StrokeCap.round
-          ..shader = shader,
-      );
-      // The sweep gradient wraps at 12 o'clock, so the round start cap would
-      // pick up the end colour; paint it in the start colour instead.
-      if (sweep < 2 * math.pi) {
-        canvas.drawCircle(c + Offset(0, -radius), stroke / 2, Paint()..color = ring.colors.first);
+      final full = p >= 1;
+      final sweep = full ? 2 * math.pi : math.max(p * 2 * math.pi, 0.08);
+      base
+        ..strokeCap = full ? StrokeCap.butt : StrokeCap.round
+        ..color = colors[i];
+      canvas.drawArc(rect, -math.pi / 2, sweep, false, base);
+      // Over target: the extra share as a lap on top, in ink, so "over"
+      // reads without a new colour. An ink ring gets a base-coloured lap.
+      final lap = colors[i] == lapColor ? lapOnInk : lapColor;
+      final extra = (raw - 1).clamp(0.0, 1.0);
+      if (extra > 0) {
+        base
+          ..strokeWidth = w * 0.42
+          ..strokeCap = StrokeCap.round
+          ..color = lap.withValues(alpha: 0.85);
+        canvas.drawArc(rect, -math.pi / 2, math.max(extra * 2 * math.pi, 0.08), false, base);
       }
     }
   }
 
   @override
-  bool shouldRepaint(_RingsPainter old) => old.t != t || old.rings != rings || old.stroke != stroke;
+  bool shouldRepaint(_RingsPainter old) =>
+      old.t != t ||
+      old.stroke != stroke ||
+      old.track != track ||
+      old.lapColor != lapColor ||
+      old.lapOnInk != lapOnInk ||
+      !listEquals(old.colors, colors) ||
+      !listEquals(old.from, from) ||
+      !listEquals(old.to, to);
 }

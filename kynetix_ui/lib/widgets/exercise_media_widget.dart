@@ -593,11 +593,11 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
             child: MuscleBodyMap(
               view: BodyView.sideBySide,
               highlightedMuscles: targetMuscles,
-              // Primary = jade, secondary = saffron (matches the detail
-              // sheet's agonist / synergist chips).
+              // Primary = full ink, secondary = set-back ink, so the two
+              // read apart by weight without a new hue.
               muscleColorMap: {
-                if (primary.isNotEmpty) primary: KColor.green,
-                for (final s in secondary) s: KColor.amber,
+                if (primary.isNotEmpty) primary: KColor.ink,
+                for (final s in secondary) s: KColor.fat,
               },
               height: widget.height - 16,
             ),
@@ -661,7 +661,7 @@ class _ExerciseMediaWidgetState extends State<ExerciseMediaWidget> {
                               margin: const EdgeInsetsDirectional.only(end: KSpacing.sm),
                               decoration: BoxDecoration(
                                 borderRadius: KRadius.pill,
-                                color: KColor.violet,
+                                color: KColor.ink,
                               ),
                             ),
                             Expanded(

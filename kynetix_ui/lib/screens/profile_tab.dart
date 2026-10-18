@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -9,7 +11,9 @@ import '../services/insights_report_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/profile_service.dart';
 import '../services/workout_service.dart';
+import '../ui/k_rolling.dart';
 import '../widgets/k_avatar.dart';
+import '../widgets/k_equal_height_row.dart';
 import 'connect_chatgpt_screen.dart';
 import 'insights_screen.dart';
 import 'nutrition_intelligence_screen.dart';
@@ -96,6 +100,9 @@ class _ProfileTabState extends State<ProfileTab> {
 
   @override
   Widget build(BuildContext context) {
+    // The shell keeps this tab alive; depending on TickerMode rebuilds it
+    // when it comes back into view, so the counts roll to what changed.
+    TickerMode.valuesOf(context);
     final profile = ProfileService.instance.currentUserProfile;
     final bottom = MediaQuery.paddingOf(context).bottom;
     if (profile == null) return const SizedBox.shrink();
@@ -117,11 +124,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 Expanded(
                   child: Semantics(header: true, child: Text('Profile', style: KText.display.copyWith(fontSize: 28))),
                 ),
-                _RoundIcon(
-                  icon: Icons.settings_outlined,
-                  label: 'Settings',
-                  onTap: () => _push(const ProfileScreen()),
-                ),
+                _GearButton(onTap: () => _push(const ProfileScreen())),
               ],
             ),
             const SizedBox(height: KSpacing.xl),
@@ -133,7 +136,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const KAvatar(size: 104),
+                    const _AvatarCrossFade(size: 104),
                     Positioned(
                       right: 0,
                       bottom: 2,
@@ -167,16 +170,15 @@ class _ProfileTabState extends State<ProfileTab> {
             const SizedBox(height: KSpacing.xl),
             KCard(
               padding: const EdgeInsets.symmetric(vertical: KSpacing.lg),
-              child: IntrinsicHeight(
-                child: Row(
-                  children: [
-                    _Stat(value: thousands(daysLogged), label: daysLogged == 1 ? 'day logged' : 'days logged'),
-                    VerticalDivider(color: KColor.divider, width: 1),
-                    _Stat(value: thousands(meals), label: meals == 1 ? 'meal' : 'meals'),
-                    VerticalDivider(color: KColor.divider, width: 1),
-                    _Stat(value: thousands(workouts), label: workouts == 1 ? 'workout' : 'workouts'),
-                  ],
-                ),
+              // Three equal columns with hairline rules, no intrinsic pass.
+              child: KEqualHeightRow(
+                gap: 1,
+                ruleColor: KColor.divider,
+                children: [
+                  _Stat(value: thousands(daysLogged), label: daysLogged == 1 ? 'day logged' : 'days logged'),
+                  _Stat(value: thousands(meals), label: meals == 1 ? 'meal' : 'meals'),
+                  _Stat(value: thousands(workouts), label: workouts == 1 ? 'workout' : 'workouts'),
+                ],
               ),
             ),
             const SizedBox(height: KSpacing.md),
@@ -240,16 +242,26 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 }
 
-class _RoundIcon extends StatelessWidget {
-  const _RoundIcon({required this.icon, required this.label, required this.onTap});
-  final IconData icon;
-  final String label;
+/// The settings gear. A tap turns it a sixth of a turn (60 degrees) as the
+/// settings open; each tap keeps turning the same way.
+class _GearButton extends StatefulWidget {
+  const _GearButton({required this.onTap});
   final VoidCallback onTap;
 
   @override
+  State<_GearButton> createState() => _GearButtonState();
+}
+
+class _GearButtonState extends State<_GearButton> {
+  double _turns = 0;
+
+  @override
   Widget build(BuildContext context) => Pressable(
-        onTap: onTap,
-        semanticLabel: label,
+        onTap: () {
+          setState(() => _turns += 1 / 6);
+          widget.onTap();
+        },
+        semanticLabel: 'Settings',
         borderRadius: BorderRadius.circular(24),
         child: Container(
           width: 46,
@@ -259,8 +271,55 @@ class _RoundIcon extends StatelessWidget {
             color: KColor.card,
             border: Border.all(color: KColor.hairline),
           ),
-          child: Icon(icon, size: 21, color: KColor.textPrimary),
+          child: AnimatedRotation(
+            turns: _turns,
+            duration: KMotion.of(context, KMotion.standard),
+            curve: Curves.easeOutCubic,
+            child: Icon(Icons.settings_outlined, size: 21, color: KColor.textPrimary),
+          ),
         ),
+      );
+}
+
+/// The profile picture, cross-fading when the photo changes or is removed.
+/// The outgoing face keeps the bytes it was built with, so the fade really
+/// goes from the old photo to the new one.
+class _AvatarCrossFade extends StatelessWidget {
+  const _AvatarCrossFade({required this.size});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<Uint8List?>(
+        valueListenable: AvatarService.instance.photo,
+        builder: (context, bytes, _) {
+          final dpr = MediaQuery.devicePixelRatioOf(context);
+          final Widget face = bytes == null
+              // No photo: KAvatar picks the account picture or the initial.
+              ? KAvatar(key: const ValueKey('avatar-none'), size: size)
+              : SizedBox.square(
+                  key: ObjectKey(bytes),
+                  dimension: size,
+                  child: ClipOval(
+                    child: ColoredBox(
+                      color: KColor.cardHigh,
+                      child: SizedBox.expand(
+                        child: Image.memory(
+                          bytes,
+                          fit: BoxFit.cover,
+                          cacheWidth: (size * dpr).round(),
+                          gaplessPlayback: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+          return AnimatedSwitcher(
+            duration: KMotion.of(context, KMotion.standard),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            child: face,
+          );
+        },
       );
 }
 
@@ -270,14 +329,14 @@ class _Stat extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: Column(
-          children: [
-            Text(value, style: KText.numMedium.copyWith(fontSize: 24)),
-            const SizedBox(height: 2),
-            Text(label, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textMuted)),
-          ],
-        ),
+  Widget build(BuildContext context) => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Odometer roll when a count changes (a new meal, a new workout).
+          KRollingNumber(value, style: KText.numMedium.copyWith(fontSize: 24), alignment: Alignment.center),
+          const SizedBox(height: 2),
+          Text(label, textAlign: TextAlign.center, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textMuted)),
+        ],
       );
 }
 
@@ -299,12 +358,15 @@ class _BodyTile extends StatelessWidget {
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
-              child: Text.rich(
-                TextSpan(children: [
-                  TextSpan(text: value, style: KText.numMedium.copyWith(fontSize: 20)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  KRollingNumber(value, style: KText.numMedium.copyWith(fontSize: 20), alignment: AlignmentDirectional.centerStart),
                   if (unit != null)
-                    TextSpan(text: ' $unit', style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted)),
-                ]),
+                    Text(' $unit', style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted)),
+                ],
               ),
             ),
           ],
@@ -333,7 +395,7 @@ class _MenuRow extends StatelessWidget {
               const SizedBox(width: KSpacing.lg),
               Expanded(child: Text(label, style: KText.bodyMedium.copyWith(fontSize: 15))),
               if (trailing != null) ...[
-                Text(trailing!, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.green)),
+                Text(trailing!, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textPrimary)),
                 const SizedBox(width: KSpacing.sm),
               ],
               Icon(Icons.chevron_right_rounded, size: 20, color: KColor.textMuted),

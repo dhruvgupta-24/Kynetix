@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,14 +25,22 @@ export '../ui/k_transitions.dart';
 export '../ui/k_widgets.dart';
 
 // ─── KPalette ─────────────────────────────────────────────────────────────────
-// "Graphite". Dark first: a neutral near-black ground with surfaces that step
-// up in clear, flat layers and 1px hairlines for edges. No glow, no tinted
-// fog. Colour carries meaning only:
-//   Calories → ember (the one warm accent)
-//   Protein  → mint
-//   Train    → iris
-//   Kyno     → sky
-// Light mode is warm greige paper with white cards and deeper accents.
+// "Graphite Ember". Three colours per theme, nothing else:
+//
+//   Dark   Graphite #0B0B0C   Bone #F2F1EC   Ember #FF6A3D
+//   Light  Paper    #F4F3EF   Ink  #151515   Burnt ember #B8401A
+//
+// Protein has its own colour, used only for protein:
+//
+//   Dark   Sage #79D49B       Light  Fern #1E7A4C
+//
+// Base is the ground. Ink is text and primary buttons.
+// Ember is the one accent, kept for one meaning on a small part of the
+// screen: calories, the open tab, the log action, and what needs attention.
+// Every surface, hairline and secondary text is a mix of base and ink, so
+// the screen never shows a fourth hue. Older names (green, violet, cyan,
+// saffron, danger) resolve into these three so every call site stays in
+// the palette.
 
 @immutable
 class KPalette {
@@ -50,6 +59,7 @@ class KPalette {
     required this.green,
     required this.greenDark,
     required this.ember,
+    required this.protein,
     required this.saffron,
     required this.violet,
     required this.cyan,
@@ -69,8 +79,15 @@ class KPalette {
   final Brightness brightness;
   final Color bg, surface, card, cardHigh, inset, border, divider;
   final Color fg, ink, onInk;
+
+  /// [ember] is the accent; [green] is ink (protein, success); [saffron],
+  /// [violet], [cyan], [danger] and [warning] resolve to the accent and
+  /// [blue] to a neutral mid tone.
   final Color green, greenDark, ember, saffron, violet, cyan, blue;
   final Color danger, warning;
+
+  /// Protein only: rings, dots, bars and numbers. Nothing else wears it.
+  final Color protein;
   final Color textPrimary, textSecondary, textMuted, textDisabled;
   final Color onAccent;
   final Color shadow;
@@ -81,67 +98,69 @@ class KPalette {
 
   bool get isDark => brightness == Brightness.dark;
 
-  /// Graphite night: neutral near-black, flat layered surfaces.
+  /// Graphite, Bone, Ember.
   static const dark = KPalette(
     brightness: Brightness.dark,
-    bg: Color(0xFF0A0A0B),
-    surface: Color(0xFF111113),
-    card: Color(0xFF161618),
-    cardHigh: Color(0xFF1F1F22),
-    inset: Color(0xFF0E0E10),
-    border: Color(0xFF2A2A2E),
-    divider: Color(0xFF212124),
-    fg: Color(0xFFFFFFFF),
-    ink: Color(0xFFF4F4F2),
-    onInk: Color(0xFF0A0A0B),
-    green: Color(0xFF4ADE9B),
-    greenDark: Color(0xFF14895A),
+    bg: Color(0xFF0B0B0C),
+    surface: Color(0xFF111112),
+    card: Color(0xFF161617),
+    cardHigh: Color(0xFF1F1F20),
+    inset: Color(0xFF0E0E0F),
+    border: Color(0xFF2B2B2C),
+    divider: Color(0xFF202021),
+    fg: Color(0xFFF2F1EC),
+    ink: Color(0xFFF2F1EC),
+    onInk: Color(0xFF0B0B0C),
+    green: Color(0xFFF2F1EC),
+    greenDark: Color(0xFF2B2B2C),
     ember: Color(0xFFFF6A3D),
-    saffron: Color(0xFFFFB648),
-    violet: Color(0xFF9D8CFF),
-    cyan: Color(0xFF5CC8F0),
-    blue: Color(0xFF5B95F7),
-    danger: Color(0xFFFF5A6E),
-    warning: Color(0xFFFFB648),
-    textPrimary: Color(0xFFF4F4F2),
-    textSecondary: Color(0xFFA3A3A8),
-    textMuted: Color(0xFF7C7C82),
-    textDisabled: Color(0xFF4A4A50),
-    onAccent: Color(0xFFFFFFFF),
+    protein: Color(0xFF79D49B),
+    saffron: Color(0xFFFF6A3D),
+    violet: Color(0xFFFF6A3D),
+    cyan: Color(0xFFFF6A3D),
+    blue: Color(0xFF9D9C97),
+    danger: Color(0xFFFF6A3D),
+    warning: Color(0xFFFF6A3D),
+    textPrimary: Color(0xFFF2F1EC),
+    textSecondary: Color(0xFFA6A5A0),
+    textMuted: Color(0xFF7B7A76),
+    textDisabled: Color(0xFF4A4A48),
+    onAccent: Color(0xFF0B0B0C),
     shadow: Color(0xFF000000),
-    track: Color(0xFF242427),
+    track: Color(0xFF232324),
     auroraStrength: 0,
   );
 
-  /// Greige paper: warm off-white ground, white cards, deeper accents.
+  /// Paper, Ink, Burnt ember.
   static const light = KPalette(
     brightness: Brightness.light,
-    bg: Color(0xFFF2F2EF),
-    surface: Color(0xFFF8F8F6),
+    bg: Color(0xFFF4F3EF),
+    surface: Color(0xFFF9F8F5),
     card: Color(0xFFFFFFFF),
-    cardHigh: Color(0xFFEBEBE7),
-    inset: Color(0xFFF0F0EC),
-    border: Color(0xFFE2E2DD),
-    divider: Color(0xFFEAEAE5),
-    fg: Color(0xFF111112),
-    ink: Color(0xFF111112),
-    onInk: Color(0xFFFFFFFF),
-    green: Color(0xFF0E9C64),
-    greenDark: Color(0xFF0A7A4E),
-    ember: Color(0xFFF0501F),
-    saffron: Color(0xFFC27A0A),
-    violet: Color(0xFF6650EE),
-    cyan: Color(0xFF0A86B0),
-    blue: Color(0xFF2F6BE0),
-    danger: Color(0xFFD9304A),
-    warning: Color(0xFFB7740B),
-    textPrimary: Color(0xFF111112),
-    textSecondary: Color(0xFF5E5E63),
-    textMuted: Color(0xFF8A8A8F),
-    textDisabled: Color(0xFFBDBDB8),
+    cardHigh: Color(0xFFEBEAE5),
+    inset: Color(0xFFEFEEEA),
+    border: Color(0xFFE0DFD9),
+    divider: Color(0xFFE8E7E1),
+    fg: Color(0xFF151515),
+    ink: Color(0xFF151515),
+    onInk: Color(0xFFF9F8F5),
+    green: Color(0xFF151515),
+    greenDark: Color(0xFF151515),
+    ember: Color(0xFFB8401A),
+    protein: Color(0xFF1E7A4C),
+    saffron: Color(0xFFB8401A),
+    violet: Color(0xFFB8401A),
+    cyan: Color(0xFFB8401A),
+    blue: Color(0xFF6E6D69),
+    danger: Color(0xFFB8401A),
+    warning: Color(0xFFB8401A),
+    textPrimary: Color(0xFF151515),
+    textSecondary: Color(0xFF55544F),
+    textMuted: Color(0xFF6B6A65),
+    textDisabled: Color(0xFFBEBDB7),
     onAccent: Color(0xFFFFFFFF),
     shadow: Color(0xFF000000),
-    track: Color(0xFFE8E8E3),
+    track: Color(0xFFE6E5DF),
     auroraStrength: 0,
   );
 }
@@ -203,7 +222,7 @@ abstract class KColor {
 
   // ── Semantic
   static Color get calorie => _p.ember;
-  static Color get protein => _p.green;
+  static Color get protein => _p.protein;
   static Color get amber => _p.saffron;
   static Color get blue => _p.blue;
   static Color get danger => _p.danger;
@@ -222,8 +241,18 @@ abstract class KColor {
   /// Unfilled part of rings and progress bars.
   static Color get track => _p.track;
 
+  // ── Data series, as tints of the three colours ──
+  /// Carbs: the accent, softened.
+  static Color get carbs => Color.lerp(_p.ember, _p.bg, isDark ? 0.38 : 0.18)!;
+
+  /// Fat: ink, set back.
+  static Color get fat => Color.lerp(_p.ink, _p.bg, 0.42)!;
+
+  /// Fiber: ink, further back.
+  static Color get fiber => Color.lerp(_p.ink, _p.bg, isDark ? 0.66 : 0.5)!;
+
   /// The 1px edge of a card.
-  static Color get hairline => isDark ? const Color(0xFF232326) : _p.border;
+  static Color get hairline => isDark ? const Color(0xFF242425) : _p.border;
 }
 
 // ─── KThemeController ─────────────────────────────────────────────────────────
@@ -345,7 +374,7 @@ abstract class KGradient {
   static List<Color> _flat(Color c) => [c, c];
 
   static List<Color> get fuel => _flat(KColor.ember);
-  static List<Color> get protein => _flat(KColor.green);
+  static List<Color> get protein => _flat(KColor.protein);
   static List<Color> get train => _flat(KColor.violet);
   static List<Color> get kyno => _flat(KColor.cyan);
 
@@ -482,15 +511,21 @@ abstract class KShadow {
 // ─── Pressable ────────────────────────────────────────────────────────────────
 // A card that physically responds to press with scale + haptic.
 
-// Press = immediate squash on finger-down (same frame), springy release.
-// Optional `haptic` fires a selection tick on commit; `semanticLabel` makes the
-// target speak as a button.
+// Press = squash on finger-down (easeOut, ~120 ms, starts the same frame),
+// release on a real spring (KMotion.pressSpring: slight lift, no wobble).
+// Both are interruptible: a new touch mid-release picks up from wherever the
+// card is. Optional `haptic` fires a selection tick on commit;
+// `semanticLabel` makes the target speak as a button.
 
 class Pressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// Scale while held. Defaults to 0.97, the app-wide press depth.
   final double scale;
+
+  /// Press-down duration (release always runs on the spring).
   final Duration duration;
   final BorderRadius borderRadius;
   final bool haptic;
@@ -501,8 +536,8 @@ class Pressable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.scale = 0.96,
-    this.duration = KMotion.instant,
+    this.scale = 0.97,
+    this.duration = KMotion.press,
     this.borderRadius = const BorderRadius.all(Radius.circular(22)),
     this.haptic = false,
     this.semanticLabel,
@@ -514,45 +549,38 @@ class Pressable extends StatefulWidget {
 
 class _PressableState extends State<Pressable>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scaleAnim;
+  // How pressed the target is: 0 at rest, 1 fully held. Unbounded so the
+  // release spring can carry it a hair past rest (a tiny lift) and back.
+  late final AnimationController _press = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
+  );
+  late final Animation<double> _scale = _PressScale(_press, () => widget.scale);
   bool _isDown = false;
 
   @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: widget.duration,
-      reverseDuration: const Duration(milliseconds: 420),
-    );
-    _scaleAnim = Tween<double>(begin: 1.0, end: widget.scale).animate(
-      CurvedAnimation(
-        parent: _ctrl,
-        curve: Curves.easeOutCubic,
-        reverseCurve: const _ReleaseSpring(),
-      ),
-    );
-  }
-
-  @override
   void dispose() {
-    _ctrl.dispose();
+    _press.dispose();
     super.dispose();
   }
 
   void _down() {
-    if (!_isDown) {
-      _isDown = true;
-      if (!KMotion.reduced(context)) _ctrl.forward();
-    }
+    if (_isDown) return;
+    _isDown = true;
+    if (KMotion.reduced(context)) return;
+    _press.animateTo(1, duration: widget.duration, curve: KMotion.easeOut);
   }
 
   void _up() {
-    if (_isDown) {
-      _isDown = false;
-      _ctrl.reverse();
+    if (!_isDown) return;
+    _isDown = false;
+    if (KMotion.reduced(context)) {
+      _press.value = 0;
+      return;
     }
+    _press.animateWith(
+      SpringSimulation(KMotion.pressSpring, _press.value, 0, _press.velocity),
+    );
   }
 
   @override
@@ -570,7 +598,7 @@ class _PressableState extends State<Pressable>
           : null,
       onTapCancel: enabled ? () => _up() : null,
       onLongPress: widget.onLongPress,
-      child: ScaleTransition(scale: _scaleAnim, child: widget.child),
+      child: ScaleTransition(scale: _scale, child: widget.child),
     );
     if (widget.semanticLabel != null) {
       out = Semantics(
@@ -590,13 +618,18 @@ class _PressableState extends State<Pressable>
   }
 }
 
-/// Reverse curve for press release. Reverse runs t: 1 → 0, so we mirror a
-/// small overshoot spring into that direction.
-class _ReleaseSpring extends Curve {
-  const _ReleaseSpring();
-  static const _s = KSpringCurve(damping: 7, frequency: 13);
+/// Maps press amount (0 rest, 1 held) to scale, reading the target scale
+/// live so a rebuilt Pressable with a new `scale` stays correct.
+class _PressScale extends Animation<double>
+    with AnimationWithParentMixin<double> {
+  _PressScale(this.parent, this._target);
+
   @override
-  double transformInternal(double t) => 1.0 - _s.transform(1.0 - t);
+  final Animation<double> parent;
+  final double Function() _target;
+
+  @override
+  double get value => 1.0 - (1.0 - _target()) * parent.value;
 }
 
 // ─── KCard ────────────────────────────────────────────────────────────────────
@@ -683,10 +716,21 @@ class KSectionTitle extends StatelessWidget {
 
 // ─── KButton ──────────────────────────────────────────────────────────────────
 // Primary action: a monochrome ink pill (warm white on Carbon, near-black on
-// Paper) — unmistakably "the" action without borrowing a data colour. 56dp
-// tall, haptic on commit, built-in loading state.
+// Paper), unmistakably "the" action without borrowing a data colour. 56dp
+// tall, haptic on commit, built-in loading and success states.
+//
+// States (see [KButtonState]):
+//   idle     label (and optional icon), tappable.
+//   loading  the spinner leads the label; taps are ignored.
+//   success  the label cross-fades to a check mark that draws itself
+//            (~300 ms) beside [successLabel] ("Logged"). One success haptic
+//            fires on the frame it switches. Taps are ignored until the
+//            caller sets the state back to idle.
 
-class KButton extends StatelessWidget {
+/// What a [KButton] is showing.
+enum KButtonState { idle, loading, success }
+
+class KButton extends StatefulWidget {
   final String label;
   final VoidCallback? onTap;
   final bool loading;
@@ -694,6 +738,16 @@ class KButton extends StatelessWidget {
   final IconData? icon;
   final Color? color;
   final double? width;
+
+  /// Shortcut for `state: KButtonState.success`.
+  final bool success;
+
+  /// Short past-tense label shown with the check mark ("Logged", "Saved").
+  /// Falls back to [label].
+  final String? successLabel;
+
+  /// Explicit state. When null it is derived from [success] and [loading].
+  final KButtonState? state;
 
   const KButton({
     super.key,
@@ -704,89 +758,294 @@ class KButton extends StatelessWidget {
     this.icon,
     this.color,
     this.width,
+    this.success = false,
+    this.successLabel,
+    this.state,
   });
+
+  /// The state this button shows.
+  KButtonState get effectiveState =>
+      state ??
+      (success
+          ? KButtonState.success
+          : loading
+              ? KButtonState.loading
+              : KButtonState.idle);
+
+  @override
+  State<KButton> createState() => _KButtonState();
+}
+
+class _KButtonState extends State<KButton> with SingleTickerProviderStateMixin {
+  // 0 shows the label, 1 shows the check. Created lazily: most buttons never
+  // succeed, and they should not carry a ticker for it.
+  AnimationController? _done;
+
+  static const _successDuration = Duration(milliseconds: 300);
+
+  AnimationController _ensureDone(double value) =>
+      _done ??= AnimationController(
+        vsync: this,
+        duration: _successDuration,
+        value: value,
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.effectiveState == KButtonState.success) _ensureDone(1);
+  }
+
+  @override
+  void didUpdateWidget(covariant KButton old) {
+    super.didUpdateWidget(old);
+    final was = old.effectiveState == KButtonState.success;
+    final now = widget.effectiveState == KButtonState.success;
+    if (was == now) return;
+    final ctrl = _ensureDone(was ? 1 : 0);
+    final reduced = KMotion.reduced(context);
+    if (now) {
+      KHaptics.success();
+      if (reduced) {
+        ctrl.value = 1;
+      } else {
+        ctrl.forward();
+      }
+    } else {
+      // Back to idle: the label returns quickly, without redrawing the check.
+      if (reduced) {
+        ctrl.value = 0;
+      } else {
+        ctrl.animateBack(0, duration: KMotion.quick, curve: KMotion.easeOut);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _done?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final w = widget;
     // One primary look everywhere: a solid ink pill (white on Graphite,
     // near-black on paper). A custom colour fills it instead.
-    final custom = color != null;
-    final bg = color ?? KColor.ink;
+    final custom = w.color != null;
+    final bg = w.color ?? KColor.ink;
     final Color fg;
-    if (outlined) {
+    if (w.outlined) {
       fg = custom ? bg : KColor.textPrimary;
     } else if (custom) {
-      fg = bg.computeLuminance() > 0.45 ? const Color(0xFF0A0A0B) : Colors.white;
+      // Ink and accent fills have their own on-colours; anything else picks
+      // the darker or lighter end of the palette by luminance.
+      fg = bg == KColor.ember
+          ? KColor.onAccent
+          : bg == KColor.ink
+              ? KColor.onInk
+              : bg.computeLuminance() > 0.45
+                  ? KPalette.dark.bg
+                  : KPalette.light.card;
     } else {
       fg = KColor.onInk;
     }
-    final disabled = onTap == null && !loading;
+    final state = w.effectiveState;
+    final loading = state == KButtonState.loading;
+    final succeeded = state == KButtonState.success;
+    final disabled = w.onTap == null && state == KButtonState.idle;
     final dim = loading || disabled;
+    final textStyle = TextStyle(
+      fontFamily: KText.family,
+      color: fg,
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.2,
+    );
+
+    final Widget idle = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedSwitcher(
+          duration: KMotion.of(context, KMotion.quick),
+          switchInCurve: KMotion.easeOut,
+          child: loading
+              ? Padding(
+                  key: const ValueKey('l'),
+                  padding: const EdgeInsets.only(right: 10),
+                  child: KSpinner(size: 16, color: fg),
+                )
+              : w.icon != null
+                  ? Padding(
+                      key: const ValueKey('i'),
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Icon(w.icon, size: 19, color: fg),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('n')),
+        ),
+        Flexible(
+          child: Text(
+            w.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textStyle,
+          ),
+        ),
+      ],
+    );
+
+    final done = _done;
+    final Widget content;
+    if (done == null) {
+      content = idle;
+    } else {
+      // Both faces stay laid out, so the pill keeps one width through the
+      // swap; only opacity and a small transform animate.
+      // `drive` (not CurvedAnimation) so nothing registers on the controller
+      // per build.
+      const outCurve = Interval(0, 0.45, curve: Curves.easeIn);
+      const inCurve = Interval(0.15, 0.75, curve: KMotion.easeOut);
+      final outOpacity = done.drive(
+        Tween(begin: 1.0, end: 0.0).chain(CurveTween(curve: outCurve)),
+      );
+      final outSlide = done.drive(
+        Tween(begin: Offset.zero, end: const Offset(0, -0.25))
+            .chain(CurveTween(curve: outCurve)),
+      );
+      final inOpacity = done.drive(CurveTween(curve: inCurve));
+      final inSlide = done.drive(
+        Tween(begin: const Offset(0, 0.25), end: Offset.zero)
+            .chain(CurveTween(curve: inCurve)),
+      );
+      final stroke = done.drive(
+        CurveTween(curve: const Interval(0.2, 1, curve: Curves.easeInOutCubic)),
+      );
+      content = Stack(
+        alignment: Alignment.center,
+        children: [
+          ExcludeSemantics(
+            excluding: succeeded,
+            child: FadeTransition(
+              opacity: outOpacity,
+              child: SlideTransition(
+                position: outSlide,
+                child: idle,
+              ),
+            ),
+          ),
+          ExcludeSemantics(
+            excluding: !succeeded,
+            child: FadeTransition(
+              opacity: inOpacity,
+              child: SlideTransition(
+                position: inSlide,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: SizedBox.square(
+                        dimension: 19,
+                        child: CustomPaint(
+                          painter: _CheckPainter(progress: stroke, color: fg),
+                        ),
+                      ),
+                    ),
+                    Flexible(
+                      child: Text(
+                        w.successLabel ?? w.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textStyle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return SizedBox(
-      width: width,
+      width: w.width,
       child: Pressable(
-        onTap: (loading || onTap == null)
+        onTap: (state != KButtonState.idle || w.onTap == null)
             ? null
             : () {
                 KHaptics.commit();
-                onTap!();
+                w.onTap!();
               },
         borderRadius: KRadius.pill,
         child: AnimatedContainer(
           duration: KMotion.of(context, KMotion.quick),
-          curve: KMotion.emphasizedCurve,
+          curve: KMotion.easeOut,
           constraints: const BoxConstraints(minHeight: 56),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
           decoration: BoxDecoration(
-            color: outlined ? Colors.transparent : (dim ? bg.withValues(alpha: 0.4) : bg),
+            color: w.outlined
+                ? Colors.transparent
+                : (dim ? bg.withValues(alpha: 0.4) : bg),
             borderRadius: KRadius.pill,
-            border: outlined
+            border: w.outlined
                 ? Border.all(
                     color: custom ? bg.withValues(alpha: 0.6) : KColor.border,
                     width: 1,
                   )
                 : null,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSwitcher(
-                duration: KMotion.of(context, KMotion.quick),
-                child: loading
-                    ? Padding(
-                        key: const ValueKey('l'),
-                        padding: const EdgeInsets.only(right: 10),
-                        child: KSpinner(size: 16, color: fg),
-                      )
-                    : icon != null
-                    ? Padding(
-                        key: const ValueKey('i'),
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Icon(icon, size: 19, color: fg),
-                      )
-                    : const SizedBox.shrink(key: ValueKey('n')),
-              ),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: KText.family,
-                    color: fg,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          child: content,
         ),
       ),
     );
   }
+}
+
+/// A check mark that draws itself along its path as [progress] runs 0 to 1.
+class _CheckPainter extends CustomPainter {
+  _CheckPainter({required this.progress, required this.color})
+      : super(repaint: progress);
+
+  final Animation<double> progress;
+  final Color color;
+
+  final Paint _paint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = progress.value;
+    if (t <= 0) return;
+    final s = size.shortestSide;
+    // Two legs: the short one is ~38% of the total length.
+    final a = Offset(s * 0.18, s * 0.53);
+    final b = Offset(s * 0.41, s * 0.75);
+    final c = Offset(s * 0.84, s * 0.29);
+    final l1 = (b - a).distance;
+    final l2 = (c - b).distance;
+    final drawn = (l1 + l2) * t;
+    final path = Path()..moveTo(a.dx, a.dy);
+    if (drawn <= l1) {
+      final p = Offset.lerp(a, b, drawn / l1)!;
+      path.lineTo(p.dx, p.dy);
+    } else {
+      path.lineTo(b.dx, b.dy);
+      final p = Offset.lerp(b, c, (drawn - l1) / l2)!;
+      path.lineTo(p.dx, p.dy);
+    }
+    _paint
+      ..color = color
+      ..strokeWidth = (s * 0.12).clamp(1.8, 2.6).toDouble();
+    canvas.drawPath(path, _paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CheckPainter old) =>
+      old.progress != progress || old.color != color;
 }
 
 // ─── KChip ────────────────────────────────────────────────────────────────────
@@ -964,38 +1223,13 @@ class _GradientCircularProgressPainter extends CustomPainter {
 
     if (progress <= 0) return;
 
-    // Sweep gradient progress
+    // Flat arc in the first colour: no gradient, no glow.
     final rect = Rect.fromCircle(center: center, radius: radius);
-    final sweepGradient = SweepGradient(
-      colors: colors,
-      stops: List.generate(
-        colors.length,
-        (index) => index / (colors.length - 1),
-      ),
-      transform: const GradientRotation(-3.14159 / 2),
-    );
-
     final progressPaint = Paint()
-      ..shader = sweepGradient.createShader(rect)
+      ..color = colors.isEmpty ? KColor.ink : colors.first
       ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
-
-    // Soft glow shadow under progress arc
-    final glowPaint = Paint()
-      ..shader = sweepGradient.createShader(rect)
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-
-    canvas.drawArc(
-      rect,
-      -3.14159 / 2,
-      2 * 3.14159 * progress.clamp(0.0, 1.0),
-      false,
-      glowPaint,
-    );
 
     canvas.drawArc(
       rect,
@@ -1054,10 +1288,10 @@ class _KAnimatedCountState extends State<KAnimatedCount>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    _animation = Tween<double>(
-      begin: 0.0,
-      end: widget.value.toDouble(),
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    _animation = _controller.drive(
+      Tween<double>(begin: 0.0, end: widget.value.toDouble())
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+    );
     _oldValue = widget.value.toDouble();
   }
 
@@ -1085,10 +1319,12 @@ class _KAnimatedCountState extends State<KAnimatedCount>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value) {
       _oldValue = oldWidget.value.toDouble();
-      _animation = Tween<double>(begin: _oldValue, end: widget.value.toDouble())
-          .animate(
-            CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-          );
+      // `drive` keeps no listener on the controller, so replacing the
+      // animation on every value change leaks nothing.
+      _animation = _controller.drive(
+        Tween<double>(begin: _oldValue, end: widget.value.toDouble())
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+      );
       _controller.reset();
       _controller.forward();
     }
@@ -1344,7 +1580,6 @@ class KSuccessBanner extends StatelessWidget {
           color: KColor.success.withValues(alpha: 0.4),
           width: 1.0,
         ),
-        boxShadow: KShadow.glow(KColor.success),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

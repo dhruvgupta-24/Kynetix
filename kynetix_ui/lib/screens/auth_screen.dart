@@ -810,7 +810,8 @@ class _KineticOrbitState extends State<KineticOrbit> with SingleTickerProviderSt
     final dark = KColor.isDark;
     final scene = _OrbitScene(
       track: KColor.fg.withValues(alpha: dark ? 0.09 : 0.11),
-      colors: [KColor.ember, KColor.green, KColor.violet],
+      // One accent comet; the other two are ink and set-back ink.
+      colors: [KColor.ember, KColor.ink, KColor.fat],
       cometAlpha: dark ? 1.0 : 0.9,
     );
     final s = widget.size;

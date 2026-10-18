@@ -15,14 +15,14 @@ enum BodyView {
 
 // ─── Body-map palette (train world) ───────────────────────────────────────────
 // Silhouette sits in ink; targeted muscles light up in the train light.
-// The volume heat ramp runs cool → hot through three distinct stops
-// (cyan → violet → ember) so low / medium / high stay distinguishable.
+// The volume heat ramp is one sequential ink ramp: a faint step off the
+// resting fill, through a set-back ink, to full ink for the most worked.
 
 // Every value is a getter so a theme switch is picked up on the next paint.
 // Resting muscles sit one clear step off the card; inert parts (head, hands,
 // feet, joints) sit half a step, so the silhouette reads on both Carbon and
 // Paper without competing with the targeted muscles.
-Color get _kDefaultHighlight => KColor.violet;
+Color get _kDefaultHighlight => KColor.ink;
 Color get _kBaseFill => Color.alphaBlend(
       KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.16),
       KColor.card,
@@ -37,7 +37,7 @@ Color get _kOutline => KColor.isDark
     ? KColor.fg.withValues(alpha: 0.1)
     : KColor.card.withValues(alpha: 0.95);
 Color get _kHeatFloor => Color.alphaBlend(
-      KColor.cyan.withValues(alpha: KColor.isDark ? 0.14 : 0.16),
+      KColor.ink.withValues(alpha: KColor.isDark ? 0.14 : 0.16),
       _kBaseFill,
     );
 
@@ -311,12 +311,10 @@ class _MuscleFills {
   }
 
   static Color _calculateHeatColor(double intensity) {
-    if (intensity < 0.3) {
-      return Color.lerp(_kHeatFloor, KColor.cyan, intensity / 0.3)!;
-    } else if (intensity < 0.7) {
-      return Color.lerp(KColor.cyan, KColor.violet, (intensity - 0.3) / 0.4)!;
+    if (intensity < 0.5) {
+      return Color.lerp(_kHeatFloor, KColor.fat, intensity / 0.5)!;
     } else {
-      return Color.lerp(KColor.violet, KColor.ember, (intensity - 0.7) / 0.3)!;
+      return Color.lerp(KColor.fat, KColor.ink, (intensity - 0.5) / 0.5)!;
     }
   }
 

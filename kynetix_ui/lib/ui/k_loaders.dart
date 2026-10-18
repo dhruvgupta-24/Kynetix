@@ -19,7 +19,9 @@
 //  KSpinner       inline + inside buttons. Loop 1.4s.
 //  KLoadingLabel  rotating VOICE.md lines, 2.8s per line.
 //  KLoaderPanel   centred loader + label, a live region announced "Loading".
-//  KPulseLoader / KLoadingDots / KShimmer* are the legacy names, upgraded.
+//  KPulseLoader / KLoadingDots are the legacy names, upgraded.
+//  KShimmer*      calm static skeleton with a slow opacity pulse (1.8s);
+//                 KSkeletonSwitcher cross-fades it to content.
 
 import 'dart:math' as math;
 
@@ -55,8 +57,11 @@ mixin _KLoop<T extends StatefulWidget>
   Duration get period;
   double get rest;
 
-  late final AnimationController loop =
-      AnimationController(vsync: this, duration: period, value: rest);
+  late final AnimationController loop = AnimationController(
+    vsync: this,
+    duration: period,
+    value: rest,
+  );
 
   bool get running => loop.isAnimating;
 
@@ -96,9 +101,8 @@ Widget _labelled(String? label, Widget child) {
   );
 }
 
-double _ease(double x) => x < 0.5
-    ? 4 * x * x * x
-    : 1 - math.pow(-2 * x + 2, 3) / 2; // easeInOutCubic
+double _ease(double x) =>
+    x < 0.5 ? 4 * x * x * x : 1 - math.pow(-2 * x + 2, 3) / 2; // easeInOutCubic
 
 // ─── KOrbitLoader ─────────────────────────────────────────────────────────────
 // The brand loader: three thin orbits (fuel, protein, train) with comet heads
@@ -114,6 +118,7 @@ class KOrbitLoader extends StatefulWidget {
 
   final double size;
   final Color? _color;
+
   /// Null paints the brand tri-colour. A colour tints all three comets.
   Color? get color => _color;
   final String? semanticsLabel;
@@ -134,7 +139,8 @@ class _KOrbitLoaderState extends State<KOrbitLoader>
     final dark = KColor.isDark;
     final tint = widget.color;
     final comets = tint == null
-        ? [KColor.ember, KColor.green, KColor.violet]
+        // One accent comet; the other two are ink and a set-back ink tint.
+        ? [KColor.ember, KColor.ink, KColor.fat]
         : [tint, tint.withValues(alpha: 0.75), tint.withValues(alpha: 0.5)];
     return _labelled(
       widget.semanticsLabel,
@@ -209,13 +215,20 @@ class _OrbitLoaderPainter extends CustomPainter {
       final dir = _turns[i] >= 0 ? 1.0 : -1.0;
       final angle = _start[i] + v * _tau * _turns[i];
       // Comet length breathes gently (integer frequency keeps it seamless).
-      final sweep = _sweep[i] * (0.82 + 0.18 * math.sin(_tau * (v * 2 + i / 3)));
+      final sweep =
+          _sweep[i] * (0.82 + 0.18 * math.sin(_tau * (v * 2 + i / 3)));
       final rect = Rect.fromCircle(center: c, radius: r);
       final seg = sweep / _segments;
       for (var k = 0; k < _segments; k++) {
         final f = (k + 1) / _segments; // tail 0 → head 1
         _arc.color = color.withValues(alpha: color.a * cometAlpha * f * f);
-        canvas.drawArc(rect, angle - dir * sweep + dir * seg * k, dir * seg, false, _arc);
+        canvas.drawArc(
+          rect,
+          angle - dir * sweep + dir * seg * k,
+          dir * seg,
+          false,
+          _arc,
+        );
       }
       final p = c + Offset.fromDirection(angle, r);
       _fill.color = color.withValues(alpha: color.a * cometAlpha * 0.18);
@@ -248,7 +261,11 @@ class _OrbitLoaderPainter extends CustomPainter {
 // rise and fall like an equaliser over faint full-height ghosts.
 
 class KMacroLoader extends StatefulWidget {
-  const KMacroLoader({super.key, this.size = 44, this.semanticsLabel = 'Loading'});
+  const KMacroLoader({
+    super.key,
+    this.size = 44,
+    this.semanticsLabel = 'Loading',
+  });
 
   final double size;
   final String? semanticsLabel;
@@ -275,9 +292,10 @@ class _KMacroLoaderState extends State<KMacroLoader>
             painter: _MacroPainter(
               t: loop,
               running: running,
-              c0: KColor.ember,
-              c1: KColor.green,
-              c2: KColor.saffron,
+              // Calories, protein, carbs: the same series colours as the app.
+              c0: KColor.calorie,
+              c1: KColor.protein,
+              c2: KColor.carbs,
               ghostAlpha: KColor.isDark ? 0.14 : 0.16,
             ),
           ),
@@ -340,7 +358,10 @@ class _MacroPainter extends CustomPainter {
       }
       final barTop = bottom - math.max(barW, h * level);
       _p.color = color;
-      canvas.drawRRect(RRect.fromLTRBR(x, barTop, x + barW, bottom, radius), _p);
+      canvas.drawRRect(
+        RRect.fromLTRBR(x, barTop, x + barW, bottom, radius),
+        _p,
+      );
     }
   }
 
@@ -359,7 +380,11 @@ class _MacroPainter extends CustomPainter {
 // Three pips on the hub count the reps in each set.
 
 class KRepLoader extends StatefulWidget {
-  const KRepLoader({super.key, this.size = 52, this.semanticsLabel = 'Loading'});
+  const KRepLoader({
+    super.key,
+    this.size = 52,
+    this.semanticsLabel = 'Loading',
+  });
 
   final double size;
   final String? semanticsLabel;
@@ -390,8 +415,8 @@ class _KRepLoaderState extends State<KRepLoader>
               track: KColor.fg.withValues(alpha: dark ? 0.10 : 0.12),
               hub: KColor.fg.withValues(alpha: dark ? 0.22 : 0.26),
               ink: KColor.ink,
-              arc: KColor.violet,
-              head: KColor.cyan,
+              arc: KColor.ink,
+              head: KColor.ember,
             ),
           ),
         ),
@@ -462,7 +487,13 @@ class _RepPainter extends CustomPainter {
         ..strokeWidth = w * (1 + 0.25 * swell);
       const start = -math.pi / 2;
       final sweep = _tau * progress;
-      canvas.drawArc(Rect.fromCircle(center: c, radius: r), start, sweep, false, _stroke);
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: r),
+        start,
+        sweep,
+        false,
+        _stroke,
+      );
       _dot.color = head.withValues(alpha: alpha);
       canvas.drawCircle(
         c + Offset.fromDirection(start + sweep, r),
@@ -502,11 +533,12 @@ class _RepPainter extends CustomPainter {
 
 class KSpinner extends StatefulWidget {
   const KSpinner({super.key, this.size = 20, Color? color, this.semanticsLabel})
-      : _color = color;
+    : _color = color;
 
   final double size;
   final Color? _color;
   Color get color => _color ?? KColor.textPrimary;
+
   /// Null by default: inside a button the button already speaks.
   final String? semanticsLabel;
 
@@ -585,7 +617,10 @@ class _SpinnerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SpinnerPainter old) =>
-      old.t != t || old.running != running || old.color != color || old.track != track;
+      old.t != t ||
+      old.running != running ||
+      old.color != color ||
+      old.track != track;
 }
 
 // ─── KLoadingLabel ────────────────────────────────────────────────────────────
@@ -640,35 +675,39 @@ class _KLoadingLabelState extends State<KLoadingLabel>
   Widget build(BuildContext context) {
     final messages = widget.messages;
     if (messages.isEmpty) return const SizedBox.shrink();
-    final style = widget.style ??
-        KText.bodyMedium.copyWith(color: KColor.textSecondary);
+    final style =
+        widget.style ?? KText.bodyMedium.copyWith(color: KColor.textSecondary);
 
-    Widget line(String text) => Text(text, style: style, textAlign: widget.textAlign);
+    Widget line(String text) =>
+        Text(text, style: style, textAlign: widget.textAlign);
 
     return Semantics(
       container: true,
       label: messages.first,
       child: ExcludeSemantics(
-        child: AnimatedBuilder(
-          animation: loop,
-          builder: (context, _) {
-            if (!running) return line(messages.first);
-            final phase = loop.value * messages.length;
-            final i = phase.floor() % messages.length;
-            final u = phase - phase.floor();
-            const edge = 0.11; // ~300ms fade each side of a 2.8s dwell
-            final o = u < edge
-                ? u / edge
-                : (u > 1 - edge ? (1 - u) / edge : 1.0);
-            final eased = Curves.easeOut.transform(o.clamp(0.0, 1.0));
-            return Opacity(
-              opacity: eased,
-              child: Transform.translate(
-                offset: Offset(0, (1 - eased) * (u < 0.5 ? 4 : -4)),
-                child: line(messages[i]),
-              ),
-            );
-          },
+        // Own layer: the line's per-frame fade never repaints the panel.
+        child: RepaintBoundary(
+          child: AnimatedBuilder(
+            animation: loop,
+            builder: (context, _) {
+              if (!running) return line(messages.first);
+              final phase = loop.value * messages.length;
+              final i = phase.floor() % messages.length;
+              final u = phase - phase.floor();
+              const edge = 0.11; // ~300ms fade each side of a 2.8s dwell
+              final o = u < edge
+                  ? u / edge
+                  : (u > 1 - edge ? (1 - u) / edge : 1.0);
+              final eased = Curves.easeOut.transform(o.clamp(0.0, 1.0));
+              return Opacity(
+                opacity: eased,
+                child: Transform.translate(
+                  offset: Offset(0, (1 - eased) * (u < 0.5 ? 4 : -4)),
+                  child: line(messages[i]),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -689,6 +728,7 @@ class KLoaderPanel extends StatelessWidget {
   /// Defaults to [KOrbitLoader].
   final Widget? loader;
   final List<String> messages;
+
   /// Spoken label; defaults to "Loading".
   final String? semanticsLabel;
 
@@ -729,11 +769,8 @@ class KPulseLoader extends StatelessWidget {
   final Color? _color;
   Color get color => _color ?? KColor.green;
 
-  const KPulseLoader({
-    super.key,
-    this.size = 40.0,
-    Color? color,
-  }) : _color = color;
+  const KPulseLoader({super.key, this.size = 40.0, Color? color})
+    : _color = color;
 
   @override
   Widget build(BuildContext context) =>
@@ -749,11 +786,8 @@ class KLoadingDots extends StatefulWidget {
   final Color? _color;
   Color get color => _color ?? KColor.textSecondary;
 
-  const KLoadingDots({
-    super.key,
-    this.size = 6.0,
-    Color? color,
-  }) : _color = color;
+  const KLoadingDots({super.key, this.size = 6.0, Color? color})
+    : _color = color;
 
   @override
   State<KLoadingDots> createState() => _KLoadingDotsState();
@@ -775,7 +809,11 @@ class _KLoadingDotsState extends State<KLoadingDots>
         height: s,
         child: RepaintBoundary(
           child: CustomPaint(
-            painter: _DotsPainter(t: loop, running: running, color: widget.color),
+            painter: _DotsPainter(
+              t: loop,
+              running: running,
+              color: widget.color,
+            ),
           ),
         ),
       ),
@@ -785,7 +823,7 @@ class _KLoadingDotsState extends State<KLoadingDots>
 
 class _DotsPainter extends CustomPainter {
   _DotsPainter({required this.t, required this.running, required this.color})
-      : super(repaint: t);
+    : super(repaint: t);
 
   final Animation<double> t;
   final bool running;
@@ -822,11 +860,19 @@ class _DotsPainter extends CustomPainter {
       old.t != t || old.running != running || old.color != color;
 }
 
-// ─── KShimmer family ─────────────────────────────────────────────────────────
-// Soft, wide sheen that sweeps, then pauses. Children are painted as masks
-// (their colour is ignored; use any opaque fill). On Carbon the sheen lifts
-// toward white; on Paper the base deepens slightly and the sheen lightens
-// toward the card, so it never looks like a grey smear on warm white.
+// ─── KShimmer family (skeletons) ─────────────────────────────────────────────
+// A calm static skeleton: the child's shapes are painted in ink at ~6-7%
+// alpha (children are masks; their own colour is ignored, use any opaque
+// fill), breathing with a slow opacity pulse. No sweeping sheen.
+//
+// Cost: the tint is a static colour filter inside a RepaintBoundary, and the
+// pulse is a FadeTransition, so a frame only changes one opacity value on a
+// cached layer (no ShaderMask, no rebuild, no repaint). The pulse runs only
+// while ambient motion is allowed: it parks at full opacity under reduced
+// motion and in tests, and its ticker stops with TickerMode (an offstage tab
+// or a covered route).
+//
+// Pair with [KSkeletonSwitcher] to cross-fade from the skeleton to content.
 
 class KShimmer extends StatefulWidget {
   final Widget child;
@@ -841,64 +887,68 @@ class KShimmer extends StatefulWidget {
 class _KShimmerState extends State<KShimmer>
     with SingleTickerProviderStateMixin, _KLoop {
   @override
-  Duration get period => const Duration(milliseconds: 1900);
-  // Off-screen sheen: a clean, flat skeleton when static.
+  Duration get period => const Duration(milliseconds: 1800);
+  // Rest is full opacity: a clean, flat skeleton when static.
   @override
   double get rest => 0.0;
 
-  static const _sweepShare = 0.72; // remainder is the pause
-
-  double _offset(double v) {
-    if (!running) return -2.0;
-    final x = (v / _sweepShare).clamp(0.0, 1.0);
-    return -1.6 + 3.2 * Curves.easeInOutSine.transform(x);
-  }
+  late final Animation<double> _pulse = loop.drive(const _Breath());
 
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return widget.child;
-
-    final dark = KColor.isDark;
-    final base = dark
-        ? KColor.cardHigh
-        : Color.lerp(KColor.cardHigh, KColor.border, 0.45)!;
-    final sheen = dark
-        ? Color.lerp(KColor.cardHigh, KColor.fg, 0.075)!
-        : Color.lerp(KColor.cardHigh, KColor.card, 0.95)!;
-    final mid = Color.lerp(base, sheen, 0.55)!;
-
+    final tone = KColor.ink.withValues(alpha: KColor.isDark ? 0.07 : 0.06);
     return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: loop,
-        child: widget.child,
-        builder: (context, child) {
-          final dx = _offset(loop.value);
-          return ShaderMask(
-            blendMode: BlendMode.srcIn,
-            shaderCallback: (bounds) => LinearGradient(
-              begin: const Alignment(-1.0, -0.35),
-              end: const Alignment(1.0, 0.35),
-              colors: [base, base, mid, sheen, mid, base, base],
-              stops: const [0.0, 0.30, 0.42, 0.5, 0.58, 0.70, 1.0],
-              transform: _ShimmerGradientTransform(dx),
-            ).createShader(bounds),
-            child: child,
-          );
-        },
+      child: FadeTransition(
+        opacity: _pulse,
+        child: ColorFiltered(
+          colorFilter: ColorFilter.mode(tone, BlendMode.srcIn),
+          child: widget.child,
+        ),
       ),
     );
   }
 }
 
-class _ShimmerGradientTransform extends GradientTransform {
-  /// Horizontal offset in multiples of the bounds width.
-  final double offset;
-
-  const _ShimmerGradientTransform(this.offset);
+/// One slow breath per loop: full opacity at rest, down to 55% and back.
+class _Breath extends Animatable<double> {
+  const _Breath();
 
   @override
-  Matrix4? transform(Rect bounds, {TextDirection? textDirection}) =>
-      Matrix4.translationValues(bounds.width * offset, 0.0, 0.0);
+  double transform(double t) => 1.0 - 0.45 * (0.5 - 0.5 * math.cos(_tau * t));
+}
+
+/// Cross-fades from a skeleton to the real content when [loading] turns
+/// false (and back, if it turns true again). Instant under reduced motion.
+class KSkeletonSwitcher extends StatelessWidget {
+  const KSkeletonSwitcher({
+    super.key,
+    required this.loading,
+    required this.skeleton,
+    required this.child,
+    this.duration = KMotion.standard,
+  });
+
+  final bool loading;
+  final Widget skeleton;
+  final Widget child;
+  final Duration duration;
+
+  static Widget _stackTop(Widget? current, List<Widget> previous) =>
+      Stack(alignment: Alignment.topCenter, children: [...previous, ?current]);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: KMotion.of(context, duration),
+      switchInCurve: KMotion.easeOut,
+      switchOutCurve: Curves.easeIn,
+      layoutBuilder: _stackTop,
+      child: loading
+          ? KeyedSubtree(key: const ValueKey('k-skeleton'), child: skeleton)
+          : KeyedSubtree(key: const ValueKey('k-content'), child: child),
+    );
+  }
 }
 
 class KShimmerBox extends StatelessWidget {
@@ -920,7 +970,7 @@ class KShimmerBox extends StatelessWidget {
         width: width,
         height: height,
         decoration: BoxDecoration(
-          color: Colors.white, // mask only; KShimmer paints the colour
+          color: Colors.white, // mask only; KShimmer tints it
           borderRadius: borderRadius ?? KRadius.md,
         ),
       ),
@@ -929,13 +979,13 @@ class KShimmerBox extends StatelessWidget {
 }
 
 Widget _mask(double? w, double h, double r) => Container(
-      width: w,
-      height: h,
-      decoration: BoxDecoration(
-        color: Colors.white, // mask only
-        borderRadius: BorderRadius.circular(r),
-      ),
-    );
+  width: w,
+  height: h,
+  decoration: BoxDecoration(
+    color: Colors.white, // mask only
+    borderRadius: BorderRadius.circular(r),
+  ),
+);
 
 class KCardShimmer extends StatelessWidget {
   final double height;
@@ -985,8 +1035,9 @@ class KChartShimmer extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: List.generate(7, (index) {
-                  final barHeight =
-                      (index % 3 == 0) ? 60.0 : (index % 2 == 0 ? 100.0 : 40.0);
+                  final barHeight = (index % 3 == 0)
+                      ? 60.0
+                      : (index % 2 == 0 ? 100.0 : 40.0);
                   return _mask(20, barHeight, 6);
                 }),
               ),
@@ -1018,10 +1069,7 @@ class KMessageShimmer extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _mask(140, 40, 16),
-            ),
+            Align(alignment: Alignment.centerRight, child: _mask(140, 40, 16)),
           ],
         ),
       ),

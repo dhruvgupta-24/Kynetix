@@ -29,19 +29,19 @@ object WidgetRings {
     enum class Form { SQUARE, WIDE, TALL, LARGE }
 
     private val CAL = Color.rgb(255, 106, 61)
-    private val CAL_OVER = Color.rgb(255, 90, 110)
-    private val PRO = Color.rgb(74, 222, 155)
-    private val CARBS = Color.rgb(91, 149, 247)
-    private val FAT = Color.rgb(255, 182, 72)
-    private val FIBER = Color.rgb(157, 140, 255)
-    private val TRACK = Color.argb(120, 30, 30, 34)
+    private val CAL_OVER = Color.rgb(255, 106, 61)
+    private val PRO = Color.rgb(121, 212, 155)
+    private val CARBS = Color.rgb(196, 86, 52)
+    private val FAT = Color.rgb(160, 159, 155)
+    private val FIBER = Color.rgb(112, 111, 108)
+    private val TRACK = Color.argb(120, 31, 31, 32)
     private val TRACK_LIFT = Color.argb(30, 255, 255, 255)
     private val TRACK_ON_PLATE = Color.argb(40, 255, 255, 255)
-    private val LENS = Color.argb(170, 10, 10, 11)
-    private val PLATE = Color.argb(160, 10, 10, 11)
+    private val LENS = Color.argb(170, 11, 11, 12)
+    private val PLATE = Color.argb(160, 11, 11, 12)
     private val PLATE_EDGE = Color.argb(20, 255, 255, 255)
-    private val TEXT = Color.rgb(246, 246, 244)
-    private val TEXT_SOFT = Color.rgb(207, 207, 212)
+    private val TEXT = Color.rgb(242, 241, 236)
+    private val TEXT_SOFT = Color.rgb(205, 204, 199)
 
     /** Most pixels one widget bitmap may use (RemoteViews bitmap budget). */
     private const val MAX_PIXELS = 1_400_000f

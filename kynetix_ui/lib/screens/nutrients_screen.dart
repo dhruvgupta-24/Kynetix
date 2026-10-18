@@ -134,7 +134,7 @@ class _NutrientRow extends StatelessWidget {
     final m = s.micro;
     final target = s.target.amount;
     final over = m.isLimit && s.today.amount > target;
-    final barColor = over ? KColor.danger : KColor.fuel;
+    final barColor = over ? KColor.ember : KColor.ink;
     final todayTracked = s.today.hasAny;
     final avg = s.avg7;
 
@@ -177,7 +177,7 @@ class _NutrientRow extends StatelessWidget {
               const _UntrackedBar(),
             if (over) ...[
               const SizedBox(height: KSpacing.xs),
-              Text('Over the daily limit', style: KText.caption.copyWith(color: KColor.danger)),
+              Text('Over the daily limit', style: KText.caption.copyWith(color: KColor.ember)),
             ],
             const SizedBox(height: KSpacing.sm),
             if (avg != null) ...[

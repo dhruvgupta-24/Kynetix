@@ -54,9 +54,8 @@ class ContinueWithChatGptButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Ink is near-black on Paper and warm-white on Carbon: use OpenAI's white
-    // logo on the dark pill and the black logo on the light pill.
-    final logo = KColor.isDark ? Colors.black : Colors.white;
+    // The logo stays monochrome: it takes the on-ink colour, like the label.
+    final logo = KColor.onInk;
     final enabled = onTap != null && !loading;
     return Semantics(
       button: true,

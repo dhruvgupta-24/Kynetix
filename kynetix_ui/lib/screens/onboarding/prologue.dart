@@ -367,7 +367,7 @@ class _LiftDemoState extends State<_LiftDemo> {
               ),
               KRollingNumber(
                 '${_weeks[_week]}',
-                style: KText.numDisplay.copyWith(fontSize: 30, color: train),
+                style: KText.numDisplay.copyWith(fontSize: 30, color: KColor.textPrimary),
                 semanticsLabel: '${_weeks.last} kilograms',
               ),
               Text(' kg × 8', style: KText.caption.copyWith(color: KColor.textMuted)),

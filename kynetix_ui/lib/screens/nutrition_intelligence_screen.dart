@@ -224,8 +224,8 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                   KDotStats([
                     KDotStat(whole(result.calories.mid), 'kcal', color: KColor.calorie),
                     KDotStat(amount(result.protein.mid), 'g protein', color: KColor.protein),
-                    if (result.carbohydrates != null) KDotStat(whole(result.carbohydrates!.mid), 'g carbs', color: KColor.blue),
-                    if (result.fat != null) KDotStat(whole(result.fat!.mid), 'g fat', color: KColor.saffron),
+                    if (result.carbohydrates != null) KDotStat(whole(result.carbohydrates!.mid), 'g carbs', color: KColor.carbs),
+                    if (result.fat != null) KDotStat(whole(result.fat!.mid), 'g fat', color: KColor.fat),
                   ]),
                 ],
               ),
@@ -273,10 +273,10 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
 
   Widget _buildRoleBadge(FoodRole role) {
     final (label, color) = switch (role) {
-      FoodRole.primary       => ('Base or carb', KColor.blue),
+      FoodRole.primary       => ('Base or carb', KColor.carbs),
       FoodRole.protein       => ('Protein', KColor.protein),
-      FoodRole.accompaniment => ('Side or curry', KColor.saffron),
-      FoodRole.addOn         => ('Add-on', KColor.violet),
+      FoodRole.accompaniment => ('Side or curry', KColor.textSecondary),
+      FoodRole.addOn         => ('Add-on', KColor.textMuted),
       FoodRole.completeMeal  => ('Single unit', KColor.textMuted),
     };
     // A quiet label keyed by a dot, not a tinted badge.
@@ -381,7 +381,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
 
   Widget _buildPatternCard(LearnedPatternEntry entry) {
     final color = KColor.textPrimary;
-    final gradient = KGradient.fuel;
+    final gradient = KGradient.primary;
     final direction = entry.scalar < 1.0
         ? 'Smaller portions'
         : (entry.scalar > 1.0 ? 'Larger portions' : 'Standard portions');
@@ -515,9 +515,9 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
                     KDotStats([
                       KDotStat(whole(override.caloriesPerUnit * override.referenceQuantity), 'kcal', color: KColor.calorie),
                       KDotStat(amount(override.proteinPerUnit * override.referenceQuantity), 'g protein', color: KColor.protein),
-                      if (carbs != null) KDotStat(whole(carbs), 'g carbs', color: KColor.blue),
-                      if (fat != null) KDotStat(whole(fat), 'g fat', color: KColor.saffron),
-                      if (fiber != null) KDotStat(amount(fiber), 'g fiber', color: KColor.violet),
+                      if (carbs != null) KDotStat(whole(carbs), 'g carbs', color: KColor.carbs),
+                      if (fat != null) KDotStat(whole(fat), 'g fat', color: KColor.fat),
+                      if (fiber != null) KDotStat(amount(fiber), 'g fiber', color: KColor.fiber),
                     ]),
                   ],
                 ),
@@ -536,11 +536,11 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
         padding: EdgeInsets.zero,
         child: Column(
           children: [
-            _buildStatRow(Icons.receipt_long_outlined, KColor.ember, 'Total meals tracked', '${EatingPatternService.instance.totalMealsTracked}'),
+            _buildStatRow(Icons.receipt_long_outlined, KColor.textSecondary, 'Total meals tracked', '${EatingPatternService.instance.totalMealsTracked}'),
             const _Hairline(),
-            _buildStatRow(Icons.rice_bowl_outlined, KColor.saffron, 'Common meal base', EatingPatternService.instance.dominantPrimaryFood),
+            _buildStatRow(Icons.rice_bowl_outlined, KColor.textSecondary, 'Common meal base', EatingPatternService.instance.dominantPrimaryFood),
             const _Hairline(),
-            _buildStatRow(Icons.straighten_outlined, KColor.green, 'Average portion size', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
+            _buildStatRow(Icons.straighten_outlined, KColor.textSecondary, 'Average portion size', '${EatingPatternService.instance.avgPrimaryPortionPerLog.toStringAsFixed(1)} units'),
           ],
         ),
       ),
@@ -574,7 +574,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     return _SegmentedTabs(
       labels: const ['All', 'Custom foods', 'Portion history'],
       selected: _selectedTab,
-      accent: KColor.ember,
+      accent: KColor.ink,
       onSelected: (index) {
         kHapticSelect();
         setState(() {

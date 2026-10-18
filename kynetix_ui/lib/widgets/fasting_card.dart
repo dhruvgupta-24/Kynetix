@@ -278,7 +278,7 @@ class _Active extends StatelessWidget {
           children: [
             KRing(
               progress: s.progress,
-              colors: [KColor.fuel],
+              colors: [KColor.ink],
               size: 92,
               stroke: 8,
               glow: false,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_theme.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_target_engine.dart';
 
@@ -32,7 +33,6 @@ class DayOutcomeResult {
   final DayOutcome outcome;
   final String     label;
   final String     emoji;
-  final Color      color;
   final bool       isPositive;
   final String     note;
   final bool       trained;
@@ -41,11 +41,25 @@ class DayOutcomeResult {
     required this.outcome,
     required this.label,
     required this.emoji,
-    required this.color,
     required this.isPositive,
     required this.note,
     this.trained = false,
   });
+
+  /// Read at paint time so it follows the active theme. Ink for a good day,
+  /// the accent for what needs attention, neutral tones for the rest. The
+  /// label always carries the meaning; colour only backs it up.
+  Color get color => switch (outcome) {
+        DayOutcome.hitCaloriesAndProtein ||
+        DayOutcome.veryGoodFatLoss => KColor.ink,
+        DayOutcome.hitCaloriesMissedProtein ||
+        DayOutcome.hitProteinOverCalories ||
+        DayOutcome.overCaloriesSignificantly => KColor.ember,
+        DayOutcome.maintenanceLike => KColor.fat,
+        DayOutcome.underCaloriesUnderProtein ||
+        DayOutcome.incomplete => KColor.textMuted,
+        DayOutcome.unlogged => KColor.textDisabled,
+      };
 }
 
 // ─── DayStatusEngine ─────────────────────────────────────────────────────────
@@ -112,7 +126,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.hitCaloriesAndProtein,
             label:      'Targets hit',
             emoji:      '✓',
-            color:      Color(0xFF60A5FA),
             isPositive: true,
             note:       'Calories and protein both landed well.',
             trained:    false,
@@ -121,7 +134,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.hitCaloriesMissedProtein,
             label:      trained ? 'Trained, protein missed' : 'Calories hit, protein missed',
             emoji:      '⚡',
-            color:      Color(0xFFA78BFA),
             isPositive: false,
             note:       trained ? 'You trained today, so the protein miss matters more.' : 'Calories were fine, but protein fell short.',
             trained:    trained,
@@ -130,7 +142,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.hitProteinOverCalories,
             label:      trained ? 'Trained, calories high' : 'Protein hit, calories high',
             emoji:      '↗',
-            color:      Color(0xFFFFB347),
             isPositive: false,
             note:       'Protein was covered, but calories drifted high.',
             trained:    trained,
@@ -139,7 +150,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.underCaloriesUnderProtein,
             label:      trained ? 'Trained, under-fuelled' : 'Under on both',
             emoji:      '…',
-            color:      Color(0xFF9CA3AF),
             isPositive: false,
             note:       trained ? 'Training day recovery likely needs more food and protein.' : 'This day likely needed one more proper meal.',
             trained:    trained,
@@ -148,7 +158,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.overCaloriesSignificantly,
             label:      'Significantly over',
             emoji:      '⚠',
-            color:      Color(0xFFFF8C42),
             isPositive: false,
             note:       'This landed clearly above your fat-loss target.',
             trained:    trained,
@@ -157,7 +166,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.veryGoodFatLoss,
             label:      trained ? 'Strong training day' : 'Very good fat-loss day',
             emoji:      '🔥',
-            color:      Color(0xFF52B788),
             isPositive: true,
             note:       trained ? 'You trained and still covered protein without overshooting calories.' : 'Protein was covered without overshooting calories.',
             trained:    trained,
@@ -166,7 +174,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.maintenanceLike,
             label:      'Maintenance-like',
             emoji:      '〜',
-            color:      Color(0xFFFFB347),
             isPositive: false,
             note:       'Close to maintenance rather than a fat-loss finish.',
             trained:    trained,
@@ -175,7 +182,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.incomplete,
             label:      'In progress',
             emoji:      '…',
-            color:      Color(0xFF4B5563),
             isPositive: true,
             note:       '',
             trained:    trained,
@@ -184,7 +190,6 @@ class DayStatusEngine {
             outcome:    DayOutcome.unlogged,
             label:      'No meals logged',
             emoji:      '-',
-            color:      Color(0xFF4B5563),
             isPositive: false,
             note:       '',
           ),

@@ -5,7 +5,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
-import 'k_hero.dart';
 
 // ─── KTone ────────────────────────────────────────────────────────────────────
 // The app's three worlds each own a light. The ambient aurora re-tints when you
@@ -19,11 +18,11 @@ class _AuroraPalette {
   final Color b; // right fill light
   final Color c; // bottom bounce
 
+  // Graphite paints no aurora (auroraStrength is 0). If it is ever turned
+  // back on, it stays inside the palette: one accent light, the rest ink.
   static _AuroraPalette of(KTone t) => switch (t) {
-        KTone.fuel    => _AuroraPalette(KColor.ember, KColor.saffron, KColor.green),
-        KTone.train   => _AuroraPalette(KColor.violet, KColor.cyan, KColor.violet),
-        KTone.kyno    => _AuroraPalette(KColor.cyan, KColor.violet, KColor.cyan),
-        KTone.neutral => _AuroraPalette(KColor.green, KColor.violet, KColor.ember),
+        KTone.neutral => _AuroraPalette(KColor.ink, KColor.ink, KColor.ink),
+        _ => _AuroraPalette(KColor.ember, KColor.ink, KColor.ink),
       };
 
   static _AuroraPalette lerp(_AuroraPalette x, _AuroraPalette y, double t) =>

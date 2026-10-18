@@ -178,7 +178,7 @@ class _WarmUpSheetState extends State<_WarmUpSheet> {
                 hintStyle: KText.numMedium.copyWith(fontSize: 28, color: KColor.textDisabled),
                 isDense: true,
                 enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: KColor.fg.withValues(alpha: 0.18))),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: KColor.train, width: 2)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: KColor.ink, width: 2)),
               ),
             ),
             const SizedBox(height: 14),

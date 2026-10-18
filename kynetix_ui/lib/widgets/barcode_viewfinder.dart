@@ -172,19 +172,6 @@ class _ViewfinderPainter extends CustomPainter {
             ],
           ).createShader(line),
       );
-      final glow = Rect.fromLTWH(inset.left, y - 18, inset.width, 18);
-      canvas.drawRect(
-        glow,
-        Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              sweepColor.withValues(alpha: 0.16),
-              sweepColor.withValues(alpha: 0),
-            ],
-          ).createShader(glow),
-      );
     }
   }
 

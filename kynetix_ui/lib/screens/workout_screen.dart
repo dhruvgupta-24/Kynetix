@@ -15,8 +15,8 @@ import '../widgets/muscle_body_map.dart';
 
 // ─── WorkoutScreen ────────────────────────────────────────────────────────────
 //
-// Primary Train tab (tab root inside AppShell). The shell paints the violet →
-// cyan aurora, so this Scaffold is transparent.
+// Primary Train tab (tab root inside AppShell). The shell paints the flat
+// base, so this Scaffold is transparent.
 //
 // States (resolved in one place, [build]):
 //   1. Not Ready    → shimmer skeleton shaped like the dashboard
@@ -25,10 +25,9 @@ import '../widgets/muscle_body_map.dart';
 //
 // Motion moments:
 //   • Entrance  — one staggered reveal of the dashboard sections (plays once).
-//   • Hero CTA  — the ink "Start workout" pill breathes a soft violet halo
-//                 (ambient; gated by KMotion.ambientAllowed, stops off-tab via
-//                 TickerMode). This is the screen's one memorable thing; every
-//                 other surface stays monochrome with train colour as accent.
+//   • Hero CTA  — the accent "Start workout" pill (the log action). Static:
+//                 Graphite draws no glow, so nothing loops. Every other
+//                 surface stays monochrome.
 //   • Data      — weekly ring springs to value, numbers count, bars grow.
 //   • State     — the draft card and hero state cross-fade (AnimatedSwitcher).
 
@@ -411,7 +410,7 @@ class _DevelopersChoicePreview extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.verified_rounded, size: 16, color: KColor.train),
+              Icon(Icons.verified_rounded, size: 16, color: KColor.ink),
               const SizedBox(width: 6),
               Text(developersChoiceName, style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700)),
               const Spacer(),
@@ -475,13 +474,12 @@ const _weekdayInitial = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 /// only a faint corner tint that fades into the plain card by mid-card.
 BoxDecoration _trainSurface({
   double tint = 0.16,
-  Color? accent,
   Color? borderColor,
   BorderRadius radius = KRadius.xl,
   List<BoxShadow>? shadow,
 }) {
-  // Graphite: flat card and hairline. [tint] and [accent] are kept for the
-  // call sites; colour lives in the content, not the surface.
+  // Graphite: flat card and hairline. [tint] is kept for the call sites;
+  // colour lives in the content, not the surface.
   return BoxDecoration(
     borderRadius: radius,
     color: KColor.card,
@@ -614,7 +612,7 @@ class _TrainHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Eyebrow(today, color: KColor.violet),
+                _Eyebrow(today, color: KColor.textSecondary),
                 const SizedBox(height: KSpacing.xs),
                 Semantics(
                   header: true,
@@ -709,8 +707,8 @@ class _TodaySplitCard extends StatelessWidget {
     final musclesStr = muscles.isEmpty ? 'All muscles' : muscles.join(', ');
     final duration = splitDay.exercises.length * 9;
 
-    // Train's jewel card: jamun light over a deep indigo ground, both themes.
-    const done2 = Color(0xFF34E0A1);
+    // Done reads in ink with a check; the plan dot is the one accent.
+    final done2 = KColor.ink;
     return KHeroSurface(
       tone: KTone.train,
       padding: const EdgeInsets.fromLTRB(KSpacing.xl, KSpacing.xl, KSpacing.xl, KSpacing.md),
@@ -726,12 +724,12 @@ class _TodaySplitCard extends StatelessWidget {
                 if (done)
                   KIcon(KIcons.done, color: done2, size: KIcons.sm)
                 else
-                  const KGlowDot(color: Color(0xFFC4B1FF)),
+                  KGlowDot(color: KColor.ember),
                 const SizedBox(width: KSpacing.sm),
                 Expanded(
                   child: _Eyebrow(
                     done ? 'Done for today' : 'On the plan today',
-                    color: done ? done2 : const Color(0xFFC4B1FF),
+                    color: done ? done2 : KColor.textSecondary,
                   ),
                 ),
               ],
@@ -803,7 +801,6 @@ class _TodaySplitCard extends StatelessWidget {
                         label: 'Log another session',
                         icon: Icons.refresh_rounded,
                         outlined: true,
-                        color: Colors.white,
                         onTap: onPickAnother,
                       ),
                       const SizedBox(height: KSpacing.sm),
@@ -881,13 +878,11 @@ class _HeroMetric extends StatelessWidget {
 }
 
 // ─── _TrainCta ───────────────────────────────────────────────────────────────
-// The hero's primary action: the monochrome ink pill (warm white on Carbon,
-// near-black on Paper) with a slow "breathing" violet halo — the Train tab's
-// one signature moment. The loop runs only when ambient motion is allowed and
-// pauses automatically when the tab is offstage (AppShell mutes tickers via
-// TickerMode). Without the glow it is a plain ink pill.
+// The hero's primary action: a solid accent pill, the log action. Graphite
+// draws no glow, so there is no halo and no breathing loop: the pill is
+// static and costs nothing per frame. [glow] is kept for call sites.
 
-class _TrainCta extends StatefulWidget {
+class _TrainCta extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool glow;
@@ -899,54 +894,6 @@ class _TrainCta extends StatefulWidget {
   });
 
   @override
-  State<_TrainCta> createState() => _TrainCtaState();
-}
-
-class _TrainCtaState extends State<_TrainCta>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _breath = AnimationController(
-    vsync: this,
-    duration: KMotion.celebrate,
-    value: 0.5,
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _syncLoop();
-  }
-
-  @override
-  void didUpdateWidget(covariant _TrainCta oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.glow != widget.glow) _syncLoop();
-  }
-
-  /// The halo breathes a few times when the tab is shown, then rests. An
-  /// endless loop kept the whole screen re-rendering every frame (on Impeller
-  /// every frame redraws everything), which cost battery and scroll headroom.
-  bool _breathed = false;
-
-  void _syncLoop() {
-    final run = widget.glow && KMotion.ambientAllowed(context);
-    if (run && !_breath.isAnimating && !_breathed) {
-      _breathed = true;
-      _breath.repeat(reverse: true, count: 6).whenCompleteOrCancel(() {
-        if (mounted && !_breath.isAnimating) _breath.value = 0.5;
-      });
-    } else if (!run && _breath.isAnimating) {
-      _breath.stop();
-      _breath.value = 0.5;
-    }
-  }
-
-  @override
-  void dispose() {
-    _breath.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final face = Container(
       constraints: const BoxConstraints(minHeight: 56),
@@ -954,26 +901,22 @@ class _TrainCtaState extends State<_TrainCta>
         horizontal: KSpacing.xl,
         vertical: 14,
       ),
-      // Train's one coloured action: violet, the world's accent.
+      // Train's one coloured action: the log action wears the accent.
       decoration: BoxDecoration(
         borderRadius: KRadius.pill,
-        gradient: LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: KGradient.train,
-        ),
+        color: KColor.ember,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.play_arrow_rounded, color: Colors.white, size: KIcons.lg),
+          Icon(Icons.play_arrow_rounded, color: KColor.onAccent, size: KIcons.lg),
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              widget.label,
+              label,
               textAlign: TextAlign.center,
               style: KText.h3.copyWith(
-                color: Colors.white,
+                color: KColor.onAccent,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 letterSpacing: -0.2,
@@ -986,7 +929,7 @@ class _TrainCtaState extends State<_TrainCta>
 
     void activate() {
       KHaptics.commit();
-      widget.onTap();
+      onTap();
     }
 
     // Its own semantics node (container) with a tap action, so a screen
@@ -994,42 +937,13 @@ class _TrainCtaState extends State<_TrainCta>
     return Semantics(
       container: true,
       button: true,
-      label: widget.label,
+      label: label,
       onTap: activate,
       excludeSemantics: true,
       child: Pressable(
-      borderRadius: KRadius.pill,
-      onTap: activate,
-      child: !widget.glow
-          ? face
-          : Stack(
-              children: [
-                // The halo breathes by animating the shadow's own strength.
-                // (Fading a blurred shadow's layer with an opacity is not
-                // supported by Impeller and logs a validation error.) It only
-                // runs for a few breaths, so the re-blur is negligible.
-                Positioned.fill(
-                  child: RepaintBoundary(
-                    child: AnimatedBuilder(
-                      animation: _breath,
-                      builder: (context, _) {
-                        final t = KMotion.emphasizedCurve.transform(_breath.value);
-                        return DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: KRadius.pill,
-                            boxShadow: KShadow.glow(
-                              KColor.violet,
-                              strength: 0.55 + (1.15 - 0.55) * t,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                face,
-              ],
-            ),
+        borderRadius: KRadius.pill,
+        onTap: activate,
+        child: face,
       ),
     );
   }
@@ -1050,16 +964,16 @@ class _RecoveryBannerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(KSpacing.xl),
-      decoration: _trainSurface(tint: 0.14, accent: KColor.cyan),
+      decoration: _trainSurface(tint: 0.14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.bedtime_rounded, color: KColor.cyan, size: 16),
+              Icon(Icons.bedtime_rounded, color: KColor.textSecondary, size: 16),
               const SizedBox(width: KSpacing.sm),
               Expanded(
-                child: _Eyebrow('Rest day', color: KColor.cyan),
+                child: _Eyebrow('Rest day', color: KColor.textSecondary),
               ),
               ExcludeSemantics(
                 child: Icon(
@@ -1276,7 +1190,7 @@ class _WeeklyRingCard extends StatelessWidget {
           const SizedBox(height: KSpacing.md),
           KBar(
             progress: fraction,
-            colors: KGradient.train,
+            colors: KGradient.primary,
             height: 4,
           ),
           const SizedBox(height: KSpacing.sm),
@@ -1366,12 +1280,12 @@ class _DayPip extends StatelessWidget {
             height: 24,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: done ? KColor.violet : null,
+              color: done ? KColor.ink : null,
               border: done
                   ? null
                   : Border.all(
                       color: training
-                          ? KColor.violet.withValues(
+                          ? KColor.ink.withValues(
                               alpha: isToday ? 0.9 : 0.45,
                             )
                           : KColor.fg.withValues(
@@ -1382,7 +1296,7 @@ class _DayPip extends StatelessWidget {
             ),
             child: Center(
               child: done
-                  ? Icon(Icons.check_rounded, size: 14, color: KColor.onAccent)
+                  ? Icon(Icons.check_rounded, size: 14, color: KColor.onInk)
                   : training
                   ? null
                   : Container(width: 8, height: 2, color: KColor.textDisabled),
@@ -1885,7 +1799,7 @@ class _AnalyticsCard extends StatelessWidget {
 }
 
 // ─── _HighlightCard ──────────────────────────────────────────────────────────
-// Latest personal record: saffron mark, plain words.
+// Latest personal record: accent mark, plain words.
 
 class _HighlightCard extends StatelessWidget {
   final String title;
@@ -1898,7 +1812,7 @@ class _HighlightCard extends StatelessWidget {
     children: [
       Padding(
         padding: const EdgeInsets.only(top: 1),
-        child: KIcon(KIcons.record, color: KColor.saffron, size: KIcons.md),
+        child: KIcon(KIcons.record, color: KColor.ember, size: KIcons.md),
       ),
       const SizedBox(width: KSpacing.md),
       Expanded(
@@ -2025,15 +1939,8 @@ class _MiniBarChart extends StatelessWidget {
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(4),
                         ),
-                        gradient: i == values.length - 1
-                            ? LinearGradient(
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
-                                colors: KGradient.train,
-                              )
-                            : null,
                         color: i == values.length - 1
-                            ? null
+                            ? KColor.ink
                             : restBar,
                       ),
                     ),
@@ -2151,7 +2058,7 @@ class _SetupEmblem extends StatelessWidget {
       child: RepaintBoundary(
         child: KRing(
           progress: 0.72,
-          colors: KGradient.train,
+          colors: KGradient.primary,
           size: 104,
           stroke: 6,
           child: Container(
@@ -2159,14 +2066,14 @@ class _SetupEmblem extends StatelessWidget {
             height: 72,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: KColor.violet.withValues(alpha: KColor.isDark ? 0.12 : 0.08),
+              color: KColor.ink.withValues(alpha: KColor.isDark ? 0.08 : 0.06),
               border: Border.all(
-                color: KColor.violet.withValues(alpha: KColor.isDark ? 0.3 : 0.24),
+                color: KColor.ink.withValues(alpha: KColor.isDark ? 0.24 : 0.20),
               ),
             ),
             child: Icon(
               Icons.fitness_center_rounded,
-              color: KColor.violet,
+              color: KColor.ink,
               size: 34,
             ),
           ),
@@ -2328,7 +2235,7 @@ class _WorkoutDayPickerSheet extends StatelessWidget {
       leading: KIcon(
         KIcons.split(d.name),
         size: KIcons.md,
-        color: isToday ? KColor.violet : KColor.textSecondary,
+        color: isToday ? KColor.ink : KColor.textSecondary,
       ),
       title: d.name,
       subtitle: '${plural(n, 'exercise')}, about ${n * 9} min',
@@ -2336,7 +2243,7 @@ class _WorkoutDayPickerSheet extends StatelessWidget {
         when,
         style: KText.caption.copyWith(
           fontWeight: FontWeight.w600,
-          color: isToday ? KColor.violet : KColor.textMuted,
+          color: isToday ? KColor.textPrimary : KColor.textMuted,
         ),
       ),
     );

@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 
 // ─── KRing ────────────────────────────────────────────────────────────────────
-// Liquid progress ring: animates to new values with a spring, sweep gradient,
-// soft under-glow and a bright leading cap. Over 100% it keeps sweeping in a
-// second, brighter lap so "over target" is visible without colour alone.
+// Progress ring: animates to new values in one flat colour. Over 100% it
+// keeps sweeping in a thinner second lap (ink, or base on an ink ring) so
+// "over target" is visible without a new colour.
 
 class KRing extends StatelessWidget {
   const KRing({
@@ -23,8 +23,7 @@ class KRing extends StatelessWidget {
     this.glow,
   });
 
-  /// Soft under-glow + bright leading cap. Defaults on for Carbon, off for
-  /// Paper; pass `false` for a calm ring on data-dense screens.
+  /// Retired: the palette has no glow. Kept so callers compile.
   final bool? glow;
 
   final double progress;
@@ -42,8 +41,8 @@ class KRing extends StatelessWidget {
     return Semantics(
       label: semanticsLabel,
       value: semanticsLabel == null ? null : '${(target * 100).round()}%',
-      // Own layer: the sweep animation (and the blurred under-glow) never
-      // repaints the card around it, and scrolling never repaints the ring.
+      // Own layer: the sweep animation never repaints the card around it,
+      // and scrolling never repaints the ring.
       child: RepaintBoundary(
         child: SizedBox.square(
         dimension: size,
@@ -57,7 +56,7 @@ class KRing extends StatelessWidget {
               colors: colors,
               stroke: stroke,
               track: trackColor ?? KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
-              glow: glow ?? false,
+              lap: colors.isNotEmpty && colors.first == KColor.ink ? KColor.bg : KColor.ink,
             ),
             child: child,
           ),
@@ -75,14 +74,14 @@ class _RingPainter extends CustomPainter {
     required this.colors,
     required this.stroke,
     required this.track,
-    required this.glow,
+    required this.lap,
   });
 
   final double progress;
   final List<Color> colors;
   final double stroke;
   final Color track;
-  final bool glow;
+  final Color lap;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -100,29 +99,10 @@ class _RingPainter extends CustomPainter {
     );
     if (progress <= 0.001) return;
 
-    final cols = colors.length == 1 ? [colors.first, colors.first] : colors;
-    final shader = SweepGradient(
-      colors: [...cols, cols.first],
-      transform: const GradientRotation(-math.pi / 2),
-    ).createShader(rect);
-
+    final fill = colors.isEmpty ? KColor.ink : colors.first;
     final lap1 = progress.clamp(0.0, 1.0);
     final sweep = 2 * math.pi * lap1;
 
-    if (glow) {
-      canvas.drawArc(
-        rect,
-        -math.pi / 2,
-        sweep,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeCap = StrokeCap.round
-          ..shader = shader
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, stroke * 0.55),
-      );
-    }
     canvas.drawArc(
       rect,
       -math.pi / 2,
@@ -132,10 +112,10 @@ class _RingPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = stroke
         ..strokeCap = StrokeCap.round
-        ..shader = shader,
+        ..color = fill,
     );
 
-    // Second lap (over target): thinner, brighter overlay.
+    // Second lap (over target): thinner overlay in a contrasting tone.
     if (progress > 1.0) {
       canvas.drawArc(
         rect,
@@ -146,21 +126,14 @@ class _RingPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = stroke * 0.45
           ..strokeCap = StrokeCap.round
-          ..color = Colors.white.withValues(alpha: 0.85),
+          ..color = lap.withValues(alpha: 0.85),
       );
-    }
-
-    // Leading cap highlight.
-    if (glow && sweep > 0) {
-      final a = -math.pi / 2 + sweep;
-      final cap = Offset(c.dx + r * math.cos(a), c.dy + r * math.sin(a));
-      canvas.drawCircle(cap, stroke * 0.26, Paint()..color = Colors.white.withValues(alpha: 0.9));
     }
   }
 
   @override
   bool shouldRepaint(covariant _RingPainter o) =>
-      o.progress != progress || o.glow != glow || o.stroke != stroke || o.track != track || !_same(o.colors, colors);
+      o.progress != progress || o.lap != lap || o.stroke != stroke || o.track != track || !_same(o.colors, colors);
 
   static bool _same(List<Color> a, List<Color> b) {
     if (a.length != b.length) return false;
@@ -172,7 +145,7 @@ class _RingPainter extends CustomPainter {
 }
 
 // ─── KBar ─────────────────────────────────────────────────────────────────────
-// Animated linear progress with gradient fill and glow head.
+// Animated linear progress with a flat fill.
 
 class KBar extends StatelessWidget {
   const KBar({
@@ -193,25 +166,23 @@ class KBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final target = progress.isFinite ? progress.clamp(0.0, 1.0) : 0.0;
-    return LayoutBuilder(
-      builder: (context, box) => Container(
+    // Painted, not laid out: the fill grows by repainting one small layer,
+    // never by animating a Container's width (no per-frame layout).
+    return LimitedBox(
+      maxWidth: 0,
+      child: SizedBox(
         height: height,
-        decoration: BoxDecoration(
-          color: trackColor ?? KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
-          borderRadius: BorderRadius.circular(height),
-        ),
-        alignment: AlignmentDirectional.centerStart,
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: target),
-          duration: KMotion.of(context, duration),
-          curve: KMotion.emphasizedCurve,
-          builder: (context, v, _) => Container(
-            width: box.maxWidth.isFinite ? box.maxWidth * v : 0,
-            height: height,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(height),
-              gradient: LinearGradient(
-                colors: colors.length == 1 ? [colors.first, colors.first] : colors,
+        width: double.infinity,
+        child: RepaintBoundary(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: target),
+            duration: KMotion.of(context, duration),
+            curve: KMotion.emphasizedCurve,
+            builder: (context, v, _) => CustomPaint(
+              painter: _BarPainter(
+                progress: v,
+                fill: colors.isEmpty ? KColor.ink : colors.first,
+                track: trackColor ?? KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
               ),
             ),
           ),
@@ -221,8 +192,33 @@ class KBar extends StatelessWidget {
   }
 }
 
+class _BarPainter extends CustomPainter {
+  _BarPainter({required this.progress, required this.fill, required this.track});
+
+  final double progress;
+  final Color fill;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = Radius.circular(size.height);
+    final p = Paint()..color = track;
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, r), p);
+    final w = size.width * progress;
+    if (w <= 0) return;
+    p.color = fill;
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, size.height), r), p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarPainter o) =>
+      o.progress != progress || o.fill != fill || o.track != track;
+}
+
 // ─── showKSheet ───────────────────────────────────────────────────────────────
-// Bottom sheet with the app's sheet chrome and a softer, springier entrance.
+// Bottom sheet with the app's sheet chrome. Enters on KMotion.sheetSpring
+// (firm landing, no visible bounce), leaves quickly on an accelerating curve.
+// Scrim: 60% in dark, 30% in light. Reduced motion: no animation.
 
 Future<T?> showKSheet<T>({
   required BuildContext context,
@@ -243,10 +239,10 @@ Future<T?> showKSheet<T>({
     barrierColor: Colors.black.withValues(alpha: KColor.isDark ? 0.6 : 0.3),
     sheetAnimationStyle: KMotion.reduced(context)
         ? AnimationStyle.noAnimation
-        : const AnimationStyle(
-            duration: KMotion.emphasized,
-            reverseDuration: KMotion.standard,
-            curve: KMotion.emphasizedCurve,
+        : AnimationStyle(
+            duration: KMotion.sheetDuration,
+            reverseDuration: const Duration(milliseconds: 240),
+            curve: KMotion.sheetCurve,
             reverseCurve: KMotion.accelerate,
           ),
     builder: builder,
@@ -264,10 +260,11 @@ class KGradientText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (r) => LinearGradient(colors: colors).createShader(r),
-      child: Text(text, style: style, textAlign: textAlign),
+    // Flat: the first colour only. The name stays so callers compile.
+    return Text(
+      text,
+      style: style.copyWith(color: colors.isEmpty ? style.color : colors.first),
+      textAlign: textAlign,
     );
   }
 }

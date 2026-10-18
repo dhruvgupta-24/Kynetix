@@ -19,9 +19,9 @@ import '../widgets/muscle_body_map.dart';
 // Uses a cached WorkoutHistoryViewModel to avoid redundant computations.
 //
 // Lives in the Train world. Chrome is monochrome (ink selected states,
-// hairlines); violet → cyan appears only on data — the series lines, the
-// heatmap, the latest bar. PRs are always saffron and always carry a trophy
-// glyph + label, never colour alone.
+// hairlines); data is drawn in ink (series lines, the heatmap, the latest
+// bar). PRs wear the ember accent and always carry a trophy glyph and a
+// label, never colour alone.
 //
 // Tabs:
 //   1. Analytics — Bento stats grid, contribution heatmap, achievements,
@@ -299,7 +299,7 @@ class _SegmentedTabs extends StatelessWidget {
   }
 }
 
-/// Section heading with a short violet → cyan tick (the train accent).
+/// Section heading with a short ink tick.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader(this.title, {this.trailing});
   final String title;
@@ -317,11 +317,7 @@ class _SectionHeader extends StatelessWidget {
             margin: const EdgeInsets.only(right: KSpacing.sm),
             decoration: BoxDecoration(
               borderRadius: KRadius.pill,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: KGradient.train,
-              ),
+              color: KColor.ink,
             ),
           ),
           Expanded(
@@ -382,7 +378,7 @@ class _Badge extends StatelessWidget {
   }
 }
 
-/// Saffron PR marker. Always icon + label.
+/// Accent PR marker. Always icon + label.
 class _PrBadge extends StatelessWidget {
   const _PrBadge(this.label);
   final String label;
@@ -390,7 +386,7 @@ class _PrBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _Badge(
     label: label,
-    color: KColor.saffron,
+    color: KColor.ember,
     icon: Icons.emoji_events_rounded,
   );
 }
@@ -408,7 +404,7 @@ class _StatusBadge extends StatelessWidget {
         Icons.check_circle_rounded,
       ),
       WorkoutStatus.partial => (
-        KColor.saffron,
+        KColor.textSecondary,
         'Partial',
         Icons.timelapse_rounded,
       ),
@@ -418,7 +414,7 @@ class _StatusBadge extends StatelessWidget {
         Icons.cancel_outlined,
       ),
       WorkoutStatus.active => (
-        KColor.cyan,
+        KColor.ember,
         'Active',
         Icons.play_circle_fill_rounded,
       ),
@@ -517,7 +513,7 @@ class _DrawInState extends State<_DrawIn> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) => widget.builder(context, _ctrl);
 }
 
-/// Shared series renderer: gradient area + violet → cyan line revealed along
+/// Shared series renderer: an ink line with a fading ink area, revealed along
 /// its path length. Subclasses supply the point offsets for a size.
 abstract class _RevealSeriesPainter extends CustomPainter {
   _RevealSeriesPainter(this.reveal) : super(repaint: reveal);
@@ -563,13 +559,14 @@ abstract class _RevealSeriesPainter extends CustomPainter {
     final rect = Offset.zero & size;
     _line
       ..strokeWidth = strokeWidth
-      ..shader = LinearGradient(colors: KGradient.train).createShader(rect);
+      ..shader = null
+      ..color = KColor.ink;
     _area.shader = LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        KColor.violet.withValues(alpha: areaAlpha),
-        KColor.cyan.withValues(alpha: 0.0),
+        KColor.ink.withValues(alpha: areaAlpha * 0.6),
+        KColor.ink.withValues(alpha: 0.0),
       ],
     ).createShader(rect);
   }
@@ -862,7 +859,7 @@ class _BentoGrid extends StatelessWidget {
                         title: 'Total PRs',
                         value: vm.totalPrs,
                         icon: Icons.emoji_events_rounded,
-                        color: KColor.saffron,
+                        color: KColor.ember,
                       ),
                     ),
                   ],
@@ -926,7 +923,7 @@ class _BentoHero extends StatelessWidget {
         padding: const EdgeInsets.all(KSpacing.lg),
         borderRadius: KRadius.xl,
         border: Border.all(
-          color: KColor.violet.withValues(alpha: KColor.isDark ? 0.3 : 0.26),
+          color: KColor.hairline,
         ),
         color: KColor.card,
         child: Stack(
@@ -938,8 +935,8 @@ class _BentoHero extends StatelessWidget {
                 child: Icon(
                   Icons.fitness_center_rounded,
                   size: 84,
-                  color: KColor.violet.withValues(
-                    alpha: KColor.isDark ? 0.08 : 0.06,
+                  color: KColor.ink.withValues(
+                    alpha: KColor.isDark ? 0.06 : 0.05,
                   ),
                 ),
               ),
@@ -961,7 +958,7 @@ class _BentoHero extends StatelessWidget {
                 const SizedBox(height: KSpacing.sm),
                 _Badge(
                   label: filterLabel,
-                  color: KColor.violet,
+                  color: KColor.ink,
                   icon: Icons.date_range_rounded,
                 ),
                 if (averageDuration > 0) ...[
@@ -1227,7 +1224,7 @@ class _SparkPainter extends _RevealSeriesPainter {
     );
     final tip = paintSeries(canvas, size);
     if (offsets.isNotEmpty && offsets.last.dx <= tip + 0.5) {
-      _dot.color = KColor.cyan;
+      _dot.color = KColor.ember;
       canvas.drawCircle(offsets.last, 3, _dot);
     }
   }
@@ -1299,7 +1296,7 @@ class _HighlightInfoRow extends StatelessWidget {
           children: [
             half(
               Icons.incomplete_circle_rounded,
-              KColor.violet,
+              KColor.ink,
               'Most trained muscle',
               mostTrainedMuscle,
             ),
@@ -1323,15 +1320,14 @@ class _HighlightInfoRow extends StatelessWidget {
 
 // ─── Heatmap ──────────────────────────────────────────────────────────────────
 
-/// Sequential single-hue ramp (violet), level 0 = empty. The empty cell is a
-/// neutral ink step so the grid reads on both Carbon and Paper; Paper's
-/// low levels sit a touch lighter because the deep violet carries more ink.
+/// Sequential single-hue ramp in ink, level 0 = empty. The empty cell is a
+/// faint ink step so the grid reads on both Graphite and Paper.
 List<Color> get _kHeatRamp => [
   KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
-  KColor.violet.withValues(alpha: KColor.isDark ? 0.30 : 0.24),
-  KColor.violet.withValues(alpha: KColor.isDark ? 0.52 : 0.46),
-  KColor.violet.withValues(alpha: KColor.isDark ? 0.78 : 0.72),
-  Color.lerp(KColor.violet, KColor.cyan, 0.25)!,
+  KColor.ink.withValues(alpha: KColor.isDark ? 0.28 : 0.24),
+  KColor.ink.withValues(alpha: KColor.isDark ? 0.50 : 0.46),
+  KColor.ink.withValues(alpha: KColor.isDark ? 0.74 : 0.70),
+  KColor.ink,
 ];
 
 const double _kHeatCell = 11.0;
@@ -1693,7 +1689,7 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                     label: hasWorkouts
                         ? '${day.sessions.length} workout${day.sessions.length == 1 ? '' : 's'}'
                         : 'Rest day',
-                    color: hasWorkouts ? KColor.violet : KColor.textMuted,
+                    color: hasWorkouts ? KColor.ink : KColor.textMuted,
                     icon: hasWorkouts
                         ? Icons.fitness_center_rounded
                         : Icons.bedtime_rounded,
@@ -1709,7 +1705,7 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                       children: [
                         _IconTile(
                           icon: Icons.bedtime_rounded,
-                          color: KColor.violet,
+                          color: KColor.textSecondary,
                           size: 52,
                         ),
                         const SizedBox(height: KSpacing.md),
@@ -1762,7 +1758,7 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
                       boxShadow: const [],
                       border: Border.all(
                         color: prCount > 0
-                            ? KColor.saffron.withValues(alpha: 0.35)
+                            ? KColor.ember.withValues(alpha: 0.35)
                             : _hairline,
                       ),
                       child: Column(
@@ -1872,7 +1868,7 @@ class _HeatmapPainter extends CustomPainter {
   final Paint _today = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.4
-    ..color = KColor.cyan;
+    ..color = KColor.ember;
 
   static const _radius = Radius.circular(2.5);
 
@@ -1995,8 +1991,8 @@ class _MuscleAnalyticsCard extends StatelessWidget {
             leftPct: vm.pushPullRatio,
             leftLabel: 'Push ($pushPct%)',
             rightLabel: 'Pull ($pullPct%)',
-            leftColor: KColor.violet,
-            rightColor: KColor.cyan,
+            leftColor: KColor.ink,
+            rightColor: KColor.fat,
           ),
           const SizedBox(height: KSpacing.lg),
           _BalanceBar(
@@ -2004,8 +2000,8 @@ class _MuscleAnalyticsCard extends StatelessWidget {
             leftPct: vm.upperLowerRatio,
             leftLabel: 'Upper ($upperPct%)',
             rightLabel: 'Lower ($lowerPct%)',
-            leftColor: KColor.cyan,
-            rightColor: KColor.violet,
+            leftColor: KColor.ink,
+            rightColor: KColor.fat,
           ),
           const SizedBox(height: KSpacing.lg),
           Container(height: 1, color: KColor.divider),
@@ -2231,26 +2227,11 @@ class _AchievementsList extends StatelessWidget {
                 width: 172,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: KColor.card,
-                  gradient: item.achieved
-                      ? LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            Color.alphaBlend(
-                              KColor.violet.withValues(
-                                alpha: KColor.isDark ? 0.14 : 0.08,
-                              ),
-                              KColor.card,
-                            ),
-                            KColor.card,
-                          ],
-                        )
-                      : null,
+                  color: item.achieved ? KColor.cardHigh : KColor.card,
                   borderRadius: KRadius.md,
                   border: Border.all(
                     color: item.achieved
-                        ? KColor.violet.withValues(alpha: 0.36)
+                        ? KColor.ink.withValues(alpha: 0.30)
                         : _hairline,
                   ),
                   boxShadow: KShadow.card,
@@ -2263,15 +2244,14 @@ class _AchievementsList extends StatelessWidget {
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
-                          Opacity(
-                            opacity: item.achieved ? 1.0 : 0.3,
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: KIcon(
-                                _achievementIcon(item.title),
-                                size: KIcons.lg,
-                                color: item.achieved ? KColor.violet : KColor.textMuted,
-                              ),
+                          // Locked badges fade via the glyph colour (no
+                          // Opacity layer per list row).
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: KIcon(
+                              _achievementIcon(item.title),
+                              size: KIcons.lg,
+                              color: item.achieved ? KColor.ink : KColor.textMuted.withValues(alpha: KColor.textMuted.a * 0.3),
                             ),
                           ),
                           if (!item.achieved)
@@ -2319,7 +2299,7 @@ class _AchievementsList extends StatelessWidget {
                           if (!item.achieved && item.targetProgress > 0) ...[
                             KBar(
                               progress: progressRatio,
-                              colors: KGradient.train,
+                              colors: KGradient.primary,
                               height: 4,
                             ),
                             const SizedBox(height: 4),
@@ -2330,7 +2310,7 @@ class _AchievementsList extends StatelessWidget {
                             style: _num(
                               11,
                               color: item.achieved
-                                  ? KColor.violet
+                                  ? KColor.textPrimary
                                   : KColor.textMuted,
                             ),
                           ),
@@ -2579,12 +2559,12 @@ class _ExerciseAnalyticsList extends StatelessWidget {
                               ),
                               padding: const EdgeInsets.all(KSpacing.md),
                               decoration: BoxDecoration(
-                                color: KColor.violet.withValues(
-                                  alpha: KColor.isDark ? 0.08 : 0.05,
+                                color: KColor.ink.withValues(
+                                  alpha: KColor.isDark ? 0.05 : 0.04,
                                 ),
                                 borderRadius: KRadius.sm,
                                 border: Border.all(
-                                  color: KColor.violet.withValues(alpha: 0.2),
+                                  color: KColor.ink.withValues(alpha: 0.14),
                                 ),
                               ),
                               child: Row(
@@ -2593,7 +2573,7 @@ class _ExerciseAnalyticsList extends StatelessWidget {
                                   ExcludeSemantics(
                                     child: Icon(
                                       Icons.lightbulb_rounded,
-                                      color: KColor.violet,
+                                      color: KColor.ink,
                                       size: 16,
                                     ),
                                   ),
@@ -2673,25 +2653,10 @@ class _DetailStatBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(KSpacing.md),
       decoration: BoxDecoration(
-        color: KColor.card,
-        gradient: emphasis
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color.alphaBlend(
-                    KColor.violet.withValues(
-                      alpha: KColor.isDark ? 0.14 : 0.08,
-                    ),
-                    KColor.card,
-                  ),
-                  KColor.card,
-                ],
-              )
-            : null,
+        color: emphasis ? KColor.cardHigh : KColor.card,
         borderRadius: KRadius.md,
         border: Border.all(
-          color: emphasis ? KColor.violet.withValues(alpha: 0.36) : _hairline,
+          color: emphasis ? KColor.ink.withValues(alpha: 0.30) : _hairline,
         ),
       ),
       child: Column(
@@ -3026,7 +2991,7 @@ class _MarkerLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = kind == 1 ? KColor.blue : KColor.amber;
+    final color = kind == 1 ? KColor.blue : KColor.ember;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3190,13 +3155,13 @@ class _LineChartPainter extends _RevealSeriesPainter {
       final kind = i < scene.markers.length ? scene.markers[i] : 0;
       final color = switch (kind) {
         1 => KColor.blue,
-        2 => KColor.amber,
-        _ => Color.lerp(KColor.violet, KColor.cyan, pt.dx / size.width)!,
+        2 => KColor.ember,
+        _ => KColor.ink,
       };
       final r = isSelected ? 5.5 : 3.8;
 
       if (isSelected) {
-        _dotFill.color = KColor.cyan.withValues(alpha: dark ? 0.22 : 0.16);
+        _dotFill.color = KColor.ink.withValues(alpha: dark ? 0.18 : 0.12);
         canvas.drawCircle(pt, 11, _dotFill);
       }
       _dotFill.color = KColor.card;
@@ -3425,14 +3390,14 @@ class _CalendarStripState extends State<_CalendarStrip> {
                           curve: KMotion.emphasizedCurve,
                           margin: const EdgeInsets.all(2),
                           height: 36,
-                          // Selected = ink; trained = a violet tint + dot;
+                          // Selected = ink; trained = an ink tint + dot;
                           // today = a hairline ring.
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? KColor.ink
                                 : trained
-                                ? KColor.violet.withValues(
-                                    alpha: KColor.isDark ? 0.12 : 0.08,
+                                ? KColor.ink.withValues(
+                                    alpha: KColor.isDark ? 0.10 : 0.07,
                                   )
                                 : Colors.transparent,
                             borderRadius: KRadius.sm,
@@ -3465,7 +3430,7 @@ class _CalendarStripState extends State<_CalendarStrip> {
                                   width: 4,
                                   height: 4,
                                   decoration: BoxDecoration(
-                                    color: KColor.violet,
+                                    color: KColor.ink,
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -3889,10 +3854,10 @@ class _SessionTile extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    KColor.violet.withValues(
-                      alpha: KColor.isDark ? 0.45 : 0.35,
+                    KColor.ink.withValues(
+                      alpha: KColor.isDark ? 0.40 : 0.32,
                     ),
-                    KColor.cyan.withValues(alpha: KColor.isDark ? 0.18 : 0.14),
+                    KColor.ink.withValues(alpha: KColor.isDark ? 0.14 : 0.12),
                   ],
                 ),
               ),
@@ -3908,7 +3873,7 @@ class _SessionTile extends StatelessWidget {
                     width: 18,
                     height: 18,
                     decoration: BoxDecoration(
-                      color: KColor.saffron,
+                      color: KColor.ember,
                       shape: BoxShape.circle,
                       border: Border.all(color: KColor.bg, width: 2),
                     ),
@@ -3924,7 +3889,7 @@ class _SessionTile extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: KColor.bg,
                       shape: BoxShape.circle,
-                      border: Border.all(color: KColor.violet, width: 2),
+                      border: Border.all(color: KColor.ink, width: 2),
                     ),
                   ),
           ),
@@ -3951,7 +3916,7 @@ class _SessionTile extends StatelessWidget {
               boxShadow: const [],
               border: Border.all(
                 color: hasPr
-                    ? KColor.saffron.withValues(alpha: 0.38)
+                    ? KColor.ember.withValues(alpha: 0.38)
                     : _hairline,
               ),
               child: Row(
@@ -3977,7 +3942,7 @@ class _SessionTile extends StatelessWidget {
                           style: KText.caption.copyWith(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: KColor.violet,
+                            color: KColor.textSecondary,
                           ),
                         ),
                       ],
@@ -4322,9 +4287,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               padding: const EdgeInsets.all(KSpacing.lg),
               borderRadius: KRadius.xl,
               border: Border.all(
-                color: KColor.violet.withValues(
-                  alpha: KColor.isDark ? 0.3 : 0.26,
-                ),
+                color: KColor.hairline,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4335,7 +4298,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                         child: Icon(
                           Icons.event_rounded,
                           size: 14,
-                          color: KColor.violet,
+                          color: KColor.textSecondary,
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -4453,7 +4416,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                                 style: KText.caption.copyWith(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: KColor.violet,
+                                  color: KColor.textPrimary,
                                 ),
                               ),
                               const SizedBox(height: KSpacing.sm),
@@ -4619,12 +4582,12 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                 Container(
                   padding: const EdgeInsets.all(KSpacing.md),
                   decoration: BoxDecoration(
-                    color: KColor.saffron.withValues(
+                    color: KColor.ember.withValues(
                       alpha: KColor.isDark ? 0.08 : 0.07,
                     ),
                     borderRadius: KRadius.md,
                     border: Border.all(
-                      color: KColor.saffron.withValues(alpha: 0.30),
+                      color: KColor.ember.withValues(alpha: 0.30),
                     ),
                   ),
                   child: Row(
@@ -4632,7 +4595,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                     children: [
                       _IconTile(
                         icon: Icons.emoji_events_rounded,
-                        color: KColor.saffron,
+                        color: KColor.ember,
                         size: 32,
                       ),
                       const SizedBox(width: KSpacing.md),
@@ -5464,7 +5427,7 @@ class _ExerciseDetailCard extends StatelessWidget {
         borderRadius: KRadius.lg,
         boxShadow: const [],
         border: Border.all(
-          color: isPr ? KColor.saffron.withValues(alpha: 0.40) : _hairline,
+          color: isPr ? KColor.ember.withValues(alpha: 0.40) : _hairline,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -5588,7 +5551,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                           child: Icon(
                                             Icons
                                                 .subdirectory_arrow_right_rounded,
-                                            color: KColor.amber,
+                                            color: KColor.ember,
                                             size: 14,
                                           ),
                                         ),
@@ -5599,7 +5562,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                             vertical: 1,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: KColor.amber.withValues(
+                                            color: KColor.ember.withValues(
                                               alpha: 0.15,
                                             ),
                                             borderRadius:
@@ -5612,7 +5575,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                                 ? 'Drop ${d + 1}'
                                                 : 'Drop',
                                             style: KText.caption.copyWith(
-                                              color: KColor.amber,
+                                              color: KColor.ember,
                                               fontSize: 10.5,
                                               fontWeight: FontWeight.w800,
                                             ),
@@ -5665,9 +5628,9 @@ class _ExerciseDetailCard extends StatelessWidget {
   }
 
   Color _setTypeColor(SetType t) => switch (t) {
-    SetType.normal => KColor.violet,
+    SetType.normal => KColor.ink,
     SetType.warmUp => KColor.blue,
-    SetType.dropSet => KColor.amber,
+    SetType.dropSet => KColor.ember,
   };
 }
 
@@ -5730,15 +5693,8 @@ class _ExerciseSparkline extends StatelessWidget {
                                             .clamp(3, 22)
                                             .toDouble(),
                                   decoration: BoxDecoration(
-                                    gradient: v == history.last
-                                        ? LinearGradient(
-                                            begin: Alignment.bottomCenter,
-                                            end: Alignment.topCenter,
-                                            colors: KGradient.train,
-                                          )
-                                        : null,
                                     color: v == history.last
-                                        ? null
+                                        ? KColor.ink
                                         : KColor.fg.withValues(
                                             alpha: KColor.isDark ? 0.14 : 0.12,
                                           ),
@@ -5785,7 +5741,7 @@ class _ConsistencyDashboardCard extends StatelessWidget {
             children: [
               _IconTile(
                 icon: Icons.analytics_outlined,
-                color: KColor.violet,
+                color: KColor.ink,
                 size: 26,
               ),
               const SizedBox(width: KSpacing.sm),
@@ -5863,7 +5819,7 @@ class _ConsistencyDashboardCard extends StatelessWidget {
                   title: 'Most common day',
                   value: vm.mostCommonTrainingDay,
                   icon: Icons.star_border_rounded,
-                  color: KColor.violet,
+                  color: KColor.ink,
                 ),
               ],
             ),
@@ -5982,7 +5938,7 @@ class _ExerciseRankingsCard extends StatelessWidget {
             children: [
               _IconTile(
                 icon: Icons.star_rounded,
-                color: KColor.saffron,
+                color: KColor.ember,
                 size: 26,
               ),
               const SizedBox(width: KSpacing.sm),
@@ -6001,7 +5957,7 @@ class _ExerciseRankingsCard extends StatelessWidget {
           if (vm.mostTrainedExercise != null)
             _RankingRow(
               icon: Icons.repeat_rounded,
-              color: KColor.violet,
+              color: KColor.ink,
               title: 'Most trained',
               exerciseName: vm.mostTrainedExercise!.exercise.name,
               score: '${vm.mostTrainedExercise!.totalSessions} sessions',
@@ -6021,7 +5977,7 @@ class _ExerciseRankingsCard extends StatelessWidget {
             const SizedBox(height: KSpacing.md),
             _RankingRow(
               icon: Icons.bolt_rounded,
-              color: KColor.saffron,
+              color: KColor.ember,
               title: 'Strongest (best 1RM)',
               exerciseName: vm.strongestExercise!.exercise.name,
               score: '${vm.strongestExercise!.bestE1rm.toStringAsFixed(1)} kg',

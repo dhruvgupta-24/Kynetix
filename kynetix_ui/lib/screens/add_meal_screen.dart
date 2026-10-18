@@ -18,6 +18,9 @@ import '../services/persistence_service.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/saved_meal_service.dart';
 import '../services/kyno_context_service.dart';
+import '../ui/k_rolling.dart';
+import '../widgets/k_progress_line.dart';
+import '../widgets/k_success_check.dart';
 import 'barcode_scanner_screen.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
@@ -120,6 +123,16 @@ class _AddMealScreenState extends State<AddMealScreen>
   bool _composerFocused = false;
   bool _saving = false;
 
+  /// Presentation only: the estimate has landed and the progress line is
+  /// closing its last stretch before the result cross-fades in. Every piece
+  /// of logic reads [_loading] / [_result], never this.
+  bool _finishingEstimate = false;
+
+  /// Presentation only: the meal is saved and the button is showing its
+  /// drawn check; the screen closes when that moment ends.
+  bool _logged = false;
+  Completer<void>? _loggedMoment;
+
   final List<_IngredientRow> _rows = [];
   bool _rememberEdits = true;
   double _totalCal = 0;
@@ -183,13 +196,10 @@ class _AddMealScreenState extends State<AddMealScreen>
   /// otherwise). Never leaves a repeat() running after estimation ends.
   void _syncPulse() {
     if (!mounted) return;
-    final shouldRun = _loading && KMotion.ambientAllowed(context);
-    if (shouldRun) {
-      if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
-    } else {
-      if (_pulseCtrl.isAnimating) _pulseCtrl.stop();
-      _pulseCtrl.value = _loading ? 1.0 : 0.0;
-    }
+    // The wait is shown by the calm progress line under the button, so the
+    // composer border just holds still while estimating: no pulsing loop.
+    if (_pulseCtrl.isAnimating) _pulseCtrl.stop();
+    _pulseCtrl.value = _loading ? 1.0 : 0.0;
   }
 
   void _onTextChanged() {
@@ -572,7 +582,7 @@ class _AddMealScreenState extends State<AddMealScreen>
     _focusNode.unfocus();
     // Haptic for the commit is fired by the tap surface (KButton / keyboard
     // submit), so this method stays silent and fires exactly once per action.
-    setState(() { _loading = true; _result = null; _error = null; });
+    setState(() { _loading = true; _result = null; _error = null; _finishingEstimate = false; });
     _syncPulse();
     try {
       final result = await NutritionPipeline.instance.estimateMeal(text);
@@ -580,6 +590,8 @@ class _AddMealScreenState extends State<AddMealScreen>
         setState(() {
           _result = result;
           _loading = false;
+          // Let the progress line close out before the result fades in.
+          _finishingEstimate = !KMotion.reduced(context);
           _initRowsFromResult(result);
         });
         _syncPulse();
@@ -615,6 +627,7 @@ class _AddMealScreenState extends State<AddMealScreen>
 
     if (_result == null || _rows.isEmpty) {
       setState(() {
+        _finishingEstimate = false;
         _result = scanned;
         _controller.text = scannedText;
         _controller.selection = TextSelection.collapsed(offset: scannedText.length);
@@ -903,7 +916,28 @@ class _AddMealScreenState extends State<AddMealScreen>
     PersistenceService.saveDay(widget.date).ignore();
     KynoContextService.instance.invalidate();
     if (!mounted) return;
+    // Everything above is already written. The button now shows its drawn
+    // check for a beat (instant under reduced motion), then the screen
+    // closes with the entry exactly as before.
+    await _playLoggedMoment();
+    if (!mounted) return;
     Navigator.of(context).pop(entry);
+  }
+
+  /// Swaps the save button for its "Logged" face and completes when that
+  /// moment has played. The commit haptic already fired once on the tap
+  /// (KButton), the same frame the save landed, so none is added here.
+  Future<void> _playLoggedMoment() {
+    final moment = Completer<void>();
+    _loggedMoment = moment;
+    setState(() => _logged = true);
+    return moment.future;
+  }
+
+  void _onLoggedMomentFinished() {
+    final moment = _loggedMoment;
+    _loggedMoment = null;
+    if (moment != null && !moment.isCompleted) moment.complete();
   }
 
 
@@ -1032,10 +1066,10 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   Widget _buildRoleBadge(FoodRole role) {
     final (label, color) = switch (role) {
-      FoodRole.primary => ('Base / carb', KColor.blue),
-      FoodRole.protein => ('Protein', KColor.green),
-      FoodRole.accompaniment => ('Side / curry', KColor.saffron),
-      FoodRole.addOn => ('Add-on', KColor.violet),
+      FoodRole.primary => ('Base / carb', KColor.textSecondary),
+      FoodRole.protein => ('Protein', KColor.protein),
+      FoodRole.accompaniment => ('Side / curry', KColor.textSecondary),
+      FoodRole.addOn => ('Add-on', KColor.textSecondary),
       FoodRole.completeMeal => ('Single unit', KColor.textMuted),
     };
     return _Tag(label: label, color: color);
@@ -1043,7 +1077,7 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   Widget _buildSourceBadge(OverrideSource source) {
     final (label, color) = switch (source) {
-      OverrideSource.userCorrected => ('Your numbers', KColor.blue),
+      OverrideSource.userCorrected => ('Your numbers', KColor.textSecondary),
     };
     return _Tag(label: label, color: color);
   }
@@ -1133,9 +1167,9 @@ class _AddMealScreenState extends State<AddMealScreen>
                         children: [
                           _buildMealTypeBadge(match.mealType),
                           KDotStat(calStr, 'kcal', color: KColor.ember),
-                          KDotStat(proStr, 'g protein', color: KColor.green),
+                          KDotStat(proStr, 'g protein', color: KColor.protein),
                           if (carbStr.isNotEmpty)
-                            KDotStat(amount(match.carbohydrates), 'g carbs', color: KColor.blue),
+                            KDotStat(amount(match.carbohydrates), 'g carbs', color: KColor.carbs),
                         ],
                       ),
                     ],
@@ -1258,7 +1292,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                     decoration: BoxDecoration(
                       borderRadius: KRadius.lg,
                       border: Border.all(
-                        color: KColor.violet.withValues(alpha: 0.8),
+                        color: KColor.ember.withValues(alpha: 0.8),
                         width: 1.5,
                       ),
                     ),
@@ -1276,8 +1310,16 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   Widget _buildStateArea() {
     final Widget child;
-    if (_loading) {
-      child = const _EstimateSkeleton(key: ValueKey('loading'));
+    if (_loading || (_finishingEstimate && _result != null)) {
+      // Same key while loading and while finishing, so the progress line is
+      // the same widget that eases to 100% when the estimate lands.
+      child = _EstimateSkeleton(
+        key: const ValueKey('loading'),
+        done: !_loading,
+        onCompleted: () {
+          if (mounted && _finishingEstimate) setState(() => _finishingEstimate = false);
+        },
+      );
     } else if (_result != null) {
       child = KeyedSubtree(
         key: const ValueKey('result'),
@@ -1300,15 +1342,22 @@ class _AddMealScreenState extends State<AddMealScreen>
     } else {
       child = const _ComposerHint(key: ValueKey('idle'));
     }
-    return AnimatedSwitcher(
+    // The height eases between states (the skeleton is taller than the
+    // result), so the ingredients below glide up instead of jumping.
+    return AnimatedSize(
       duration: KMotion.of(context, KMotion.standard),
-      switchInCurve: KMotion.decelerate,
-      switchOutCurve: KMotion.accelerate,
-      layoutBuilder: (current, previous) => Stack(
-        alignment: Alignment.topCenter,
-        children: [...previous, ?current],
+      curve: KMotion.emphasizedCurve,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: KMotion.of(context, KMotion.standard),
+        switchInCurve: KMotion.decelerate,
+        switchOutCurve: KMotion.accelerate,
+        layoutBuilder: (current, previous) => Stack(
+          alignment: Alignment.topCenter,
+          children: [...previous, ?current],
+        ),
+        child: child,
       ),
-      child: child,
     );
   }
 
@@ -1319,10 +1368,10 @@ class _AddMealScreenState extends State<AddMealScreen>
     final r = _result!;
     final confirmed = r.userCorrected || r.macrosLockedByUser;
     final confColor = confirmed
-        ? KColor.blue
+        ? KColor.textSecondary
         : (r.confidence >= 0.86
-              ? KColor.green
-              : (r.confidence >= 0.62 ? KColor.saffron : KColor.ember));
+              ? KColor.ink
+              : (r.confidence >= 0.62 ? KColor.textSecondary : KColor.ember));
     final confLabel = confirmed ? 'Your confirmed macros' : r.confidenceLabel;
     final confIcon = confirmed
         ? Icons.lock_rounded
@@ -1377,17 +1426,17 @@ class _AddMealScreenState extends State<AddMealScreen>
                 _MiniMacro(
                   label: 'Carbs',
                   value: _totalCarb,
-                  color: KColor.blue,
+                  color: KColor.carbs,
                 ),
                 _MiniMacro(
                   label: 'Fat',
                   value: _totalFat,
-                  color: KColor.saffron,
+                  color: KColor.fat,
                 ),
                 _MiniMacro(
                   label: 'Fiber',
                   value: _totalFib,
-                  color: KColor.violet,
+                  color: KColor.fiber,
                 ),
               ],
             ),
@@ -1651,7 +1700,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                         child: _buildField(
                           'Carbs (g)',
                           row.carbCtrl,
-                          KColor.blue,
+                          KColor.carbs,
                         ),
                       ),
                       const SizedBox(width: KSpacing.sm),
@@ -1659,7 +1708,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                         child: _buildField(
                           'Fat (g)',
                           row.fatCtrl,
-                          KColor.amber,
+                          KColor.fat,
                         ),
                       ),
                       const SizedBox(width: KSpacing.sm),
@@ -1667,7 +1716,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                         child: _buildField(
                           'Fiber (g)',
                           row.fibCtrl,
-                          KColor.violet,
+                          KColor.fiber,
                         ),
                       ),
                     ],
@@ -1707,16 +1756,16 @@ class _AddMealScreenState extends State<AddMealScreen>
         margin: const EdgeInsets.only(bottom: KSpacing.lg),
         padding: const EdgeInsets.all(KSpacing.lg),
         decoration: BoxDecoration(
-          color: KColor.saffron.withValues(alpha: KColor.isDark ? 0.06 : 0.07),
+          color: KColor.ember.withValues(alpha: KColor.isDark ? 0.06 : 0.07),
           borderRadius: KRadius.lg,
-          border: Border.all(color: KColor.saffron.withValues(alpha: KColor.isDark ? 0.22 : 0.28)),
+          border: Border.all(color: KColor.ember.withValues(alpha: KColor.isDark ? 0.22 : 0.28)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'How Kyno estimated this',
-              style: KText.h3.copyWith(fontSize: 14, color: KColor.saffron),
+              style: KText.h3.copyWith(fontSize: 14, color: KColor.ember),
             ),
             const SizedBox(height: KSpacing.sm),
             for (final w in warnings)
@@ -1729,7 +1778,7 @@ class _AddMealScreenState extends State<AddMealScreen>
                       padding: EdgeInsets.only(top: 3),
                       child: Icon(
                         Icons.info_outline_rounded,
-                        color: KColor.saffron,
+                        color: KColor.ember,
                         size: 13,
                       ),
                     ),
@@ -1846,9 +1895,11 @@ class _AddMealScreenState extends State<AddMealScreen>
                                 decoration: BoxDecoration(color: KColor.calorie, shape: BoxShape.circle),
                               ),
                               const SizedBox(width: 6),
+                              // Totals roll digit by digit as rows are edited.
                               Flexible(
-                                child: Text(
-                                  '${_totalCal.toStringAsFixed(0)} kcal',
+                                child: _RollingTotal(
+                                  value: _totalCal.toStringAsFixed(0),
+                                  unit: ' kcal',
                                   style: KText.numSmall.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
                                 ),
                               ),
@@ -1864,8 +1915,9 @@ class _AddMealScreenState extends State<AddMealScreen>
                               ),
                               const SizedBox(width: 6),
                               Flexible(
-                                child: Text(
-                                  '${_totalPro.toStringAsFixed(1)}g protein',
+                                child: _RollingTotal(
+                                  value: _totalPro.toStringAsFixed(1),
+                                  unit: 'g protein',
                                   style: KText.numSmall.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
                                 ),
                               ),
@@ -1877,11 +1929,33 @@ class _AddMealScreenState extends State<AddMealScreen>
                 ],
               ),
             ),
-            KButton(
-              label: isEditing ? 'Save changes' : 'Log meal',
-              icon: isEditing ? Icons.check_rounded : Icons.add_task_rounded,
-              loading: _saving,
-              onTap: _onSavePressed,
+            // Idle / saving is the normal button; a successful save turns it
+            // into the drawn-check "Logged" face, then the screen closes.
+            AnimatedSwitcher(
+              duration: KMotion.of(context, KMotion.quick),
+              switchInCurve: KMotion.decelerate,
+              switchOutCurve: KMotion.accelerate,
+              layoutBuilder: (current, previous) => Stack(
+                fit: StackFit.passthrough,
+                alignment: Alignment.center,
+                children: [...previous, ?current],
+              ),
+              child: _logged
+                  ? SizedBox(
+                      key: const ValueKey('logged'),
+                      width: double.infinity,
+                      child: KSuccessPill(
+                        label: isEditing ? 'Saved' : 'Logged',
+                        onFinished: _onLoggedMomentFinished,
+                      ),
+                    )
+                  : KButton(
+                      key: const ValueKey('save'),
+                      label: isEditing ? 'Save changes' : 'Log meal',
+                      icon: isEditing ? Icons.check_rounded : Icons.add_task_rounded,
+                      loading: _saving,
+                      onTap: _onSavePressed,
+                    ),
             ),
           ],
         ),
@@ -1892,7 +1966,11 @@ class _AddMealScreenState extends State<AddMealScreen>
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialEntry != null;
-    return KPage(
+    // While the "Logged" moment plays the meal is already saved; hold the
+    // route so the caller still receives the entry when it closes.
+    return PopScope(
+      canPop: !_logged,
+      child: KPage(
       tone: KTone.fuel,
       intensity: 0.8,
       appBar: AppBar(
@@ -1903,7 +1981,7 @@ class _AddMealScreenState extends State<AddMealScreen>
         leading: IconButton(
           icon: Icon(Icons.close_rounded, color: KColor.textPrimary),
           tooltip: 'Close',
-          onPressed: () => Navigator.of(context).pop(null),
+          onPressed: _logged ? null : () => Navigator.of(context).pop(null),
         ),
         title: Text(
           !isEditing
@@ -2076,6 +2154,7 @@ class _AddMealScreenState extends State<AddMealScreen>
         ),
       ),
       bottomNavigationBar: _result != null ? _buildBottomBar() : null,
+      ),
     );
   }
 }
@@ -2225,16 +2304,15 @@ class _HeroStat extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.end,
                 spacing: 4,
                 children: [
-                  TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0, end: value),
-                    duration: KMotion.of(context, KMotion.slow),
-                    curve: KMotion.emphasizedCurve,
-                    builder: (context, v, _) => Text(
-                      v.toStringAsFixed(decimals),
-                      style: KText.numDisplay.copyWith(
-                        fontSize: 34,
-                        color: KColor.textPrimary,
-                      ),
+                  // Rolls up from zero on reveal, then digit by digit as
+                  // ingredient numbers change. Tabular, so it never reflows.
+                  KRollingNumber(
+                    shown,
+                    fromZero: true,
+                    duration: KMotion.slow,
+                    style: KText.numDisplay.copyWith(
+                      fontSize: 34,
+                      color: KColor.textPrimary,
                     ),
                   ),
                   Padding(
@@ -2280,12 +2358,13 @@ class _MiniMacro extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 5),
-        Text(
-          '$label ${value.toStringAsFixed(0)}g',
+        _RollingTotal(
+          prefix: '$label ',
+          value: value.toStringAsFixed(0),
+          unit: 'g',
           style: KText.caption.copyWith(
             fontSize: 13,
             color: KColor.textSecondary,
-            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       ],
@@ -2354,17 +2433,59 @@ class _ComposerHint extends StatelessWidget {
   }
 }
 
-/// Estimating state: a skeleton shaped like the estimate preview.
-class _EstimateSkeleton extends StatelessWidget {
-  const _EstimateSkeleton({super.key});
+/// A number with its words around it ("Carbs 42g", "512 kcal") where only the
+/// digits roll when the value changes. Read by screen readers as one phrase.
+class _RollingTotal extends StatelessWidget {
+  const _RollingTotal({
+    required this.value,
+    required this.style,
+    this.prefix = '',
+    this.unit = '',
+  });
+
+  final String value;
+  final String prefix;
+  final String unit;
+  final TextStyle style;
 
   @override
   Widget build(BuildContext context) {
+    final st = style.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    return Semantics(
+      label: '$prefix$value$unit',
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          if (prefix.isNotEmpty) Text(prefix, style: st),
+          KRollingNumber(value, style: st, duration: KMotion.standard),
+          if (unit.isNotEmpty) Flexible(child: Text(unit, style: st, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Estimating state: a still skeleton shaped like the estimate preview, under
+/// a calm ticked progress line that eases toward ~90% over the usual wait
+/// (3 to 8 s) and closes out when the estimate lands. No shimmer, no glow.
+class _EstimateSkeleton extends StatelessWidget {
+  const _EstimateSkeleton({super.key, this.done = false, this.onCompleted});
+
+  /// The estimate has arrived: finish the line, then call [onCompleted].
+  final bool done;
+  final VoidCallback? onCompleted;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05);
     Widget box(double h, {double? w, BorderRadius? r}) => Container(
       width: w ?? double.infinity,
       height: h,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: fill,
         borderRadius: r ?? KRadius.sm,
       ),
     );
@@ -2396,35 +2517,33 @@ class _EstimateSkeleton extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(height: KSpacing.sm),
+            KProgressLine(done: done, onCompleted: onCompleted),
             const SizedBox(height: KSpacing.md),
             ExcludeSemantics(
-              child: RepaintBoundary(
-                child: KShimmer(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          Expanded(child: box(104, r: KRadius.lg)),
-                          const SizedBox(width: KSpacing.md),
-                          Expanded(child: box(104, r: KRadius.lg)),
-                        ],
-                      ),
-                      const SizedBox(height: KSpacing.md),
-                      Row(
-                        children: [
-                          box(24, w: 110, r: KRadius.pill),
-                          const SizedBox(width: KSpacing.sm),
-                          Expanded(child: box(12)),
-                        ],
-                      ),
-                      const SizedBox(height: KSpacing.xl),
-                      box(132, r: KRadius.lg),
-                      const SizedBox(height: KSpacing.md),
-                      box(132, r: KRadius.lg),
+                      Expanded(child: box(104, r: KRadius.lg)),
+                      const SizedBox(width: KSpacing.md),
+                      Expanded(child: box(104, r: KRadius.lg)),
                     ],
                   ),
-                ),
+                  const SizedBox(height: KSpacing.md),
+                  Row(
+                    children: [
+                      box(24, w: 110, r: KRadius.pill),
+                      const SizedBox(width: KSpacing.sm),
+                      Expanded(child: box(12)),
+                    ],
+                  ),
+                  const SizedBox(height: KSpacing.xl),
+                  box(132, r: KRadius.lg),
+                  const SizedBox(height: KSpacing.md),
+                  box(132, r: KRadius.lg),
+                ],
               ),
             ),
           ],

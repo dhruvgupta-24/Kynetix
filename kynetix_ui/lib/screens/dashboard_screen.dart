@@ -30,6 +30,8 @@ import '../services/insights_report_service.dart';
 import 'insights_screen.dart';
 import 'workout_screen.dart';
 import 'add_meal_screen.dart';
+import '../ui/k_rolling.dart';
+import '../widgets/k_equal_height_row.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 //
@@ -66,6 +68,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   static final DateTime _baseMonth = DateTime(2024, 1, 1);
   late final PageController _calendarPageController;
+
+  /// Collapsed strip: one page per week, swiped like the month grid.
+  late final PageController _weekPageController;
 
   int _monthIndex(DateTime date) {
     return (date.year - _baseMonth.year) * 12 + date.month - _baseMonth.month;
@@ -155,6 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _calendarPageController = PageController(initialPage: _monthIndex(_focusedMonth));
+    _weekPageController = PageController(initialPage: _weekIndex(_weekStartOf(_stripAnchor())));
     // "Add meal" lives in the shell's dock, beside the nav pill.
     // Registered after the first frame: the dock rebuilds from this notifier,
     // and notifying mid-build is not allowed.
@@ -189,6 +195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     PersistenceService.dayLogNotifier.removeListener(_onDayLogChange);
     BodyMetricsService.instance.changes.removeListener(_onBodyChange);
     _calendarPageController.dispose();
+    _weekPageController.dispose();
     super.dispose();
   }
 
@@ -543,7 +550,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double get _targetFiber      => (14.0 * _targetCalories / 1000).clamp(20.0, 60.0);
 
   void _prevMonth() {
-    if (!_calendarExpanded) return _shiftWeek(-7);
+    if (!_calendarExpanded) return _stepWeek(-1);
     _calendarPageController.previousPage(
       duration: KMotion.of(context, KMotion.standard),
       curve: KMotion.emphasizedCurve,
@@ -551,11 +558,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _nextMonth() {
-    if (!_calendarExpanded) return _shiftWeek(7);
+    if (!_calendarExpanded) return _stepWeek(1);
     _calendarPageController.nextPage(
       duration: KMotion.of(context, KMotion.standard),
       curve: KMotion.emphasizedCurve,
     );
+  }
+
+  /// Arrow taps on the collapsed strip slide the week pager, and its
+  /// onPageChanged does the rest, so arrows and swipes behave the same.
+  void _stepWeek(int dir) {
+    if (!_weekPageController.hasClients) return _shiftWeek(dir * 7);
+    final d = KMotion.of(context, KMotion.standard);
+    if (dir < 0) {
+      _weekPageController.previousPage(duration: d, curve: KMotion.emphasizedCurve);
+    } else {
+      _weekPageController.nextPage(duration: d, curve: KMotion.emphasizedCurve);
+    }
+  }
+
+  // Weeks are counted from Monday 3 Jan 2000, in UTC days so DST never
+  // shifts an index.
+  static DateTime _weekStartOf(DateTime d) => DateTime(d.year, d.month, d.day - (d.weekday - 1));
+  static int _weekIndex(DateTime weekStart) =>
+      DateTime.utc(weekStart.year, weekStart.month, weekStart.day).difference(DateTime.utc(2000, 1, 3)).inDays ~/ 7;
+  static DateTime _weekFromIndex(int i) => DateTime(2000, 1, 3 + i * 7);
+
+  /// Keeps the week pager on the strip's week when something else moved it
+  /// (picking a day, changing month while expanded). Never mid-swipe.
+  void _syncWeekPager(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_weekPageController.hasClients) return;
+      if (_weekPageController.position.isScrollingNotifier.value) return;
+      if (_weekPageController.page?.round() != index) _weekPageController.jumpToPage(index);
+    });
   }
 
   /// Collapsed strip: step one week at a time, keeping the month grid
@@ -787,6 +823,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // screen, a sheet reporting an update) bump [_epoch], which invalidates
   // every section, so in-place log edits are always picked up.
 
+  // ── Per-day entrance ───────────────────────────────────────────────────
+  //
+  // The meals block and the bento tiles rise 8 px and fade in, 50 ms apart,
+  // the first time the dashboard shows a given day this session. Rebuilds,
+  // tab returns and coming back from a pushed screen don't replay it; for a
+  // new day the same KReveal elements replay in place (no remount).
+  static final Set<String> _enteredDays = {};
+  bool _firstEntranceDone = false;
+  String _revealDay = '';
+  bool _revealPlay = false;
+  Duration _revealLead = Duration.zero;
+
+  Widget _dayReveal(int index, Widget child) => KReveal(
+        index: index,
+        maxIndex: 5,
+        rise: 8,
+        stagger: const Duration(milliseconds: 50),
+        duration: KMotion.standard,
+        delay: _revealLead,
+        enabled: _revealPlay,
+        replayKey: _revealDay,
+        child: child,
+      );
+
   int _epoch = 0;
   int _logTick = 0;
   int _workoutTick = 0;
@@ -841,30 +901,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ];
     final selectedKey = dateKey(_selectedDate);
     final hour = TimeOfDay.now().hour;
+    _revealDay = selectedKey;
+    _revealPlay = !_enteredDays.contains(selectedKey);
+    // On the very first show, wait for the sections above to start.
+    _revealLead = _firstEntranceDone ? Duration.zero : KMotion.stagger * 4;
 
-    final sections = <Widget>[
-      _section(0, [...common, selectedKey, _profile, hour < 12 ? 0 : hour < 17 ? 1 : 2],
-          _buildHeader),
-      _section(1, [
+    // (section, reveals its own items) in screen order.
+    final sections = <(Widget, bool)>[
+      (_section(0, [...common, selectedKey, _profile, hour < 12 ? 0 : hour < 17 ? 1 : 2],
+          _buildHeader), false),
+      (_section(1, [
         ...common, _logTick, _focusedMonth, selectedKey, _calendarExpanded,
         _weekAnchor, _profile, _syncResult,
-      ], _buildCalendar),
-      _section(2, [...common, _logTick, _workoutTick, _bodyTick, selectedKey, _profile, _syncResult],
-          _buildFuelHero),
-      _section(12, [...common, _logTick, selectedKey, _profile, _syncResult, _carryTick],
-          _buildCarryForwardCard),
-      _section(13, [...common, _logTick, selectedKey], _buildMeals),
-      _section(3, [
+      ], _buildCalendar), false),
+      (_section(2, [...common, _logTick, _workoutTick, _bodyTick, selectedKey, _profile, _syncResult],
+          _buildFuelHero), false),
+      (_section(12, [...common, _logTick, selectedKey, _profile, _syncResult, _carryTick],
+          _buildCarryForwardCard), false),
+      (_section(13, [...common, _logTick, selectedKey], _buildMeals), true),
+      (_section(3, [
         ...common, _logTick, _workoutTick, _bodyTick, selectedKey, _profile, _syncResult,
         _hcAvailable, _syncing, _weightHistory,
-      ], _buildBento),
-      _section(4, [...common, _logTick, _workoutTick, selectedKey, _profile, _syncResult],
-          _buildNutritionDetails),
-      _section(10, [...common, _logTick, selectedKey], () => Padding(
+      ], _buildBento), true),
+      (_section(4, [...common, _logTick, _workoutTick, selectedKey, _profile, _syncResult],
+          _buildNutritionDetails), false),
+      (_section(10, [...common, _logTick, selectedKey], () => Padding(
         padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.md, KSpacing.p, 0),
         child: NutrientsSummaryCard(onLogFood: _logFoodText),
-      )),
+      )), false),
     ];
+    _enteredDays.add(selectedKey);
+    _firstEntranceDone = true;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -877,10 +944,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               slivers: [
                 // One orchestrated entrance on first mount. Keys keep each
                 // section's element (and KReveal state) stable across rebuilds.
+                // Meals and bento run their own per-day entrance instead.
                 for (var i = 0; i < sections.length; i++)
                   SliverToBoxAdapter(
                     key: ValueKey('dash-section-$i'),
-                    child: KReveal(index: i, child: sections[i]),
+                    child: sections[i].$2
+                        ? sections[i].$1
+                        : KReveal(index: i, child: sections[i].$1),
                   ),
                 SliverToBoxAdapter(child: SizedBox(height: scrollBottom)),
               ],
@@ -961,8 +1031,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // one month page) instead of totalling every logged day in the store.
     final marks = _DayMarks(_weeklyPlan.avgDailyCalories);
 
-    final anchor = _stripAnchor();
-    final weekStart = DateTime(anchor.year, anchor.month, anchor.day - (anchor.weekday - 1));
+    _syncWeekPager(_weekIndex(_weekStartOf(_stripAnchor())));
 
     // No card: the week sits on the page, set like a diary strip.
     return Padding(
@@ -1016,18 +1085,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   ),
-                  if (!_calendarExpanded)
-                    AnimatedSwitcher(
-                      duration: KMotion.of(context, KMotion.quick),
-                      child: _WeekStrip(
-                        key: ValueKey(dateKey(weekStart)),
-                        weekStart:        weekStart,
-                        focusedMonth:     _focusedMonth,
-                        selectedDate:     _selectedDate,
-                        marks:            marks,
-                        onSelect:         _selectDay,
-                      ),
+                  // Kept mounted like the month pager, so the controller
+                  // never re-attaches on a stale week.
+                  Offstage(
+                    offstage: _calendarExpanded,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const _WeekdayRow(),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 48,
+                          child: PageView.builder(
+                            controller: _weekPageController,
+                            onPageChanged: (index) {
+                              if (_calendarExpanded) return;
+                              final delta = index - _weekIndex(_weekStartOf(_stripAnchor()));
+                              if (delta != 0) _shiftWeek(delta * 7);
+                            },
+                            itemBuilder: (context, index) => _WeekStrip(
+                              weekStart:    _weekFromIndex(index),
+                              focusedMonth: _focusedMonth,
+                              selectedDate: _selectedDate,
+                              marks:        marks,
+                              onSelect:     _selectDay,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -1059,7 +1146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       for (final s in MealSection.values)
         if (log.entriesFor(s).isNotEmpty) (s, log.entriesFor(s)),
     ];
-    return Padding(
+    return _dayReveal(0, Padding(
       padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.xl, KSpacing.p, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1121,7 +1208,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   // ── Bento ───────────────────────────────────────────────────────────────────
@@ -1148,23 +1235,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           for (var r = 0; r < tiles.length; r += 2) ...[
             if (r > 0) const SizedBox(height: KSpacing.md),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: tiles[r]),
-                  const SizedBox(width: KSpacing.md),
-                  Expanded(child: tiles[r + 1]),
-                ],
-              ),
+            // Both tiles in a row share the taller one's height, without an
+            // intrinsic pass over the tiles.
+            KEqualHeightRow(
+              gap: KSpacing.md,
+              minHeight: _BentoTile.minHeight,
+              children: [
+                _dayReveal(1 + r, tiles[r]),
+                _dayReveal(2 + r, tiles[r + 1]),
+              ],
             ),
           ],
           if (weights.length >= 2) ...[
             const SizedBox(height: KSpacing.md),
-            _WeightTrendCard(
-              key: const ValueKey('weight-trend'),
-              healthReadings: _weightHistory ?? const [],
-              onLogWeight: _logWeight,
+            _dayReveal(
+              1 + tiles.length,
+              _WeightTrendCard(
+                key: const ValueKey('weight-trend'),
+                healthReadings: _weightHistory ?? const [],
+                onLogWeight: _logWeight,
+              ),
             ),
           ],
         ],
@@ -1212,7 +1302,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     return _BentoTile(
       icon: KIcons.train,
-      accent: KColor.violet,
+      accent: KColor.ink,
       label: label,
       value: value,
       sub: sub,
@@ -1227,7 +1317,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_syncing) {
       return _BentoTile(
         icon: Icons.directions_walk_rounded,
-        accent: KColor.cyan,
+        accent: KColor.textSecondary,
         label: 'Steps',
         value: 'Syncing',
         sub: 'Health Connect',
@@ -1236,7 +1326,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!connected) {
       return _BentoTile(
         icon: Icons.directions_walk_rounded,
-        accent: KColor.cyan,
+        accent: KColor.textSecondary,
         label: 'Steps',
         value: _hcAvailable ? 'Connect' : 'Not set up',
         sub: _hcAvailable ? 'For sharper targets' : 'Install Health Connect',
@@ -1246,7 +1336,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final avg = r.effectiveAverageSteps ?? r.averageDailySteps14d;
     return _BentoTile(
       icon: Icons.directions_walk_rounded,
-      accent: KColor.cyan,
+      accent: KColor.textSecondary,
       label: 'Steps a day',
       value: avg != null ? thousands(avg) : 'No data',
       sub: r.activityTier.displayName,
@@ -1331,7 +1421,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final plan = _weeklyPlan;
     return _BentoTile(
       icon: Icons.track_changes_rounded,
-      accent: KColor.green,
+      accent: KColor.ink,
       label: 'Targets',
       value: thousands(plan.avgDailyCalories),
       unit: 'kcal',
@@ -1493,24 +1583,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final isToday = dateKey(_selectedDate) == dateKey(DateTime.now());
     return Padding(
       padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.lg, KSpacing.p, 0),
-      child: FuelLabel(
-        title: isToday
-            ? 'Today\'s fuel'
-            : 'Fuel on ${_kMonthShort[_selectedDate.month - 1]} ${_selectedDate.day}',
-        trailing: Text(
-          _targetCalories > 0
-              ? '${(_consumedCalories / _targetCalories * 100).round()}% eaten'
-              : '',
-          style: KText.caption.copyWith(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            fontFeatures: const [FontFeature.tabularFigures()],
+      // The rings fly into the day screen. Only from the visible tab: the
+      // shell keeps this tab mounted offstage while others show.
+      child: ValueListenableBuilder<int>(
+        valueListenable: AppShell.currentTab,
+        builder: (context, tab, child) => HeroMode(enabled: tab == 0, child: child!),
+        child: FuelLabel(
+          heroTag: FuelLabel.heroTagFor(_selectedDate),
+          title: isToday
+              ? 'Today\'s fuel'
+              : 'Fuel on ${_kMonthShort[_selectedDate.month - 1]} ${_selectedDate.day}',
+          trailing: Text(
+            _targetCalories > 0
+                ? '${(_consumedCalories / _targetCalories * 100).round()}% eaten'
+                : '',
+            style: KText.caption.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
+          consumedCal: _consumedCalories,
+          targetCal:   _targetCalories,
+          consumedPro: _consumedProtein,
+          targetPro:   _targetProtein,
         ),
-        consumedCal: _consumedCalories,
-        targetCal:   _targetCalories,
-        consumedPro: _consumedProtein,
-        targetPro:   _targetProtein,
       ),
     );
   }
@@ -1569,7 +1666,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label:    'Protein',
             value:    '${plan.avgDailyProtein.round()} g a day on average',
             subtitle: 'Train days ${plan.trainingDayProtein.round()} g, rest days ${plan.restDayProtein.round()} g',
-            dot:      KColor.green,
+            dot:      KColor.protein,
           ),
           const KHairline(),
         ],
@@ -1644,7 +1741,13 @@ class FuelLabel extends StatelessWidget {
     required this.targetPro,
     this.trailing,
     this.footer,
+    this.heroTag,
+    this.sweepIn = true,
   });
+
+  /// The Hero tag that carries a day's rings from the dashboard into the
+  /// day screen.
+  static String heroTagFor(DateTime day) => 'fuel-rings-${dateKey(day)}';
 
   final String title;
   final int consumedCal;
@@ -1657,6 +1760,13 @@ class FuelLabel extends StatelessWidget {
 
   /// Below the card (a day status line, an empty-day nudge).
   final Widget? footer;
+
+  /// Wraps the rings in a Hero with this tag (see [heroTagFor]).
+  final Object? heroTag;
+
+  /// Sweep the rings up from empty on first show. Off where the rings
+  /// arrive by Hero, already drawn.
+  final bool sweepIn;
 
   @override
   Widget build(BuildContext context) {
@@ -1685,7 +1795,7 @@ class FuelLabel extends StatelessWidget {
       fontWeight: FontWeight.w600,
       letterSpacing: -2.0,
       height: 1.0,
-      color: calOver ? KColor.danger : KColor.textPrimary,
+      color: calOver ? KColor.ember : KColor.textPrimary,
     );
 
     return Column(
@@ -1716,9 +1826,10 @@ class FuelLabel extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Center(
-                    child: KDabbaRings(
+                    child: _maybeHero(KDabbaRings(
                       size: 220,
                       stroke: 16,
+                      sweepIn: sweepIn,
                       rings: [
                         KRingSpec(calRatio, calOver ? KRingColors.over : KRingColors.calories),
                         KRingSpec(proRatio, KRingColors.protein),
@@ -1726,10 +1837,16 @@ class FuelLabel extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          KAnimatedCount(
-                            value: hasCal ? calLeft : consumedCal,
-                            style: centre,
-                            thousandsSeparator: true,
+                          // Rolls like an odometer when a meal changes it;
+                          // a plain rebuild with the same number stays still.
+                          ConstrainedBox(
+                            // Inside the inner ring.
+                            constraints: const BoxConstraints(maxWidth: 150),
+                            child: KRollingNumber.int(
+                              hasCal ? calLeft : consumedCal,
+                              style: centre,
+                              alignment: Alignment.center,
+                            ),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -1742,7 +1859,7 @@ class FuelLabel extends StatelessWidget {
                           ),
                         ],
                       ),
-                    ),
+                    )),
                   ),
                   const SizedBox(height: KSpacing.xl),
                   Row(
@@ -1786,6 +1903,12 @@ class FuelLabel extends StatelessWidget {
       ],
     );
   }
+
+  Widget _maybeHero(KDabbaRings rings) {
+    final tag = heroTag;
+    if (tag == null) return rings;
+    return Hero(tag: tag, flightShuttleBuilder: KDabbaRings.heroShuttle, child: rings);
+  }
 }
 
 class _RingLegend extends StatelessWidget {
@@ -1824,15 +1947,18 @@ class _RingLegend extends StatelessWidget {
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(
-                  text: value,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                KRollingNumber(
+                  value,
                   style: KText.numMedium.copyWith(fontSize: 22, fontWeight: FontWeight.w800, color: KHeroInk.primary),
+                  alignment: AlignmentDirectional.centerStart,
                 ),
-                TextSpan(text: ' $of', style: KText.caption.copyWith(fontSize: 13, color: KHeroInk.muted)),
-              ]),
-              maxLines: 1,
+                Text(' $of', maxLines: 1, style: KText.caption.copyWith(fontSize: 13, color: KHeroInk.muted)),
+              ],
             ),
           ),
         ],
@@ -2002,7 +2128,6 @@ class _WeekStrip extends StatelessWidget {
   final _DayMarks marks;
 
   const _WeekStrip({
-    super.key,
     required this.weekStart,
     required this.focusedMonth,
     required this.selectedDate,
@@ -2013,12 +2138,7 @@ class _WeekStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const _WeekdayRow(),
-        const SizedBox(height: 6),
-        Row(
+    return Row(
           children: List.generate(7, (i) {
             final date = DateTime(weekStart.year, weekStart.month, weekStart.day + i);
             final dk = dateKey(date);
@@ -2036,8 +2156,6 @@ class _WeekStrip extends StatelessWidget {
               ),
             );
           }),
-        ),
-      ],
     );
   }
 }
@@ -2127,7 +2245,7 @@ class _DayCell extends StatelessWidget {
     final dark = KColor.isDark;
     final Color textColor;
     if (isSelected) {
-      textColor = Colors.white;
+      textColor = KColor.onInk;
     } else if (isToday || isCompleted) {
       textColor = KColor.textPrimary;
     } else if (dimmed) {
@@ -2158,14 +2276,10 @@ class _DayCell extends StatelessWidget {
           height: height,
           margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
-            // Selected = the Fuel gradient. Target met keeps a faint mint wash
+            // Selected = a solid ink chip. Target met keeps a faint ink wash
             // (shape, not just the dot); today gets an ink outline.
-            gradient: isSelected
-                ? LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: KGradient.fuel)
-                : null,
-            boxShadow: isSelected ? KShadow.glow(KColor.ember, strength: 0.6) : null,
             color: isSelected
-                ? null
+                ? KColor.ink
                 : isCompleted
                     ? KColor.green.withValues(alpha: dark ? 0.12 : 0.1)
                     : Colors.transparent,
@@ -2191,10 +2305,10 @@ class _DayCell extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (isCompleted)
-                      _Dot(color: KColor.green, ring: isSelected)
+                      _Dot(color: KColor.ink, ring: isSelected)
                     else if (isLogged)
-                      _Dot(color: KColor.saffron, ring: isSelected),
-                    if (hasGym) _Dot(color: KColor.violet, ring: isSelected),
+                      _Dot(color: KColor.textMuted, ring: isSelected),
+                    if (hasGym) _Dot(color: KColor.ember, ring: isSelected),
                   ],
                 ),
               ),
@@ -3103,10 +3217,10 @@ class DailyNutritionQualityCard extends StatelessWidget {
     final (Color scoreColor, String verdict) = score == null
         ? (KColor.textSecondary, 'Not scored yet')
         : score >= 80
-            ? (KColor.green, 'Good')
+            ? (KColor.ink, 'Good')
             : score >= 60
-                ? (KColor.saffron, 'Fair')
-                : (KColor.danger, 'Could be cleaner');
+                ? (KColor.textSecondary, 'Fair')
+                : (KColor.ember, 'Could be cleaner');
 
     return Padding(
       padding: const EdgeInsets.only(top: KSpacing.xl),
@@ -3272,7 +3386,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
                         consumed: consumedFiber,
                         target: targetFiber,
                         unit: 'g',
-                        colors: [KColor.violet],
+                        colors: [KColor.fiber],
                       ),
                       const SizedBox(height: KSpacing.md),
                       _buildMacroRow(
@@ -3280,7 +3394,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
                         consumed: consumedCarbs,
                         target: targetCarbs,
                         unit: 'g',
-                        colors: [KColor.blue],
+                        colors: [KColor.carbs],
                       ),
                       const SizedBox(height: KSpacing.md),
                       _buildMacroRow(
@@ -3288,7 +3402,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
                         consumed: consumedFat,
                         target: targetFat,
                         unit: 'g',
-                        colors: [KColor.saffron],
+                        colors: [KColor.fat],
                       ),
                       if (consumedSugar > 0) ...[
                         const SizedBox(height: KSpacing.md),
@@ -3340,7 +3454,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
                 textAlign: TextAlign.end,
                 style: KText.caption.copyWith(
                   fontSize: 13,
-                  color: isOver ? KColor.warning : KColor.textSecondary,
+                  color: isOver ? KColor.ember : KColor.textSecondary,
                   fontWeight: isOver ? FontWeight.w600 : FontWeight.w500,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
@@ -3353,7 +3467,7 @@ class _AdditionalMacrosCardState extends State<AdditionalMacrosCard> {
           progress: progressRatio,
           height: 4,
           duration: KMotion.standard,
-          colors: isOver ? [KColor.warning, KColor.warning] : colors,
+          colors: isOver ? [KColor.ember, KColor.ember] : colors,
         ),
       ],
     );
@@ -3451,19 +3565,25 @@ class _BentoTile extends StatelessWidget {
   final double? progress;
   final VoidCallback? onTap;
 
+  static const double minHeight = 132;
+
   @override
   Widget build(BuildContext context) {
     final spoken = '$label. $value${unit == null ? '' : ' $unit'}.${sub == null ? '' : ' $sub.'}';
+    final valueStyle = KText.numMedium.copyWith(fontSize: 26, fontWeight: FontWeight.w600, letterSpacing: -0.9);
     final body = Container(
-      constraints: const BoxConstraints(minHeight: 132),
+      constraints: const BoxConstraints(minHeight: minHeight),
       padding: const EdgeInsets.fromLTRB(KSpacing.lg, 14, KSpacing.md, KSpacing.lg),
       decoration: BoxDecoration(
         color: KColor.card,
         borderRadius: KRadius.lg,
         border: Border.all(color: KColor.hairline),
       ),
+      // spaceBetween rather than a Spacer: the row measures each tile at its
+      // natural height first, then stretches the shorter one.
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
@@ -3483,47 +3603,56 @@ class _BentoTile extends StatelessWidget {
                 Icon(Icons.chevron_right_rounded, size: 18, color: KColor.textMuted),
             ],
           ),
-          const Spacer(),
-          const SizedBox(height: KSpacing.md),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(
-                  text: value,
-                  style: KText.numMedium.copyWith(fontSize: 26, fontWeight: FontWeight.w600, letterSpacing: -0.9),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: KSpacing.md),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    // Numbers roll when they change; words just change.
+                    if (KRollingNumber.isRollable(value))
+                      KRollingNumber(value, style: valueStyle, alignment: AlignmentDirectional.centerStart)
+                    else
+                      Text(value, maxLines: 1, style: valueStyle),
+                    if (unit != null)
+                      Text(
+                        ' $unit',
+                        maxLines: 1,
+                        style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted),
+                      ),
+                  ],
                 ),
-                if (unit != null)
-                  TextSpan(
-                    text: ' $unit',
-                    style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted),
-                  ),
-              ]),
-              maxLines: 1,
-            ),
-          ),
-          if (sub != null) ...[
-            const SizedBox(height: 3),
-            Text(
-              sub!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted),
-            ),
-          ],
-          if (progress != null) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: KRadius.pill,
-              child: LinearProgressIndicator(
-                value: progress!.clamp(0.0, 1.0),
-                minHeight: 4,
-                backgroundColor: KColor.track,
-                color: accent,
               ),
-            ),
-          ],
+              if (sub != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  sub!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted),
+                ),
+              ],
+              if (progress != null) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: KRadius.pill,
+                  child: LinearProgressIndicator(
+                    value: progress!.clamp(0.0, 1.0),
+                    minHeight: 4,
+                    backgroundColor: KColor.track,
+                    color: accent,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -3600,7 +3729,7 @@ class _FastingTileState extends State<_FastingTile> {
       final planned = st.scheduled;
       return _BentoTile(
         icon: Icons.timer_outlined,
-        accent: KColor.saffron,
+        accent: KColor.ink,
         label: 'Fasting',
         value: planned != null ? 'Planned' : 'Start',
         sub: planned != null ? planned.preset.label : '16:8, a vrat or a roza',
@@ -3610,7 +3739,7 @@ class _FastingTileState extends State<_FastingTile> {
     final status = FastStatus(a, DateTime.now());
     return _BentoTile(
       icon: Icons.timer_outlined,
-      accent: KColor.saffron,
+      accent: KColor.ink,
       label: a.preset.label,
       value: status.goalReached ? 'Done' : _hm(status.remaining),
       unit: status.goalReached ? null : 'left',
@@ -3697,7 +3826,7 @@ class _MealGroupRow extends StatelessWidget {
               const SizedBox(height: 3),
               Text(
                 '$pro g protein',
-                style: KText.caption.copyWith(fontSize: 12, color: KColor.green),
+                style: KText.caption.copyWith(fontSize: 12, color: KColor.protein),
               ),
             ],
           ),

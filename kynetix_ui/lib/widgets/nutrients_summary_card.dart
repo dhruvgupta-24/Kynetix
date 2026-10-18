@@ -129,12 +129,12 @@ class _MiniRow extends StatelessWidget {
               Expanded(child: Text(m.label, style: KText.bodyMedium)),
               Text(
                 over ? '$pct of limit, $when' : '$pct, $when',
-                style: KText.caption.copyWith(color: over ? KColor.danger : KColor.textSecondary),
+                style: KText.caption.copyWith(color: over ? KColor.ember : KColor.textSecondary),
               ),
             ],
           ),
           const SizedBox(height: KSpacing.xs),
-          KBar(progress: ratio, colors: [over ? KColor.danger : KColor.fuel], height: 4),
+          KBar(progress: ratio, colors: [over ? KColor.ember : KColor.ink], height: 4),
         ],
       ),
     );

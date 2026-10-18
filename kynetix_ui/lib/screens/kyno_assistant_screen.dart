@@ -279,13 +279,13 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
 
     final top = insights.first;
 
-    // Colour carries meaning only (attention = amber, progress / resolved =
-    // success); coaching notes stay monochrome. Each pairs with an icon + word.
+    // Colour carries meaning only (attention = the accent, progress / resolved =
+    // ink); coaching notes stay monochrome. Each pairs with an icon + word.
     final (color, icon) = switch (top.severity) {
-      KynoInsightSeverity.needsAttention => (KColor.warning, Icons.error_outline_rounded),
+      KynoInsightSeverity.needsAttention => (KColor.ember, Icons.error_outline_rounded),
       KynoInsightSeverity.coaching => (KColor.textSecondary, Icons.lightbulb_outline_rounded),
-      KynoInsightSeverity.progress => (KColor.success, Icons.trending_up_rounded),
-      KynoInsightSeverity.resolved => (KColor.success, Icons.check_circle_outline_rounded),
+      KynoInsightSeverity.progress => (KColor.ink, Icons.trending_up_rounded),
+      KynoInsightSeverity.resolved => (KColor.ink, Icons.check_circle_outline_rounded),
     };
 
     // A note Kyno left for you: the one genuine object on this screen, so it
@@ -452,7 +452,7 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
               children: [
                 Expanded(
                   child: _GlanceStat(
-                    accent: KColor.violet,
+                    accent: KColor.textSecondary,
                     eyebrow: 'Training',
                     value: workoutLabel,
                     subtitle: exercisesCount,

@@ -136,13 +136,13 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
     primaryContainer: Color.alphaBlend(p.green.withValues(alpha: 0.18), p.card),
     onPrimaryContainer: p.textPrimary,
     secondary: p.green,
-    onSecondary: p.onAccent,
-    secondaryContainer: Color.alphaBlend(p.violet.withValues(alpha: 0.18), p.card),
+    onSecondary: p.onInk,
+    secondaryContainer: Color.alphaBlend(p.ember.withValues(alpha: 0.14), p.card),
     onSecondaryContainer: p.textPrimary,
-    tertiary: p.violet,
+    tertiary: p.ember,
     onTertiary: p.onAccent,
     error: p.danger,
-    onError: dark ? const Color(0xFF2B0710) : Colors.white,
+    onError: p.onAccent,
     surface: p.surface,
     onSurface: p.textPrimary,
     onSurfaceVariant: p.textSecondary,
@@ -157,7 +157,7 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
     scrim: Colors.black,
     inverseSurface: p.textPrimary,
     onInverseSurface: p.bg,
-    inversePrimary: p.green,
+    inversePrimary: p.onInk,
   );
 
   final base = (dark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
@@ -195,7 +195,9 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
     textTheme: textTheme,
     scaffoldBackgroundColor: p.bg,
     canvasColor: p.surface,
-    splashFactory: InkSparkle.splashFactory,
+    // InkRipple, not InkSparkle: no fragment shader to load and compile on
+    // the first tap (a one-off hitch on some devices), and a calmer ripple.
+    splashFactory: InkRipple.splashFactory,
     pageTransitionsTheme: kPageTransitions,
     dividerTheme: DividerThemeData(color: p.divider, thickness: 1, space: 1),
     iconTheme: IconThemeData(color: p.textSecondary),
@@ -207,6 +209,17 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
       centerTitle: false,
       foregroundColor: p.textPrimary,
       titleTextStyle: KText.h2,
+      // A transparent app bar can't infer the status-bar icon colour (it
+      // reads as dark and picks white icons, which then stick on light
+      // screens), so say it per theme.
+      systemOverlayStyle: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      ),
     ),
     cardTheme: CardThemeData(
       color: p.card,
@@ -247,7 +260,9 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
       behavior: SnackBarBehavior.floating,
       backgroundColor: p.ink,
       contentTextStyle: KText.bodyMedium.copyWith(fontSize: 13.5, color: p.onInk),
-      actionTextColor: dark ? p.greenDark : const Color(0xFF7DF0C2),
+      // Ember on ink fails contrast in both themes, so the action is base
+      // colour and set apart by its weight and position.
+      actionTextColor: p.onInk,
       elevation: 0,
       insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       shape: const RoundedRectangleBorder(borderRadius: KRadius.md),
