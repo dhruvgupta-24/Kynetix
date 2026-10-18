@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4x4. Updates come from the app; updatePeriodMillis is the 30 min floor,
+     and a midnight alarm redraws every size for the new day. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="250dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="4"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/kynetix_widget_4x4"
+    android:previewImage="@drawable/kynetix_widget_preview_large"
+    android:description="@string/kynetix_widget_large_description"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen">
+</appwidget-provider>

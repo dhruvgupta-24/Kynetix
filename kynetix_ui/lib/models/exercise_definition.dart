@@ -1,3 +1,4 @@
+import '../data/exercise_classification.dart';
 import 'workout_split.dart';
 
 /// Rich exercise definition from the master 1,300+ exercise library.
@@ -51,12 +52,20 @@ class ExerciseDefinition {
   })  : canonicalName = canonicalName ?? name ?? '',
         displayName = displayName ?? name ?? canonicalName ?? '';
 
+  /// Equipment, compound or isolation, and the honest label for the UI.
+  ExerciseClassification get classification => ExerciseClassifier.classify(
+        id: id,
+        name: canonicalName,
+        equipment: equipment,
+        muscle: targetMuscle,
+        storedType: exerciseType,
+      );
+
   /// Seamlessly convert to Kynetix [Exercise] instance for active workouts and splits.
   ExerciseExecutionMode inferExecutionMode() {
     final cat = category.toLowerCase();
     final bp = bodyPart.toLowerCase();
     final nameLower = canonicalName.toLowerCase();
-    final eq = equipment.toLowerCase();
 
     if (cat == 'cardio' || bp == 'cardio') {
       return ExerciseExecutionMode.cardio;
@@ -68,9 +77,9 @@ class ExerciseDefinition {
         nameLower.contains('hollow body')) {
       return ExerciseExecutionMode.timed;
     }
-    if (eq.contains('body weight') ||
-        eq.contains('bodyweight') ||
-        exerciseType == ExerciseType.bodyweight) {
+    final bodyweightMode = classification.bodyweightMode;
+    if (bodyweightMode != null) return bodyweightMode;
+    if (exerciseType == ExerciseType.bodyweight) {
       return ExerciseExecutionMode.bodyweightReps;
     }
     return ExerciseExecutionMode.weightReps;
@@ -91,13 +100,14 @@ class ExerciseDefinition {
   }
 
   factory ExerciseDefinition.fromExercise(Exercise ex) {
+    final kind = ExerciseClassifier.forExercise(ex);
     return ExerciseDefinition(
       id: ex.id,
       name: ex.name,
       category: _inferCategory(ex.muscleGroup),
       bodyPart: ex.muscleGroup,
-      equipment: _inferEquipment(ex.type),
-      equipmentGroup: _inferEquipmentGroup(ex.type),
+      equipment: kind.equipmentName,
+      equipmentGroup: kind.equipmentGroup,
       targetMuscle: ex.muscleGroup,
       muscleGroup: ex.muscleGroup,
       secondaryMuscles: const [],
@@ -183,25 +193,5 @@ class ExerciseDefinition {
     if (m.contains('core') || m.contains('abs') || m.contains('waist')) return 'Core';
     if (m.contains('cardio')) return 'Cardio';
     return 'Other';
-  }
-
-  static String _inferEquipment(ExerciseType type) {
-    return switch (type) {
-      ExerciseType.barbellCompound => 'Barbell',
-      ExerciseType.dumbbell => 'Dumbbell',
-      ExerciseType.cableMachine => 'Cable',
-      ExerciseType.isolation => 'Machine',
-      ExerciseType.bodyweight => 'Bodyweight',
-    };
-  }
-
-  static String _inferEquipmentGroup(ExerciseType type) {
-    return switch (type) {
-      ExerciseType.barbellCompound => 'Barbell',
-      ExerciseType.dumbbell => 'Dumbbell',
-      ExerciseType.cableMachine => 'Cable',
-      ExerciseType.isolation => 'Machine',
-      ExerciseType.bodyweight => 'Bodyweight',
-    };
   }
 }

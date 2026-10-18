@@ -8,6 +8,7 @@ import '../services/user_session_coordinator.dart';
 import '../services/dev_test_harness.dart';
 import '../config/app_theme.dart';
 import 'app_shell.dart';
+import 'email_verify_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'onboarding/password_toggle.dart';
 import 'onboarding/scene_backdrop.dart';
@@ -37,6 +38,9 @@ class _AuthScreenState extends State<AuthScreen> {
   /// The in-flight request is Google sign-in, so the spinner shows on the
   /// Google button rather than on the email/phone action.
   bool _googleLoading = false;
+
+  /// A social sign-in owns the spinner, so the email/phone action stays calm.
+  bool get _socialLoading => _googleLoading;
 
   // Email Controllers
   final _emailCtrl = TextEditingController();
@@ -98,16 +102,25 @@ class _AuthScreenState extends State<AuthScreen> {
         // account only signs in (and reaches onboarding through AuthGate)
         // once the link in the email is opened.
         if (response.session == null && response.user != null && mounted) {
-          setState(() {
-            _errorMessage = 'Almost there. Check your email for a confirmation link, then sign in.';
-            _noticeIsInfo = true;
-          });
+          // Supabase answers a sign-up for an address that already has a
+          // confirmed account with an empty identity list and no email.
+          if ((response.user!.identities ?? const []).isEmpty) {
+            _showError('There is already an account with that email. Sign in instead.');
+          } else {
+            await _openVerify(email, sentNow: true);
+          }
         }
       } else {
         await _authService.signIn(email: email, password: password);
         // AuthGate handles the implicit routing.
       }
     } on AuthException catch (e) {
+      final m = '${e.code ?? ''} ${e.message}'.toLowerCase();
+      if (!_isSignup && (m.contains('email_not_confirmed') || m.contains('not confirmed'))) {
+        if (mounted) setState(() => _isLoading = false);
+        await _openVerify(email, sentNow: false);
+        return;
+      }
       _showError(_friendlyAuthError(e));
     } catch (e) {
       _showError(_genericError);
@@ -116,6 +129,13 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+
+  Future<void> _openVerify(String email, {required bool sentNow}) async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => EmailVerifyScreen(email: email, sentNow: sentNow)),
+    );
+  }
 
   static const _genericError = "That didn't go through. Check your connection and try again.";
 
@@ -554,7 +574,7 @@ class _AuthScreenState extends State<AuthScreen> {
       KButton(
         label: _isSignup ? 'Create account' : 'Sign in',
         width: double.infinity,
-        loading: _isLoading && !_googleLoading,
+        loading: _isLoading && !_socialLoading,
         onTap: _submitEmailAuth,
       ),
     ];
@@ -588,7 +608,7 @@ class _AuthScreenState extends State<AuthScreen> {
         KButton(
           label: 'Send code',
           width: double.infinity,
-          loading: _isLoading && !_googleLoading,
+          loading: _isLoading && !_socialLoading,
           onTap: _handlePhoneOtpSend,
         ),
       ];
@@ -607,7 +627,7 @@ class _AuthScreenState extends State<AuthScreen> {
       KButton(
         label: 'Verify and ${_isSignup ? "sign up" : "sign in"}',
         width: double.infinity,
-        loading: _isLoading && !_googleLoading,
+        loading: _isLoading && !_socialLoading,
         onTap: _handlePhoneOtpVerify,
       ),
       const SizedBox(height: KSpacing.sm),

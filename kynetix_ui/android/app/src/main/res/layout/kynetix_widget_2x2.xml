@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 2x2: two concentric rings (calories, protein) on a transparent
-     background, drawn by WidgetRings. Tapping opens the app. -->
+<!-- 2x2: drawn by WidgetRings on a transparent background (rings, a dark
+     lens behind the numbers, small dark plates behind the stats). Tapping
+     opens the app. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/transparent"
-    android:padding="2dp">
+    android:padding="4dp">
 
     <ImageView
         android:id="@+id/widget_dial"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center"
-        android:adjustViewBounds="true"
         android:importantForAccessibility="no"
         android:scaleType="fitCenter" />
 </FrameLayout>

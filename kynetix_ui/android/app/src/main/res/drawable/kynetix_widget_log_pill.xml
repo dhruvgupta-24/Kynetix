@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Log meal button on the 2x4 and 4x4 widgets: a solid light pill with
+     a faint dark hairline so its edge holds on light wallpapers. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFF4F4F2" />
+    <stroke android:width="1dp" android:color="#1F0A0A0B" />
+    <corners android:radius="100dp" />
+</shape>

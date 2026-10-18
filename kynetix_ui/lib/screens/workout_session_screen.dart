@@ -24,6 +24,7 @@ import '../services/warmup_calculator.dart';
 import '../widgets/pr_celebration.dart';
 import '../widgets/workout_share_card.dart';
 import '../widgets/muscle_body_map.dart';
+import '../data/exercise_classification.dart';
 import '../data/form_cues.dart';
 import '../widgets/workout_session_sheets.dart';
 import 'package:flutter/services.dart' show HapticFeedback, SystemSound, SystemSoundType;
@@ -3309,13 +3310,8 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   // ── Exercise title, stats strip and Kyno insights ────────────────────────
 
-  String get _exTypeLabel => switch (widget.exercise.type) {
-        ExerciseType.barbellCompound => 'Barbell compound',
-        ExerciseType.dumbbell => 'Dumbbell',
-        ExerciseType.cableMachine => 'Cable machine',
-        ExerciseType.isolation => 'Isolation',
-        ExerciseType.bodyweight => 'Bodyweight',
-      };
+  /// Equipment and movement, e.g. "Bodyweight" or "Barbell, isolation".
+  String get _exTypeLabel => ExerciseClassifier.forExercise(widget.exercise).label;
 
   /// Name, muscle group and the two page actions. The muscle mark comes from
   /// the shared icon language.

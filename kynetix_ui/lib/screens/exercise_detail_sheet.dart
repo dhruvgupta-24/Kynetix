@@ -200,9 +200,9 @@ class ExerciseDetailSheet extends StatelessWidget {
                         ],
                         const SizedBox(height: 10),
                         _LabeledRow(
-                          label: 'Progression style:',
+                          label: 'Type:',
                           child: Text(
-                            _typeLabel(definition.exerciseType),
+                            definition.classification.label,
                             style: KText.bodyMedium.copyWith(
                               color: KColor.textPrimary,
                               fontSize: 14,
@@ -401,14 +401,6 @@ class ExerciseDetailSheet extends StatelessWidget {
       ),
     );
   }
-
-  static String _typeLabel(ExerciseType type) => switch (type) {
-    ExerciseType.barbellCompound => 'Barbell compound',
-    ExerciseType.dumbbell => 'Dumbbell',
-    ExerciseType.cableMachine => 'Cable or machine',
-    ExerciseType.isolation => 'Isolation',
-    ExerciseType.bodyweight => 'Bodyweight, reps first',
-  };
 
   /// Short descriptive line under the title (equipment · primary muscle),
   /// written in sentence case so it never duplicates the uppercase tags.

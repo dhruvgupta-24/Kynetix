@@ -23,6 +23,9 @@ class AuthService {
       final response = await supabase.auth.signUp(
         email: email,
         password: password,
+        // The confirmation email has a code and a link; the link opens the
+        // app through this deep link.
+        emailRedirectTo: emailCallback,
       );
       debugPrint('[AuthService] signUp success. User ID: ${response.user?.id}');
       return response;
@@ -30,6 +33,20 @@ class AuthService {
       debugPrint('[AuthService] signUp failed: $e');
       rethrow;
     }
+  }
+
+  /// Deep link the confirmation email's link opens.
+  static const emailCallback = 'kynetix://login-callback';
+
+  /// Confirms a new account with the 6-digit code from the sign-up email.
+  /// A successful check returns a session, which signs the person in.
+  Future<AuthResponse> verifyEmailCode({required String email, required String code}) {
+    return supabase.auth.verifyOTP(email: email, token: code, type: OtpType.signup);
+  }
+
+  /// Sends the sign-up confirmation email again (a fresh code and link).
+  Future<void> resendSignupEmail(String email) async {
+    await supabase.auth.resend(type: OtpType.signup, email: email, emailRedirectTo: emailCallback);
   }
 
   Future<AuthResponse> signIn({
@@ -146,4 +163,5 @@ class AuthService {
       rethrow;
     }
   }
+
 }

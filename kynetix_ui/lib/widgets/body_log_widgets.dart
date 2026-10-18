@@ -82,14 +82,23 @@ class _WeightSheetState extends State<_WeightSheet> {
                   _StepButton(icon: Icons.remove_rounded, label: 'Less 0.1 kilograms', onTap: () => _step(-0.1), onLongPress: () => _step(-1)),
                   const SizedBox(width: KSpacing.lg),
                   SizedBox(
-                    width: 132,
+                    width: 168,
                     child: TextField(
                       controller: _ctrl,
                       textAlign: TextAlign.center,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
                       style: KText.display.copyWith(fontSize: 40, fontFeatures: const [FontFeature.tabularFigures()]),
-                      decoration: const InputDecoration(border: InputBorder.none, suffixText: 'kg', isDense: true),
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        suffixText: 'kg',
+                        suffixStyle: KText.caption.copyWith(fontSize: 16, color: KColor.textMuted),
+                      ),
                       onChanged: (t) {
                         final v = double.tryParse(t.replaceAll(',', '.'));
                         if (v != null) _kg = v;

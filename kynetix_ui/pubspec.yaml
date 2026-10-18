@@ -83,16 +83,17 @@ flutter_launcher_icons:
   adaptive_icon_foreground: "assets/branding/kynetix_icon_fg.png"
 
 flutter_native_splash:
-  # Splash follows the phone theme: Paper (warm white) / Carbon (true black).
-  color: "#FAF7F1"
-  color_dark: "#000000"
+  # Kynetix is dark first: the splash is Graphite in both phone themes, so a
+  # light-mode phone never flashes white before the dark app.
+  color: "#0A0A0B"
+  color_dark: "#0A0A0B"
   image: "assets/branding/kynetix_logo_padded.png"
   android_12:
     image: "assets/branding/kynetix_icon_padded.png"
-    icon_background_color: "#FAF7F1"
-    color: "#FAF7F1"
-    icon_background_color_dark: "#000000"
-    color_dark: "#000000"
+    icon_background_color: "#0A0A0B"
+    color: "#0A0A0B"
+    icon_background_color_dark: "#0A0A0B"
+    color_dark: "#0A0A0B"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

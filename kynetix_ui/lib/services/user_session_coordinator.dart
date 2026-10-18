@@ -1,3 +1,4 @@
+import 'avatar_service.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -264,6 +265,7 @@ class UserSessionCoordinator {
     await KynoNotesService.instance.initForUser(userId, prefsOverride: prefs);
     await FastingService.instance.initForUser(userId, prefsOverride: prefs);
     await FoodLinkService.instance.initForUser(userId, prefsOverride: prefs);
+    await AvatarService.instance.initForUser(userId, prefsOverride: prefs);
     BodyMetricsService.instance.hydrateFromCloud().ignore();
 
     // 4. Reset KynoContext cache so no stale data from any prior session leaks
@@ -304,6 +306,7 @@ class UserSessionCoordinator {
     KynoNotesService.instance.clearMemory();
     FastingService.instance.clearMemory();
     FoodLinkService.instance.clearMemory();
+    AvatarService.instance.clearMemory();
     KynoContextService.instance.reset();
     KynoHistoricalAnalysisService.instance.clearMemory();
     KynoCoachingInsightService.instance.clearMemory();

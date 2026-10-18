@@ -20,7 +20,7 @@ void _debugLog(String? message, {int? wrapWidth}) {
 ///
 /// ```
 /// {
-///   "v": 2,
+///   "v": 3,
 ///   "date_key": "2026-10-17",         // the day these numbers belong to
 ///   "last_update_date": "2026-10-17", // legacy alias of date_key
 ///   "last_update_time": "14:05",
@@ -30,12 +30,21 @@ void _debugLog(String? message, {int? wrapWidth}) {
 ///   "protein_consumed": 82,
 ///   "protein_target": 140,
 ///   "protein_remaining": 58,
+///   "carbs_consumed": 150,            // v3: rounded DayLog mid totals,
+///   "carbs_target": 230,              // targets as the dashboard's
+///   "fat_consumed": 40,               // "Carbs, fat and fiber" card
+///   "fat_target": 62,                 // (macroSplit, 14 g fiber per
+///   "fiber_consumed": 18,             // 1,000 kcal clamped 20 to 60)
+///   "fiber_target": 30,
 ///   "is_training_day": true,
 ///   "day_label": "Push Day",
 ///   "next_day": {                     // tomorrow, so the widget is right
 ///     "date_key": "2026-10-18",       // after midnight without the app
 ///     "calories_target": 1980,
 ///     "protein_target": 132,
+///     "carbs_target": 210,            // v3, also on every days[] entry
+///     "fat_target": 58,
+///     "fiber_target": 28,
 ///     "is_training_day": false,
 ///     "day_label": "Rest Day"
 ///   }
@@ -49,7 +58,7 @@ class WidgetService {
 
   static const _channel = MethodChannel('com.kynetix.app/widget');
   static const prefsKey = 'widget_data_v1';
-  static const payloadVersion = 2;
+  static const payloadVersion = 3;
 
   /// The same totals the dashboard prints: every meal row shows its rounded
   /// kcal / protein, and the total is the sum of those printed numbers.
@@ -62,6 +71,23 @@ class WidgetService {
   @visibleForTesting
   static int displayProteinFor(DayLog log) =>
       log.allEntries.fold<int>(0, (s, e) => s + e.result.protein.mid.round());
+
+  /// Fiber target the dashboard shows (dashboard_screen.dart `_targetFiber`):
+  /// 14 g per 1,000 kcal of the day's target, clamped to 20 to 60 g.
+  @visibleForTesting
+  static double fiberTargetFor(double calories) =>
+      (14.0 * calories / 1000).clamp(20.0, 60.0).toDouble();
+
+  /// Carbs, fat and fiber targets for a day, rounded the way the dashboard's
+  /// "Carbs, fat and fiber" card prints them (`target.round()`).
+  static Map<String, int> _extraTargets(NutritionTargetEngine eng, DayTarget t, UserProfile profile) {
+    final split = eng.macroSplit(t.calories, t.protein, profile: profile);
+    return {
+      'carbs_target': split.carbs.round(),
+      'fat_target': split.fat.round(),
+      'fiber_target': fiberTargetFor(t.calories).round(),
+    };
+  }
 
   static String _dateKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -95,6 +121,7 @@ class WidgetService {
 
     final targetCalories = target.calories.round();
     final targetProtein = target.protein.round();
+    final extra = _extraTargets(eng, target, profile);
 
     return {
       'v': payloadVersion,
@@ -108,12 +135,18 @@ class WidgetService {
       'protein_consumed': consumedProtein,
       'protein_target': targetProtein,
       'protein_remaining': targetProtein - consumedProtein,
+      // Same DayLog mid totals as the dashboard's carbs, fat and fiber card.
+      'carbs_consumed': log.totalCarbsMid.round(),
+      'fat_consumed': log.totalFatMid.round(),
+      'fiber_consumed': log.totalFiberMid.round(),
+      ...extra,
       'is_training_day': target.isTrainingDay,
       'day_label': target.label,
       'next_day': {
         'date_key': _dateKey(tomorrow),
         'calories_target': next.calories.round(),
         'protein_target': next.protein.round(),
+        ..._extraTargets(eng, next, profile),
         'is_training_day': next.isTrainingDay,
         'day_label': next.label,
       },
@@ -129,6 +162,7 @@ class WidgetService {
               'date_key': _dateKey(d),
               'calories_target': t.calories.round(),
               'protein_target': t.protein.round(),
+              ..._extraTargets(eng, t, profile),
               'is_training_day': t.isTrainingDay,
               'day_label': t.label,
             };
@@ -178,6 +212,19 @@ class WidgetService {
       _debugLog('[WidgetService] Widget data updated successfully: $payload');
     } catch (e, stack) {
       _debugLog('[WidgetService] Failed to update widget data: $e\n$stack');
+    }
+  }
+
+  /// Asks the launcher to add the widget of [size] ("2x2", "4x2", "2x4",
+  /// "4x4") to the home screen. False when the launcher can't pin widgets,
+  /// in which case the person adds it from the widget picker.
+  static Future<bool> pinWidget(String size) async {
+    try {
+      return await _channel.invokeMethod<bool>('pinWidget', {'size': size}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
     }
   }
 

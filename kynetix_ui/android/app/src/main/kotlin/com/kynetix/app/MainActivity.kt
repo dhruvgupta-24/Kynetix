@@ -76,15 +76,26 @@ class MainActivity : FlutterFragmentActivity() {
             when (call.method) {
                 "updateWidget" -> {
                     val context = applicationContext
-                    val widgetIntent = Intent(context, KynetixWidgetProvider::class.java).apply {
-                        action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-                    }
-                    val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(
-                        ComponentName(context, KynetixWidgetProvider::class.java)
-                    )
-                    widgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-                    context.sendBroadcast(widgetIntent)
+                    KynetixWidgetProvider.refreshAll(context)
                     result.success(true)
+                }
+                "pinWidget" -> {
+                    // Asks the launcher to add one widget size to the home
+                    // screen (Android 8+, launcher permitting).
+                    val cls = when (call.argument<String>("size")) {
+                        "4x2" -> KynetixWidgetWide::class.java
+                        "2x4" -> KynetixWidgetTall::class.java
+                        "4x4" -> KynetixWidgetLarge::class.java
+                        else -> KynetixWidgetProvider::class.java
+                    }
+                    val m = AppWidgetManager.getInstance(applicationContext)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                        m.isRequestPinAppWidgetSupported
+                    ) {
+                        result.success(m.requestPinAppWidget(ComponentName(applicationContext, cls), null, null))
+                    } else {
+                        result.success(false)
+                    }
                 }
                 "getPendingAction" -> {
                     val action = pendingAction

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:kynetix/screens/dashboard_screen.dart';
+import 'package:kynetix/screens/app_shell.dart';
 
 import 'package:kynetix/services/profile_service.dart';
 import 'package:kynetix/models/user_profile.dart';
@@ -29,15 +29,16 @@ void main() {
     } catch (_) {}
   });
 
-  testWidgets('WF-10 REGRESSION: Dashboard profile control exposes accessible semantic label "Profile"', (WidgetTester tester) async {
+  // Profile moved from the dashboard header into the bottom bar's Profile tab.
+  testWidgets('WF-10 REGRESSION: the Profile tab in the dock exposes the semantic label "Profile"', (WidgetTester tester) async {
     final handle = tester.ensureSemantics();
 
     await tester.pumpWidget(
       const MaterialApp(
-        home: DashboardScreen(),
+        home: AppShell(),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
 
     final profileSemantics = find.bySemanticsLabel('Profile');
 

@@ -104,6 +104,12 @@ Deno.serve(async (req: Request) => {
       counts[`${table}.${column}_cleared`] = count ?? 0;
     }
 
+    // The profile picture lives in storage, not in a table.
+    {
+      const { error } = await admin.storage.from('avatars').remove([`${userId}/avatar.jpg`]);
+      if (error) console.error('[delete-account] avatar remove failed (continuing)');
+    }
+
     const { error: delErr } = await admin.auth.admin.deleteUser(userId);
     if (delErr && !isUserNotFound(delErr)) {
       console.error(`[delete-account] auth delete failed status=${(delErr as any).status ?? '-'}`);

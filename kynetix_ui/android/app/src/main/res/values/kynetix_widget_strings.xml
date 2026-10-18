@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="kynetix_widget_label">Kynetix rings</string>
+    <string name="kynetix_widget_wide_label">Kynetix wide</string>
+    <string name="kynetix_widget_tall_label">Kynetix tall</string>
+    <string name="kynetix_widget_large_label">Kynetix day</string>
     <string name="kynetix_widget_description">Calories and protein left today, at a glance.</string>
+    <string name="kynetix_widget_wide_description">Calories and protein left, with carbs, fat and fiber.</string>
+    <string name="kynetix_widget_tall_description">Rings, carbs, fat and fiber, and Log meal.</string>
+    <string name="kynetix_widget_large_description">Your whole day: rings, every macro and Log meal.</string>
+    <string name="kynetix_widget_log_meal">+ Log meal</string>
 </resources>

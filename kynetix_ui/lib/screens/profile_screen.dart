@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,7 @@ import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
+import '../services/widget_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/insights_report_service.dart';
 import 'insights_screen.dart';
@@ -793,6 +795,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
+        if (defaultTargetPlatform == TargetPlatform.android)
+          _SettingRow(
+            icon: Icons.widgets_outlined,
+            tint: KColor.textSecondary,
+            label: 'Home screen widget',
+            subtitle: 'Calories and protein left, without opening the app',
+            onTap: () => showKSheet<void>(context: context, builder: (_) => const _WidgetPickerSheet()),
+          ),
       ],
     );
   }
@@ -3310,6 +3320,125 @@ class _GoalChip extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Home screen widget picker ────────────────────────────────────────────────
+// Each size, drawn as its shape on a 4x4 grid, and a tap that asks the
+// launcher to place it.
+
+class _WidgetPickerSheet extends StatelessWidget {
+  const _WidgetPickerSheet();
+
+  static const _sizes = [
+    ('2x2', 'Rings', 'Calories and protein left, on your wallpaper.', 2, 2),
+    ('4x2', 'Wide', 'Rings with what is left and what you have eaten.', 4, 2),
+    ('2x4', 'Tall', 'Rings, eaten of target, and a Log meal button.', 2, 4),
+    ('4x4', 'Large', 'Your whole day, with a Log meal button.', 4, 4),
+  ];
+
+  Future<void> _pin(BuildContext context, String size) async {
+    final ok = await WidgetService.pinWidget(size);
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Long-press your home screen, tap Widgets, then find Kynetix.'),
+          persist: false,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.sm, KSpacing.p, KSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Center(child: KDragHandle()),
+            const SizedBox(height: KSpacing.md),
+            Text('Add a widget', style: KText.h2),
+            const SizedBox(height: 4),
+            Text(
+              'Pick a size. Your phone asks where to put it.',
+              style: KText.body.copyWith(color: KColor.textSecondary),
+            ),
+            const SizedBox(height: KSpacing.lg),
+            for (final (size, name, about, w, h) in _sizes)
+              Pressable(
+                onTap: () => _pin(context, size),
+                haptic: true,
+                scale: 0.98,
+                borderRadius: KRadius.md,
+                semanticLabel: '$name widget, $size. $about',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      _SizeGlyph(w: w, h: h),
+                      const SizedBox(width: KSpacing.lg),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$name, $size', style: KText.h3),
+                            const SizedBox(height: 2),
+                            Text(about, style: KText.caption.copyWith(fontSize: 13, color: KColor.textMuted)),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.add_rounded, color: KColor.textSecondary),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A widget size as filled cells on a 4x4 grid.
+class _SizeGlyph extends StatelessWidget {
+  const _SizeGlyph({required this.w, required this.h});
+  final int w;
+  final int h;
+
+  @override
+  Widget build(BuildContext context) {
+    const cell = 9.0;
+    const gap = 2.0;
+    return SizedBox(
+      width: cell * 4 + gap * 3,
+      height: cell * 4 + gap * 3,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          for (var r = 0; r < 4; r++)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (var c = 0; c < 4; c++)
+                  Container(
+                    width: cell,
+                    height: cell,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(2.5),
+                      color: (c < w && r < h) ? KColor.ember : KColor.cardHigh,
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }

@@ -105,13 +105,50 @@
         <!-- Kynetix Home Widget -->
         <receiver
             android:name=".KynetixWidgetProvider"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/kynetix_widget_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/kynetix_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".KynetixWidgetWide"
+            android:exported="true"
+            android:label="@string/kynetix_widget_wide_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kynetix_widget_wide_info" />
+        </receiver>
+
+        <receiver
+            android:name=".KynetixWidgetTall"
+            android:exported="true"
+            android:label="@string/kynetix_widget_tall_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kynetix_widget_tall_info" />
+        </receiver>
+
+        <receiver
+            android:name=".KynetixWidgetLarge"
+            android:exported="true"
+            android:label="@string/kynetix_widget_large_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kynetix_widget_large_info" />
         </receiver>
 
         <!-- flutter_local_notifications: delivers scheduled notifications

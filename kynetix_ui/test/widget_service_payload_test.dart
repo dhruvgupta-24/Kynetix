@@ -11,7 +11,8 @@ import 'package:kynetix/services/profile_service.dart';
 import 'package:kynetix/services/widget_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-MealEntry _meal(DateTime at, double calMin, double calMax, double proMin, double proMax) {
+MealEntry _meal(DateTime at, double calMin, double calMax, double proMin, double proMax,
+    {NutrientRange? carbs, NutrientRange? fat, NutrientRange? fiber}) {
   return MealEntry(
     rawInput: 'Test meal',
     addedAt: at,
@@ -24,6 +25,9 @@ MealEntry _meal(DateTime at, double calMin, double calMax, double proMin, double
       items: const [],
       calories: NutrientRange(min: calMin, max: calMax),
       protein: NutrientRange(min: proMin, max: proMax),
+      carbohydrates: carbs,
+      fat: fat,
+      fiber: fiber,
       confidence: 0.9,
       warnings: const [],
       source: 'test',
@@ -60,7 +64,7 @@ void main() {
   test('payload carries the date key of the day it describes, plus tomorrow', () {
     final now = DateTime(2026, 10, 17, 23, 58);
     final p = WidgetService.buildPayload(now: now, profile: profile);
-    expect(p['v'], 2);
+    expect(p['v'], 3);
     expect(p['date_key'], '2026-10-17');
     expect(p['last_update_date'], '2026-10-17');
     expect(p['last_update_time'], '23:58');
@@ -113,6 +117,67 @@ void main() {
     expect(p['calories_consumed'], WidgetService.displayKcalFor(log));
     expect(p['calories_remaining'], (p['calories_target'] as int) - 303);
     expect(p['protein_remaining'], (p['protein_target'] as int) - 33);
+  });
+
+  test('carbs, fat and fiber: DayLog mid totals and the dashboard targets', () {
+    final now = DateTime(2026, 10, 17, 12);
+    final log = logFor(DateTime(2026, 10, 17));
+    log.add(MealSection.lunch, _meal(now, 500, 520, 30, 32,
+        carbs: const NutrientRange(min: 60, max: 70),
+        fat: const NutrientRange(min: 15, max: 18),
+        fiber: const NutrientRange(min: 8, max: 9)));
+    log.add(MealSection.dinner, _meal(now, 300, 320, 20, 22,
+        carbs: const NutrientRange(min: 30, max: 31))); // no fat / fiber data
+
+    final engine = NutritionTargetEngine();
+    final p = WidgetService.buildPayload(now: now, profile: profile, engine: engine);
+    expect(p['carbs_consumed'], log.totalCarbsMid.round()); // 65 + 30.5
+    expect(p['carbs_consumed'], 96);
+    expect(p['fat_consumed'], 17); // 16.5 rounds up
+    expect(p['fiber_consumed'], 9); // 8.5 rounds up
+
+    // Targets: the dashboard's AdditionalMacrosCard (macroSplit + fiber rule).
+    final t = engine.effectiveTargetForDate(DateTime(2026, 10, 17), profile: profile, log: log);
+    final split = engine.macroSplit(t.calories, t.protein, profile: profile);
+    expect(p['carbs_target'], split.carbs.round());
+    expect(p['fat_target'], split.fat.round());
+    expect(p['fiber_target'], (14.0 * t.calories / 1000).clamp(20.0, 60.0).round());
+    expect(p['carbs_target'], greaterThan(0));
+    expect(p['fat_target'], greaterThan(0));
+    expect(p['fiber_target'], inInclusiveRange(20, 60));
+  });
+
+  test('next_day and every days[] entry carry carbs, fat and fiber targets', () {
+    final engine = NutritionTargetEngine();
+    final p = WidgetService.buildPayload(now: DateTime(2026, 10, 17, 9), profile: profile, engine: engine);
+    final next = p['next_day'] as Map;
+    final t = engine.effectiveTargetForDate(DateTime(2026, 10, 18), profile: profile, log: DayLog());
+    final split = engine.macroSplit(t.calories, t.protein, profile: profile);
+    expect(next['carbs_target'], split.carbs.round());
+    expect(next['fat_target'], split.fat.round());
+    expect(next['fiber_target'], WidgetService.fiberTargetFor(t.calories).round());
+    final days = p['days'] as List;
+    expect(days, hasLength(7));
+    for (final d in days.cast<Map>()) {
+      expect(d['carbs_target'], isA<int>());
+      expect(d['fat_target'], isA<int>());
+      expect(d['fiber_target'], isA<int>());
+      // A day ahead has nothing eaten: no consumed keys at all.
+      expect(d.containsKey('carbs_consumed'), isFalse);
+    }
+  });
+
+  test('nothing logged: carbs, fat and fiber eaten are 0', () {
+    final p = WidgetService.buildPayload(now: DateTime(2026, 10, 17, 9), profile: profile);
+    expect(p['carbs_consumed'], 0);
+    expect(p['fat_consumed'], 0);
+    expect(p['fiber_consumed'], 0);
+  });
+
+  test('fiber target follows 14 g per 1,000 kcal, clamped to 20 to 60 g', () {
+    expect(WidgetService.fiberTargetFor(2000), 28);
+    expect(WidgetService.fiberTargetFor(1000), 20);
+    expect(WidgetService.fiberTargetFor(5000), 60);
   });
 
   test('building the payload never creates a day log', () {

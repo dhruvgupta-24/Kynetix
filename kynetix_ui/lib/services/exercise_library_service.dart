@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import '../data/exercise_classification.dart';
 import '../models/exercise_definition.dart';
 import '../models/workout_split.dart';
 import 'exercise_search_engine.dart';
@@ -86,6 +87,10 @@ class ExerciseLibraryService extends ChangeNotifier {
       for (final def in _allDefinitions) {
         _byId[def.id] = def;
       }
+      // Lets saved exercises be labelled by their library equipment.
+      ExerciseClassifier.registerLibraryEquipment({
+        for (final def in _allDefinitions) def.id: def.equipment,
+      });
       _initialized = true;
       if (_customDefinitions.isEmpty) {
         ExerciseSearchEngine.instance.setPrebuiltIndex(parsed.index);

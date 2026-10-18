@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4x4: drawn by WidgetRings on a transparent background, with a real
+     Log meal pill under it. Tapping elsewhere opens the app. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:orientation="vertical"
+    android:padding="4dp">
+
+    <ImageView
+        android:id="@+id/widget_dial"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/widget_log_meal"
+        android:layout_width="wrap_content"
+        android:layout_height="34dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/kynetix_widget_log_pill"
+        android:contentDescription="@string/kynetix_widget_log_meal"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:minWidth="120dp"
+        android:paddingStart="22dp"
+        android:paddingEnd="22dp"
+        android:text="@string/kynetix_widget_log_meal"
+        android:textColor="#FF0A0A0B"
+        android:textSize="14sp" />
+</LinearLayout>

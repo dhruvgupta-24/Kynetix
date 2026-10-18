@@ -8,7 +8,6 @@ import '../config/app_theme.dart';
 import 'barcode_scanner_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/day_detail_screen.dart';
-import '../screens/profile_screen.dart';
 import '../models/day_log.dart';
 import '../models/carry_forward_record.dart';
 import '../services/health_service.dart';
@@ -26,7 +25,6 @@ import '../services/profile_service.dart';
 import '../services/widget_service.dart';
 import '../services/workout_service.dart';
 import '../services/user_session_coordinator.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/insights_report_service.dart';
 import 'insights_screen.dart';
@@ -164,6 +162,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) AppShell.addMealAction.value = _showAddMealOptionsSheet;
     });
     WorkoutService.instance.addListener(_onWorkoutServiceChange);
+    // Settings now live on the Profile tab: pick up any change there when
+    // Nutrition comes back into view.
+    AppShell.currentTab.addListener(_onTabChange);
     PersistenceService.dayLogNotifier.addListener(_onDayLogChange);
     BodyMetricsService.instance.changes.addListener(_onBodyChange);
     // Show a loading indicator if user already connected
@@ -183,6 +184,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (AppShell.addMealAction.value == _showAddMealOptionsSheet) {
       AppShell.addMealAction.value = null;
     }
+    AppShell.currentTab.removeListener(_onTabChange);
     WorkoutService.instance.removeListener(_onWorkoutServiceChange);
     PersistenceService.dayLogNotifier.removeListener(_onDayLogChange);
     BodyMetricsService.instance.changes.removeListener(_onBodyChange);
@@ -795,6 +797,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _epoch++);
   }
 
+  void _onTabChange() {
+    if (AppShell.currentTab.value == 0) _refresh();
+  }
+
   Widget _section(int slot, List<Object?> deps, Widget Function() build) {
     final prev = _sectionMemo[slot];
     if (prev != null && listEquals(prev.$1, deps)) return prev.$2;
@@ -926,27 +932,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               ],
-            ),
-          ),
-          const SizedBox(width: KSpacing.sm),
-          Semantics(
-            label: 'Profile',
-            button: true,
-            excludeSemantics: true,
-            child: Pressable(
-              onTap: () async {
-                KHaptics.select();
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ProfileScreen(
-                      onProfileChanged: _refresh,
-                    ),
-                  ),
-                );
-                _refresh();
-              },
-              borderRadius: BorderRadius.circular(50),
-              child: _AvatarBadge(profile: _profile),
             ),
           ),
         ],
@@ -1094,10 +1079,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           Pressable(
-            onTap: () => _openDay(_selectedDate),
+            // Nothing logged yet: the card is the way in, so it logs a meal.
+            onTap: () {
+              final log = AppShell.addMealAction.value;
+              if (groups.isEmpty && log != null) {
+                log();
+              } else {
+                _openDay(_selectedDate);
+              }
+            },
             scale: 0.98,
             borderRadius: KRadius.lg,
-            semanticLabel: groups.isEmpty ? 'No meals logged. Open the day' : 'Open the day to edit meals',
+            semanticLabel: groups.isEmpty ? 'No meals logged. Log a meal' : 'Open the day to edit meals',
             child: KCard(
               padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg, vertical: KSpacing.xs),
               child: groups.isEmpty
@@ -1109,7 +1102,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(width: KSpacing.md),
                           Expanded(
                             child: Text(
-                              'Nothing logged yet. Tap + and type what you ate.',
+                              'Nothing logged yet. Tap here and type what you ate.',
                               style: KText.body.copyWith(color: KColor.textSecondary),
                             ),
                           ),
@@ -2304,55 +2297,6 @@ class _TargetRow extends StatelessWidget {
 
 // ─── Avatar badge ─────────────────────────────────────────────────────────────
 
-class _AvatarBadge extends StatelessWidget {
-  final UserProfile profile;
-  const _AvatarBadge({required this.profile});
-
-  @override
-  Widget build(BuildContext context) {
-    final user = Supabase.instance.client.auth.currentUser;
-    final avatarUrl = user?.userMetadata?['avatar_url'] ?? user?.userMetadata?['picture'] as String?;
-
-    String getInitials(String name) {
-      final t = name.trim();
-      return t.isEmpty ? 'K' : t[0].toUpperCase();
-    }
-
-    final initials = getInitials(profile.name);
-    final initialsText = Center(
-      child: Text(
-        initials,
-        style: KText.h3.copyWith(color: KColor.textPrimary, fontSize: 17, fontWeight: FontWeight.w700),
-      ),
-    );
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-
-    // A plain disc inside a 48dp target: no ring, no gradient.
-    return SizedBox(
-      width: 48,
-      height: 48,
-      child: Center(
-        child: ClipOval(
-          child: ColoredBox(
-            color: KColor.fg.withValues(alpha: KColor.isDark ? 0.10 : 0.07),
-            child: SizedBox.square(
-              dimension: 40,
-              child: avatarUrl != null && avatarUrl.isNotEmpty
-                  ? Image.network(
-                      avatarUrl,
-                      fit: BoxFit.cover,
-                      cacheWidth: (40 * dpr).round(),
-                      errorBuilder: (context, error, stackTrace) => initialsText,
-                    )
-                  : initialsText,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Reusable primitives ──────────────────────────────────────────────────────
 
 // ─── Activity Sync Card ───────────────────────────────────────────────────────
@@ -2763,19 +2707,49 @@ class _WeightTrendCard extends StatefulWidget {
 class _WeightTrendCardState extends State<_WeightTrendCard> {
   int _days = 30;
 
+  /// The weigh-in being inspected (tap or drag on the chart), or null.
+  int? _selected;
+
+  static String _day(DateTime d) => '${d.day} ${_kMonthShort[d.month - 1]}';
+
+  void _pick(List<WeightPoint> pts, double dx, double width) {
+    if (pts.isEmpty || width <= 0) return;
+    final t0 = pts.first.day.millisecondsSinceEpoch.toDouble();
+    final span = math.max(1.0, pts.last.day.millisecondsSinceEpoch - t0);
+    var best = 0;
+    var bestDist = double.infinity;
+    for (var i = 0; i < pts.length; i++) {
+      final x = (pts[i].day.millisecondsSinceEpoch - t0) / span * width;
+      final d = (x - dx).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    if (best != _selected) {
+      KHaptics.select();
+      setState(() => _selected = best);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final trend = BodyMetricsService.instance.trend(days: _days, external: widget.healthReadings);
+    final pts = trend.points;
+    final sel = (_selected != null && _selected! < pts.length) ? pts[_selected!] : null;
     final latest = trend.latest;
     final rate = trend.weeklyRateKg;
-    String rateText;
-    if (rate == null) {
-      rateText = 'A few more weigh-ins to show a rate';
+    String sub;
+    if (sel != null) {
+      sub = '${_day(sel.day)}${sel.manual ? ', logged in Kynetix' : ', Health Connect'}. Trend ${sel.trendKg.toStringAsFixed(1)} kg';
+    } else if (rate == null) {
+      sub = 'A few more weigh-ins to show a rate';
     } else if (rate.abs() < 0.05) {
-      rateText = 'Holding steady';
+      sub = 'Holding steady';
     } else {
-      rateText = '${rate > 0 ? 'Up' : 'Down'} ${rate.abs().toStringAsFixed(2)} kg a week';
+      sub = '${rate > 0 ? 'Up' : 'Down'} ${rate.abs().toStringAsFixed(2)} kg a week';
     }
+    final headline = sel?.scaleKg ?? latest?.trendKg;
     return KCard(
       padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.lg, KSpacing.lg, KSpacing.md),
       child: Column(
@@ -2784,11 +2758,17 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
           Row(
             children: [
               Expanded(
-                child: Text('Weight trend', style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary)),
+                child: Text(
+                  sel != null ? 'Weigh-in' : 'Weight trend',
+                  style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary),
+                ),
               ),
               _RangeToggle(
                 value: _days,
-                onChanged: (d) => setState(() => _days = d),
+                onChanged: (d) => setState(() {
+                  _days = d;
+                  _selected = null;
+                }),
               ),
             ],
           ),
@@ -2803,14 +2783,14 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
                     Text.rich(
                       TextSpan(children: [
                         TextSpan(
-                          text: latest == null ? '-' : latest.trendKg.toStringAsFixed(1),
+                          text: headline == null ? '-' : headline.toStringAsFixed(1),
                           style: KText.numDisplay.copyWith(fontSize: 34),
                         ),
                         TextSpan(text: ' kg', style: KText.caption.copyWith(fontSize: 14, color: KColor.textMuted)),
                       ]),
                     ),
                     const SizedBox(height: 2),
-                    Text(rateText, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textMuted)),
+                    Text(sub, style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textMuted)),
                   ],
                 ),
               ),
@@ -2819,23 +2799,58 @@ class _WeightTrendCardState extends State<_WeightTrendCard> {
           ),
           const SizedBox(height: KSpacing.md),
           SizedBox(
-            height: 120,
-            child: trend.points.length < 2
+            height: 140,
+            child: pts.length < 2
                 ? Center(
                     child: Text(
                       'Two weigh-ins draw the line.',
                       style: KText.caption.copyWith(color: KColor.textMuted),
                     ),
                   )
-                : CustomPaint(
-                    painter: _WeightLinePainter(
-                      points: trend.points,
-                      line: KColor.textPrimary,
-                      dot: KColor.textMuted,
-                      grid: KColor.divider,
+                : LayoutBuilder(
+                    builder: (context, box) => Semantics(
+                      label: 'Weight chart, ${pts.length} weigh-ins. '
+                          'Tap a point to read it.',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (d) {
+                          // Tapping the point that is already open closes it.
+                          final before = _selected;
+                          _pick(pts, d.localPosition.dx, box.maxWidth);
+                          if (before != null && before == _selected) setState(() => _selected = null);
+                        },
+                        onHorizontalDragStart: (d) => _pick(pts, d.localPosition.dx, box.maxWidth),
+                        onHorizontalDragUpdate: (d) => _pick(pts, d.localPosition.dx, box.maxWidth),
+                        child: CustomPaint(
+                          size: Size(box.maxWidth, box.maxHeight),
+                          painter: _WeightLinePainter(
+                            points: pts,
+                            selected: _selected,
+                            line: KColor.textPrimary,
+                            dot: KColor.textMuted,
+                            grid: KColor.divider,
+                            accent: KColor.ember,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
           ),
+          if (pts.length >= 2) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Text(_day(pts.first.day), style: KText.caption.copyWith(fontSize: 11.5, color: KColor.textMuted)),
+                const Spacer(),
+                Text(
+                  sel == null ? 'Tap the chart to read a day' : 'Tap again to close',
+                  style: KText.caption.copyWith(fontSize: 11.5, color: KColor.textMuted),
+                ),
+                const Spacer(),
+                Text(_day(pts.last.day), style: KText.caption.copyWith(fontSize: 11.5, color: KColor.textMuted)),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -2889,11 +2904,20 @@ class _RangeToggle extends StatelessWidget {
 }
 
 class _WeightLinePainter extends CustomPainter {
-  _WeightLinePainter({required this.points, required this.line, required this.dot, required this.grid});
+  _WeightLinePainter({
+    required this.points,
+    required this.line,
+    required this.dot,
+    required this.grid,
+    required this.accent,
+    this.selected,
+  });
   final List<WeightPoint> points;
+  final int? selected;
   final Color line;
   final Color dot;
   final Color grid;
+  final Color accent;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2911,23 +2935,36 @@ class _WeightLinePainter extends CustomPainter {
     final t0 = points.first.day.millisecondsSinceEpoch.toDouble();
     final t1 = points.last.day.millisecondsSinceEpoch.toDouble();
     final span = math.max(1.0, t1 - t0);
-    const padY = 8.0;
+    const padTop = 30.0; // room for the reading above a selected point
+    const padBottom = 8.0;
     Offset at(DateTime d, double kg) => Offset(
           (d.millisecondsSinceEpoch - t0) / span * size.width,
-          padY + (1 - (kg - lo) / (hi - lo)) * (size.height - padY * 2),
+          padTop + (1 - (kg - lo) / (hi - lo)) * (size.height - padTop - padBottom),
         );
 
     final gridPaint = Paint()
       ..color = grid
       ..strokeWidth = 1;
     for (var i = 0; i < 3; i++) {
-      final y = padY + i * (size.height - padY * 2) / 2;
+      final y = padTop + i * (size.height - padTop - padBottom) / 2;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
-    final dotPaint = Paint()..color = dot.withValues(alpha: 0.7);
+    final sel = selected != null && selected! < points.length ? points[selected!] : null;
+    if (sel != null) {
+      final x = at(sel.day, sel.scaleKg).dx;
+      canvas.drawLine(
+        Offset(x, padTop - 4),
+        Offset(x, size.height),
+        Paint()
+          ..color = line.withValues(alpha: 0.25)
+          ..strokeWidth = 1,
+      );
+    }
+
+    final dotPaint = Paint()..color = dot.withValues(alpha: 0.75);
     for (final p in points) {
-      canvas.drawCircle(at(p.day, p.scaleKg), 2.4, dotPaint);
+      canvas.drawCircle(at(p.day, p.scaleKg), 2.6, dotPaint);
     }
 
     final path = Path();
@@ -2948,13 +2985,47 @@ class _WeightLinePainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..color = line,
     );
-    final last = at(points.last.day, points.last.trendKg);
-    canvas.drawCircle(last, 4.5, Paint()..color = line);
+
+    if (sel == null) {
+      canvas.drawCircle(at(points.last.day, points.last.trendKg), 4.5, Paint()..color = line);
+      return;
+    }
+
+    // The selected weigh-in: a ringed dot and its reading in a small label.
+    final o = at(sel.day, sel.scaleKg);
+    canvas.drawCircle(o, 7, Paint()..color = accent.withValues(alpha: 0.22));
+    canvas.drawCircle(o, 4.5, Paint()..color = accent);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '${sel.scaleKg.toStringAsFixed(1)} kg',
+        style: TextStyle(
+          fontFamily: KText.displayFace,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          color: KColor.onInk,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    const padX = 8.0;
+    const padY = 4.0;
+    final w = tp.width + padX * 2;
+    final h = tp.height + padY * 2;
+    final left = (o.dx - w / 2).clamp(0.0, math.max(0.0, size.width - w)).toDouble();
+    final rect = RRect.fromRectAndRadius(Rect.fromLTWH(left, 0, w, h), const Radius.circular(8));
+    canvas.drawRRect(rect, Paint()..color = KColor.ink);
+    tp.paint(canvas, Offset(left + padX, padY));
   }
 
   @override
   bool shouldRepaint(_WeightLinePainter old) =>
-      old.points != points || old.line != line || old.dot != dot || old.grid != grid;
+      old.points != points ||
+      old.selected != selected ||
+      old.line != line ||
+      old.dot != dot ||
+      old.grid != grid ||
+      old.accent != accent;
 }
 
 // ─── Shared nutrition sections (also used by DayDetailScreen) ─────────────────

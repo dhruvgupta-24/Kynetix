@@ -10,6 +10,8 @@ import 'dashboard_screen.dart';
 import 'workout_screen.dart';
 import 'workout_session_screen.dart';
 import 'ai_coach_screen.dart';
+import 'profile_tab.dart';
+import '../widgets/k_avatar.dart';
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,10 @@ class AppShell extends StatefulWidget {
   /// dashboard. The dock shows it as a round ink button beside the pill, so it
   /// never floats over content.
   static final addMealAction = ValueNotifier<VoidCallback?>(null);
+
+  /// The open tab: 0 Nutrition, 1 Train, 2 Kyno, 3 Profile. Tabs listen to
+  /// refresh when they come back into view.
+  static final currentTab = ValueNotifier<int>(0);
 
   @override
   State<AppShell> createState() => AppShellState();
@@ -44,6 +50,7 @@ class AppShellState extends State<AppShell> {
     });
     _checkPendingAction();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      AppShell.currentTab.value = _tab;
       _checkAndShowResumeDialog();
     });
   }
@@ -487,9 +494,33 @@ class AppShellState extends State<AppShell> {
   }
 
   void switchToTab(int index) {
-    if (!mounted || index == _tab) return;
+    if (!mounted) return;
+    if (index == _tab) {
+      if (_compact) setState(() => _compact = false);
+      return;
+    }
     KHaptics.select();
-    setState(() => _tab = index);
+    setState(() {
+      _tab = index;
+      _compact = false;
+    });
+    AppShell.currentTab.value = index;
+  }
+
+  // ── The island follows the scroll ─────────────────────────────────────────
+  // Scrolling down a tab shrinks the dock to the open tab; scrolling up, or
+  // reaching the top, grows it back. Only vertical scrolls of the page itself
+  // count (not horizontal strips or nested lists).
+
+  bool _compact = false;
+
+  bool _onScroll(ScrollNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical || n is! ScrollUpdateNotification) return false;
+    final d = n.scrollDelta ?? 0;
+    final px = n.metrics.pixels;
+    final next = px < 80 ? false : (d > 6 ? true : (d < -6 ? false : _compact));
+    if (next != _compact) setState(() => _compact = next);
+    return false;
   }
 
   // Kyno is the real coach (model + the app's brief), with the on-device
@@ -498,9 +529,10 @@ class AppShellState extends State<AppShell> {
     const DashboardScreen(),
     const WorkoutScreen(),
     AiCoachScreen.tab(),
+    const ProfileTab(),
   ];
 
-  static const _tones = [KTone.fuel, KTone.train, KTone.kyno];
+  static const _tones = [KTone.fuel, KTone.train, KTone.kyno, KTone.neutral];
 
   @override
   Widget build(BuildContext context) {
@@ -511,12 +543,15 @@ class AppShellState extends State<AppShell> {
         // Content scrolls beneath the floating glass dock; Scaffold adds the
         // dock height to the body's MediaQuery bottom padding.
         extendBody: true,
-        body: _FadeThroughTabs(
-          index: _tab,
-          // Each tab keeps its own world, whichever one is showing.
-          children: [
-            for (var i = 0; i < _pages.length; i++) KToneScope(tone: _tones[i], child: _pages[i]),
-          ],
+        body: NotificationListener<ScrollNotification>(
+          onNotification: _onScroll,
+          child: _FadeThroughTabs(
+            index: _tab,
+            // Each tab keeps its own world, whichever one is showing.
+            children: [
+              for (var i = 0; i < _pages.length; i++) KToneScope(tone: _tones[i], child: _pages[i]),
+            ],
+          ),
         ),
         bottomNavigationBar: ValueListenableBuilder<VoidCallback?>(
           valueListenable: AppShell.addMealAction,
@@ -526,6 +561,8 @@ class AppShellState extends State<AppShell> {
             child: _KDock(
               currentIndex: _tab,
               onTap: switchToTab,
+              compact: _compact,
+              onExpand: () => setState(() => _compact = false),
               action: _tab == 0 ? addMeal : null,
             ),
           ),
@@ -635,142 +672,213 @@ class _FadeThroughTabsState extends State<_FadeThroughTabs>
 }
 
 // ─── _KDock ───────────────────────────────────────────────────────────────────
-// Floating glass pill. Every tab shows its icon and its word; an indicator
-// slides to the active one on a spring and takes that world's accent
-// (Nutrition ember, Train violet, Kyno cyan), so you always know where you are.
+// A floating island at the bottom, after the iOS 26 tab bar: one capsule with
+// the four places. The open tab is a solid ink pill with its name; the others
+// are icons. Scrolling down shrinks the island to just the open tab, so the
+// content gets the screen; scrolling up (or a tap) grows it back. The round
+// "+" beside it is the Nutrition tab's action and slides away elsewhere.
+//
+// Smoothness: the whole bar is one layout computed every frame from three
+// eased values (which tab, how shrunk, whether "+" is there) and the
+// capsule's actual width. Nothing animates on its own clock, so the pill,
+// the icons, the label and the capsule edge can never drift apart.
 
 class _KDock extends StatelessWidget {
+  const _KDock({
+    required this.currentIndex,
+    required this.onTap,
+    required this.compact,
+    required this.onExpand,
+    this.action,
+  });
+
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  const _KDock({required this.currentIndex, required this.onTap, this.action});
+  /// Shrunk to the open tab while the content scrolls down.
+  final bool compact;
+  final VoidCallback onExpand;
 
-  /// Optional primary action shown as a round ink button right of the pill.
+  /// Optional primary action shown as a round button right of the island.
   final VoidCallback? action;
 
-  static List<_NavItemData> get _items => const [
+  static const _items = [
     _NavItemData(icon: KIcons.plate, label: 'Nutrition'),
     _NavItemData(icon: KIcons.train, label: 'Train'),
-    _NavItemData(icon: KIcons.kyno, label: 'Kyno', kyno: true),
+    _NavItemData(icon: KIcons.kyno, label: 'Kyno', kind: _NavKind.kyno),
+    _NavItemData(icon: Icons.person_rounded, label: 'Profile', kind: _NavKind.avatar),
   ];
+
+  static const _height = 64.0;
+  static const _inset = 6.0;
+  static const _iconSlot = 54.0;
+  static const _actionGap = 10.0;
+  static const _compactWidth = _iconSlot + _inset * 2 + 6;
 
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
-    final dark = KColor.isDark;
-    // Content dissolves into the page colour before it reaches the dock, so
-    // nothing reads through the gaps around the floating chrome.
+    final dur = KMotion.of(context, const Duration(milliseconds: 460));
+    const curve = KMotion.emphasizedCurve;
+    // Content dissolves into the page colour before it reaches the island,
+    // so nothing reads through the gaps around the floating chrome.
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            KColor.bg.withValues(alpha: 0),
-            KColor.bg.withValues(alpha: 0.85),
-            KColor.bg,
-          ],
+          colors: [KColor.bg.withValues(alpha: 0), KColor.bg.withValues(alpha: 0.85), KColor.bg],
           stops: const [0, 0.45, 1],
         ),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, 16, 20, bottom + 12),
-        child: Row(
-          children: [
-            Expanded(child: _pill(context, dark)),
-            AnimatedSize(
-              duration: KMotion.of(context, KMotion.standard),
-              curve: KMotion.emphasizedCurve,
-              child: action == null
-                  ? const SizedBox(height: 64)
-                  : Padding(
-                      padding: const EdgeInsets.only(left: 10),
-                      child: _DockAction(onTap: action!),
-                    ),
+        child: SizedBox(
+          height: _height,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(end: currentIndex.toDouble()),
+            duration: dur,
+            curve: curve,
+            builder: (context, sel, _) => TweenAnimationBuilder<double>(
+              tween: Tween(end: compact ? 1 : 0),
+              duration: dur,
+              curve: curve,
+              builder: (context, shrink, _) => TweenAnimationBuilder<double>(
+                tween: Tween(end: action == null ? 0 : 1),
+                duration: dur,
+                curve: curve,
+                builder: (context, act, _) => LayoutBuilder(
+                  builder: (context, box) => _frame(context, box.maxWidth, sel, shrink, act),
+                ),
+              ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _pill(BuildContext context, bool dark) {
-    // A solid capsule one step above the page, edged with a hairline. No
-    // blur, no shadow.
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: KRadius.pill,
-        color: dark ? KColor.cardHigh : KColor.card,
-        border: Border.all(color: dark ? const Color(0xFF2C2C30) : KColor.border),
-      ),
-        child: SizedBox(
-          // Grows with the text size instead of clipping the labels.
-          height: (46 + MediaQuery.textScalerOf(context).scale(13.5)).clamp(64.0, 120.0),
-          child: LayoutBuilder(
-            builder: (context, box) {
-              // Every tab shows its icon and its word, so the shares are
-              // equal; the ink indicator slides between them.
-              const activeWeight = 1.0;
-              final unit = box.maxWidth / (_items.length - 1 + activeWeight);
-              double widthOf(int i) =>
-                  i == currentIndex ? unit * activeWeight : unit;
-              double leftOf(int i) {
-                var x = 0.0;
-                for (var j = 0; j < i; j++) {
-                  x += widthOf(j);
-                }
-                return x;
-              }
+  /// How much of tab [i]'s name shows when it is [f] open. The tab being
+  /// left lets go of its name early, the tab being opened unrolls its name
+  /// over the last stretch, so mid-slide the pill only carries an icon and
+  /// two half names never share it.
+  static double _reveal(double f, bool arriving) {
+    final t = arriving ? (f - 0.45) / 0.55 : (f - 0.7) / 0.3;
+    final c = t.clamp(0.0, 1.0);
+    return c * c * (3 - 2 * c);
+  }
 
-              final dur = KMotion.of(
-                context,
-                const Duration(milliseconds: 620),
-              );
-              return Stack(
-                children: [
-                  // Accent indicator
-                  AnimatedPositioned(
-                    duration: dur,
-                    curve: KMotion.spring,
-                    left: leftOf(currentIndex) + 6,
-                    top: 7,
-                    bottom: 7,
-                    width: widthOf(currentIndex) - 12,
-                    child: AnimatedContainer(
-                      duration: KMotion.of(context, KMotion.standard),
-                      curve: KMotion.emphasizedCurve,
-                      // The selected tab is a solid ink pill.
-                      decoration: BoxDecoration(
-                        borderRadius: KRadius.pill,
-                        color: KColor.ink,
+  /// One frame of the bar for the eased values [sel] (fractional tab),
+  /// [shrink] (0 full, 1 compact) and [act] (0 no "+", 1 "+" shown).
+  Widget _frame(BuildContext context, double maxW, double sel, double shrink, double act) {
+    final n = _items.length;
+    final full = maxW - act * (_height + _actionGap);
+    final capW = full + (_compactWidth - full) * shrink;
+    final capLeft = (full - capW) / 2 * shrink;
+    final inner = capW - _inset * 2;
+    final open = sel.round().clamp(0, n - 1);
+
+    // How "open" each tab is right now: 1 for the tab the pill sits on,
+    // shared between two neighbours while it slides.
+    final f = [for (var i = 0; i < n; i++) (1 - (i - sel).abs()).clamp(0.0, 1.0)];
+    final selFull = inner - _iconSlot * (n - 1);
+    final widths = <double>[];
+    for (var i = 0; i < n; i++) {
+      final expanded = _iconSlot + (selFull - _iconSlot) * f[i];
+      final compactW = i == open ? inner : 0.0;
+      widths.add(expanded + (compactW - expanded) * shrink);
+    }
+    final lefts = <double>[];
+    var x = _inset;
+    for (final w in widths) {
+      lefts.add(x);
+      x += w;
+    }
+    // The pill follows the open tab's slot, gliding between neighbours.
+    var pillL = 0.0;
+    var pillW = 0.0;
+    for (var i = 0; i < n; i++) {
+      pillL += lefts[i] * f[i];
+      pillW += widths[i] * f[i];
+    }
+
+    final dark = KColor.isDark;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: capLeft,
+          top: 0,
+          bottom: 0,
+          width: capW,
+          child: GestureDetector(
+            // A tap anywhere on the shrunk island grows it back.
+            onTap: shrink > 0.5 ? onExpand : null,
+            behavior: HitTestBehavior.opaque,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: KRadius.pill,
+                color: dark ? KColor.cardHigh : KColor.card,
+                border: Border.all(color: dark ? const Color(0xFF2C2C30) : KColor.border),
+              ),
+              child: ClipRRect(
+                borderRadius: KRadius.pill,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: pillL,
+                      top: _inset,
+                      bottom: _inset,
+                      width: pillW,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(borderRadius: KRadius.pill, color: KColor.ink),
                       ),
                     ),
-                  ),
-                  for (var i = 0; i < _items.length; i++)
-                    AnimatedPositioned(
-                      duration: dur,
-                      curve: KMotion.spring,
-                      left: leftOf(i),
-                      top: 0,
-                      bottom: 0,
-                      width: widthOf(i),
-                      child: _NavItem(
-                        data: _items[i],
-                        selected: currentIndex == i,
-                        accent: KColor.tabAccent(i),
-                        onTap: () => onTap(i),
-                      ),
-                    ),
-                ],
-              );
-            },
+                    for (var i = 0; i < n; i++)
+                      if (widths[i] > 0.5)
+                        Positioned(
+                          left: lefts[i],
+                          top: _inset,
+                          bottom: _inset,
+                          width: widths[i],
+                          child: IgnorePointer(
+                            ignoring: shrink > 0.5,
+                            child: Opacity(
+                              opacity: i == open ? 1 : (1 - shrink).clamp(0.0, 1.0),
+                              child: _NavItem(
+                                data: _items[i],
+                                selected: i == currentIndex,
+                                openness: f[i],
+                                labelReveal: _reveal(f[i], i == currentIndex) * (1 - shrink),
+                                onTap: () => onTap(i),
+                              ),
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
+        // The "+" slides in from the right edge with the same easing.
+        if (act > 0.01)
+          Positioned(
+            right: -(1 - act) * (_height + 20),
+            top: 0,
+            bottom: 0,
+            width: _height,
+            child: Opacity(
+              opacity: act.clamp(0.0, 1.0),
+              child: _DockAction(onTap: action ?? () {}),
+            ),
+          ),
+      ],
     );
   }
 }
 
-/// Round ember button docked beside the nav pill (Nutrition → "Add meal").
+/// Round ember button beside the island (Nutrition: "Log a meal").
 class _DockAction extends StatelessWidget {
   const _DockAction({required this.onTap});
   final VoidCallback onTap;
@@ -794,36 +902,46 @@ class _DockAction extends StatelessWidget {
   }
 }
 
+enum _NavKind { icon, kyno, avatar }
+
 class _NavItemData {
   final IconData icon;
   final String label;
-
-  /// Draw Kyno's mark instead of [icon].
-  final bool kyno;
-  const _NavItemData({
-    required this.icon,
-    required this.label,
-    this.kyno = false,
-  });
+  final _NavKind kind;
+  const _NavItemData({required this.icon, required this.label, this.kind = _NavKind.icon});
 }
 
 class _NavItem extends StatelessWidget {
-  final _NavItemData data;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
-
   const _NavItem({
     required this.data,
     required this.selected,
-    required this.accent,
+    required this.openness,
+    required this.labelReveal,
     required this.onTap,
   });
 
+  final _NavItemData data;
+  final bool selected;
+
+  /// 0 an icon in the bar, 1 sitting on the ink pill; in between while the
+  /// pill slides.
+  final double openness;
+
+  /// How much of the label shows (0 none, 1 all).
+  final double labelReveal;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
-    // Selected sits on the ink pill.
-    final color = selected ? KColor.onInk : KColor.textSecondary;
+    final color = Color.lerp(KColor.textSecondary, KColor.onInk, openness)!;
+    final Widget glyph = switch (data.kind) {
+      _NavKind.kyno => KynoMark(size: 22, outlined: true, color: color),
+      _NavKind.avatar => KAvatar(
+          size: 28,
+          ring: openness > 0.5 ? null : KColor.fg.withValues(alpha: 0.18),
+        ),
+      _NavKind.icon => Icon(data.icon, color: color, size: 22),
+    };
     return Semantics(
       button: true,
       selected: selected,
@@ -832,38 +950,45 @@ class _NavItem extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            data.kyno
-                ? KynoMark(
-                    size: 20,
-                    // Outlined on the gradient pill too: a filled white disc
-                    // would hide the "k".
-                    outlined: true,
-                    color: color,
-                  )
-                : TweenAnimationBuilder<Color?>(
-                    tween: ColorTween(end: color),
-                    duration: KMotion.of(context, KMotion.quick),
-                    builder: (context, c, _) => Icon(data.icon, color: c, size: 21),
-                  ),
-            const SizedBox(height: 2),
-            Text(
-              data.label,
-              maxLines: 1,
-              overflow: TextOverflow.fade,
-              softWrap: false,
-              style: TextStyle(
-                fontFamily: KText.family,
-                color: color,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                letterSpacing: 0,
-                height: 1.1,
+        child: ClipRect(
+          child: OverflowBox(
+            maxWidth: double.infinity,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  glyph,
+                  // The name unrolls from the icon as the tab opens: its
+                  // width and opacity follow the same eased value.
+                  if (labelReveal > 0.01)
+                    ClipRect(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: labelReveal,
+                        child: Opacity(
+                          opacity: labelReveal,
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Text(
+                              data.label,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: TextStyle(
+                                fontFamily: KText.family,
+                                color: color,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

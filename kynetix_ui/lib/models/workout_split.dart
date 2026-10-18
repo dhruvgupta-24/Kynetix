@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../data/exercise_classification.dart';
+
 // ─── ExerciseType ─────────────────────────────────────────────────────────────
 //
 // Used to drive progression logic:
@@ -7,6 +9,11 @@ import 'dart:convert';
 //   dumbbell        → +2 kg increments (nearest DB increment)
 //   cableMachine    → +5 kg stack increments
 //   isolation       → reps-first before weight jump
+//   bodyweight      → reps first, then added load
+//
+// The type is derived by ExerciseClassifier (data/exercise_classification.dart),
+// which also gives the honest UI label: a leg press is a machine, not a cable,
+// and a barbell curl is a barbell isolation lift, not a compound.
 //
 // This matters: don't suggest the same progression for a deadlift and a
 // cable lateral raise. The type drives coaching, not just labelling.
@@ -121,26 +128,42 @@ class Exercise {
       'supersetGroupId': supersetGroupId,
   };
 
-  factory Exercise.fromJson(Map<String, dynamic> j) => Exercise(
-    id: j['id'] as String? ?? '',
-    name: j['name'] as String? ?? '',
-    muscleGroup: j['muscleGroup'] as String? ?? '',
-    type: _parseExerciseType(j['type']),
-    defaultRepMin: _parseInt(j['defaultRepMin']),
-    defaultRepMax: _parseInt(j['defaultRepMax']),
-    defaultTargetSets: _parseInt(j['defaultTargetSets'] ?? j['target_sets']) ?? 3,
-    notes: j['notes'] as String?,
-    executionMode: _parseExecutionMode(
-      j['executionMode'] as String?,
-      name: j['name'] as String?,
-      type: _parseExerciseType(j['type']),
-      muscleGroup: j['muscleGroup'] as String?,
-    ),
-    supersetGroupId: j['supersetGroupId'] as String?,
-  );
+  /// The saved type is only a hint: older splits and sessions were saved
+  /// without one (and then re-saved as a barbell lift), so the type is
+  /// re-derived from the exercise itself. Sets, ids and names are untouched.
+  factory Exercise.fromJson(Map<String, dynamic> j) {
+    final id = j['id'] as String? ?? '';
+    final name = j['name'] as String? ?? '';
+    final muscleGroup = j['muscleGroup'] as String? ?? '';
+    final kind = ExerciseClassifier.classify(
+      id: id,
+      name: name,
+      muscle: muscleGroup,
+      storedType: _parseExerciseType(j['type']),
+    );
+    return Exercise(
+      id: id,
+      name: name,
+      muscleGroup: muscleGroup,
+      type: kind.type,
+      defaultRepMin: _parseInt(j['defaultRepMin']),
+      defaultRepMax: _parseInt(j['defaultRepMax']),
+      defaultTargetSets: _parseInt(j['defaultTargetSets'] ?? j['target_sets']) ?? 3,
+      notes: j['notes'] as String?,
+      executionMode: _parseExecutionMode(
+        j['executionMode'] as String?,
+        name: name,
+        type: kind.type,
+        muscleGroup: muscleGroup,
+        weighted: kind.isWeighted,
+      ),
+      supersetGroupId: j['supersetGroupId'] as String?,
+    );
+  }
 
-  static ExerciseType _parseExerciseType(dynamic raw) {
-    if (raw == null) return ExerciseType.barbellCompound;
+  /// The stored type, or null when it is missing or unreadable.
+  static ExerciseType? _parseExerciseType(dynamic raw) {
+    if (raw == null) return null;
     if (raw is int) {
       return ExerciseType.values[raw.clamp(0, ExerciseType.values.length - 1)];
     }
@@ -153,7 +176,7 @@ class Exercise {
         return ExerciseType.values.byName(raw);
       } catch (_) {}
     }
-    return ExerciseType.barbellCompound;
+    return null;
   }
 
   static int? _parseInt(dynamic raw) {
@@ -168,6 +191,7 @@ class Exercise {
     String? name,
     ExerciseType? type,
     String? muscleGroup,
+    bool weighted = false,
   }) {
     if (raw != null) {
       try {
@@ -192,7 +216,9 @@ class Exercise {
       return ExerciseExecutionMode.cardio;
     }
     if (type == ExerciseType.bodyweight) {
-      return ExerciseExecutionMode.bodyweightReps;
+      return weighted
+          ? ExerciseExecutionMode.weightedBodyweight
+          : ExerciseExecutionMode.bodyweightReps;
     }
     return ExerciseExecutionMode.weightReps;
   }
@@ -374,7 +400,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'tbar_row',
       name: 'T-Bar Row',
       muscleGroup: 'Back',
-      type: ExerciseType.barbellCompound,
+      type: ExerciseType.cableMachine,
     ),
     Exercise(
       id: 'bb_row',
@@ -392,7 +418,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'bb_curl',
       name: 'Barbell Curl',
       muscleGroup: 'Biceps',
-      type: ExerciseType.barbellCompound,
+      type: ExerciseType.isolation,
     ),
     Exercise(
       id: 'incline_db_curl',
@@ -436,7 +462,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'rear_delt_fly',
       name: 'Rear Delt Fly',
       muscleGroup: 'Rear Delts',
-      type: ExerciseType.dumbbell,
+      type: ExerciseType.cableMachine,
     ),
     Exercise(
       id: 'shrugs',
@@ -568,7 +594,7 @@ const Map<String, List<Exercise>> exerciseLibraryByDay = {
       id: 'bb_curl',
       name: 'Barbell Curl',
       muscleGroup: 'Biceps',
-      type: ExerciseType.barbellCompound,
+      type: ExerciseType.isolation,
     ),
     Exercise(
       id: 'hammer_curl',
@@ -612,7 +638,7 @@ final List<Exercise> fullExerciseLibrary = [
     id: 'skullcrusher',
     name: 'Skull Crusher',
     muscleGroup: 'Triceps',
-    type: ExerciseType.barbellCompound,
+    type: ExerciseType.isolation,
   ),
   const Exercise(
     id: 'close_grip_bench',

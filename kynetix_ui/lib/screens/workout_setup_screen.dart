@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../data/exercise_classification.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
 import '../widgets/exercise_picker_sheet.dart';
@@ -1686,8 +1687,25 @@ class _CreateCustomExerciseSheetState
   final _repMaxCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   String _muscleGroup = 'Other';
-  ExerciseType _type = ExerciseType.barbellCompound;
+  // Follows the name ("Pull-ups" reads as bodyweight) until the user picks.
+  ExerciseType _type = ExerciseType.isolation;
+  bool _typePicked = false;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.addListener(_suggestType);
+  }
+
+  void _suggestType() {
+    if (_typePicked) return;
+    final suggested = ExerciseClassifier.classify(
+      name: _nameCtrl.text,
+      muscle: _muscleGroup,
+    ).type;
+    if (suggested != _type) setState(() => _type = suggested);
+  }
 
   static const _muscleGroups = [
     'Chest',
@@ -1751,6 +1769,10 @@ class _CreateCustomExerciseSheetState
       defaultRepMin: repMin,
       defaultRepMax: repMax,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+      executionMode: _type == ExerciseType.bodyweight &&
+              ExerciseClassifier.classify(name: name, muscle: _muscleGroup).isWeighted
+          ? ExerciseExecutionMode.weightedBodyweight
+          : ExerciseExecutionMode.weightReps,
     );
     await WorkoutService.instance.addCustomExercise(ex);
     if (mounted) {
@@ -1852,6 +1874,7 @@ class _CreateCustomExerciseSheetState
                           onTap: () {
                             if (!selected) KHaptics.select();
                             setState(() => _muscleGroup = g);
+                            _suggestType();
                           },
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1903,7 +1926,10 @@ class _CreateCustomExerciseSheetState
                         behavior: HitTestBehavior.opaque,
                         onTap: () {
                           if (_type != opt.type) KHaptics.select();
-                          setState(() => _type = opt.type);
+                          setState(() {
+                            _type = opt.type;
+                            _typePicked = true;
+                          });
                         },
                         child: AnimatedContainer(
                           duration: KMotion.of(context, KMotion.quick),
@@ -1988,40 +2014,35 @@ class _CreateCustomExerciseSheetState
 
 class _TypeOption {
   final ExerciseType type;
-  final String label;
   final String hint;
 
   const _TypeOption({
     required this.type,
-    required this.label,
     required this.hint,
   });
+
+  String get label => ExerciseClassifier.typeLabel(type);
 }
 
 const _typeOptions = [
   _TypeOption(
     type: ExerciseType.barbellCompound,
-    label: 'Barbell compound',
     hint: '+2.5 kg jumps when rep range is earned',
   ),
   _TypeOption(
     type: ExerciseType.dumbbell,
-    label: 'Dumbbell',
     hint: '+2 kg jumps (nearest DB increment)',
   ),
   _TypeOption(
     type: ExerciseType.cableMachine,
-    label: 'Cable or machine',
     hint: '+5 kg stack increments',
   ),
   _TypeOption(
     type: ExerciseType.isolation,
-    label: 'Isolation',
     hint: 'Beat reps twice before adding weight',
   ),
   _TypeOption(
     type: ExerciseType.bodyweight,
-    label: 'Bodyweight',
     hint: 'Rep-first progression, then add load',
   ),
 ];
