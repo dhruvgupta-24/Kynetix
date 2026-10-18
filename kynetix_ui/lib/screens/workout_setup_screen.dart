@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../data/exercise_classification.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
@@ -334,7 +335,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     // Saved untouched: still the Developer's Choice, keep its name.
     if (isUnchangedDevelopersChoice(newSplit)) newSplit = developersChoiceSplit;
     // Captured before the await: the result toast lands on the screen below.
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final toaster = KToaster.of(context);
     setState(() => _finishing = true);
     try {
       await WorkoutService.instance.saveSplit(newSplit);
@@ -342,27 +343,16 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
       if (!mounted) return;
       setState(() => _finishing = false);
       KHaptics.reject();
-      messenger?.showSnackBar(
-        const SnackBar(
-          content: Text("Couldn't save your split. Try again in a moment."),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      toaster.show("Couldn't save your split. Try again in a moment.", kind: KToastKind.error);
       return;
     }
     if (!mounted) return;
     KHaptics.success();
     Navigator.of(context).pop(true);
-    messenger
-      ?..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            widget.editMode ? 'Split saved.' : "Split saved. Chalo, let's train.",
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    toaster.show(
+      widget.editMode ? 'Split saved.' : "Split saved. Chalo, let's train.",
+      kind: KToastKind.success,
+    );
   }
 
   void _removeExercise(int weekday, Exercise ex) {
@@ -1726,23 +1716,13 @@ class _CreateCustomExerciseSheetState
     final repMax = int.tryParse(_repMaxCtrl.text.trim());
     if (name.isEmpty) {
       KHaptics.reject();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Give the exercise a name first.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showKToast(context, 'Give the exercise a name first.', kind: KToastKind.error);
       return;
     }
     if ((repMin != null || repMax != null) &&
         (repMin == null || repMax == null || repMin <= 0 || repMax < repMin)) {
       KHaptics.reject();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Check the rep range. Use both numbers, low to high.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showKToast(context, 'Check the rep range. Use both numbers, low to high.', kind: KToastKind.error);
       return;
     }
 

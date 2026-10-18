@@ -1,6 +1,7 @@
 import 'dart:async' show Timer;
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../ui/k_segmented.dart';
 import '../models/insights_models.dart';
 import '../models/day_log.dart';
 import '../models/day_status.dart';
@@ -264,11 +265,14 @@ class _InsightsScreenState extends State<InsightsScreen>
   // ─── Tabs UI ────────────────────────────────────────────────────────────────
 
   Widget _buildTabs() {
-    return _SegmentedTabs(
-      labels: const ['Week', 'Month', 'Year'],
-      selected: _selectedTab,
-      onSelected: (index) {
-        kHapticSelect();
+    return KSegmented<int>(
+      segments: const [
+        KSegment(0, 'Week'),
+        KSegment(1, 'Month'),
+        KSegment(2, 'Year'),
+      ],
+      value: _selectedTab,
+      onChanged: (index) {
         setState(() {
           _selectedTab = index;
         });
@@ -2040,6 +2044,7 @@ class _InsightsScreenState extends State<InsightsScreen>
           type: KEmptyStateType.general,
           title: 'Nothing to read yet',
           message: msg,
+          kyno: true,
           actionLabel: 'Refresh insights',
           onAction: _handleRefresh,
         ),
@@ -2241,92 +2246,6 @@ class _InsightsScreenState extends State<InsightsScreen>
 }
 
 // ─── Private building blocks ──────────────────────────────────────────────────
-
-/// Segmented period control: the selected segment is a solid ink pill that
-/// slides between options (ink = selection, per the design system).
-class _SegmentedTabs extends StatelessWidget {
-  const _SegmentedTabs({
-    required this.labels,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final List<String> labels;
-  final int selected;
-  final ValueChanged<int> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final bold = MediaQuery.boldTextOf(context);
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: KColor.isDark ? KColor.surface : KColor.cardHigh,
-        borderRadius: KRadius.pill,
-        border: Border.all(color: _hairlineColor(), width: 1),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final tabWidth = constraints.maxWidth / labels.length;
-          return Stack(
-            children: [
-              AnimatedPositionedDirectional(
-                duration: KMotion.of(context, KMotion.standard),
-                curve: KMotion.emphasizedCurve,
-                start: selected * tabWidth,
-                width: tabWidth,
-                top: 0,
-                bottom: 0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: KColor.ink,
-                    borderRadius: KRadius.pill,
-                  ),
-                ),
-              ),
-              Row(
-                children: [
-                  for (var i = 0; i < labels.length; i++)
-                    Expanded(
-                      child: Semantics(
-                        button: true,
-                        selected: i == selected,
-                        label: labels[i],
-                        excludeSemantics: true,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onSelected(i),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(minHeight: 48),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                child: AnimatedDefaultTextStyle(
-                                  duration: KMotion.of(context, KMotion.quick),
-                                  textAlign: TextAlign.center,
-                                  style: KText.bodyMedium.copyWith(
-                                    fontSize: 14,
-                                    height: 1.2,
-                                    fontWeight: (i == selected || bold) ? FontWeight.w600 : FontWeight.w500,
-                                    color: i == selected ? KColor.onInk : KColor.textSecondary,
-                                  ),
-                                  child: Text(labels[i]),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
 
 /// Report section heading: monochrome icon tile, eyebrow, Geist title and an
 /// optional caption. Editorial hierarchy, no colour.

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../models/barcode_product.dart';
 import '../models/day_log.dart';
 import '../models/nutrition_result.dart';
@@ -70,7 +71,7 @@ Future<BarcodeFlowOutcome?> openBarcodeFlow(
   MealSection? section,
   BarcodeFlowMode mode = BarcodeFlowMode.log,
 }) async {
-  final messenger = ScaffoldMessenger.maybeOf(context);
+  final toaster = KToaster.of(context);
   final navigator = Navigator.of(context);
   final accessible = MediaQuery.maybeAccessibleNavigationOf(context) ?? false;
   final sec =
@@ -85,19 +86,11 @@ Future<BarcodeFlowOutcome?> openBarcodeFlow(
   if (outcome == null) return null;
 
   void toast(String message) {
-    messenger
-      ?..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          duration: Duration(seconds: accessible ? 8 : 3),
-          margin: const EdgeInsets.fromLTRB(KSpacing.lg, 0, KSpacing.lg, 88),
-          padding: EdgeInsets.zero,
-          content: KSuccessBanner(message: message),
-        ),
-      );
+    toaster.show(
+      message,
+      kind: KToastKind.success,
+      duration: Duration(seconds: accessible ? 8 : 3),
+    );
   }
 
   switch (outcome.action) {
@@ -381,12 +374,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   Future<void> _openSettings() async {
-    final messenger = ScaffoldMessenger.of(context);
+    final toaster = KToaster.of(context);
     final ok = await BarcodeAppSettings.open();
     if (!ok && mounted) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text(BarcodeAppSettings.manualPath)),
-      );
+      toaster.show(BarcodeAppSettings.manualPath);
     }
   }
 

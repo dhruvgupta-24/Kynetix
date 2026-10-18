@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../models/day_log.dart';
 import '../services/avatar_service.dart';
 import '../services/body_metrics_service.dart';
@@ -12,6 +13,7 @@ import '../services/nutrition_target_engine.dart';
 import '../services/profile_service.dart';
 import '../services/workout_service.dart';
 import '../ui/k_rolling.dart';
+import '../widgets/consistency_heatmap.dart';
 import '../widgets/k_avatar.dart';
 import '../widgets/k_equal_height_row.dart';
 import 'connect_chatgpt_screen.dart';
@@ -52,9 +54,7 @@ class _ProfileTabState extends State<ProfileTab> {
       KHaptics.commit();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't open that photo. Try another one."), persist: false),
-      );
+      showKToast(context, "Couldn't open that photo. Try another one.", kind: KToastKind.error);
     }
   }
 
@@ -136,7 +136,8 @@ class _ProfileTabState extends State<ProfileTab> {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const _AvatarCrossFade(size: 104),
+                    // Today's rings around the picture, as in the dock.
+                    KFuelAvatar(size: 120, stroke: 3, face: (s) => _AvatarCrossFade(size: s)),
                     Positioned(
                       right: 0,
                       bottom: 2,
@@ -190,6 +191,19 @@ class _ProfileTabState extends State<ProfileTab> {
                 const SizedBox(width: KSpacing.md),
                 Expanded(child: _BodyTile(label: 'BMI', value: profile.bmi.toStringAsFixed(1))),
               ],
+            ),
+            const SizedBox(height: KSpacing.xl),
+            // ── Consistency: the last sixteen weeks, one square a day.
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: KSpacing.sm),
+              child: Semantics(
+                header: true,
+                child: Text('Consistency', style: KText.h3.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            KCard(
+              padding: const EdgeInsets.all(KSpacing.lg),
+              child: ConsistencyHeatmap(avgTarget: plan.avgDailyCalories),
             ),
             const SizedBox(height: KSpacing.xl),
             KCard(

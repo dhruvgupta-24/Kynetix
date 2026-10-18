@@ -8,6 +8,7 @@ import 'onboarding/prologue.dart';
 import 'onboarding/scene_backdrop.dart';
 import 'onboarding/welcome_moment.dart';
 import '../config/app_theme.dart';
+import '../ui/k_segmented.dart';
 import '../services/auth_service.dart';
 import '../services/consent_service.dart';
 import '../services/persistence_service.dart';
@@ -16,6 +17,7 @@ import '../services/nutrition_target_engine.dart';
 import '../services/nutrition_hydration_guard.dart';
 import '../services/eating_pattern_service.dart';
 import '../ui/k_rolling.dart';
+import '../ui/k_shake.dart';
 import '../widgets/kyno_avatar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
@@ -370,6 +372,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     };
     if (!valid) {
       KHaptics.reject();
+      // The fields that said no give a short sideways nudge.
+      KShake.shakeInvalid(switch (_currentStep) {
+        0 => _step1Key.currentContext,
+        _ => _step2Key.currentContext,
+      });
       return;
     }
 
@@ -1203,7 +1210,8 @@ class _OnboardingTextFieldState extends State<OnboardingTextField> {
     final dark = KColor.isDark;
     final rest = dark ? KColor.fg.withValues(alpha: 0.10) : KColor.border;
     final ring = KColor.fg.withValues(alpha: dark ? 0.10 : 0.07);
-    return AnimatedContainer(
+    // KShake: a rejected Continue nudges the field (see _nextStep).
+    return KShake(child: AnimatedContainer(
       duration: KMotion.of(context, KMotion.quick),
       curve: KMotion.emphasizedCurve,
       decoration: BoxDecoration(
@@ -1253,7 +1261,7 @@ class _OnboardingTextFieldState extends State<OnboardingTextField> {
           errorMaxLines: 2,
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1348,76 +1356,15 @@ class _UnitToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Height unit',
-      value: useCm ? 'Centimetres' : 'Feet and inches',
-      hint: 'Switch unit',
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          KHaptics.select();
-          onToggle();
-        },
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Center(
-            widthFactor: 1,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: KColor.isDark
-                    ? KColor.fg.withValues(alpha: 0.05)
-                    : KColor.card,
-                borderRadius: KRadius.pill,
-                border: Border.all(
-                  color: KColor.isDark
-                      ? KColor.fg.withValues(alpha: 0.08)
-                      : KColor.border,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ToggleSegment(label: 'cm', active: useCm),
-                  _ToggleSegment(label: 'ft/in', active: !useCm),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ToggleSegment extends StatelessWidget {
-  final String label;
-  final bool active;
-  const _ToggleSegment({required this.label, required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: KMotion.of(context, KMotion.quick),
-      curve: KMotion.emphasizedCurve,
-      padding: const EdgeInsets.symmetric(
-        horizontal: KSpacing.md + 2,
-        vertical: 8,
-      ),
-      decoration: BoxDecoration(
-        color: active ? KColor.ink : null,
-        borderRadius: KRadius.pill,
-      ),
-      child: Text(
-        label,
-        style: KText.caption.copyWith(
-          fontSize: 13,
-          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-          color: active ? KColor.onInk : KColor.textMuted,
-        ),
-      ),
+    return KSegmented<bool>(
+      segments: const [
+        KSegment(true, 'cm', semanticLabel: 'Height in centimetres'),
+        KSegment(false, 'ft/in', semanticLabel: 'Height in feet and inches'),
+      ],
+      value: useCm,
+      dense: true,
+      segmentWidth: 60,
+      onChanged: (_) => onToggle(),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../models/workout_session.dart';
 import '../models/workout_split.dart';
 import '../services/workout_service.dart';
@@ -455,14 +456,12 @@ class AppShellState extends State<AppShell> {
     await service.clearDraftSession();
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            status == WorkoutStatus.partial
-                ? 'Saved as partial. Every set still counts.'
-                : 'Workout saved. Solid session.',
-          ),
-        ),
+      showKToast(
+        context,
+        status == WorkoutStatus.partial
+            ? 'Saved as partial. Every set still counts.'
+            : 'Workout saved. Solid session.',
+        kind: KToastKind.success,
       );
     }
   }
@@ -865,7 +864,10 @@ class _KDock extends StatelessWidget {
             // A tap anywhere on the shrunk island grows it back.
             onTap: shrink > 0.5 ? onExpand : null,
             behavior: HitTestBehavior.opaque,
-            child: DecoratedBox(
+            child: CustomPaint(
+              // Carbon: the island's machined top rim, as on cards.
+              foregroundPainter: dark ? KRimPainter(radius: KRadius.pill, alpha: 0.06) : null,
+              child: DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: KRadius.pill,
                 color: dark ? KColor.cardHigh : KColor.card,
@@ -907,6 +909,7 @@ class _KDock extends StatelessWidget {
                         ),
                   ],
                 ),
+              ),
               ),
             ),
           ),
@@ -1003,10 +1006,11 @@ class _NavItem extends StatelessWidget {
     final Widget glyph = switch (data.kind) {
       _NavKind.kyno => KynoMark(size: 22, outlined: true, alive: true, selected: selected, color: color),
       // A photo can't take a colour, so the avatar alone keeps an Opacity
-      // (28 px, and only while the island shrinks).
+      // (32 px, and only while the island shrinks). It wears today's rings;
+      // const, so the dock's per-frame rebuilds skip it entirely.
       _NavKind.avatar => Opacity(
           opacity: fade,
-          child: _CachedAvatar(ring: openness > 0.5 ? null : KColor.fg.withValues(alpha: 0.18)),
+          child: const KFuelAvatar(size: 32),
         ),
       _NavKind.icon => Icon(data.icon, color: color, size: 22),
     };
@@ -1057,30 +1061,5 @@ class _NavItem extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-/// The profile avatar for the dock. The dock rebuilds every animation frame;
-/// handing back the same [KAvatar] instance while the ring is unchanged lets
-/// Flutter skip rebuilding the photo subtree on those frames.
-class _CachedAvatar extends StatefulWidget {
-  const _CachedAvatar({required this.ring});
-  final Color? ring;
-
-  @override
-  State<_CachedAvatar> createState() => _CachedAvatarState();
-}
-
-class _CachedAvatarState extends State<_CachedAvatar> {
-  Widget? _avatar;
-  Color? _ring;
-
-  @override
-  Widget build(BuildContext context) {
-    if (_avatar == null || _ring != widget.ring) {
-      _ring = widget.ring;
-      _avatar = KAvatar(size: 28, ring: _ring);
-    }
-    return _avatar!;
   }
 }

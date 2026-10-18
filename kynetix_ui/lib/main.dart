@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/app_theme.dart';
+import 'ui/k_theme_reveal.dart';
 import 'screens/auth_gate.dart';
 import 'screens/reset_password_screen.dart';
 import 'services/exercise_library_service.dart';
@@ -114,6 +115,8 @@ class _KynetixAppState extends State<KynetixApp> {
         debugShowCheckedModeBanner: false,
         theme: buildKynetixTheme(palette),
         themeAnimationDuration: Duration.zero,
+        // Light / dark flips are revealed as a circle from the last touch.
+        builder: (context, child) => KThemeReveal(child: child ?? const SizedBox.shrink()),
         home: const AuthGate(),
       ),
     );

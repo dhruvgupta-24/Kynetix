@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../models/workout_split.dart';
 import '../models/workout_session.dart';
 import '../models/day_log.dart';
@@ -1346,23 +1347,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (validationError != null) {
       // Rejected input: acknowledged (icon + text + haptic), never punished.
       KHaptics.reject();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.error_outline_rounded, color: KColor.danger, size: 18),
-              const SizedBox(width: 10),
-              Expanded(child: Text(validationError, style: KText.bodyMedium)),
-            ],
-          ),
-          backgroundColor: KColor.cardHigh,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: KRadius.md,
-            side: BorderSide(color: KColor.danger.withValues(alpha: 0.5)),
-          ),
-          duration: const Duration(seconds: 2),
-        ),
+      showKToast(
+        context,
+        validationError,
+        kind: KToastKind.error,
+        duration: const Duration(seconds: 2),
       );
       return;
     }
@@ -1880,15 +1869,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     });
   }
 
+  /// Both callers report a finish that could not go through.
   void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: KText.bodyMedium.copyWith(color: KColor.onInk)),
-        backgroundColor: KColor.ink,
-        behavior: SnackBarBehavior.floating,
-        shape: const RoundedRectangleBorder(borderRadius: KRadius.md),
-      ),
-    );
+    showKToast(context, msg, kind: KToastKind.error);
   }
 
   Future<void> _addExerciseToSession() async {

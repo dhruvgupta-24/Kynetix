@@ -133,6 +133,7 @@ class _KAuroraState extends State<KAurora> with SingleTickerProviderStateMixin {
                 phaseTo: () => _phaseTo,
                 intensity: widget.intensity,
                 palette: KColor.palette,
+                dpr: MediaQuery.devicePixelRatioOf(context),
               ),
             ),
           ),
@@ -152,9 +153,11 @@ class _AuroraPainter extends CustomPainter {
     required this.phaseTo,
     required this.intensity,
     required this.palette,
-  }) : super(repaint: morph);
+    required this.dpr,
+  }) : super(repaint: Listenable.merge([morph, _Grain.ready]));
 
   final KPalette palette;
+  final double dpr;
 
   final Animation<double> morph;
   final _AuroraPalette Function() from;
@@ -166,8 +169,27 @@ class _AuroraPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = palette.bg);
+    // Grain: a fixed per-pixel speckle on the ground only (cards and text
+    // sit above this layer), so flat fills read as a material instead of a
+    // screen. One tiled image shader, static, a few percent strong.
+    final grain = _Grain.tile(palette.isDark);
+    if (grain != null) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..shader = ImageShader(
+            grain,
+            TileMode.repeated,
+            TileMode.repeated,
+            // One grain texel per device pixel, whatever the density.
+            Matrix4.diagonal3Values(1 / dpr, 1 / dpr, 1).storage,
+            filterQuality: FilterQuality.none,
+          ),
+      );
+    }
+
     final strength = intensity * palette.auroraStrength;
-    // Graphite: a clean, flat ground. No light field, no grain.
+    // Graphite: no light field.
     if (strength <= 0) return;
 
     final m = KMotion.emphasizedCurve.transform(morph.value);
@@ -212,61 +234,70 @@ class _AuroraPainter extends CustomPainter {
       w * 0.9,
       0.08,
     );
-
-    // Paper grain: a fixed speckle over the light, so flat fills read as a
-    // material instead of a screen. Static (same seed every paint), under 5%.
-    final tile = _Grain.tile(palette.isDark);
-    canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    for (var y = 0.0; y < h; y += _Grain.size) {
-      for (var x = 0.0; x < w; x += _Grain.size) {
-        canvas.save();
-        canvas.translate(x, y);
-        canvas.drawPicture(tile);
-        canvas.restore();
-      }
-    }
-    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _AuroraPainter old) =>
-      old.intensity != intensity || !identical(old.palette, palette);
+      old.intensity != intensity || !identical(old.palette, palette) || old.dpr != dpr;
 }
 
-/// A 160 dp tile of fine speckle, recorded once per brightness and tiled.
+/// A 128 px tile of per-pixel noise, built once per brightness from a fixed
+/// seed and decoded off the frame. Until it is ready nothing is drawn; the
+/// aurora layer repaints once when it lands.
 abstract final class _Grain {
-  static const size = 160.0;
-  static ui.Picture? _dark;
-  static ui.Picture? _light;
+  static const size = 128;
 
-  static ui.Picture tile(bool dark) => dark ? (_dark ??= _record(true)) : (_light ??= _record(false));
+  /// Per-pixel swing around the ground tone, in 8-bit levels: about what
+  /// full-range noise at 2.5% (Graphite) and 3% (Paper) opacity gives,
+  /// but centred on the ground so its average tone does not shift.
+  static const _darkSwing = 3.2;
+  static const _lightSwing = 3.8;
 
-  static ui.Picture _record(bool dark) {
-    final rec = ui.PictureRecorder();
-    final c = Canvas(rec, const Rect.fromLTWH(0, 0, size, size));
-    final rnd = math.Random(7);
-    // Two passes: light flecks and dark flecks, so the texture has depth in
-    // either theme without shifting the overall tone.
-    for (final (color, n) in [
-      (Colors.white.withValues(alpha: dark ? 0.045 : 0.10), 900),
-      (Colors.black.withValues(alpha: dark ? 0.10 : 0.035), 900),
-    ]) {
-      final pts = Float32List(n * 2);
-      for (var i = 0; i < n; i++) {
-        pts[i * 2] = rnd.nextDouble() * size;
-        pts[i * 2 + 1] = rnd.nextDouble() * size;
-      }
-      c.drawRawPoints(
-        ui.PointMode.points,
-        pts,
-        Paint()
-          ..color = color
-          ..strokeWidth = 1.1
-          ..strokeCap = StrokeCap.round,
-      );
+  /// Tile alpha (of 255). Each texel is the ground tone offset by up to
+  /// swing / alpha levels, so painted over the ground it moves it by at most
+  /// the swing.
+  static const _alpha8 = 77;
+  static const _alpha = _alpha8 / 255;
+
+  static ui.Image? _dark;
+  static ui.Image? _light;
+  static bool _started = false;
+
+  /// Ticks when a tile has been decoded.
+  static final ready = ValueNotifier<int>(0);
+
+  static ui.Image? tile(bool dark) {
+    if (!_started) {
+      _started = true;
+      _build(true);
+      _build(false);
     }
-    return rec.endRecording();
+    return dark ? _dark : _light;
+  }
+
+  static void _build(bool dark) {
+    final rnd = math.Random(7);
+    final px = Uint8List(size * size * 4);
+    final bg = (dark ? KPalette.dark : KPalette.light).bg;
+    final spread = (dark ? _darkSwing : _lightSwing) / _alpha;
+    final base = [bg.r * 255, bg.g * 255, bg.b * 255];
+    for (var i = 0; i < px.length; i += 4) {
+      // One luminance offset per pixel (no colour noise), premultiplied.
+      final n = (rnd.nextDouble() * 2 - 1) * spread;
+      for (var c = 0; c < 3; c++) {
+        final g = (base[c] + n).clamp(0.0, 255.0);
+        px[i + c] = (g * _alpha).round();
+      }
+      px[i + 3] = _alpha8;
+    }
+    ui.decodeImageFromPixels(px, size, size, ui.PixelFormat.rgba8888, (img) {
+      if (dark) {
+        _dark = img;
+      } else {
+        _light = img;
+      }
+      ready.value++;
+    });
   }
 }
 

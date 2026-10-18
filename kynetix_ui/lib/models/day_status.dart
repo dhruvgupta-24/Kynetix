@@ -195,3 +195,30 @@ class DayStatusEngine {
           ),
       };
 }
+
+// ─── DayMark ──────────────────────────────────────────────────────────────────
+//
+// The calendar's three-state read of a day, shared by the dashboard calendar
+// and the Profile consistency grid so both agree on what "logged" and
+// "target met" mean.
+
+enum DayMark { none, logged, completed }
+
+/// Marker lookup against the average daily calorie target, computed on first
+/// use per day and memoised for the life of this object. Totalling a day
+/// re-derives every meal's nutrition, so only the days asked for are ever
+/// resolved. Build a fresh one when the logs change.
+class DayMarks {
+  DayMarks(this.avgTarget);
+  final double avgTarget;
+  final Map<String, DayMark> _cache = {};
+
+  DayMark of(String dk) => _cache[dk] ??= () {
+        final log = dayLogStore[dk];
+        if (log == null || log.isEmpty) return DayMark.none;
+        final cal = log.totalCaloriesMid;
+        if (cal >= avgTarget * 0.88) return DayMark.completed;
+        if (cal > 0) return DayMark.logged;
+        return DayMark.none;
+      }();
+}

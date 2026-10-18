@@ -1434,6 +1434,7 @@ class _RecentWorkoutCard extends StatelessWidget {
               'Your first session sets the tone. Stats show up here once you save one.',
           actionLabel: onStart == null ? null : 'Start workout',
           onAction: onStart,
+          kyno: true,
         ),
       );
     }

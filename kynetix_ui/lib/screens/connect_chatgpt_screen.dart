@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../widgets/chatgpt_sign_in_button.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/chatgpt_siwc_service.dart';
 
@@ -403,17 +404,11 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     if (_session?.userCode == null) return;
     Clipboard.setData(ClipboardData(text: _session!.userCode));
     KHaptics.select();
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.clearSnackBars();
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(
-          'Code copied.',
-          style: KText.bodyMedium.copyWith(color: KColor.onInk),
-        ),
-        duration: const Duration(seconds: 2),
-        backgroundColor: KColor.ink,
-      ),
+    showKToast(
+      context,
+      'Code copied.',
+      kind: KToastKind.success,
+      duration: const Duration(seconds: 2),
     );
   }
 

@@ -90,6 +90,8 @@ class KDabbaRings extends StatefulWidget {
     Color? track,
     this.child,
     this.sweepIn = true,
+    this.duration,
+    this.curve,
   }) : _track = track;
 
   final List<KRingSpec> rings;
@@ -102,6 +104,13 @@ class KDabbaRings extends StatefulWidget {
   /// arriving already drawn (the far end of a Hero flight).
   final bool sweepIn;
 
+  /// How long a change takes to ease in. Defaults to [KMotion.slow].
+  final Duration? duration;
+
+  /// The easing for a change. Defaults to [KMotion.emphasizedCurve]. Read
+  /// once, when the rings first show.
+  final Curve? curve;
+
   /// The same rings, already drawn: what a Hero flight carries, so the
   /// shuttle never replays the sweep mid-air.
   KDabbaRings settled() => KDabbaRings(
@@ -110,6 +119,8 @@ class KDabbaRings extends StatefulWidget {
         stroke: stroke,
         track: _track,
         sweepIn: false,
+        duration: duration,
+        curve: curve,
         child: child,
       );
 
@@ -138,7 +149,7 @@ class KDabbaRings extends StatefulWidget {
 
 class _KDabbaRingsState extends State<KDabbaRings> with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(vsync: this);
-  late final CurvedAnimation _curve = CurvedAnimation(parent: _ctrl, curve: KMotion.emphasizedCurve);
+  late final CurvedAnimation _curve = CurvedAnimation(parent: _ctrl, curve: widget.curve ?? KMotion.emphasizedCurve);
 
   // Each ring eases from where it was drawn to where it should be.
   List<double> _from = const [];
@@ -155,7 +166,7 @@ class _KDabbaRingsState extends State<KDabbaRings> with SingleTickerProviderStat
     if (_started) return;
     _started = true;
     _to = _progressOf(widget.rings);
-    final d = KMotion.of(context, KMotion.slow);
+    final d = KMotion.of(context, widget.duration ?? KMotion.slow);
     if (!widget.sweepIn || d == Duration.zero) {
       _from = _to;
       _ctrl.value = 1;
@@ -177,7 +188,7 @@ class _KDabbaRingsState extends State<KDabbaRings> with SingleTickerProviderStat
     final now = _current();
     _from = [for (var i = 0; i < next.length; i++) i < now.length ? now[i] : 0.0];
     _to = next;
-    final d = KMotion.of(context, KMotion.slow);
+    final d = KMotion.of(context, widget.duration ?? KMotion.slow);
     if (d == Duration.zero) {
       _from = _to;
       _ctrl.value = 1;

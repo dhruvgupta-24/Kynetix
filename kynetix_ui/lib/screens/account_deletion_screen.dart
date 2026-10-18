@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../services/account_deletion_service.dart';
 import 'auth_gate.dart';
 
@@ -56,7 +57,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       _error = null;
     });
     // Captured before the await: this screen is gone once we navigate.
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final toaster = KToaster.of(context);
     final navigator = Navigator.of(context);
     try {
       await (widget.service ?? AccountDeletionService.instance).deleteAccount();
@@ -87,11 +88,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       kFadeThroughRoute(builder: (_) => const AuthGate()),
       (route) => false,
     );
-    messenger?.showSnackBar(
-      const SnackBar(
-        content: Text(AccountDeletionScreen.deletedMessage),
-        duration: Duration(seconds: 6),
-      ),
+    toaster.show(
+      AccountDeletionScreen.deletedMessage,
+      kind: KToastKind.success,
+      duration: const Duration(seconds: 6),
     );
   }
 

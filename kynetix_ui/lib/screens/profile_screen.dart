@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
+import '../ui/k_segmented.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
 import '../screens/nutrition_intelligence_screen.dart';
@@ -21,6 +23,7 @@ import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
 import '../ui/k_rolling.dart';
+import '../ui/k_shake.dart';
 import '../widgets/k_equal_height_row.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
@@ -226,41 +229,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return 'Couldn\'t sync with Health Connect. Try again in a moment.';
   }
 
-  /// The screen's one snackbar style: floating surface pill, icon + one line.
+  /// The screen's toasts. Every message that is not a success here is a
+  /// failure ("Couldn't ..."), so it shows as an error.
   void _showToast(String message, {bool success = false}) {
     if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-              color: success ? KColor.green : KColor.textSecondary,
-              size: 16,
-            ),
-            const SizedBox(width: KSpacing.sm),
-            Flexible(
-              child: Text(
-                message,
-                style: KText.bodyMedium.copyWith(
-                  fontSize: 13,
-                  color: KColor.textPrimary,
-                ),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-        backgroundColor: KColor.surface,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: KRadius.md,
-          side: BorderSide(color: KColor.border, width: 0.5),
-        ),
-        margin: const EdgeInsets.all(KSpacing.md),
-      ),
+    showKToast(
+      context,
+      message,
+      kind: success ? KToastKind.success : KToastKind.error,
+      duration: const Duration(seconds: 3),
     );
   }
 
@@ -503,6 +480,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 _showToast('Metrics saved.', success: true);
                               } else {
                                 KHaptics.reject();
+                                KShake.shakeInvalid(formKey.currentContext);
                               }
                             },
                           ),
@@ -532,16 +510,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Text(label, style: KText.label),
         const SizedBox(height: KSpacing.sm),
-        TextFormField(
-          controller: controller,
-          keyboardType: keyboardType,
-          inputFormatters: formatters,
-          validator: validator,
-          style: KText.numSmall.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+        // Shaken by KShake.shakeInvalid when Save rejects the value.
+        KShake(
+          child: TextFormField(
+            controller: controller,
+            keyboardType: keyboardType,
+            inputFormatters: formatters,
+            validator: validator,
+            style: KText.numSmall.copyWith(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: _inputDecoration(suffix: suffix),
           ),
-          decoration: _inputDecoration(suffix: suffix),
         ),
       ],
     );
@@ -1944,7 +1925,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: KSpacing.lg),
-                TextFormField(
+                KShake(child: TextFormField(
                   controller: ctrl,
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(
@@ -1975,7 +1956,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                     return null;
                   },
-                ),
+                )),
               ],
             ),
           ),
@@ -1990,6 +1971,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _confirmValueChange(title, currentValue, val, onSave);
                 } else {
                   KHaptics.reject();
+                  KShake.shakeInvalid(formKey.currentContext);
                 }
               },
             ),
@@ -2090,7 +2072,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: KText.caption.copyWith(height: 1.4),
                 ),
                 const SizedBox(height: KSpacing.lg),
-                TextFormField(
+                KShake(child: TextFormField(
                   controller: ctrl,
                   autofocus: true,
                   keyboardType: TextInputType.number,
@@ -2111,7 +2093,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                     return null;
                   },
-                ),
+                )),
               ],
             ),
           ),
@@ -2127,6 +2109,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _showToast('Threshold saved.', success: true);
                 } else {
                   KHaptics.reject();
+                  KShake.shakeInvalid(formKey.currentContext);
                 }
               },
             ),
@@ -2268,98 +2251,29 @@ InputDecoration _inputDecoration({String? label, String? suffix}) {
 }
 
 // ─── Theme mode segmented control ─────────────────────────────────────────────
-// Selected segment is an ink fill with onInk text; state is also carried by
-// the semantics "selected" flag and a filled icon, never colour alone.
+// State is carried by the ink thumb, the semantics "selected" flag and a
+// filled icon, never colour alone.
 
 class _ThemeModeSegmented extends StatelessWidget {
   const _ThemeModeSegmented({required this.selected});
   final ThemeMode selected;
 
-  static const _modes = [ThemeMode.dark, ThemeMode.light, ThemeMode.system];
-
-  static String _label(ThemeMode m) => switch (m) {
-    ThemeMode.system => 'System',
-    ThemeMode.light => 'Light',
-    ThemeMode.dark => 'Dark',
-  };
-
-  static IconData _icon(ThemeMode m, bool on) => switch (m) {
-    ThemeMode.system =>
-      on ? Icons.brightness_auto_rounded : Icons.brightness_auto_outlined,
-    ThemeMode.light =>
-      on ? Icons.light_mode_rounded : Icons.light_mode_outlined,
-    ThemeMode.dark => on ? Icons.dark_mode_rounded : Icons.dark_mode_outlined,
-  };
-
   @override
   Widget build(BuildContext context) {
-    final d = KMotion.of(context, KMotion.quick);
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
-        borderRadius: KRadius.md,
-        border: Border.all(
-          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
-        ),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < _modes.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
-            Expanded(child: _segment(context, _modes[i], d)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _segment(BuildContext context, ThemeMode m, Duration d) {
-    final on = m == selected;
-    final fg = on ? KColor.onInk : KColor.textSecondary;
-    return Semantics(
-      button: true,
-      selected: on,
-      inMutuallyExclusiveGroup: true,
-      label: '${_label(m)} theme',
-      excludeSemantics: true,
-      child: Pressable(
-        onTap: () {
-          if (on) return;
-          KHaptics.select();
-          KThemeController.instance.set(m);
-        },
-        scale: 0.97,
-        borderRadius: KRadius.sm,
-        child: AnimatedContainer(
-          duration: d,
-          curve: KMotion.emphasizedCurve,
-          constraints: const BoxConstraints(minHeight: 48),
-          padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: on ? KColor.ink : Colors.transparent,
-            borderRadius: KRadius.sm,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(_icon(m, on), size: 16, color: fg),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  _label(m),
-                  maxLines: 1,
-                  style: KText.caption.copyWith(
-                    fontWeight: on ? FontWeight.w700 : FontWeight.w600,
-                    color: fg,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return KSegmented<ThemeMode>(
+      value: selected,
+      onChanged: (m) => KThemeController.instance.set(m),
+      segments: const [
+        KSegment(ThemeMode.dark, 'Dark',
+            icon: Icons.dark_mode_outlined, selectedIcon: Icons.dark_mode_rounded,
+            semanticLabel: 'Dark theme'),
+        KSegment(ThemeMode.light, 'Light',
+            icon: Icons.light_mode_outlined, selectedIcon: Icons.light_mode_rounded,
+            semanticLabel: 'Light theme'),
+        KSegment(ThemeMode.system, 'System',
+            icon: Icons.brightness_auto_outlined, selectedIcon: Icons.brightness_auto_rounded,
+            semanticLabel: 'System theme'),
+      ],
     );
   }
 }
@@ -3313,12 +3227,7 @@ class _WidgetPickerSheet extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.of(context).pop();
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Long-press your home screen, tap Widgets, then find Kynetix.'),
-          persist: false,
-        ),
-      );
+      showKToast(context, 'Long-press your home screen, tap Widgets, then find Kynetix.');
     }
   }
 

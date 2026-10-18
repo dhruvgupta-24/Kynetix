@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
+import '../ui/k_segmented.dart';
 import '../models/workout_history_view_model.dart';
 import '../models/workout_session.dart';
 import '../models/workout_split.dart';
@@ -134,7 +136,7 @@ class _WorkoutHistoryScreenState extends State<WorkoutHistoryScreen>
             style: KText.h2.copyWith(fontSize: 17, height: 1.15),
           ),
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(62),
+            preferredSize: const Size.fromHeight(64),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                 KSpacing.lg,
@@ -257,42 +259,28 @@ TextStyle get _formLabel => KText.caption.copyWith(
   fontWeight: FontWeight.w600,
 );
 
-/// Segmented pill tab bar; the selected segment is an ink pill.
+/// Analytics / Sessions switch. The thumb rides the TabController's
+/// animation, so it tracks a swipe between the two pages.
 class _SegmentedTabs extends StatelessWidget {
   const _SegmentedTabs({required this.controller});
   final TabController controller;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: KColor.isDark
-            ? KColor.fg.withValues(alpha: 0.05)
-            : KColor.cardHigh.withValues(alpha: 0.8),
-        borderRadius: KRadius.pill,
-        border: Border.all(color: _hairline),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(3),
-        child: TabBar(
-          controller: controller,
-          onTap: (_) => KHaptics.select(),
-          indicatorSize: TabBarIndicatorSize.tab,
-          dividerColor: Colors.transparent,
-          splashFactory: NoSplash.splashFactory,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-          indicator: BoxDecoration(
-            borderRadius: KRadius.pill,
-            color: KColor.ink,
-          ),
-          labelColor: KColor.onInk,
-          unselectedLabelColor: KColor.textSecondary,
-          labelStyle: KText.bodyMedium.copyWith(fontWeight: FontWeight.w600),
-          unselectedLabelStyle: KText.bodyMedium,
-          tabs: const [
-            Tab(text: 'Analytics'),
-            Tab(text: 'Sessions'),
-          ],
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => KSegmented<int>(
+        segments: const [
+          KSegment(0, 'Analytics'),
+          KSegment(1, 'Sessions'),
+        ],
+        value: controller.index,
+        height: 44,
+        position: controller.animation,
+        onChanged: (i) => controller.animateTo(
+          i,
+          duration: KMotion.of(context, KMotion.standard),
+          curve: KMotion.emphasizedCurve,
         ),
       ),
     );
@@ -4631,7 +4619,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   }
 
   void _openEditSessionScreen() async {
-    final messenger = ScaffoldMessenger.of(context);
+    final toaster = KToaster.of(context);
     final updated = await Navigator.of(context).push<WorkoutSession>(
       kRiseRoute<WorkoutSession>(
         builder: (_) => _EditSessionScreen(session: _currentSession),
@@ -4644,14 +4632,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
         _currentSession = updated;
       });
       KHaptics.success();
-      messenger
-        ..clearSnackBars()
-        ..showSnackBar(
-          SnackBar(
-            content: const Text('Changes saved.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      toaster.show('Changes saved.', kind: KToastKind.success);
     }
   }
 }
@@ -6081,6 +6062,7 @@ class _EmptyHistoryPlaceholder extends StatelessWidget {
     title: title,
     message: subtitle,
     actionLabel: ctaText,
+    kyno: true,
     // The history screen is pushed from Train; going back is the honest way
     // to start a session from here.
     onAction: () => Navigator.maybePop(context),

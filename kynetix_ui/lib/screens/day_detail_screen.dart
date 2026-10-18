@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
+import '../ui/k_segmented.dart';
 import 'barcode_scanner_screen.dart';
 import '../models/coach_insight.dart';
 import '../models/day_log.dart';
@@ -24,6 +26,7 @@ import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
 import 'ai_coach_screen.dart';
 import 'dashboard_screen.dart';
+import '../ui/k_text_morph.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -203,28 +206,29 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             alignment: AlignmentDirectional.centerStart,
             children: [...previous, ?current],
           ),
+          // Cross-fades only between today and a past day (one line or two);
+          // from one past day to the next the letters morph in place.
           child: Semantics(
-            key: ValueKey(_dateKey),
+            key: ValueKey(_isToday),
             header: true,
             liveRegion: true,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
+                KTextMorph(
                   _isToday ? 'Today' : _dateLabel,
-                  style: KText.h2,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.fade,
+                  order: _dateToPageIndex(_currentDate),
+                  style: KText.h2.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
                 ),
                 if (!_isToday)
-                  Text(
+                  KTextMorph(
                     _relativeLabel,
-                    style: KText.caption.copyWith(color: KColor.textMuted),
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.fade,
+                    order: _dateToPageIndex(_currentDate),
+                    style: KText.caption.copyWith(
+                      color: KColor.textMuted,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
               ],
             ),
@@ -350,20 +354,16 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     _refresh();
     KHaptics.success();
     final kcal = added.fold<double>(0, (s, e) => s + e.calMid).round();
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        persist: false,
-        behavior: SnackBarBehavior.floating,
-        content: Text('Copied ${section.displayName.toLowerCase()} from $when, ${thousands(kcal)} kcal.'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () async {
-            await MealRepeatService.undo(widget.date, added);
-            _refresh();
-          },
-        ),
-      ));
+    showKToast(
+      context,
+      'Copied ${section.displayName.toLowerCase()} from $when, ${thousands(kcal)} kcal.',
+      kind: KToastKind.success,
+      actionLabel: 'Undo',
+      onAction: () async {
+        await MealRepeatService.undo(widget.date, added);
+        _refresh();
+      },
+    );
   }
 
   Future<void> _openAddMeal(MealSection section) async {
@@ -454,19 +454,12 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     if (!mounted) return;
     KHaptics.success();
     final accessible = MediaQuery.accessibleNavigationOf(context);
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          duration: Duration(seconds: accessible ? 8 : 2),
-          margin: const EdgeInsets.fromLTRB(KSpacing.lg, 0, KSpacing.lg, 88),
-          padding: EdgeInsets.zero,
-          content: KSuccessBanner(message: 'Meal logged to ${section.displayName}.'),
-        ),
-      );
+    showKToast(
+      context,
+      'Meal logged to ${section.displayName}.',
+      kind: KToastKind.success,
+      duration: Duration(seconds: accessible ? 8 : 2),
+    );
   }
 
   MealSection get _currentSection {
@@ -513,17 +506,11 @@ class _DayDetailContentState extends State<_DayDetailContent> {
 
     if (!mounted) return;
     kHapticMedium();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(KIcons.done, color: KColor.onInk, size: 16),
-            const SizedBox(width: 8),
-            Expanded(child: Text('$name logged.')),
-          ],
-        ),
-        duration: const Duration(seconds: 2),
-      ),
+    showKToast(
+      context,
+      '$name logged.',
+      kind: KToastKind.success,
+      duration: const Duration(seconds: 2),
     );
 
     final tSnackbar = sw.elapsedMicroseconds / 1000.0;
@@ -676,48 +663,20 @@ class _DayDetailContentState extends State<_DayDetailContent> {
     _persistLogChange();
     _refresh();
 
-    final media = MediaQuery.of(context);
-    final bottomPadding = media.padding.bottom;
-    final screenWidth = media.size.width;
-    final horizontalMargin = screenWidth > 600 ? (screenWidth - 400) / 2 : 16.0;
-
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          duration: Duration(seconds: media.accessibleNavigation ? 10 : 4),
-          persist: false,
-          margin: EdgeInsets.only(
-            bottom: bottomPadding + 80.0,
-            left: horizontalMargin,
-            right: horizontalMargin,
-          ),
-          content: Row(
-            children: [
-              Icon(KIcons.delete, color: KColor.onInk, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Deleted ${entry.finalSavedInput}.',
-                  maxLines: 2,
-                ),
-              ),
-            ],
-          ),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              // Touched: the restored copy must beat the deletion even if
-              // it already reached the cloud.
-              _log.add(section, entry.touched());
-              MealTombstones.instance.forgive(dateKey(widget.date), entry);
-              _persistLogChange();
-              _refresh();
-              kHapticMedium();
-            },
-          ),
-        ),
-      );
+    showKToast(
+      context,
+      'Deleted ${entry.finalSavedInput}.',
+      actionLabel: 'Undo',
+      onAction: () {
+        // Touched: the restored copy must beat the deletion even if
+        // it already reached the cloud.
+        _log.add(section, entry.touched());
+        MealTombstones.instance.forgive(dateKey(widget.date), entry);
+        _persistLogChange();
+        _refresh();
+        kHapticMedium();
+      },
+    );
   }
 
   DayTarget? get _dayTarget =>
@@ -956,16 +915,21 @@ class _GymCard extends StatelessWidget {
               ),
               const SizedBox(width: KSpacing.sm),
               // Yes / No toggle
-              _GymSegmented(
-                didGym: didGym,
-                onYes: () => _toggleGym(true),
-                onNo: fromSession
-                    ? () => ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('A workout is logged for this day. Delete it in Train to make it a rest day.'),
-                          ),
-                        )
-                    : () => _toggleGym(false),
+              KSegmented<bool>(
+                segments: const [
+                  KSegment(true, 'Yes', semanticLabel: 'Trained today: Yes'),
+                  KSegment(false, 'No', semanticLabel: 'Trained today: No'),
+                ],
+                value: didGym,
+                dense: true,
+                segmentWidth: 56,
+                onChanged: (yes) {
+                  if (!yes && fromSession) {
+                    showKToast(context, 'A workout is logged for this day. Delete it in Train to make it a rest day.');
+                    return;
+                  }
+                  _toggleGym(yes);
+                },
               ),
             ],
           ),
@@ -1097,94 +1061,6 @@ class _SelectChip extends StatelessWidget {
                   ),
                 ],
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Yes / No segmented toggle for "did you train today".
-class _GymSegmented extends StatelessWidget {
-  const _GymSegmented({required this.didGym, required this.onYes, required this.onNo});
-  final bool didGym;
-  final VoidCallback onYes;
-  final VoidCallback onNo;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
-        borderRadius: KRadius.pill,
-        border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _GymToggleButton(
-            label: 'Yes',
-            active: didGym,
-            activeColor: KColor.ink,
-            onTap: onYes,
-          ),
-          _GymToggleButton(
-            label: 'No',
-            active: !didGym,
-            activeColor: KColor.textSecondary,
-            onTap: onNo,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GymToggleButton extends StatelessWidget {
-  final String label;
-  final bool active;
-  final Color activeColor;
-  final VoidCallback onTap;
-  const _GymToggleButton({
-    required this.label,
-    required this.active,
-    required this.activeColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: active,
-      label: 'Trained today: $label',
-      excludeSemantics: true,
-      child: Pressable(
-        onTap: () {
-          if (!active) KHaptics.select();
-          onTap();
-        },
-        borderRadius: KRadius.pill,
-        child: AnimatedContainer(
-          duration: KMotion.of(context, KMotion.quick),
-          curve: KMotion.emphasizedCurve,
-          constraints: const BoxConstraints(minWidth: 52, minHeight: 44),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            // Selected = ink; the "Yes" side keeps a violet rim (train world).
-            color: active ? KColor.ink : Colors.transparent,
-            borderRadius: KRadius.pill,
-            border: Border.all(color: Colors.transparent, width: 1.4),
-          ),
-          child: Text(
-            label,
-            style: KText.caption.copyWith(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: active ? KColor.onInk : KColor.textSecondary,
             ),
           ),
         ),
@@ -2005,11 +1881,7 @@ class _QuickAddCardState extends State<_QuickAddCard> {
     );
     if (exists) {
       KHaptics.reject();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('That one\'s already in Quick Add.'),
-        ),
-      );
+      showKToast(context, 'That one\'s already in Quick Add.', kind: KToastKind.error);
       return;
     }
     // Optimistic: both calls update memory synchronously, so the new chip

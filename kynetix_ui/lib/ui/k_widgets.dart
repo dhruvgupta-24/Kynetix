@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
@@ -218,7 +219,12 @@ class _BarPainter extends CustomPainter {
 // ─── showKSheet ───────────────────────────────────────────────────────────────
 // Bottom sheet with the app's sheet chrome. Enters on KMotion.sheetSpring
 // (firm landing, no visible bounce), leaves quickly on an accelerating curve.
-// Scrim: 60% in dark, 30% in light. Reduced motion: no animation.
+// Figure / ground: the scene behind softly blurs (sigma 0 to 6) and dims
+// (52% dark, 26% light) as the sheet rises, both driven by the route's own
+// animation, so dragging the sheet down un-blurs the page with the finger.
+// Reduced motion: no animation, and a static light blur.
+// Every sheet draws its own handle (KDragHandle / KSheetHeader), so none is
+// added here.
 
 Future<T?> showKSheet<T>({
   required BuildContext context,
@@ -229,24 +235,112 @@ Future<T?> showKSheet<T>({
   bool enableDrag = true,
   Color? backgroundColor,
 }) {
-  return showModalBottomSheet<T>(
-    context: context,
-    isScrollControlled: isScrollControlled,
-    useSafeArea: useSafeArea,
-    isDismissible: isDismissible,
-    enableDrag: enableDrag,
-    backgroundColor: backgroundColor ?? KColor.surface,
-    barrierColor: Colors.black.withValues(alpha: KColor.isDark ? 0.6 : 0.3),
-    sheetAnimationStyle: KMotion.reduced(context)
-        ? AnimationStyle.noAnimation
-        : AnimationStyle(
-            duration: KMotion.sheetDuration,
-            reverseDuration: const Duration(milliseconds: 240),
-            curve: KMotion.sheetCurve,
-            reverseCurve: KMotion.accelerate,
-          ),
-    builder: builder,
+  // Same wiring as showModalBottomSheet, with our own barrier.
+  final navigator = Navigator.of(context);
+  final reduced = KMotion.reduced(context);
+  return navigator.push<T>(
+    _KSheetRoute<T>(
+      builder: builder,
+      capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
+      isScrollControlled: isScrollControlled,
+      useSafeArea: useSafeArea,
+      isDismissible: isDismissible,
+      enableDrag: enableDrag,
+      backgroundColor: backgroundColor ?? KColor.surface,
+      modalBarrierColor: Colors.black.withValues(alpha: KColor.isDark ? 0.52 : 0.26),
+      barrierLabel: MaterialLocalizations.of(context).scrimLabel,
+      barrierOnTapHint: MaterialLocalizations.of(context)
+          .scrimOnTapHint(MaterialLocalizations.of(context).bottomSheetLabel),
+      reducedMotion: reduced,
+      sheetAnimationStyle: reduced
+          ? AnimationStyle.noAnimation
+          : AnimationStyle(
+              duration: KMotion.sheetDuration,
+              reverseDuration: const Duration(milliseconds: 240),
+              curve: KMotion.sheetCurve,
+              reverseCurve: KMotion.accelerate,
+            ),
+    ),
   );
+}
+
+/// A modal bottom sheet route whose barrier blurs the scene behind it.
+class _KSheetRoute<T> extends ModalBottomSheetRoute<T> {
+  _KSheetRoute({
+    required super.builder,
+    required super.capturedThemes,
+    required super.isScrollControlled,
+    required super.useSafeArea,
+    required super.isDismissible,
+    required super.enableDrag,
+    required super.backgroundColor,
+    required super.modalBarrierColor,
+    required super.barrierLabel,
+    required super.barrierOnTapHint,
+    required super.sheetAnimationStyle,
+    required this.reducedMotion,
+  });
+
+  final bool reducedMotion;
+
+  /// Blur at rest, in logical px.
+  static const _sigma = 6.0;
+
+  /// Static blur under reduced motion: present, but lighter.
+  static const _reducedSigma = 3.0;
+
+  @override
+  Widget buildModalBarrier() {
+    // The stock barrier (tap to dismiss, semantics, animated dim) on top of
+    // a blur of whatever is behind the route.
+    final barrier = super.buildModalBarrier();
+    final anim = animation;
+    if (reducedMotion || anim == null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          const _SheetBlur(sigma: _reducedSigma),
+          barrier,
+        ],
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        AnimatedBuilder(
+          animation: anim,
+          builder: (context, _) => _SheetBlur(
+            // The route animation is the sheet's position, so the blur
+            // tracks a drag too. Easing in late keeps the first frames of
+            // the rise cheap.
+            sigma: _sigma * Curves.easeOut.transform(anim.value.clamp(0.0, 1.0)),
+          ),
+        ),
+        barrier,
+      ],
+    );
+  }
+}
+
+class _SheetBlur extends StatelessWidget {
+  const _SheetBlur({required this.sigma});
+  final double sigma;
+
+  @override
+  Widget build(BuildContext context) {
+    // Under ~0.1 a blur is invisible; skip the filter entirely.
+    if (sigma < 0.1) return const SizedBox.expand();
+    return IgnorePointer(
+      child: ExcludeSemantics(
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.clamp),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ─── KGradientText ────────────────────────────────────────────────────────────

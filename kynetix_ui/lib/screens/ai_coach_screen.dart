@@ -7,6 +7,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import '../services/ai_coach_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../models/day_log.dart';
@@ -254,7 +255,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   }
 
   Future<void> _openManageUsage() async {
-    final messenger = ScaffoldMessenger.of(context);
+    final toaster = KToaster.of(context);
     var opened = false;
     try {
       opened = await launchUrl(
@@ -265,7 +266,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       debugPrint('[AI_COACH_SCREEN] Could not open usage settings: $e');
     }
     if (!opened) {
-      _showToast(messenger, 'Couldn\'t open ChatGPT settings. Try again in a moment.');
+      _showToast(toaster, 'Couldn\'t open ChatGPT settings. Try again in a moment.', error: true);
     }
   }
 
@@ -353,10 +354,10 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       "That photo's too large for Kyno. Try a smaller one.";
 
   Future<void> _pickImage() async {
-    final messenger = ScaffoldMessenger.of(context);
+    final toaster = KToaster.of(context);
     if (_pendingImages.length >= maxPhotosPerMessage) {
       KHaptics.reject();
-      _showToast(messenger, photoCapMessage);
+      _showToast(toaster, photoCapMessage);
       return;
     }
     final source = await showKSheet<ImageSource>(
@@ -436,9 +437,9 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       });
     }
     if (overCap > 0) {
-      _showToast(messenger, photoCapMessage);
+      _showToast(toaster, photoCapMessage);
     } else if (tooLarge > 0) {
-      _showToast(messenger, photoTooLargeMessage);
+      _showToast(toaster, photoTooLargeMessage, error: true);
     }
   }
 
@@ -1275,10 +1276,9 @@ void _copyToClipboard(BuildContext context, String textToCopy) {
   if (textToCopy.isEmpty) return;
   Clipboard.setData(ClipboardData(text: textToCopy));
   kHapticMedium();
-  _showToast(ScaffoldMessenger.of(context), 'Copied.', success: true);
+  _showToast(KToaster.of(context), 'Copied.', success: true);
 }
 
-/// The screen's one snackbar style: floating surface pill, icon + one line.
 /// HTTP status of a failed coach reply. Reads an `int statusCode` when the
 /// service throws a typed error, else the `ai-meal-coach <status>:` prefix
 /// the service throws today.
@@ -1322,35 +1322,16 @@ String aiCoachFriendlyError(Object e) {
   return 'That didn\'t go through. Try again in a moment.';
 }
 
-void _showToast(ScaffoldMessengerState messenger, String message, {bool success = false}) {
-  messenger.clearSnackBars();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Row(
-        children: [
-          Icon(
-            success ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-            color: success ? KColor.green : KColor.textSecondary,
-            size: 16,
-          ),
-          const SizedBox(width: KSpacing.sm),
-          Flexible(
-            child: Text(
-              message,
-              style: KText.bodyMedium.copyWith(fontSize: 13, color: KColor.textPrimary),
-            ),
-          ),
-        ],
-      ),
-      duration: const Duration(seconds: 3),
-      backgroundColor: KColor.surface,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(
-        borderRadius: KRadius.md,
-        side: BorderSide(color: KColor.border, width: 0.5),
-      ),
-      margin: const EdgeInsets.all(KSpacing.md),
-    ),
+/// The screen's toasts: the shared KToast, a shorter stay for one-liners.
+void _showToast(KToaster toaster, String message, {bool success = false, bool error = false}) {
+  toaster.show(
+    message,
+    kind: success
+        ? KToastKind.success
+        : error
+            ? KToastKind.error
+            : KToastKind.info,
+    duration: const Duration(seconds: 3),
   );
 }
 

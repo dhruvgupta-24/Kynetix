@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
@@ -284,7 +286,25 @@ class KThemeController extends ValueNotifier<ThemeMode> {
     }
   }
 
+  /// Called before a change that flips light / dark, and awaited, so the
+  /// theme reveal can snapshot the old frame first. Set by `KThemeReveal`.
+  Future<void> Function()? beforeFlip;
+
+  /// Whether [mode] resolves to the dark palette right now.
+  static bool resolvesDark(ThemeMode mode) =>
+      mode == ThemeMode.dark ||
+      (mode == ThemeMode.system &&
+          SchedulerBinding.instance.platformDispatcher.platformBrightness ==
+              Brightness.dark);
+
   Future<void> set(ThemeMode mode) async {
+    // Only a real light / dark flip is revealed (System that resolves to the
+    // current palette changes nothing on screen).
+    if (mode != value && resolvesDark(mode) != resolvesDark(value)) {
+      try {
+        await beforeFlip?.call();
+      } catch (_) {}
+    }
     value = mode;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -325,12 +345,7 @@ class _KThemeScopeState extends State<KThemeScope> with WidgetsBindingObserver {
   void didChangePlatformBrightness() => _apply();
 
   void _resolve() {
-    final mode = _ctrl.value;
-    final platformDark =
-        SchedulerBinding.instance.platformDispatcher.platformBrightness ==
-        Brightness.dark;
-    final dark =
-        mode == ThemeMode.dark || (mode == ThemeMode.system && platformDark);
+    final dark = KThemeController.resolvesDark(_ctrl.value);
     KColor._p = dark ? KPalette.dark : KPalette.light;
     KText._refresh();
     SystemChrome.setSystemUIOverlayStyle(
@@ -657,17 +672,65 @@ class KCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Flat: one surface step above the page and a 1px hairline.
-    return Container(
+    final radius = borderRadius ?? KRadius.lg;
+    final edge = border ?? Border.all(color: KColor.hairline, width: 1);
+    final card = Container(
       padding: padding ?? const EdgeInsets.all(KSpacing.lg),
       decoration: BoxDecoration(
         color: color ?? KColor.card,
-        borderRadius: borderRadius ?? KRadius.lg,
-        border: border ?? Border.all(color: KColor.hairline, width: 1),
+        borderRadius: radius,
+        border: edge,
         boxShadow: boxShadow,
       ),
       child: child,
     );
+    if (!KColor.isDark) return card;
+    // Carbon: light catches the machined top edge. Painted over the card,
+    // so it never changes the card's size.
+    return CustomPaint(
+      foregroundPainter: KRimPainter(radius: radius, inset: edge.top.width),
+      child: card,
+    );
   }
+}
+
+/// A 1px highlight just inside a surface's top edge that fades out down the
+/// sides, like light on a machined rim. Dark theme only; no blur, no glow.
+class KRimPainter extends CustomPainter {
+  KRimPainter({required this.radius, this.inset = 1, this.alpha = 0.055})
+      : color = KColor.fg;
+
+  final BorderRadius radius;
+
+  /// Width of the surface's own border; the rim sits just inside it.
+  final double inset;
+  final double alpha;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final rrect = radius.toRRect(Offset.zero & size).scaleRadii().deflate(inset + 0.5);
+    // Brightest along the top, softening round the corners, gone a little
+    // below them.
+    final r = math.max(rrect.tlRadiusY, rrect.trRadiusY);
+    final fade = math.min(size.height * 0.6, r + 14);
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.withValues(alpha: alpha), color.withValues(alpha: 0)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, fade)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant KRimPainter o) =>
+      o.radius != radius || o.inset != inset || o.alpha != alpha || o.color != color;
 }
 
 // ─── KSectionTitle ────────────────────────────────────────────────────────────
@@ -1367,6 +1430,10 @@ class KEmptyState extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
 
+  /// Kyno sits in the ring instead of the glyph, idly blinking and glancing.
+  /// For real "nothing here yet" moments only, not filtered-out results.
+  final bool kyno;
+
   const KEmptyState({
     super.key,
     required this.type,
@@ -1374,6 +1441,7 @@ class KEmptyState extends StatelessWidget {
     required this.message,
     this.actionLabel,
     this.onAction,
+    this.kyno = false,
   });
 
   @override
@@ -1393,15 +1461,17 @@ class KEmptyState extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.16 : 0.14)),
                 ),
-                child: Icon(
-                  switch (type) {
-                    KEmptyStateType.nutrition => KIcons.plate,
-                    KEmptyStateType.workout => KIcons.train,
-                    KEmptyStateType.general => Icons.inbox_outlined,
-                  },
-                  size: 24,
-                  color: KColor.textSecondary,
-                ),
+                child: kyno
+                    ? Center(child: KynoMark(alive: true, outlined: true, size: 30, color: KColor.textSecondary))
+                    : Icon(
+                        switch (type) {
+                          KEmptyStateType.nutrition => KIcons.plate,
+                          KEmptyStateType.workout => KIcons.train,
+                          KEmptyStateType.general => Icons.inbox_outlined,
+                        },
+                        size: 24,
+                        color: KColor.textSecondary,
+                      ),
               ),
             ),
             const SizedBox(height: 16),

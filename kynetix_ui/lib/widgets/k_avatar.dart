@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
 import '../services/profile_service.dart';
 import '../services/avatar_service.dart';
+import '../services/day_fuel.dart';
+import '../services/persistence_service.dart';
+import '../services/workout_service.dart';
 
 /// The person's picture in a circle: their photo, else the Google account
 /// picture, else the first letter of their name.
@@ -53,6 +56,58 @@ class KAvatar extends StatelessWidget {
           child: ClipOval(
             child: ColoredBox(color: KColor.cardHigh, child: SizedBox.expand(child: child)),
           ),
+        );
+      },
+    );
+  }
+}
+
+/// The avatar wearing today's rings: calories outside, protein inside, the
+/// same numbers the dashboard's fuel card prints, each capped at a full lap.
+/// The rings follow meals as they are logged (eased, only when a number
+/// changes); [face] draws the picture inside them, [KAvatar] by default.
+class KFuelAvatar extends StatelessWidget {
+  const KFuelAvatar({super.key, required this.size, this.stroke = 1.6, this.face});
+
+  /// Outer size, rings included.
+  final double size;
+  final double stroke;
+
+  /// Builds the picture at the size left inside the rings.
+  final Widget Function(double faceSize)? face;
+
+  /// The ring change: long enough to see the arc move, short enough to read
+  /// as an answer to the meal that moved it.
+  static const Duration arcDuration = Duration(milliseconds: 600);
+
+  /// Width the two rings and their gaps take from each side. Mirrors the
+  /// ring painter: outer stroke, a 0.42 gap, an inner ring at 0.78, then
+  /// one more gap before the picture.
+  static double ringBand(double stroke) => stroke * (1 + 0.42 + 0.78 + 0.42) + 1;
+
+  @override
+  Widget build(BuildContext context) {
+    final faceSize = size - 2 * ringBand(stroke);
+    final inner = face?.call(faceSize) ?? KAvatar(size: faceSize);
+    return ListenableBuilder(
+      listenable: Listenable.merge([PersistenceService.dayLogNotifier, WorkoutService.instance]),
+      // The picture is built once and handed through, so a meal change
+      // repaints the rings only.
+      child: inner,
+      builder: (context, child) {
+        final fuel = DayFuel.of(DateTime.now());
+        return KDabbaRings(
+          size: size,
+          stroke: stroke,
+          sweepIn: false,
+          duration: arcDuration,
+          curve: KMotion.easeOut,
+          track: KColor.track.withValues(alpha: KColor.track.a * 0.5),
+          rings: [
+            KRingSpec(fuel.kcalRatio.clamp(0.0, 1.0), KRingColors.calories),
+            KRingSpec(fuel.proteinRatio.clamp(0.0, 1.0), KRingColors.protein),
+          ],
+          child: child,
         );
       },
     );

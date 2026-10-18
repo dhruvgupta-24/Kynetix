@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../services/user_session_coordinator.dart';
 import '../services/dev_test_harness.dart';
 import '../config/app_theme.dart';
+import '../ui/k_segmented.dart';
 import 'app_shell.dart';
 import 'email_verify_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -386,21 +387,19 @@ class _AuthScreenState extends State<AuthScreen> {
 
   /// ── BUILDERS ─────────────────────────────────────────────────────────────
 
+  // KSegmented fires the selection haptic, so these stay silent.
   void _selectSignIn() {
-    if (_isSignup) KHaptics.select();
     FocusScope.of(context).unfocus();
     _resetAuthState();
     setState(() => _isSignup = false);
   }
 
   void _selectSignUp() {
-    if (!_isSignup) KHaptics.select();
     _resetAuthState();
     setState(() => _isSignup = true);
   }
 
   void _selectMethod(AuthMethod method) {
-    if (_authMethod != method) KHaptics.select();
     _resetAuthState();
     setState(() {
       _authMethod = method;
@@ -480,17 +479,25 @@ class _AuthScreenState extends State<AuthScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Segmented control (Sign in / Sign up)
-        _ModeSwitch(
-          isSignup: _isSignup,
-          onSignIn: _selectSignIn,
-          onSignUp: _selectSignUp,
+        KSegmented<bool>(
+          segments: const [
+            KSegment(false, 'Sign in'),
+            KSegment(true, 'Sign up'),
+          ],
+          value: _isSignup,
+          onChanged: (signup) => signup ? _selectSignUp() : _selectSignIn(),
         ),
         const SizedBox(height: KSpacing.md),
 
-        // Method tabs (Email / Phone)
-        _MethodTabs(
-          method: _authMethod,
-          onSelect: _selectMethod,
+        // Method (Email / Phone): the dense size, a level below the mode.
+        KSegmented<AuthMethod>(
+          segments: const [
+            KSegment(AuthMethod.email, 'Email', icon: Icons.email_outlined, selectedIcon: Icons.email_rounded),
+            KSegment(AuthMethod.phone, 'Phone', icon: Icons.phone_android_rounded),
+          ],
+          value: _authMethod,
+          dense: true,
+          onChanged: _selectMethod,
         ),
         const SizedBox(height: KSpacing.lg),
 
@@ -1124,183 +1131,6 @@ class _InlineNotice extends StatelessWidget {
                 ),
               ),
       ),
-    );
-  }
-}
-
-// ─── Mode switch (Sign in / Sign up) ──────────────────────────────────────────
-// Sliding ink pill; the label weight and colour also change so the state is
-// never carried by the pill alone.
-
-class _ModeSwitch extends StatelessWidget {
-  const _ModeSwitch({required this.isSignup, required this.onSignIn, required this.onSignUp});
-  final bool isSignup;
-  final VoidCallback onSignIn;
-  final VoidCallback onSignUp;
-
-  @override
-  Widget build(BuildContext context) {
-    final dur = KMotion.of(context, KMotion.standard);
-    final dark = KColor.isDark;
-    Widget segment(String label, bool selected, VoidCallback onTap) {
-      return Expanded(
-        child: Semantics(
-          button: true,
-          selected: selected,
-          inMutuallyExclusiveGroup: true,
-          label: label,
-          excludeSemantics: true,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm, vertical: KSpacing.sm),
-                  child: AnimatedDefaultTextStyle(
-                    duration: dur,
-                    style: KText.bodyMedium.copyWith(
-                      fontSize: 14.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected ? KColor.onInk : KColor.textSecondary,
-                    ),
-                    child: Text(label, textAlign: TextAlign.center),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(KSpacing.xs),
-      decoration: BoxDecoration(
-        color: KColor.fg.withValues(alpha: dark ? 0.05 : 0.045),
-        borderRadius: KRadius.pill,
-        border: Border.all(color: KColor.fg.withValues(alpha: dark ? 0.08 : 0.06)),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: AnimatedAlign(
-              duration: dur,
-              curve: KMotion.emphasizedCurve,
-              alignment: isSignup ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
-              child: FractionallySizedBox(
-                widthFactor: 0.5,
-                heightFactor: 1,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: KColor.ink,
-                    borderRadius: KRadius.pill,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Row(
-            children: [
-              segment('Sign in', !isSignup, onSignIn),
-              segment('Sign up', isSignup, onSignUp),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Method tabs (Email / Phone) ──────────────────────────────────────────────
-// Quiet underline tabs, a level below the mode switch. Selected state is
-// carried by weight, colour and the sliding ink underline together.
-
-class _MethodTabs extends StatelessWidget {
-  const _MethodTabs({required this.method, required this.onSelect});
-  final AuthMethod method;
-  final ValueChanged<AuthMethod> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final dur = KMotion.of(context, KMotion.standard);
-    final isEmail = method == AuthMethod.email;
-    Widget tab(String title, IconData icon, AuthMethod value) {
-      final selected = method == value;
-      final fg = selected ? KColor.textPrimary : KColor.textMuted;
-      return Expanded(
-        child: Semantics(
-          button: true,
-          selected: selected,
-          inMutuallyExclusiveGroup: true,
-          label: title,
-          excludeSemantics: true,
-          child: Pressable(
-            onTap: () => onSelect(value),
-            scale: 0.98,
-            borderRadius: KRadius.sm,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 18, color: fg),
-                  const SizedBox(width: KSpacing.sm),
-                  Flexible(
-                    child: AnimatedDefaultTextStyle(
-                      duration: dur,
-                      style: KText.bodyMedium.copyWith(
-                        color: fg,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                      child: Text(title),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            tab('Email', Icons.email_outlined, AuthMethod.email),
-            tab('Phone', Icons.phone_android_rounded, AuthMethod.phone),
-          ],
-        ),
-        SizedBox(
-          height: 2,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: ColoredBox(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.08)),
-              ),
-              AnimatedAlign(
-                duration: dur,
-                curve: KMotion.emphasizedCurve,
-                alignment: isEmail ? AlignmentDirectional.centerStart : AlignmentDirectional.centerEnd,
-                child: FractionallySizedBox(
-                  widthFactor: 0.5,
-                  heightFactor: 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: KSpacing.xxl),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(color: KColor.ink, borderRadius: KRadius.pill),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

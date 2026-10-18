@@ -5,11 +5,13 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'app_shell.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
 import 'barcode_scanner_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/day_detail_screen.dart';
 import '../models/day_log.dart';
 import '../models/carry_forward_record.dart';
+import '../models/day_status.dart' show DayMark, DayMarks;
 import '../services/health_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/persistence_service.dart';
@@ -31,6 +33,11 @@ import 'insights_screen.dart';
 import 'workout_screen.dart';
 import 'add_meal_screen.dart';
 import '../ui/k_rolling.dart';
+import '../ui/k_text_morph.dart';
+import '../services/day_fuel.dart';
+// The display totals moved to day_fuel.dart; screens that import this one
+// keep reaching them here.
+export '../services/day_fuel.dart' show displayKcal, displayProtein;
 import '../widgets/k_equal_height_row.dart';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -71,6 +78,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Collapsed strip: one page per week, swiped like the month grid.
   late final PageController _weekPageController;
+
+  // ── Compact top bar ─────────────────────────────────────────────────────────
+  // Once the greeting has scrolled away, a slim bar with the day and its rings
+  // settles in under the status bar. [_compact] runs 0 (hidden) to 1 (shown)
+  // with the scroll offset; only the bar listens, so scrolling never rebuilds
+  // the page.
+  final ScrollController _scroll = ScrollController();
+  final ValueNotifier<double> _compact = ValueNotifier<double>(0);
+  final GlobalKey _headerKey = GlobalKey();
+
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final h = _headerKey.currentContext?.size?.height ?? 80.0;
+    // Starts as the greeting's last line slips under the top, done 24 px on.
+    final v = ((_scroll.offset - (h - 20)) / 24).clamp(0.0, 1.0);
+    // Two decimals is finer than the eye can tell, and keeps sub-pixel
+    // scroll jitter from rebuilding the bar.
+    _compact.value = (v * 100).roundToDouble() / 100;
+  }
+
+  void _scrollToTop() {
+    if (!_scroll.hasClients) return;
+    KHaptics.select();
+    final d = KMotion.of(context, KMotion.emphasized);
+    if (d == Duration.zero) {
+      _scroll.jumpTo(0);
+    } else {
+      _scroll.animateTo(0, duration: d, curve: KMotion.emphasizedCurve);
+    }
+  }
 
   int _monthIndex(DateTime date) {
     return (date.year - _baseMonth.year) * 12 + date.month - _baseMonth.month;
@@ -135,24 +172,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Targets run on the profile weight: offer to move it once the trend has
     // drifted a full kilo away, never silently.
     if (p != null && (trendKg - p.weight).abs() >= 1.0) {
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(SnackBar(
-        persist: false,
-        behavior: SnackBarBehavior.floating,
+      showKToast(
+        context,
+        'Your targets use ${p.weight.toStringAsFixed(1)} kg. Trend is ${trendKg.toStringAsFixed(1)} kg.',
         duration: const Duration(seconds: 8),
-        content: Text('Your targets use ${p.weight.toStringAsFixed(1)} kg. Trend is ${trendKg.toStringAsFixed(1)} kg.'),
-        action: SnackBarAction(
-          label: 'Update',
-          onPressed: () async {
-            final updated = p.copyWith(weight: (trendKg * 10).round() / 10);
-            ProfileService.instance.currentUserProfile = updated;
-            await ProfileService.instance.save(updated);
-            await NutritionTargetEngine.instance.refreshTargetForDate(DateTime.now(), force: true);
-            if (mounted) setState(() => _epoch++);
-          },
-        ),
-      ));
+        actionLabel: 'Update',
+        onAction: () async {
+          final updated = p.copyWith(weight: (trendKg * 10).round() / 10);
+          ProfileService.instance.currentUserProfile = updated;
+          await ProfileService.instance.save(updated);
+          await NutritionTargetEngine.instance.refreshTargetForDate(DateTime.now(), force: true);
+          if (mounted) setState(() => _epoch++);
+        },
+      );
     }
   }
 
@@ -161,6 +193,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _calendarPageController = PageController(initialPage: _monthIndex(_focusedMonth));
     _weekPageController = PageController(initialPage: _weekIndex(_weekStartOf(_stripAnchor())));
+    _scroll.addListener(_onScroll);
     // "Add meal" lives in the shell's dock, beside the nav pill.
     // Registered after the first frame: the dock rebuilds from this notifier,
     // and notifying mid-build is not allowed.
@@ -196,6 +229,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     BodyMetricsService.instance.changes.removeListener(_onBodyChange);
     _calendarPageController.dispose();
     _weekPageController.dispose();
+    _scroll.dispose();
+    _compact.dispose();
     super.dispose();
   }
 
@@ -658,21 +693,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// One tap from the + sheet: logs it, closes the sheet, offers Undo.
   void _confirmLogged(String what, List<MealEntry> added) {
     _refresh();
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        persist: false,
-        behavior: SnackBarBehavior.floating,
-        content: Text(what),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () async {
-            await MealRepeatService.undo(_selectedDate, added);
-            _refresh();
-          },
-        ),
-      ),
+    showKToast(
+      context,
+      what,
+      kind: KToastKind.success,
+      actionLabel: 'Undo',
+      onAction: () async {
+        await MealRepeatService.undo(_selectedDate, added);
+        _refresh();
+      },
     );
   }
 
@@ -941,6 +970,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SafeArea(
             bottom: false,
             child: CustomScrollView(
+              controller: _scroll,
               slivers: [
                 // One orchestrated entrance on first mount. Keys keep each
                 // section's element (and KReveal state) stable across rebuilds.
@@ -950,14 +980,108 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     key: ValueKey('dash-section-$i'),
                     child: sections[i].$2
                         ? sections[i].$1
-                        : KReveal(index: i, child: sections[i].$1),
+                        : KReveal(
+                            index: i,
+                            // The greeting is measured so the top bar knows
+                            // when it has scrolled away.
+                            child: i == 0 ? KeyedSubtree(key: _headerKey, child: sections[i].$1) : sections[i].$1,
+                          ),
                   ),
                 SliverToBoxAdapter(child: SizedBox(height: scrollBottom)),
               ],
             ),
           ),
+          Positioned(top: 0, left: 0, right: 0, child: _buildCompactBar(context)),
         ],
       ),
+    );
+  }
+
+  /// The slim bar that stands in for the greeting once it has scrolled away:
+  /// the day, its rings in miniature and what is left. Same numbers as the
+  /// fuel card (the same getters). The content is built with the page; the
+  /// scroll only moves its opacity and offset.
+  Widget _buildCompactBar(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    final reduced = KMotion.reduced(context);
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final d = _selectedDate;
+    final day = '${weekdays[d.weekday - 1]} ${d.day} ${_kMonthShort[d.month - 1]}';
+    // Integer maths on the printed numbers, as the fuel card does.
+    final consumedCal = _consumedCalories;
+    final tCal = _targetCalories.round();
+    final tPro = _targetProtein.round();
+    final hasCal = tCal > 0;
+    final calOver = hasCal && consumedCal > tCal;
+    final shown = hasCal ? (tCal - consumedCal).abs() : consumedCal;
+    final unit = !hasCal ? 'kcal eaten' : (calOver ? 'kcal over' : 'kcal left');
+
+    final content = Semantics(
+      button: true,
+      label: '$day, ${thousands(shown)} $unit. Back to top',
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _scrollToTop,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: KColor.bg.withValues(alpha: 0.92),
+            border: Border(bottom: BorderSide(color: KColor.hairline, width: 0.5)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(KSpacing.p, top, KSpacing.p, 0),
+            child: SizedBox(
+              height: 48,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      day,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.fade,
+                      style: KText.h3.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  // The fuel card's rings in miniature, already drawn.
+                  KDabbaRings(
+                    size: 22,
+                    stroke: 3,
+                    sweepIn: false,
+                    rings: [
+                      KRingSpec(hasCal ? consumedCal / tCal : 0.0, calOver ? KRingColors.over : KRingColors.calories),
+                      KRingSpec(tPro > 0 ? _consumedProtein / tPro : 0.0, KRingColors.protein),
+                    ],
+                  ),
+                  const SizedBox(width: KSpacing.sm),
+                  KRollingNumber.int(
+                    shown,
+                    style: KText.numSmall.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: calOver ? KColor.ember : KColor.textPrimary,
+                    ),
+                  ),
+                  Text(' $unit', style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return ValueListenableBuilder<double>(
+      valueListenable: _compact,
+      child: content,
+      builder: (context, v, child) {
+        // Hidden: nothing painted, nothing to tap, no semantics.
+        if (v <= 0) return const SizedBox.shrink();
+        final body = Opacity(opacity: v, child: IgnorePointer(ignoring: v < 0.5, child: child));
+        // Reduced motion: the fade alone, no slide.
+        if (reduced) return body;
+        return Transform.translate(offset: Offset(0, -8 * (1 - v)), child: body);
+      },
     );
   }
 
@@ -1185,7 +1309,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       padding: const EdgeInsets.symmetric(vertical: KSpacing.lg),
                       child: Row(
                         children: [
-                          Icon(KIcons.plate, size: 18, color: KColor.textMuted),
+                          // Kyno waits here, idly blinking, until the first meal.
+                          KynoMark(alive: true, outlined: true, size: 28, color: KColor.textSecondary),
                           const SizedBox(width: KSpacing.md),
                           Expanded(
                             child: Text(
@@ -1715,15 +1840,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 }
 
-// ─── Display totals ───────────────────────────────────────────────────────────
-// What the screen adds up is exactly what the rows show: every meal row prints
-// its rounded kcal, and every total is the sum of those printed numbers.
-
-int displayKcal(DayLog log) =>
-    log.allEntries.fold<int>(0, (s, e) => s + e.calMid.round());
-
-int displayProtein(DayLog log) =>
-    log.allEntries.fold<int>(0, (s, e) => s + e.result.protein.mid.round());
+// Display totals (displayKcal / displayProtein) live in services/day_fuel.dart
+// and are re-exported above.
 
 // ─── Fuel label ───────────────────────────────────────────────────────────────
 // The day as two concentric rings on a jewel card: calories outside, protein
@@ -1969,25 +2087,10 @@ class _RingLegend extends StatelessWidget {
 
 const _kWeekdayLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-enum _DayMark { none, logged, completed }
-
-/// Calendar marker lookup, computed on first use per day and memoised for
-/// one build. Totalling a day re-derives every meal's nutrition, so only the
-/// visible days are ever resolved.
-class _DayMarks {
-  _DayMarks(this.avgTarget);
-  final double avgTarget;
-  final Map<String, _DayMark> _cache = {};
-
-  _DayMark of(String dk) => _cache[dk] ??= () {
-        final log = dayLogStore[dk];
-        if (log == null || log.isEmpty) return _DayMark.none;
-        final cal = log.totalCaloriesMid;
-        if (cal >= avgTarget * 0.88) return _DayMark.completed;
-        if (cal > 0) return _DayMark.logged;
-        return _DayMark.none;
-      }();
-}
+// Calendar marker lookup, memoised for one build. Shared with the Profile
+// consistency grid (see DayMarks in models/day_status.dart).
+typedef _DayMark = DayMark;
+typedef _DayMarks = DayMarks;
 
 class _CalendarHeader extends StatelessWidget {
   final DateTime month;
@@ -2015,20 +2118,18 @@ class _CalendarHeader extends StatelessWidget {
       children: [
         const SizedBox(width: KSpacing.sm),
         Expanded(
-          child: AnimatedSwitcher(
-            duration: KMotion.of(context, KMotion.quick),
-            layoutBuilder: (current, previous) => Stack(
-              alignment: AlignmentDirectional.centerStart,
-              children: [...previous, ?current],
-            ),
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
-              child: child,
-            ),
-            child: Text(
+          // Letters that differ roll the way the calendar moved; the rest
+          // stay put.
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: KTextMorph(
               '${_months[month.month - 1]} ${month.year}',
-              key: ValueKey(month),
-              style: KText.h3.copyWith(fontSize: 14, color: KColor.textSecondary),
+              order: month.year * 12 + month.month,
+              style: KText.h3.copyWith(
+                fontSize: 14,
+                color: KColor.textSecondary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         ),

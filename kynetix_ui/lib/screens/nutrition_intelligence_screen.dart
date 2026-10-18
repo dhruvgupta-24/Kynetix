@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../ui/k_toast.dart';
+import '../ui/k_segmented.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
@@ -159,24 +161,20 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
   /// back as they were; Undo links them again.
   Future<void> _unlink(FoodLink link) async {
     kHapticSelect();
-    final messenger = ScaffoldMessenger.of(context);
+    final toaster = KToaster.of(context);
     final done = FoodLinkService.instance.unlink(link.barcode);
     if (mounted) setState(() {});
     await done;
     if (mounted) setState(() {});
-    messenger.showSnackBar(
-      SnackBar(
-        content: const Text('Unlinked. Both names are separate again.'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () async {
-            for (final a in link.aliases) {
-              await FoodLinkService.instance.link(link.product, a);
-            }
-            if (mounted) setState(() {});
-          },
-        ),
-      ),
+    toaster.show(
+      'Unlinked. Both names are separate again.',
+      actionLabel: 'Undo',
+      onAction: () async {
+        for (final a in link.aliases) {
+          await FoodLinkService.instance.link(link.product, a);
+        }
+        if (mounted) setState(() {});
+      },
     );
   }
 
@@ -260,11 +258,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
       await Future.wait([EatingPatternService.instance.save(), cleared]);
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Food library cleared. Fresh start.'),
-          ),
-        );
+        showKToast(context, 'Food library cleared. Fresh start.', kind: KToastKind.success);
       }
     }
   }
@@ -571,12 +565,14 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
   }
 
   Widget _buildTabs() {
-    return _SegmentedTabs(
-      labels: const ['All', 'Custom foods', 'Portion history'],
-      selected: _selectedTab,
-      accent: KColor.ink,
-      onSelected: (index) {
-        kHapticSelect();
+    return KSegmented<int>(
+      segments: const [
+        KSegment(0, 'All'),
+        KSegment(1, 'Custom foods'),
+        KSegment(2, 'Portion history'),
+      ],
+      value: _selectedTab,
+      onChanged: (index) {
         setState(() {
           _selectedTab = index;
         });
@@ -905,92 +901,3 @@ class _Hairline extends StatelessWidget {
   }
 }
 
-/// Segmented filter control with a sliding lit indicator.
-class _SegmentedTabs extends StatelessWidget {
-  const _SegmentedTabs({
-    required this.labels,
-    required this.selected,
-    required this.onSelected,
-    required this.accent,
-  });
-
-  final List<String> labels;
-  final int selected;
-  final ValueChanged<int> onSelected;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final bold = MediaQuery.boldTextOf(context);
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: KColor.isDark ? KColor.surface.withValues(alpha: 0.82) : KColor.cardHigh,
-        borderRadius: KRadius.pill,
-        border: Border.all(
-          color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
-          width: 1,
-        ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final tabWidth = constraints.maxWidth / labels.length;
-          return Stack(
-            children: [
-              AnimatedPositionedDirectional(
-                duration: KMotion.of(context, KMotion.standard),
-                curve: KMotion.emphasizedCurve,
-                start: selected * tabWidth,
-                width: tabWidth,
-                top: 0,
-                bottom: 0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: KColor.ink,
-                    borderRadius: KRadius.pill,
-                  ),
-                ),
-              ),
-              Row(
-                children: [
-                  for (var i = 0; i < labels.length; i++)
-                    Expanded(
-                      child: Semantics(
-                        button: true,
-                        selected: i == selected,
-                        label: labels[i],
-                        excludeSemantics: true,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onSelected(i),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(minHeight: 48),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                                child: AnimatedDefaultTextStyle(
-                                  duration: KMotion.of(context, KMotion.quick),
-                                  textAlign: TextAlign.center,
-                                  style: KText.bodyMedium.copyWith(
-                                    fontSize: 13.5,
-                                    height: 1.2,
-                                    fontWeight: (i == selected || bold) ? FontWeight.w600 : FontWeight.w500,
-                                    color: i == selected ? KColor.onInk : KColor.textSecondary,
-                                  ),
-                                  child: Text(labels[i]),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}

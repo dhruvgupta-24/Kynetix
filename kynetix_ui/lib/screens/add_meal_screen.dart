@@ -914,6 +914,8 @@ class _AddMealScreenState extends State<AddMealScreen>
     ).ignore();
 
     PersistenceService.saveDay(widget.date).ignore();
+    // Tell everything that reads the logs (heatmap, avatar rings, Kyno).
+    PersistenceService.notifyLogsChanged();
     KynoContextService.instance.invalidate();
     if (!mounted) return;
     // Everything above is already written. The button now shows its drawn
