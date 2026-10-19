@@ -2,21 +2,22 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/kynetix-wordmark-dark-theme.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/brand/kynetix-wordmark-light-theme.svg">
-    <img alt="Kynetix" src="docs/brand/kynetix-wordmark-light-theme.svg" width="420">
+    <img alt="Kynetix" src="docs/brand/kynetix-wordmark-light-theme.svg" width="360">
   </picture>
 </p>
 
 <h3 align="center">Real food. Real lifts. One coach.</h3>
 
 <p align="center">
-  Log what you actually ate, in your own words. Log what you actually lifted.<br>
-  Kyno, the coach, connects the two.
+  A calorie and training tracker built for how people in India actually eat.<br>
+  Type "2 roti, 1 katori dal" and it gets it. Log your sets, catch your PRs,<br>
+  and ask Kyno, the coach, why Tuesday's bench felt so heavy.
 </p>
 
 <p align="center">
-  <a href="https://dhruvgupta-24.github.io/Kynetix/">Website</a> ·
-  <a href="https://dhruvgupta-24.github.io/Kynetix/privacy/">Privacy</a> ·
-  <a href="https://dhruvgupta-24.github.io/Kynetix/terms/">Terms</a> ·
+  <a href="https://dhruvgupta-24.github.io/Kynetix/"><b>Website</b></a> &nbsp;·&nbsp;
+  <a href="https://dhruvgupta-24.github.io/Kynetix/privacy/">Privacy</a> &nbsp;·&nbsp;
+  <a href="https://dhruvgupta-24.github.io/Kynetix/terms/">Terms</a> &nbsp;·&nbsp;
   <a href="https://dhruvgupta-24.github.io/Kynetix/delete-account/">Delete account</a>
 </p>
 
@@ -26,34 +27,13 @@
   <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres%20%2B%20RLS-3FCF8E?logo=supabase&logoColor=white">
 </p>
 
-<p align="center"><b>Status:</b> launching on Google Play soon. iPhone later.</p>
+<p align="center"><sub>Coming soon to Google Play. iPhone later.</sub></p>
 
----
+<br>
 
-## A look around
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/readme/home.jpg" width="200" alt="Home: calories and protein rings"><br><sub>Today, at a glance</sub></td>
-    <td align="center"><img src="docs/readme/meal.jpg" width="200" alt="Logging a meal in plain words"><br><sub>Type it like you'd say it</sub></td>
-    <td align="center"><img src="docs/readme/train.jpg" width="200" alt="Training tab with splits"><br><sub>Your split, your week</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/readme/workout.jpg" width="200" alt="Live workout logging"><br><sub>Sets, reps, rest. Done.</sub></td>
-    <td align="center"><img src="docs/readme/done.jpg" width="200" alt="Workout complete summary"><br><sub>Paid in sweat. No refunds.</sub></td>
-    <td align="center"><img src="docs/readme/kyno_empty.jpg" width="200" alt="Kyno coach chat"><br><sub>Ask Kyno anything</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/readme/kyno_answer.jpg" width="200" alt="Kyno answering about diet"><br><sub>Straight answers, real numbers</sub></td>
-    <td align="center"><img src="docs/readme/share_poster.jpg" width="200" alt="Poster share card"><br><sub>Share card: Poster</sub></td>
-    <td align="center"><img src="docs/readme/share_receipt.jpg" width="200" alt="Receipt share card"><br><sub>Share card: Receipt</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/readme/share_skyline.jpg" width="200" alt="Skyline share card"><br><sub>Share card: Skyline</sub></td>
-    <td></td>
-    <td></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/readme/hero.png" width="860" alt="Three Kynetix screens: the home screen with today's calorie ring, a live workout set, and Kyno answering a diet question">
+</p>
 
 ---
 
@@ -92,6 +72,47 @@
 **Privacy**
 - Your rows are yours: user data sits behind Postgres row level security.
 - Delete your account from inside the app, or from the [web page](https://dhruvgupta-24.github.io/Kynetix/delete-account/). It actually deletes.
+
+---
+
+## Screens
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/readme/home.jpg" width="170" alt="Home: calories and protein rings"><br><sub>Today, at a glance</sub></td>
+    <td align="center"><img src="docs/readme/meal.jpg" width="170" alt="Logging a meal in plain words"><br><sub>Type it like you'd say it</sub></td>
+    <td align="center"><img src="docs/readme/workout.jpg" width="170" alt="Live workout logging"><br><sub>Sets, reps, rest</sub></td>
+    <td align="center"><img src="docs/readme/kyno_answer.jpg" width="170" alt="Kyno answering a diet question"><br><sub>Straight answers</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>More screens</summary>
+<br>
+<table>
+  <tr>
+    <td align="center"><img src="docs/readme/train.jpg" width="170" alt="Training tab with splits"><br><sub>Your split, your week</sub></td>
+    <td align="center"><img src="docs/readme/done.jpg" width="170" alt="Workout complete summary"><br><sub>Session saved</sub></td>
+    <td align="center"><img src="docs/readme/kyno_empty.jpg" width="170" alt="Kyno coach chat, empty state"><br><sub>Ask Kyno anything</sub></td>
+  </tr>
+</table>
+</details>
+
+### Share cards
+
+Five styles, all from the same Push Day. Graphite shown; each also comes on paper or over your own photo.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/readme/card-poster.jpg" width="140" alt="Poster share card"><br><sub>Poster</sub></td>
+    <td align="center"><img src="docs/readme/card-receipt.jpg" width="140" alt="Receipt share card"><br><sub>Receipt</sub></td>
+    <td align="center"><img src="docs/readme/card-skyline.jpg" width="140" alt="Skyline share card"><br><sub>Skyline</sub></td>
+    <td align="center"><img src="docs/readme/card-equivalent.jpg" width="140" alt="In real terms share card: 33 auto rickshaws"><br><sub>In real terms</sub></td>
+    <td align="center"><img src="docs/readme/card-sticker.jpg" width="140" alt="Transparent sticker share card over a photo"><br><sub>Sticker</sub></td>
+  </tr>
+</table>
+
+Full-size renders live in [`docs/share-cards/`](docs/share-cards/).
 
 ---
 
@@ -203,6 +224,12 @@ Short version: we keep what's needed to run the app, nothing gets sold, and dele
 
 - [ ] Google Play launch. Soon.
 - [ ] iPhone. Later. It's on the list, not on the calendar.
+
+---
+
+## Docs
+
+- [Play launch guide](docs/PLAY_LAUNCH_GUIDE.md): the checklist for getting Kynetix onto Google Play.
 
 ---
 

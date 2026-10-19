@@ -487,33 +487,49 @@ section { position: relative; }
   box-shadow: 0 0 0 1px var(--line), 0 30px 60px -30px #000;
 }
 .cards .card img { width: 100%; height: 100%; object-fit: cover; }
+/* The sticker is a transparent cut-out, so it sits on a stand-in gym photo:
+   a dim, out-of-focus room with a rubber floor. */
+.cards .card.sticker, .lightbox img.sticker {
+  background:
+    radial-gradient(18% 10% at 24% 14%, rgba(255, 236, 205, .38), transparent 70%),
+    radial-gradient(14% 8% at 74% 11%, rgba(255, 236, 205, .28), transparent 70%),
+    radial-gradient(70% 30% at 30% 20%, rgba(214, 170, 120, .45), transparent 72%),
+    radial-gradient(30% 22% at 88% 46%, rgba(120, 140, 150, .40), transparent 70%),
+    radial-gradient(22% 30% at 8% 58%, rgba(70, 50, 40, .9), transparent 70%),
+    radial-gradient(100% 40% at 50% 104%, rgba(0, 0, 0, .75), transparent 75%),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, .035) 0 3px, transparent 3px 52px),
+    linear-gradient(180deg, #6a5a48 0%, #4a4038 40%, #2c2622 62%, #1d1a18 63%, #141312 100%);
+}
+.finish { display: flex; justify-content: center; gap: 4px; width: max-content; margin: 0 auto 8px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; }
+.finish[hidden] { display: none; }
+.finish button { font: inherit; font-size: 14px; color: var(--ash); background: transparent; border: 0; border-radius: 999px; padding: 10px 18px; min-height: 44px; cursor: pointer; transition: background .3s ease, color .3s ease; }
+.finish button[aria-pressed="true"] { background: var(--bone); color: var(--carbon); }
+.finish button:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 .cards figcaption { padding: 16px 2px 0; }
 .cards figcaption b { display: block; font-weight: 600; }
 .cards figcaption span { color: var(--ash); font-size: 15px; }
-.cards-wrap { position: relative; }
+.cards-wrap { position: relative; overflow-x: clip; }
 @media (min-width: 980px) {
   .cards { overflow: visible; justify-content: center; padding: 30px 0 0; gap: 0; perspective: 1400px; }
   .cards li {
-    width: 280px; margin: 0 calc(-26px + var(--spread, 0px));
-    transform: translateX(calc(var(--o) * -180px * (1 - var(--p, 1)))) translateY(calc((var(--o) * var(--o)) * 26px * var(--p, 1)));
+    width: clamp(190px, 17vw, 240px); margin: 0 calc(-30px + var(--spread, 0px));
+    transform: translateX(calc(var(--o) * -150px * (1 - var(--p, 1)))) translateY(calc((var(--o) * var(--o)) * 20px * var(--p, 1)));
     z-index: calc(10 - var(--o) * var(--o));
     transition: margin .6s var(--spring);
   }
   .cards .card {
-    transform: rotate(calc(var(--o) * 6deg * var(--p, 1) * (1 - var(--flat, 0)))) translateY(var(--lift, 0px)) scale(var(--sc, 1));
+    transform: rotate(calc(var(--o) * 5deg * var(--p, 1) * (1 - var(--flat, 0)))) translateY(var(--lift, 0px)) scale(var(--sc, 1));
     transform-origin: 50% 120%;
     transition: transform .6s var(--spring), filter .4s ease, box-shadow .4s ease;
   }
-  .cards:hover { --spread: 34px; }
+  .cards:hover { --spread: clamp(0px, calc((100vw - 1000px) / 12), 28px); }
   .cards:hover li { --flat: .5; }
   .cards li:hover { z-index: 20; --flat: 1; --lift: -18px; --sc: 1.03; }
   .cards:hover li:not(:hover) .card { filter: brightness(.62) saturate(.8); }
   .cards li:hover .card { box-shadow: 0 0 0 1px var(--line-strong), 0 50px 80px -30px #000; }
-  .cards figcaption { text-align: center; opacity: var(--p, 1); padding: 24px 30px 0; font-size: 15px; }
+  .cards figcaption { text-align: center; opacity: var(--p, 1); padding: 24px 34px 0; font-size: 15px; }
   .cards figcaption span { font-size: 14px; }
 }
-.also { margin-top: clamp(32px, 5vw, 48px); color: var(--ash); max-width: var(--max); text-align: center; }
-.also b { color: var(--bone); font-weight: 600; }
 .quip { margin-top: clamp(32px, 6vw, 64px); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 14px; letter-spacing: .14em; color: var(--ash); text-align: center; }
 
 /* Lightbox */

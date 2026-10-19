@@ -333,6 +333,26 @@
     else openFirst();
   }
 
+  /* ── Share cards: graphite / paper finish ────────────── */
+  var finish = $('.finish');
+  if (finish) {
+    finish.hidden = false;
+    var finBtns = $$('button', finish);
+    finBtns.forEach(function (fb) {
+      fb.addEventListener('click', function () {
+        var f = fb.getAttribute('data-finish');
+        finBtns.forEach(function (x) { x.setAttribute('aria-pressed', String(x === fb)); });
+        $$('.card[data-base]').forEach(function (c) {
+          var base = (f === 'paper' && c.getAttribute('data-paper')) || c.getAttribute('data-base');
+          var img = $('img', c);
+          img.srcset = base + '-360.webp 360w, ' + base + '-720.webp 720w';
+          img.src = base + '-360.webp';
+          c.setAttribute('data-full', base + '-720.webp');
+        });
+      });
+    });
+  }
+
   /* ── Share cards: lightbox ───────────────────────────── */
   var lb = $('#lightbox');
   if (lb && lb.showModal) {
@@ -342,6 +362,7 @@
         var img = $('img', c);
         lbImg.src = c.getAttribute('data-full');
         lbImg.alt = img.alt;
+        lbImg.classList.toggle('sticker', c.classList.contains('sticker'));
         var fig = c.closest('figure');
         var cap = fig && fig.querySelector('figcaption');
         lbCap.textContent = cap ? cap.querySelector('b').textContent + '. ' + cap.querySelector('span').textContent : '';
