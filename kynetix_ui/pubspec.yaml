@@ -49,7 +49,7 @@ dependencies:
   url_launcher: ^6.3.2
   app_links: ^6.3.2
   image_picker: ^1.1.2
-  flutter_markdown: ^0.7.7+1
+  flutter_markdown_plus: ^1.0.12
   animations: ^2.2.0
   # SHA-256 for the OAuth 2.0 PKCE code challenge (Sign in with ChatGPT).
   crypto: ^3.0.6
@@ -58,6 +58,8 @@ dependencies:
   flutter_local_notifications: ^22.3.2
   timezone: ^0.11.2
   share_plus: ^13.3.1
+  flutter_secure_storage: ^10.0.0
+  package_info_plus: ^10.2.2
 
 dev_dependencies:
   flutter_test:

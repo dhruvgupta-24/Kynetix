@@ -27,7 +27,7 @@ void main() {
 
       final prefs = await SharedPreferences.getInstance();
       final raw = jsonDecode(prefs.getString('privacy_consent_v1_$_uid')!) as Map;
-      expect(raw['version'], '2026-10-16');
+      expect(raw['version'], '2026-10-20');
       expect(raw['at'], '2026-10-16T09:00:00.000Z');
       expect(raw['adult'], isTrue);
       expect(await svc.hasConsented(_uid), isTrue);
@@ -45,7 +45,7 @@ void main() {
       expect(await ConsentService.instance.hasConsented(_uid), isFalse);
       await prefs.setString(
           'privacy_consent_v1_$_uid',
-          jsonEncode({'version': '2026-10-16', 'at': '2026-10-16T00:00:00Z', 'adult': false}));
+          jsonEncode({'version': '2026-10-20', 'at': '2026-10-20T00:00:00Z', 'adult': false}));
       expect(await ConsentService.instance.hasConsented(_uid), isFalse);
     });
 

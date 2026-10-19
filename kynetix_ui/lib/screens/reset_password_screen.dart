@@ -39,8 +39,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       return;
     }
 
-    if (password.length < 6) {
-      setState(() => _errorMessage = 'Use at least 6 characters.');
+    if (password.length < 8) {
+      setState(() => _errorMessage = 'Use at least 8 characters.');
       return;
     }
 
@@ -85,7 +85,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       return "That's your current password. Pick a new one.";
     }
     if (m.contains('weak_password') || m.contains('should be')) {
-      return 'That password is too short. Use at least 6 characters.';
+      return 'That password is too short. Use at least 8 characters.';
     }
     if (m.contains('session') || m.contains('expired') || m.contains('jwt')) {
       return 'This reset link has expired. Request a new one from the sign-in screen.';
@@ -200,7 +200,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             ),
             const SizedBox(height: KSpacing.sm),
             Text(
-              "At least 6 characters. You'll sign in with it from now on.",
+              "At least 8 characters. You'll sign in with it from now on.",
               style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15),
             ),
           ],

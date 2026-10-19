@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
@@ -25,6 +25,7 @@ import '../services/workout_service.dart';
 import '../widgets/kyno_avatar.dart';
 import '../widgets/kyno_notes_sheet.dart';
 import '../services/kyno_notes_service.dart';
+import '../services/kyno_report_service.dart';
 import '../widgets/kyno_presence.dart';
 import '../widgets/k_typing_dots.dart';
 import 'add_meal_screen.dart';
@@ -483,7 +484,9 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       // Everything before this question. Photos stay in the thread as a note
       // (Kyno's reply already describes them); answers written on the phone
       // while the AI was down aren't the model's words, so they're left out.
-      final history = _messages
+      // Only the latest [maxHistoryMessages] go up, oldest first, so a long
+      // chat never grows the request without bound.
+      final thread = _messages
           .take(_messages.length - 1)
           .where((m) => !m.offline)
           .map((m) {
@@ -497,6 +500,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           })
           .where((h) => (h['content'] as String).isNotEmpty)
           .toList();
+      final history = recentHistory(thread);
 
       final dayPlan = widget.embedded ? WorkoutService.instance.planFor(DateTime.now()) : null;
       final stream = AiCoachService.instance.streamMessage(
@@ -1033,11 +1037,21 @@ class _AiCoachScreenState extends State<AiCoachScreen>
               role: msg.role,
               imagesBytes: msg.imagesBytes,
               onLog: _logSuggestion,
+              prompt: msg.role == _Role.assistant ? _promptBefore(i) : null,
             ),
           );
         },
       ),
     );
+  }
+
+  /// The user's question just before the reply at [index], for a report.
+  String? _promptBefore(int index) {
+    for (var j = index - 1; j >= 0; j--) {
+      final m = _messages[j];
+      if (m.role == _Role.user) return m.text;
+    }
+    return null;
   }
 
   Widget _buildImagePreview() {
@@ -1162,7 +1176,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     final bottom = MediaQuery.paddingOf(context).bottom +
         (widget.embedded ? MediaQuery.viewInsetsOf(context).bottom : 0);
     return Padding(
-      padding: EdgeInsets.fromLTRB(KSpacing.md, KSpacing.xs, KSpacing.md, bottom + KSpacing.md),
+      padding: EdgeInsets.fromLTRB(KSpacing.md, KSpacing.xs, KSpacing.md, bottom + KSpacing.sm),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1241,11 +1255,24 @@ class _AiCoachScreenState extends State<AiCoachScreen>
               ),
             ),
           ),
+          // Always there, never in the way: one quiet line under the box.
+          const SizedBox(height: 6),
+          Semantics(
+            label: _kDisclaimer,
+            excludeSemantics: true,
+            child: Text(
+              _kDisclaimer,
+              textAlign: TextAlign.center,
+              style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 11.5, height: 1.3),
+            ),
+          ),
         ],
       ),
     );
   }
 }
+
+const _kDisclaimer = 'Kyno can be wrong. Not medical advice.';
 
 // ─── _Entrance — rise + fade a row in, decided once at mount ─────────────────
 // A short 8 px rise and fade (220 ms, ease-out): quick enough to feel like
@@ -1304,6 +1331,205 @@ void _copyToClipboard(BuildContext context, String textToCopy) {
   _showToast(KToaster.of(context), 'Copied.', success: true);
 }
 
+// ─── Reply actions: Copy / Report this reply ──────────────────────────────────
+// Every Kyno reply can be reported in the app (Google Play generative AI
+// policy). Long-press or the options button opens this sheet.
+
+Future<void> _showReplyActions(BuildContext context, {required String text, String? prompt}) async {
+  if (text.isEmpty) return;
+  KHaptics.select();
+  final action = await showKSheet<String>(
+    context: context,
+    builder: (sheet) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: KSpacing.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const KSheetHeader("Kyno's reply"),
+            _SheetOption(
+              icon: Icons.copy_rounded,
+              label: 'Copy',
+              onTap: () => Navigator.of(sheet).pop('copy'),
+            ),
+            _SheetOption(
+              icon: Icons.flag_outlined,
+              label: 'Report this reply',
+              onTap: () => Navigator.of(sheet).pop('report'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  if (!context.mounted) return;
+  if (action == 'copy') _copyToClipboard(context, text);
+  if (action == 'report') {
+    await showKSheet<void>(
+      context: context,
+      builder: (_) => _ReportReplySheet(message: text, prompt: prompt),
+    );
+  }
+}
+
+class _ReportReplySheet extends StatefulWidget {
+  const _ReportReplySheet({required this.message, this.prompt});
+  final String message;
+  final String? prompt;
+
+  @override
+  State<_ReportReplySheet> createState() => _ReportReplySheetState();
+}
+
+class _ReportReplySheetState extends State<_ReportReplySheet> {
+  final _note = TextEditingController();
+  KynoReportReason? _reason;
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final reason = _reason;
+    if (reason == null || _sending) return;
+    final toaster = KToaster.of(context);
+    final navigator = Navigator.of(context);
+    setState(() => _sending = true);
+    try {
+      await KynoReportService.instance.report(
+        reason: reason,
+        message: widget.message,
+        prompt: widget.prompt,
+        note: _note.text,
+      );
+      KHaptics.success();
+      if (navigator.mounted) navigator.pop();
+      _showToast(toaster, "Thanks. Kyno's team will review it.", success: true);
+    } catch (e) {
+      debugPrint('[AI_COACH_SCREEN] Report failed: $e');
+      if (mounted) setState(() => _sending = false);
+      final signedOut = e.toString().contains('not authenticated');
+      _showToast(
+        toaster,
+        signedOut
+            ? 'Sign in again to send a report.'
+            : "Couldn't send the report. Check your connection and try again.",
+        error: true,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: keyboard),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: KSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const KSheetHeader(
+                'Report this reply',
+                subtitle: 'Tell us what went wrong. The reply and your question are sent with it.',
+              ),
+              const SizedBox(height: KSpacing.sm),
+              for (final r in KynoReportReason.values)
+                _ReasonRow(
+                  label: r.label,
+                  selected: _reason == r,
+                  onTap: _sending
+                      ? null
+                      : () {
+                          KHaptics.select();
+                          setState(() => _reason = r);
+                        },
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.md, KSpacing.p, 0),
+                child: TextField(
+                  controller: _note,
+                  enabled: !_sending,
+                  maxLength: KynoReportService.maxNoteLength,
+                  minLines: 2,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: KText.body.copyWith(fontSize: 15, height: 1.4),
+                  decoration: InputDecoration(
+                    hintText: 'Add a note (optional)',
+                    hintStyle: KText.body.copyWith(color: KColor.textMuted),
+                    filled: true,
+                    fillColor: KColor.card,
+                    contentPadding: const EdgeInsets.all(KSpacing.md),
+                    border: OutlineInputBorder(borderRadius: KRadius.md, borderSide: BorderSide(color: _hairline())),
+                    enabledBorder: OutlineInputBorder(borderRadius: KRadius.md, borderSide: BorderSide(color: _hairline())),
+                    focusedBorder: OutlineInputBorder(borderRadius: KRadius.md, borderSide: BorderSide(color: KColor.textSecondary)),
+                    disabledBorder: OutlineInputBorder(borderRadius: KRadius.md, borderSide: BorderSide(color: _hairline())),
+                  ),
+                ),
+              ),
+              const SizedBox(height: KSpacing.sm),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
+                child: KButton(
+                  label: 'Send report',
+                  loading: _sending,
+                  onTap: _reason == null ? null : _submit,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One reason in the report sheet: a radio mark (shape, not colour, says
+/// which is picked) and the label.
+class _ReasonRow extends StatelessWidget {
+  const _ReasonRow({required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      checked: selected,
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 52),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: KSpacing.p, vertical: KSpacing.sm),
+            child: Row(
+              children: [
+                Icon(
+                  selected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
+                  size: 22,
+                  color: selected ? KColor.textPrimary : KColor.textMuted,
+                ),
+                const SizedBox(width: KSpacing.md),
+                Expanded(child: Text(label, style: KText.bodyMedium)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// HTTP status of a failed coach reply. Reads an `int statusCode` when the
 /// service throws a typed error, else the `ai-meal-coach <status>:` prefix
 /// the service throws today.
@@ -1347,6 +1573,14 @@ String aiCoachFriendlyError(Object e) {
   return 'That didn\'t go through. Try again in a moment.';
 }
 
+/// Most messages sent to the AI as context with each question.
+const maxHistoryMessages = 20;
+
+/// The latest [max] entries of [thread], in their original order.
+@visibleForTesting
+List<T> recentHistory<T>(List<T> thread, {int max = maxHistoryMessages}) =>
+    thread.length <= max ? thread : thread.sublist(thread.length - max);
+
 /// The screen's toasts: the shared KToast, a shorter stay for one-liners.
 void _showToast(KToaster toaster, String message, {bool success = false, bool error = false}) {
   toaster.show(
@@ -1368,11 +1602,15 @@ class _ChatBubble extends StatelessWidget {
   final List<Uint8List>? imagesBytes;
   final ValueChanged<String>? onLog;
 
+  /// The user's question this reply answers, sent along with a report.
+  final String? prompt;
+
   const _ChatBubble({
     this.message,
     required this.role,
     this.imagesBytes,
     this.onLog,
+    this.prompt,
   });
 
   @override
@@ -1432,21 +1670,38 @@ class _ChatBubble extends StatelessWidget {
       );
     }
 
-    // Kyno writes on the page: a byline, then the answer as prose.
+    // Kyno writes on the page: a byline, then the answer as prose. The
+    // options button below a reply takes up most of the gap after it.
     return Padding(
-      padding: const EdgeInsets.only(right: KSpacing.xs, top: 8, bottom: KSpacing.xl),
+      padding: EdgeInsets.only(right: KSpacing.xs, top: 8, bottom: text.isEmpty ? KSpacing.xl : KSpacing.xs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const KynoByline(),
           const SizedBox(height: KSpacing.sm),
           GestureDetector(
-            // Long-press copies the message text to clipboard
-            onLongPress: () => _copyToClipboard(context, text),
+            // Long-press opens Copy / Report this reply
+            onLongPress: () => _showReplyActions(context, text: text, prompt: prompt),
             child: _MarkdownText(text),
           ),
           if (message?.fuel != null && onLog != null)
             _FuelPlanCard(plan: message!.fuel!, onLog: onLog!),
+          // The same actions, findable without knowing about long-press.
+          if (text.isNotEmpty)
+            Transform.translate(
+              // Line the dots up with the text, not the 48 dp target's edge.
+              offset: const Offset(-15, 0),
+              child: IconButton(
+                tooltip: 'Reply options',
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: () => _showReplyActions(context, text: text, prompt: prompt),
+                icon: Icon(Icons.more_horiz_rounded, size: 18, color: KColor.textMuted),
+              ),
+            ),
         ],
       ),
     );

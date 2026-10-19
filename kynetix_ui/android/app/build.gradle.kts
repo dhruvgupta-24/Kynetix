@@ -9,18 +9,26 @@ plugins {
 }
 
 // ── Store (Play upload) signing ────────────────────────────────────────────
-// Only used when explicitly requested, so everyday `flutter run --release`
-// keeps the debug key and can always install over a dev/debug install on a
-// phone without an uninstall (an uninstall would wipe local meal data):
-//   PowerShell:  $env:ORG_GRADLE_PROJECT_kynetixStoreRelease="true"; flutter build appbundle --release
-//   bash:        ORG_GRADLE_PROJECT_kynetixStoreRelease=true flutter build appbundle --release
+// App bundles (`flutter build appbundle`, the only thing Play takes) are
+// always signed with the upload key, and the build fails without it, so a
+// debug-signed bundle can never reach Play. APKs keep the debug key unless
+// asked, so a sideloaded `flutter build apk` still installs over a dev
+// install on a phone without an uninstall (which would wipe local data):
+//   PowerShell:  $env:ORG_GRADLE_PROJECT_kynetixStoreRelease="true"; flutter build apk --release
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(FileInputStream(keystorePropertiesFile))
 }
-val useStoreSigning =
-    (project.findProperty("kynetixStoreRelease") as String?)?.toBoolean() == true &&
-        keystorePropertiesFile.exists()
+val buildingReleaseBundle = gradle.startParameter.taskNames.any {
+    it.contains("bundle", ignoreCase = true) && it.contains("release", ignoreCase = true)
+}
+if (buildingReleaseBundle && !keystorePropertiesFile.exists()) {
+    throw GradleException(
+        "Release app bundles must be signed with the upload key: android/key.properties is missing.",
+    )
+}
+val useStoreSigning = keystorePropertiesFile.exists() &&
+    (buildingReleaseBundle || (project.findProperty("kynetixStoreRelease") as String?)?.toBoolean() == true)
 
 android {
     namespace = "com.kynetix.app"
@@ -40,10 +48,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.kynetix.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

@@ -72,6 +72,10 @@ class _AuthScreenState extends State<AuthScreen> {
       _showError('Add your email and password to continue.');
       return;
     }
+    if (_isSignup && password.length < 8) {
+      _showError('That password is too short. Use at least 8 characters.');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -148,7 +152,7 @@ class _AuthScreenState extends State<AuthScreen> {
       return 'There is already an account with that email. Sign in instead.';
     }
     if (has('weak_password') || has('password should be')) {
-      return 'That password is too short. Use at least 6 characters.';
+      return 'That password is too short. Use at least 8 characters.';
     }
     if (has('email_address_invalid') || has('invalid email') || has('unable to validate email')) {
       return "That email doesn't look right. Check it and try again.";
@@ -448,7 +452,7 @@ class _AuthScreenState extends State<AuthScreen> {
         key: const ValueKey('password_field'),
         controller: _passwordCtrl,
         focusNode: _passwordFocus,
-        hint: _isSignup ? 'Password, at least 6 characters' : 'Password',
+        hint: _isSignup ? 'Password, at least 8 characters' : 'Password',
         icon: Icons.lock_outline,
         isPassword: true,
         textInputAction: TextInputAction.done,

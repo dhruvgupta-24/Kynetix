@@ -536,7 +536,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetService.updateWidgetData().ignore();
   }
 
-  UserProfile get _profile => currentUserProfile!;
+  // The profile can be cleared (sign-out, account deletion) while this screen
+  // is still mounted for a frame or two; a neutral stand-in keeps the build
+  // from throwing until the shell swaps the screen out.
+  UserProfile get _profile => currentUserProfile ?? kFallbackUserProfile;
 
   // ── Engine-based target ───────────────────────────────────────────────────
   //

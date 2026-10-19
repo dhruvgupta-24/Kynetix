@@ -11,7 +11,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   }
 
-  testWidgets('embedded idle shows both ways in plus Skip, and Skip finishes',
+  testWidgets('embedded idle shows Sign in with ChatGPT plus Skip, and Skip finishes',
       (tester) async {
     var finished = 0;
     await pump(
@@ -20,7 +20,8 @@ void main() {
     );
 
     expect(find.text('Continue with ChatGPT'), findsOneWidget);
-    expect(find.text('Use a code instead'), findsOneWidget);
+    // The device-code path is hidden (see _allowDeviceCode).
+    expect(find.text('Use a code instead'), findsNothing);
     expect(find.text('Skip for now'), findsOneWidget);
     expect(find.text('You can do this later in Settings.'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);
@@ -35,7 +36,8 @@ void main() {
   testWidgets('pushed page has no Skip and keeps an app bar', (tester) async {
     await pump(tester, const ConnectChatGptScreen());
     expect(find.text('Continue with ChatGPT'), findsOneWidget);
-    expect(find.text('Use a code instead'), findsOneWidget);
+    // The device-code path is hidden (see _allowDeviceCode).
+    expect(find.text('Use a code instead'), findsNothing);
     expect(find.text('Skip for now'), findsNothing);
     expect(find.byType(AppBar), findsOneWidget);
   });

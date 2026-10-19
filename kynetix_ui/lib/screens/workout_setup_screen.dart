@@ -667,7 +667,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
           ),
           const SizedBox(height: 10),
           KButton(
-            label: "Use Developer's Choice",
+            label: 'Use Kynetix Pick',
             outlined: true,
             onTap: () => _applyRecommendation(developersChoiceSplit),
           ),

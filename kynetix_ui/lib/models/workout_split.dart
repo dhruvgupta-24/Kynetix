@@ -319,9 +319,18 @@ class WorkoutSplit {
     'days': days.map((d) => d.toJson()).toList(),
   };
 
+  /// Splits saved before the rename still carry the old display name; show
+  /// the current one. Only the label changes; the id stays as saved.
+  static String _displayName(String? id, String? name) {
+    if (id == developersChoiceId && name == _legacyDevelopersChoiceName) {
+      return developersChoiceName;
+    }
+    return name ?? 'My Split';
+  }
+
   factory WorkoutSplit.fromJson(Map<String, dynamic> j) => WorkoutSplit(
     id: j['id'] as String? ?? '',
-    name: j['name'] as String? ?? 'My Split',
+    name: _displayName(j['id'] as String?, j['name'] as String?),
     days: (j['days'] as List<dynamic>? ?? [])
         .map((d) => SplitDay.fromJson(d as Map<String, dynamic>))
         .toList(),
@@ -678,15 +687,20 @@ List<Exercise> get deduplicatedLibrary {
   return fullExerciseLibrary.where((e) => seen.add(e.id)).toList();
 }
 
-// ─── Developer's Choice ──────────────────────────────────────────────────────
+// ─── Kynetix Pick (internally "Developer's Choice") ─────────────────────────
 //
 // The split the person who builds Kynetix actually runs: a bro split for the
 // first half of the week, push/pull to hit everything twice, Sunday off.
+// Shown to users as "Kynetix Pick"; the id and Dart names keep the old
+// wording so saved splits and lookups are untouched.
 // Every new account starts on it. Edits are saved per user (WorkoutService
 // keys the split by user id), so changing it never touches anyone else.
 
 const developersChoiceId = 'developers_choice';
-const developersChoiceName = "Developer's Choice";
+const developersChoiceName = 'Kynetix Pick';
+
+/// The display name splits were saved with before the rename.
+const _legacyDevelopersChoiceName = "Developer's Choice";
 
 /// Exercises the Developer's Choice uses that the day library doesn't list.
 const _dcExtras = <Exercise>[

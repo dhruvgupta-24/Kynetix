@@ -355,7 +355,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 14),
                 child: Text(
-                  "Start on the split Kynetix's developer runs, or answer three questions and we'll build one around you. Either way it's yours to change.",
+                  "Start on a proven split we built, or answer three questions and we'll build one around you. Either way it's yours to change.",
                   textAlign: TextAlign.center,
                   style: KText.body.copyWith(color: KColor.textSecondary),
                 ),
@@ -369,7 +369,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 child: SizedBox(
                   width: double.infinity,
                   child: KButton(
-                    label: "Use Developer's Choice",
+                    label: 'Use Kynetix Pick',
                     icon: Icons.arrow_forward_rounded,
                     loading: _adopting,
                     onTap: _adoptDevelopersChoice,
@@ -395,7 +395,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   );
 }
 
-/// The seven days of the Developer's Choice, as a strip of chips.
+/// The seven days of the Kynetix Pick, as a strip of chips.
 class _DevelopersChoicePreview extends StatelessWidget {
   const _DevelopersChoicePreview();
 

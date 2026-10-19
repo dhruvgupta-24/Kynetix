@@ -1160,6 +1160,16 @@ class _ShareSheetState extends State<_ShareSheet> {
     }
   }
 
+  /// Screen reader tap on a neighbouring preview: bring it to the centre.
+  void _showTemplate(int i) {
+    final d = KMotion.of(context, KMotion.standard);
+    if (d == Duration.zero) {
+      _pages.jumpToPage(i);
+    } else {
+      _pages.animateToPage(i, duration: d, curve: KMotion.easeOut);
+    }
+  }
+
   Widget _page(ShareTemplate t) {
     final size = _format.size;
     final card = RepaintBoundary(
@@ -1209,7 +1219,7 @@ class _ShareSheetState extends State<_ShareSheet> {
             const KSheetHeader('Share your session', subtitle: 'Swipe for a style. Made for your story.'),
             const SizedBox(height: 12),
             Semantics(
-              label: 'Share card style: ${_template.label}. '
+              label: 'Share card preview. '
                   '${widget.data.dayName}, ${widget.data.sets} sets, ${widget.data.totalVolume.round()} kilograms.',
               child: SizedBox(
                 height: previewH,
@@ -1220,14 +1230,28 @@ class _ShareSheetState extends State<_ShareSheet> {
                     setState(() => _template = ShareTemplate.values[i]);
                   },
                   children: [
-                    for (final t in ShareTemplate.values)
-                      Padding(padding: const EdgeInsets.symmetric(horizontal: 7), child: _page(t)),
+                    for (final (i, t) in ShareTemplate.values.indexed)
+                      // Each preview speaks as one node ("Style 2 of 5,
+                      // Receipt"); the card's own text would read as noise.
+                      Semantics(
+                        container: true,
+                        selected: t == _template,
+                        label: 'Style ${i + 1} of ${ShareTemplate.values.length}, '
+                            '${t.transparent ? '${t.label}, transparent' : t.label}',
+                        onTap: t == _template ? null : () => _showTemplate(i),
+                        child: ExcludeSemantics(
+                          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 7), child: _page(t)),
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            Row(
+            Semantics(
+              label: 'Style ${_template.index + 1} of ${ShareTemplate.values.length}',
+              excludeSemantics: true,
+              child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 for (final t in ShareTemplate.values)
@@ -1242,6 +1266,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                     ),
                   ),
               ],
+              ),
             ),
             const SizedBox(height: 6),
             Text(
@@ -1257,7 +1282,13 @@ class _ShareSheetState extends State<_ShareSheet> {
                 children: [
                   KSegmented<ShareFormat>(
                     dense: true,
-                    segments: [for (final f in ShareFormat.values) KSegment(f, f.label)],
+                    segments: [
+                      for (final f in ShareFormat.values)
+                        KSegment(f, f.label, semanticLabel: switch (f) {
+                          ShareFormat.story => 'Story size, tall',
+                          ShareFormat.post => 'Post size, 4 by 5',
+                        }),
+                    ],
                     value: _format,
                     onChanged: (f) => setState(() => _format = f),
                   ),
@@ -1265,10 +1296,15 @@ class _ShareSheetState extends State<_ShareSheet> {
                     const SizedBox(height: 10),
                     KSegmented<ShareBackdrop>(
                       dense: true,
-                      segments: const [
-                        KSegment(ShareBackdrop.graphite, 'Graphite'),
-                        KSegment(ShareBackdrop.paper, 'Paper'),
-                        KSegment(ShareBackdrop.photo, 'Photo', icon: Icons.photo_outlined),
+                      segments: [
+                        const KSegment(ShareBackdrop.graphite, 'Graphite', semanticLabel: 'Graphite backdrop'),
+                        const KSegment(ShareBackdrop.paper, 'Paper', semanticLabel: 'Paper backdrop'),
+                        KSegment(
+                          ShareBackdrop.photo,
+                          'Photo',
+                          icon: Icons.photo_outlined,
+                          semanticLabel: _photoBytes == null ? 'Photo backdrop, choose a photo' : 'Photo backdrop',
+                        ),
                       ],
                       value: _photo == null && _backdrop == ShareBackdrop.photo ? ShareBackdrop.graphite : _backdrop,
                       onChanged: (b) {
@@ -1281,10 +1317,16 @@ class _ShareSheetState extends State<_ShareSheet> {
                     ),
                     if (_backdrop == ShareBackdrop.photo && _photo != null)
                       Align(
-                        child: TextButton.icon(
-                          onPressed: _pickPhoto,
-                          icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                          label: const Text('Change photo'),
+                        child: Semantics(
+                          button: true,
+                          label: 'Change backdrop photo',
+                          onTap: _pickPhoto,
+                          excludeSemantics: true,
+                          child: TextButton.icon(
+                            onPressed: _pickPhoto,
+                            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                            label: const Text('Change photo'),
+                          ),
                         ),
                       ),
                   ],
@@ -1296,11 +1338,21 @@ class _ShareSheetState extends State<_ShareSheet> {
                     ),
                   ],
                   const SizedBox(height: 14),
-                  KButton(
-                    label: 'Share',
-                    icon: Icons.ios_share_rounded,
-                    loading: _busy,
+                  Semantics(
+                    container: true,
+                    button: true,
+                    enabled: !_busy,
+                    label: _busy
+                        ? 'Making your image'
+                        : 'Share the ${_template.label} card as an image',
                     onTap: _busy ? null : _share,
+                    excludeSemantics: true,
+                    child: KButton(
+                      label: 'Share',
+                      icon: Icons.ios_share_rounded,
+                      loading: _busy,
+                      onTap: _busy ? null : _share,
+                    ),
                   ),
                 ],
               ),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
@@ -48,7 +49,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  UserProfile get _profile => currentUserProfile!;
+  // Null-safe for the frame or two after sign-out or account deletion
+  // clears the profile while this screen is still mounted.
+  UserProfile get _profile => currentUserProfile ?? kFallbackUserProfile;
   WeeklyTargetPlan get _plan => NutritionTargetEngine().weeklyPlan(
     _profile,
     health: _profile.healthSyncEnabled && _profile.averageDailySteps != null
@@ -73,11 +76,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _enableRpeTracking = false;
 
+  // ── App version ─────────────────────────────────────────────────────────────
+  // Read from the platform once per app run; null until it lands (or if the
+  // lookup fails, in which case the row shows nothing rather than a guess).
+  static Future<String?>? _versionLookup;
+  String? _version;
+
+  static Future<String?> _lookUpVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final name = info.version.trim();
+      final build = info.buildNumber.trim();
+      if (name.isEmpty) return null;
+      return build.isEmpty ? name : '$name ($build)';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _loadVersion() async {
+    final v = await (_versionLookup ??= _lookUpVersion());
+    if (mounted && v != _version) setState(() => _version = v);
+  }
+
   @override
   void initState() {
     super.initState();
     _loadAiStatus();
     _loadSettings();
+    _loadVersion();
   }
 
   Future<void> _loadSettings() async {
@@ -199,8 +226,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final result = await HealthService().sync();
     if (!mounted) return;
 
+    final profileNow = currentUserProfile;
+    if (profileNow == null) {
+      // Signed out mid-sync: nothing to update.
+      setState(() => _syncing = false);
+      return;
+    }
+
     if (!result.hasError && result.hasData) {
-      currentUserProfile = currentUserProfile!.copyWithHealth(
+      currentUserProfile = profileNow.copyWithHealth(
         averageDailySteps: result.effectiveAverageSteps!.toInt(),
         lastHealthSyncAt: result.syncedAt,
       );
@@ -1533,7 +1567,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           icon: Icons.info_outline_rounded,
           tint: KColor.textSecondary,
           label: 'Version',
-          value: '1.0.0',
+          value: _version,
         ),
         _SettingRow(
           icon: Icons.restaurant_menu_rounded,

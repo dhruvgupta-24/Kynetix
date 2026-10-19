@@ -18,6 +18,7 @@ import '../services/nutrition_hydration_guard.dart';
 import '../services/eating_pattern_service.dart';
 import '../ui/k_rolling.dart';
 import '../ui/k_shake.dart';
+import '../ui/k_toast.dart';
 import '../widgets/kyno_avatar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
@@ -28,6 +29,19 @@ UserProfile? get currentUserProfile =>
     ProfileService.instance.currentUserProfile;
 set currentUserProfile(UserProfile? p) =>
     ProfileService.instance.currentUserProfile = p;
+
+/// A neutral stand-in for screens that outlive the profile by a frame or two
+/// (sign-out, account deletion). Never saved; only read so a build can't throw.
+const kFallbackUserProfile = UserProfile(
+  name: '',
+  age: 25,
+  gender: 'Male',
+  height: 170,
+  weight: 70,
+  workoutDaysMin: 2,
+  workoutDaysMax: 3,
+  goal: kMaintenance,
+);
 
 // ─── Workout frequency options ────────────────────────────────────────────────
 
@@ -415,28 +429,45 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
     // Persist before moving on so a quick kill won't lose profile.
     // Local write; the cloud backup starts right away (see lastUpload).
-    await ProfileService.instance.save(currentUserProfile!);
-    await PersistenceService.setOnboardingDone();
+    // Whatever happens, the lock is released in finally so a failed write
+    // never leaves the screen stuck on "saving"; the user can try again.
+    var saved = false;
+    try {
+      await ProfileService.instance.save(currentUserProfile!);
+      await PersistenceService.setOnboardingDone();
+      saved = true;
 
-    // Mark hydration complete since this is a new onboarding flow with fresh/empty memory
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    NutritionHydrationGuard.instance.markComplete(userId);
+      // Mark hydration complete since this is a new onboarding flow with fresh/empty memory
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      NutritionHydrationGuard.instance.markComplete(userId);
 
-    // Fire & forget cloud update. Consent is written to the profile row once
-    // that row exists (best effort; it stays recorded locally either way).
-    ProfileService.instance.lastUpload.then((_) {
-      if (userId != null) ConsentService.instance.syncToCloud(userId).ignore();
-    }).ignore();
+      // Fire & forget cloud update. Consent is written to the profile row once
+      // that row exists (best effort; it stays recorded locally either way).
+      ProfileService.instance.lastUpload.then((_) {
+        if (userId != null) ConsentService.instance.syncToCloud(userId).ignore();
+      }).ignore();
 
-    // Seed eating pattern scalars from the declared eating style so the
-    // scalar system is active from day one, not after 3+ corrections.
-    if (_portionAnchor != null) {
-      EatingPatternService.instance.seedFromPortionAnchor(_portionAnchor!);
-      EatingPatternService.instance.save().ignore();
+      // Seed eating pattern scalars from the declared eating style so the
+      // scalar system is active from day one, not after 3+ corrections.
+      if (_portionAnchor != null) {
+        EatingPatternService.instance.seedFromPortionAnchor(_portionAnchor!);
+        EatingPatternService.instance.save().ignore();
+      }
+    } catch (_) {
+      // The profile itself is what matters; past that point the extras are
+      // best effort and must not hold the user back.
+      if (!saved && mounted) {
+        showKToast(
+          context,
+          "Couldn't save your profile just now. Give it another try.",
+          kind: KToastKind.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
 
-    if (!mounted) return;
-    setState(() => _saving = false);
+    if (!saved || !mounted) return;
     // Saved: on to the optional last chapter.
     _goTo(_aiChapter);
   }
@@ -1720,7 +1751,8 @@ class _StepSummary extends StatelessWidget {
             ),
             const SizedBox(height: KSpacing.md),
             Text(
-              'These are estimates. Tweak them anytime in your profile.',
+              'These are estimates, not medical advice. Tweak them anytime '
+              'in your profile.',
               style: KText.caption.copyWith(color: KColor.textMuted),
             ),
           ],

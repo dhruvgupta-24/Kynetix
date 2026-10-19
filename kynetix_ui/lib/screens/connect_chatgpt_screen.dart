@@ -16,7 +16,11 @@ import '../services/chatgpt_siwc_service.dart';
 //            PKCE in the system browser, loopback callback). Tokens go
 //            straight to the server via `openai-link-siwc`.
 //   Fallback "Use a code instead": the existing device-code flow
-//            (openai-link-start → poll → verify), unchanged.
+//            (openai-link-start → poll → verify), unchanged. Hidden for now
+//            behind [_ConnectChatGptScreenState._allowDeviceCode]: it signs in
+//            through the Codex CLI's device page, which a third-party app
+//            shouldn't offer. The code stays for later; accounts already
+//            linked that way keep working (nothing server side changes).
 //
 // States: idle → waiting for browser → connecting → connected ("You're using
 // your ChatGPT plan." + "Got it"), or error. The code flow adds its own
@@ -74,6 +78,10 @@ class _ErrorInfo {
 
 class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
     with WidgetsBindingObserver {
+  /// Whether the device-code path ("Use a code instead") is offered. Off:
+  /// only the official Sign in with ChatGPT flow is shown.
+  static const bool _allowDeviceCode = false;
+
   _Step _step = _Step.idle;
   _ErrorInfo? _error;
 
@@ -190,15 +198,18 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       SiwcFailure.browserUnavailable => const _ErrorInfo(
         method: m,
         title: 'Couldn\'t open your browser',
-        message: 'Try again, or use a code instead.',
+        message: _allowDeviceCode
+            ? 'Try again, or use a code instead.'
+            : 'Try again in a moment.',
         offerCode: true,
       ),
       SiwcFailure.listenerUnavailable => const _ErrorInfo(
         method: m,
         title: 'Couldn\'t start sign-in',
-        message:
-            'This phone blocked the sign-in handoff. Try again, or use a '
-            'code instead.',
+        message: _allowDeviceCode
+            ? 'This phone blocked the sign-in handoff. Try again, or use a '
+                'code instead.'
+            : 'This phone blocked the sign-in handoff. Try again in a moment.',
         offerCode: true,
       ),
       SiwcFailure.securityCheck => const _ErrorInfo(
@@ -241,7 +252,9 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       SiwcFailure.server || SiwcFailure.cancelled => const _ErrorInfo(
         method: m,
         title: 'That didn\'t go through',
-        message: 'Try again in a moment, or use a code instead.',
+        message: _allowDeviceCode
+            ? 'Try again in a moment, or use a code instead.'
+            : 'Try again in a moment.',
         offerCode: true,
       ),
     };
@@ -600,7 +613,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       const SizedBox(height: KSpacing.xxl),
       ContinueWithChatGptButton(onTap: _startBrowserFlow),
       const SizedBox(height: KSpacing.sm),
-      _quietButton('Use a code instead', _startCodeFlow),
+      if (_allowDeviceCode) _quietButton('Use a code instead', _startCodeFlow),
       if (widget.embedded) ...[
         _quietButton('Skip for now', _skip),
         Text(
@@ -990,7 +1003,8 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         width: double.infinity,
       ),
       const SizedBox(height: KSpacing.sm),
-      if (e.offerCode) _quietButton('Use a code instead', _startCodeFlow),
+      if (_allowDeviceCode && e.offerCode)
+        _quietButton('Use a code instead', _startCodeFlow),
       if (e.method == _Method.code)
         _quietButton('Continue with ChatGPT instead', _startBrowserFlow),
       if (widget.embedded)

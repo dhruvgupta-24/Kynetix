@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/services/error_reporter.dart';
 
@@ -79,6 +81,80 @@ void main() {
           transport: (row) async => sent.add(row), currentUserId: () => null);
       signedOut.report(Exception('anon'), null);
       expect(sent, isEmpty);
+    });
+  });
+
+  group('ErrorReporter signed-out queue', () {
+    test('queues while signed out and flushes on sign-in', () async {
+      final sent = <Map<String, Object?>>[];
+      final signIns = StreamController<void>.broadcast();
+      String? user;
+      final r = ErrorReporter.forTesting(
+        transport: (row) async => sent.add(row),
+        currentUserId: () => user,
+        appVersion: () => '2.3.4+56',
+        signedInEvents: () => signIns.stream,
+      );
+
+      r.report(StateError('onboarding broke for a@b.com'), StackTrace.current, type: 'flutter');
+      r.report(Exception('auth broke'), null);
+      expect(sent, isEmpty);
+      expect(r.pendingCount, 2);
+
+      user = 'user-1';
+      signIns.add(null);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sent, hasLength(2));
+      expect(r.pendingCount, 0);
+      for (final row in sent) {
+        expect(row['user_id'], 'user-1');
+        expect(row['app_version'], '2.3.4+56');
+      }
+      expect(sent.first['message'], isNot(contains('a@b.com')));
+      expect(sent.first['error_type'], 'flutter:StateError');
+
+      // Nothing is sent twice.
+      signIns.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(sent, hasLength(2));
+      await signIns.close();
+    });
+
+    test('caps the queue at maxPending', () async {
+      final r = ErrorReporter.forTesting(
+        transport: (_) async {},
+        currentUserId: () => null,
+      );
+      for (var i = 0; i < 50; i++) {
+        r.report(Exception('distinct $i'), null);
+      }
+      expect(r.pendingCount, ErrorReporter.maxPending);
+    });
+
+    test('a report after sign-in also sends what was queued', () async {
+      final sent = <Map<String, Object?>>[];
+      String? user;
+      final r = ErrorReporter.forTesting(
+        transport: (row) async => sent.add(row),
+        currentUserId: () => user,
+      );
+      r.report(Exception('before'), null);
+      user = 'u';
+      r.report(Exception('after'), null);
+      await Future<void>.delayed(Duration.zero);
+      expect(sent.map((r) => r['message']), ['Exception: before', 'Exception: after']);
+    });
+
+    test('async version source is awaited; failure reports unknown', () async {
+      final sent = <Map<String, Object?>>[];
+      final r = ErrorReporter.forTesting(
+        transport: (row) async => sent.add(row),
+        appVersion: () async => throw Exception('no platform'),
+      );
+      r.report(Exception('x'), null);
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+      expect(sent.single['app_version'], 'unknown');
     });
   });
 }
