@@ -381,7 +381,7 @@ section { position: relative; }
 .btn:active { transform: scale(.97); }
 
 /* 404 */
-.lost { min-height: 100svh; display: grid; align-content: center; gap: 28px; padding: 120px 0 80px; }
+.lost { min-height: 100svh; display: grid; align-content: center; gap: 28px; padding-top: 120px; padding-bottom: 80px; }
 .lost .shear { font-size: clamp(3.4rem, 16vw, 12rem); }
 .lost p { color: var(--ash); font-size: 1.15rem; max-width: 30em; margin: 0; }
 
