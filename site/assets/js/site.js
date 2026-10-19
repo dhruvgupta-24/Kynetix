@@ -336,6 +336,88 @@
     else openFirst();
   }
 
+  /* ── Widgets: the home screen assembles as you scroll (wide screens,
+     fine pointer, motion allowed). Everywhere else it is a still grid. ── */
+  var wsec = doc.getElementById('widgets');
+  if (wsec) {
+    var mqPin = window.matchMedia('(min-width: 1100px) and (min-height: 680px) and (hover: hover) and (pointer: fine)');
+    var wTrack = $('.wg-track', wsec);
+    var wGrid = $('.wg', wsec);
+    var wView = $('.wg-view', wsec);
+    var wTiles = $$('.wg-tile[data-step]', wsec);
+    var wSlots = $$('.wg-slot', wsec);
+    var wSteps = $$('.wg-steps li', wsec);
+    var wBtns = $$('.wg-steps button', wsec);
+    var wProg = $('.wg-prog', wsec);
+    var wPinned = false, wLanded = null;
+    var STEP0 = 0.08, STEP = 0.19;
+    var wLand = function (n) {
+      if (n === wLanded) return;
+      wLanded = n;
+      wTiles.forEach(function (t) { t.classList.toggle('in', +t.getAttribute('data-step') <= n); });
+      wSlots.forEach(function (s) {
+        var k = +s.getAttribute('data-step');
+        s.classList.toggle('in', k <= n);
+        s.classList.toggle('next', k === n + 1);
+      });
+      wSteps.forEach(function (li, i) {
+        li.classList.toggle('on', wPinned && i === n);
+        li.classList.toggle('done', wPinned && i < n);
+      });
+      wGrid.classList.toggle('cut-in', n >= 0);
+    };
+    var wUpdate = function () {
+      if (!wPinned) return;
+      var r = wTrack.getBoundingClientRect();
+      var total = Math.max(1, r.height - window.innerHeight);
+      var p = clamp(-r.top / total, 0, 1);
+      if (wProg) wProg.style.setProperty('--p', p.toFixed(4));
+      wLand(p < STEP0 ? -1 : Math.min(3, Math.floor((p - STEP0) / STEP)));
+    };
+    var wApply = function () {
+      var want = motion && mqPin.matches;
+      wPinned = want;
+      wsec.classList.toggle('wg-pin', want);
+      wBtns.forEach(function (b) { b.disabled = !want; });
+      wLanded = null;
+      if (want) wUpdate(); else wLand(3);
+    };
+    wBtns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!wPinned) return;
+        var i = +b.getAttribute('data-step');
+        var top = wTrack.getBoundingClientRect().top + window.scrollY;
+        var total = wTrack.offsetHeight - window.innerHeight;
+        window.scrollTo({ top: top + total * (STEP0 + STEP * i + STEP * 0.5), behavior: 'smooth' });
+      });
+    });
+    var wTick = false;
+    window.addEventListener('scroll', function () {
+      if (!wPinned || wTick) return;
+      wTick = true;
+      requestAnimationFrame(function () { wTick = false; wUpdate(); });
+    }, { passive: true });
+    window.addEventListener('resize', wUpdate);
+    if (mqPin.addEventListener) mqPin.addEventListener('change', wApply);
+    wApply();
+
+    /* Pointer tilt, at most 5 degrees, with a sheen that slides the other way. */
+    if (motion && wView) {
+      wView.addEventListener('pointermove', function (e) {
+        if (!wPinned || e.pointerType !== 'mouse') return;
+        var r = wGrid.getBoundingClientRect();
+        var x = clamp((e.clientX - r.left) / r.width - 0.5, -0.5, 0.5);
+        var y = clamp((e.clientY - r.top) / r.height - 0.5, -0.5, 0.5);
+        wGrid.style.setProperty('--rx', (-y * 8).toFixed(2) + 'deg');
+        wGrid.style.setProperty('--ry', (x * 10).toFixed(2) + 'deg');
+        wGrid.style.setProperty('--gx', (50 - x * 90).toFixed(1) + '%');
+      });
+      wView.addEventListener('pointerleave', function () {
+        wGrid.style.setProperty('--rx', '0deg'); wGrid.style.setProperty('--ry', '0deg'); wGrid.style.setProperty('--gx', '50%');
+      });
+    }
+  }
+
   /* ── Share cards: graphite / paper finish ────────────── */
   var finish = $('.finish');
   if (finish) {

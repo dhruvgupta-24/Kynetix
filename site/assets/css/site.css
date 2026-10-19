@@ -477,21 +477,31 @@ section { position: relative; }
   .kyno-phones { width: min(320px, 80%); }
 }
 
-/* ── Widgets: a home screen grid, 4 columns on phones, 8 on wide screens ── */
+/* ── Widgets ─────────────────────────────────────────────
+   Phones: a 4-column home screen grid with two copy tiles.
+   Wide screens: copy and size list on the left, a square 6 x 6 home screen
+   on the right that the four real widgets fill exactly. With a fine pointer
+   and motion allowed, the stage pins and the widgets land one per scroll
+   step (pin + transform), the panel tilts under the pointer with a sheen
+   that slides the other way, and the size list tracks what just landed. */
 .widgets { padding-top: clamp(64px, 10vw, 140px); }
+.wg-stage { display: grid; gap: clamp(36px, 6vw, 64px); }
+.wg-copy { display: grid; gap: 24px; align-content: center; min-width: 0; }
+.wg-copy > p { color: var(--ash); font-size: clamp(1.05rem, 2vw, 1.25rem); max-width: 30em; margin: 0; }
+.wg-steps, .wg-prog { display: none; }
 .wg {
   --gap: 10px; --pad: 12px;
   --cw: calc((min(100vw - 2 * var(--gutter), 620px) - 2 * var(--pad) - 3 * var(--gap)) / 4);
-  position: relative; margin: 0 auto; max-width: 620px;
+  position: relative; margin: 0 auto; width: 100%; max-width: 620px;
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: var(--cw); gap: var(--gap);
   padding: var(--pad); border-radius: 34px;
   background: radial-gradient(120% 70% at 50% 0%, #131315 0%, #050506 55%, #000 100%);
   box-shadow: 0 0 0 1px var(--line), 0 50px 90px -40px #000;
 }
-.wg-cut { position: absolute; left: -28px; top: calc(var(--pad) + var(--cr, 2) * (var(--cw) + var(--gap)) - var(--gap) / 2 - 1px); width: 120px; height: 2px; border-radius: 2px; background: var(--ember); transform-origin: left; z-index: 2; pointer-events: none; }
-.wg-tile { position: relative; margin: 0; min-width: 0; min-height: 0; border-radius: 22px; background: #000; overflow: hidden; box-shadow: 0 0 0 1px rgba(242, 241, 236, .07); transition: transform .5s var(--spring), box-shadow .3s ease; }
+.wg-cut { position: absolute; left: -28px; top: calc(var(--pad) + var(--cr, 2) * (var(--cw) + var(--gap)) - var(--gap) / 2 - 1px); width: 120px; height: 2px; border-radius: 2px; background: var(--ember); transform-origin: left; z-index: 3; pointer-events: none; }
+.wg-tile { position: relative; z-index: 1; margin: 0; min-width: 0; min-height: 0; border-radius: 22px; background: #000; overflow: hidden; box-shadow: 0 0 0 1px rgba(242, 241, 236, .07); transition: transform .5s var(--spring), box-shadow .3s ease; }
 .wg-tile img { width: 100%; height: 100%; object-fit: contain; }
-@media (hover: hover) { .wg-tile:hover { transform: translateY(-4px); box-shadow: 0 0 0 1px var(--line-strong), 0 24px 40px -24px #000; } }
+.wg-slot, .wg-sheen { display: none; }
 .t-2x2 { grid-column: 1 / span 2; grid-row: 1 / span 2; }
 .t-note { grid-column: 3 / span 2; grid-row: 1 / span 2; }
 .t-4x2 { grid-column: 1 / span 4; grid-row: 3 / span 2; }
@@ -505,31 +515,73 @@ section { position: relative; }
 .wg-key div:first-child { border-top: 0; padding-top: 0; }
 .wg-key dt { font-family: var(--display); font-weight: 800; font-size: 1.15rem; line-height: 1; color: var(--ember); }
 .wg-key dd { margin: 0; color: var(--ash); font-size: 13.5px; line-height: 1.4; }
-@media (min-width: 980px) {
-  .wg {
-    --gap: 14px; --pad: 16px; --cr: 4; max-width: none;
-    --cw: calc((min(100vw - 2 * var(--gutter), var(--max) - 2 * var(--gutter)) - 2 * var(--pad) - 7 * var(--gap)) / 8);
-    grid-template-columns: repeat(8, minmax(0, 1fr)); border-radius: 44px;
+.motion .widgets:not(.wg-pin) .wg[data-reveal] { opacity: 1; transform: none; }
+.motion .widgets:not(.wg-pin) .wg[data-reveal] .wg-tile { opacity: 0; transform: translateY(26px) scale(.97); transition: opacity .7s ease, transform .9s var(--ease-out); transition-delay: calc(var(--i) * 80ms); }
+.motion .widgets:not(.wg-pin) .wg[data-reveal].is-in .wg-tile { opacity: 1; transform: none; }
+.motion .widgets:not(.wg-pin) .wg[data-reveal] .wg-cut { transform: scaleX(0); transition: transform 1s var(--ease-cut) .5s; }
+.motion .widgets:not(.wg-pin) .wg[data-reveal].is-in .wg-cut { transform: scaleX(1); }
+
+@media (min-width: 1100px) {
+  .wg-copy .shear { font-size: clamp(2.8rem, 4.4vw, 4.6rem); }
+  .wg-stage { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: center; column-gap: clamp(48px, 5vw, 96px); }
+  .wg-steps { display: grid; list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); max-width: 30em; }
+  .wg-steps li { border-bottom: 1px solid var(--line); }
+  .wg-steps button {
+    width: 100%; display: grid; grid-template-columns: 3.2em minmax(0, 1fr); align-items: baseline; gap: 12px;
+    min-height: 48px; padding: 14px 0; border: 0; background: none; text-align: left; color: var(--ash); cursor: pointer;
+    transition: color .3s ease, transform .5s var(--spring);
   }
-  .wg-tile { border-radius: 28px; }
+  .wg-steps button:disabled { cursor: default; color: #DAD9D3; }
+  .wg-steps b { font-family: var(--display); font-weight: 800; font-size: 1.3rem; line-height: 1; color: inherit; transition: color .3s ease; }
+  .wg-steps span { font-size: 15.5px; line-height: 1.45; }
+  .wg-steps .done button { color: #CFCEC8; }
+  .wg-steps .on button { color: var(--bone); transform: translateX(8px); }
+  .wg-steps .on b, .wg-steps button:disabled b { color: var(--ember); }
+  .wg {
+    --gap: 12px; --pad: 14px; --cr: 4;
+    --side: min(100vh - 170px, 44vw, 760px);
+    --cw: calc((var(--side) - 2 * var(--pad) - 5 * var(--gap)) / 6);
+    width: var(--side); max-width: none; margin: 0 0 0 auto;
+    grid-template-columns: repeat(6, minmax(0, 1fr)); border-radius: 40px;
+  }
+  .wg-tile { border-radius: 26px; }
+  .t-note, .t-key { display: none; }
   .t-4x4 { grid-column: 1 / span 4; grid-row: 1 / span 4; }
   .t-2x4 { grid-column: 5 / span 2; grid-row: 1 / span 4; }
-  .t-2x2 { grid-column: 7 / span 2; grid-row: 1 / span 2; }
-  .t-note { grid-column: 7 / span 2; grid-row: 3 / span 2; }
   .t-4x2 { grid-column: 1 / span 4; grid-row: 5 / span 2; }
-  .t-key { grid-column: 5 / span 4; grid-row: 5 / span 2; grid-template-columns: 1fr 1fr; align-content: center; column-gap: 28px; padding: 22px 26px; }
-  .t-key div:nth-child(2) { border-top: 0; padding-top: 0; }
-  .wg-note { padding: 22px; }
-  .wg-note p { font-size: clamp(1.3rem, 2vw, 1.85rem); }
-  .wg-key dd { font-size: 14.5px; }
-  .wg-key dt { font-size: 1.35rem; }
+  .t-2x2 { grid-column: 5 / span 2; grid-row: 5 / span 2; }
 }
-.motion .wg[data-reveal] { opacity: 1; transform: none; }
-.motion .wg[data-reveal] .wg-tile { opacity: 0; transform: translateY(26px) scale(.97); transition: opacity .7s ease, transform .9s var(--ease-out); transition-delay: calc(var(--i) * 80ms); }
-.motion .wg[data-reveal].is-in .wg-tile { opacity: 1; transform: none; }
-.motion .wg[data-reveal].is-in .wg-tile:hover { transform: translateY(-4px); transition-delay: 0s; }
-.motion .wg[data-reveal] .wg-cut { transform: scaleX(0); transition: transform 1s var(--ease-cut) .5s; }
-.motion .wg[data-reveal].is-in .wg-cut { transform: scaleX(1); }
+
+/* Pinned: the home screen assembles as you scroll. */
+/* The pinned layout comes from CSS, so the page has its final height from the
+   first paint; script only decides which widgets have landed. */
+@media (min-width: 1100px) and (min-height: 680px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .js .widgets { padding-top: 0; padding-bottom: 0; }
+  .js .wg-track { height: 360vh; }
+  .js .wg-stage { position: sticky; top: 0; height: 100vh; align-content: center; padding-top: 64px; }
+}
+.wg-pin .wg-prog { display: block; position: relative; height: 2px; max-width: 30em; border-radius: 2px; background: var(--line); overflow: hidden; }
+.wg-pin .wg-prog i { position: absolute; inset: 0; background: var(--ember); transform-origin: left; transform: scaleX(var(--p, 0)); }
+.wg-pin .wg-view { perspective: 1600px; }
+.wg-pin .wg { transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .8s var(--ease-out); }
+.wg-pin .wg-slot {
+  display: grid; place-items: center; position: relative; z-index: 0; border-radius: 26px;
+  border: 1.5px dashed rgba(242, 241, 236, .16); color: rgba(169, 168, 162, .7);
+  font: 800 1.1rem/1 var(--display); letter-spacing: -.01em;
+  transition: opacity .4s ease, border-color .4s ease, color .4s ease;
+}
+.wg-pin .wg-slot.next { border-color: rgba(255, 106, 61, .6); color: var(--ember); }
+.wg-pin .wg-slot.in { opacity: 0; }
+.wg-pin .wg-tile[data-step] { opacity: 0; transform: translate3d(0, -56px, 0) scale(1.08) rotate(-1.5deg); transition: opacity .35s ease, transform .9s var(--spring); }
+.wg-pin .wg-tile[data-step].in { opacity: 1; transform: none; }
+.wg-pin .wg-cut { transform: scaleX(0); transition: transform .9s var(--ease-cut); }
+.wg-pin .wg.cut-in .wg-cut { transform: scaleX(1); }
+.wg-pin .wg-sheen {
+  display: block; position: absolute; inset: 0; z-index: 4; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, transparent 35%, rgba(242, 241, 236, .05) 48%, transparent 62%) no-repeat;
+  background-size: 260% 100%; background-position: var(--gx, 50%) 0; transition: background-position .8s var(--ease-out);
+}
+@media (hover: hover) { .wg-pin .wg-tile.in:hover { transform: translateY(-4px); transition-duration: .5s; } }
 
 /* ── Share cards ────────────────────────────────────────── */
 .share-head { display: grid; gap: 40px; align-items: center; margin-bottom: clamp(40px, 7vw, 72px); }
