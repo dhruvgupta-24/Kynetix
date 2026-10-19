@@ -30,6 +30,7 @@ export const USER_TABLES: readonly UserTable[] = [
   { table: 'client_errors',               column: 'user_id' },
   { table: 'client_error_rate',           column: 'reporter_id' },
   { table: 'kyno_reports',                column: 'user_id' },
+  { table: 'feedback',                    column: 'user_id' },
   { table: 'profiles_backup_pre_rollback', column: 'id' },     // old profile snapshot keyed by user id
   { table: 'profiles',                    column: 'id' },
 ];

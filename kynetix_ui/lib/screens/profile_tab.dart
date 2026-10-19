@@ -15,6 +15,7 @@ import '../services/workout_service.dart';
 import '../ui/k_rolling.dart';
 import '../widgets/consistency_heatmap.dart';
 import '../widgets/k_avatar.dart';
+import '../widgets/feedback_sheet.dart';
 import '../widgets/k_equal_height_row.dart';
 import 'connect_chatgpt_screen.dart';
 import 'insights_screen.dart';
@@ -206,6 +207,8 @@ class _ProfileTabState extends State<ProfileTab> {
               child: ConsistencyHeatmap(avgTarget: plan.avgDailyCalories),
             ),
             const SizedBox(height: KSpacing.xl),
+            _TalkToUsCard(onTap: () => showFeedbackSheet(context)),
+            const SizedBox(height: KSpacing.md),
             KCard(
               padding: const EdgeInsets.symmetric(vertical: KSpacing.xs),
               child: ListenableBuilder(
@@ -384,6 +387,51 @@ class _BodyTile extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      );
+}
+
+/// The way to reach the team: an ember-tinted card with an ink mark, set
+/// apart from the menu below so it reads as an invitation, not a setting.
+class _TalkToUsCard extends StatelessWidget {
+  const _TalkToUsCard({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+        onTap: onTap,
+        scale: 0.98,
+        semanticLabel: 'Talk to us. Ideas, bugs, love letters. We read every one.',
+        borderRadius: KRadius.lg,
+        child: KCard(
+          color: KColor.tint(KColor.ember),
+          padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.lg, KSpacing.md, KSpacing.lg),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: KColor.ink),
+                child: Icon(Icons.chat_bubble_outline_rounded, size: 18, color: KColor.onInk),
+              ),
+              const SizedBox(width: KSpacing.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Talk to us', style: KText.h3.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Ideas, bugs, love letters. We read every one.',
+                      style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: KSpacing.sm),
+              Icon(Icons.arrow_forward_rounded, size: 20, color: KColor.textPrimary),
+            ],
+          ),
         ),
       );
 }

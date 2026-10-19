@@ -27,7 +27,7 @@ Deno.test('table list covers every user-keyed table in the live schema', () => {
     'day_logs', 'profiles', 'profiles_backup_pre_rollback', 'workout_sessions', 'workout_splits',
     'user_nutrition_memory', 'user_quick_adds', 'user_eating_patterns', 'user_meal_contexts',
     'user_insights_cache', 'user_achievements', 'user_openai_links', 'openai_device_auth_sessions',
-    'app_curators', 'ai_usage', 'client_errors', 'client_error_rate', 'kyno_reports',
+    'app_curators', 'ai_usage', 'client_errors', 'client_error_rate', 'kyno_reports', 'feedback',
   ]) {
     assert(tables.includes(t), `missing ${t}`);
   }

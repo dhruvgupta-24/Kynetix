@@ -11,7 +11,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.View
+import android.view.ViewGroup
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -56,6 +59,21 @@ class MainActivity : FlutterFragmentActivity() {
             // Recreated (rotation, theme): no intro, no splash to wait for.
             intro.skipEntirely()
             markSplashGone()
+        }
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        // Flutter draws its own focus rings. Without this, any key press (a
+        // hardware keyboard, Tab) makes Android outline the whole app window
+        // with its default focus highlight, and it stays.
+        disableDefaultFocusHighlight(window.decorView)
+    }
+
+    private fun disableDefaultFocusHighlight(view: View) {
+        if (view is FlutterView) view.defaultFocusHighlightEnabled = false
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) disableDefaultFocusHighlight(view.getChildAt(i))
         }
     }
 

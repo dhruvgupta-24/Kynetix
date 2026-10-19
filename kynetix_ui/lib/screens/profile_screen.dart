@@ -21,6 +21,9 @@ import '../services/auth_service.dart';
 import '../services/widget_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/insights_report_service.dart';
+import '../services/feedback_service.dart';
+import '../widgets/feedback_sheet.dart';
+import 'feedback_inbox_screen.dart';
 import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
@@ -76,6 +79,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _enableRpeTracking = false;
 
+  // Curators see the feedback inbox row; everyone else never does.
+  bool _isCurator = false;
+
   // ── App version ─────────────────────────────────────────────────────────────
   // Read from the platform once per app run; null until it lands (or if the
   // lookup fails, in which case the row shows nothing rather than a guess).
@@ -105,6 +111,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadAiStatus();
     _loadSettings();
     _loadVersion();
+    _loadCurator();
+  }
+
+  Future<void> _loadCurator() async {
+    final curator = await FeedbackService.instance.isCurator();
+    if (!curator || !mounted) return;
+    setState(() => _isCurator = true);
+    FeedbackService.instance.refreshNewCount();
   }
 
   Future<void> _loadSettings() async {
@@ -577,6 +591,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _buildHealthCard(),
       _buildAiCard(),
       _buildLibraryAndInsightsCard(),
+      _buildFeedbackCard(),
       _buildAboutCard(),
       _buildPrivacyCard(),
       _buildAccountCard(),
@@ -1553,6 +1568,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
             );
           },
         ),
+      ],
+    );
+  }
+
+  // ── Feedback ───────────────────────────────────────────────────────────────
+
+  Widget _buildFeedbackCard() {
+    return _Group(
+      title: 'Feedback',
+      children: [
+        _SettingRow(
+          icon: Icons.chat_bubble_outline_rounded,
+          tint: KColor.textSecondary,
+          label: 'Talk to us',
+          subtitle: 'Ideas, bugs, love letters. We read every one.',
+          haptic: false,
+          onTap: () => showFeedbackSheet(context),
+        ),
+        if (_isCurator)
+          ValueListenableBuilder<int>(
+            valueListenable: FeedbackService.instance.newCount,
+            builder: (context, fresh, _) => _SettingRow(
+              icon: Icons.inbox_outlined,
+              tint: KColor.textSecondary,
+              label: 'Feedback inbox',
+              value: fresh > 0 ? '$fresh new' : null,
+              valueColor: fresh > 0 ? KColor.green : null,
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const FeedbackInboxScreen()),
+                );
+                FeedbackService.instance.refreshNewCount();
+              },
+            ),
+          ),
       ],
     );
   }
