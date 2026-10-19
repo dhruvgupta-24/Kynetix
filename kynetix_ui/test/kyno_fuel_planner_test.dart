@@ -122,4 +122,60 @@ void main() {
       expect((atwater - c.kcal).abs() / c.kcal, lessThan(0.22), reason: c.name);
     }
   });
+
+  test('a combo never has the same food twice, however it is measured', () {
+    const oatsWhey = FuelFood(
+      name: 'overnight oats + whey',
+      serving: 'as you log it',
+      kcal: 310,
+      protein: 30,
+      timesLogged: 6,
+      fromHistory: true,
+    );
+    const wheyMilk = FuelFood(
+      name: 'whey in milk',
+      serving: '1 scoop + 250 ml',
+      kcal: 270,
+      protein: 32,
+    );
+    final plan = KynoFuelPlanner.plan(
+      gap: const FuelGap(kcal: 1400, protein: 110),
+      history: const [oatsWhey, paneerBhurji],
+      catalog: const [],
+    );
+    expect(plan.combos, isNotEmpty);
+    // Built directly too: the planner must not pair the two whey foods.
+    final again = KynoFuelPlanner.plan(
+      gap: const FuelGap(kcal: 1400, protein: 110),
+      history: const [oatsWhey, wheyMilk],
+      catalog: const [],
+    );
+    for (final c in again.combos) {
+      final wheys = c.items.where((f) => f.name.contains('whey')).length;
+      expect(wheys, lessThanOrEqualTo(1), reason: c.items.map((f) => f.name).join(' + '));
+    }
+  });
+
+  test("a meal already eaten today isn't suggested again today", () {
+    final today = DateTime(2026, 10, 20);
+    final breakfast = FuelFood(
+      name: '2 parathas with curd',
+      serving: 'as you log it',
+      kcal: 480,
+      protein: 16,
+      timesLogged: 5,
+      fromHistory: true,
+      lastLogged: today,
+    );
+    final plan = KynoFuelPlanner.plan(
+      gap: const FuelGap(kcal: 1500, protein: 90),
+      history: [breakfast, paneerBhurji, wheyShake],
+      today: today,
+    );
+    final named = [
+      ...plan.yours.map((p) => p.food.name),
+      for (final c in plan.combos) ...c.items.map((f) => f.name),
+    ];
+    expect(named, isNot(contains('2 parathas with curd')));
+  });
 }

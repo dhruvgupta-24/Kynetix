@@ -133,6 +133,7 @@ class KynoBriefService {
         slot: KynoFuelPlanner.slotAt(t),
         // Navratri / Ekadashi: only vrat foods.
         fastingOnly: FastingService.instance.vratFoodsOnly(now: t),
+        today: today,
       );
       out['food_options'] = {
         'diet_seen_in_log': [for (final d in diets) d.name],

@@ -169,6 +169,7 @@ abstract final class KynoFuelPlanner {
     FoodSlot? slot,
     int maxEach = 4,
     bool fastingOnly = false,
+    DateTime? today,
   }) {
     if (gap.done) {
       return FuelPlan(
@@ -182,8 +183,15 @@ abstract final class KynoFuelPlanner {
       );
     }
 
+    bool eatenToday(FuelFood f) {
+      final l = f.lastLogged;
+      return today != null && l != null && l.year == today.year && l.month == today.month && l.day == today.day;
+    }
+
     final usable = history
         .where((f) => f.kcal >= _minKcal && f.kcal <= _maxKcal && diets.contains(f.diet))
+        // Already had it today: suggesting it again reads as a repeat.
+        .where((f) => !eatenToday(f))
         // On a vrat day only foods allowed on the fast.
         .where((f) => !fastingOnly || isFastingFriendlyName(f.name))
         .toList();
@@ -342,13 +350,17 @@ abstract final class KynoFuelPlanner {
     }
 
     // Foods from the log can be whole meals ("50 g oats + 1 scoop whey"), so
-    // two of them may share a part. A combo never repeats a part.
-    Set<String> parts(FuelFood f) => {
-          for (final p in f.name.split(RegExp(r'[+,]')))
-            if (_norm(p).isNotEmpty) _norm(p),
-        };
-    final partsOf = [for (final f in pool) parts(f)];
-    bool clash(int a, int b) => partsOf[a].intersection(partsOf[b]).isNotEmpty;
+    // two of them may share a part. A combo never repeats a part, however
+    // it is measured: "1 scoop whey" and "whey" are the same food.
+    final partsOf = [for (final f in pool) _parts('${f.name},${f.logText}')];
+    bool clash(int a, int b) {
+      for (final x in partsOf[a]) {
+        for (final y in partsOf[b]) {
+          if (x == y || ' $x '.contains(' $y ') || ' $y '.contains(' $x ')) return true;
+        }
+      }
+      return false;
+    }
 
     final n = pool.length;
     for (var i = 0; i < n; i++) {
@@ -391,6 +403,21 @@ abstract final class KynoFuelPlanner {
     }
     return 'You have $k kcal and $p g of protein left today.';
   }
+
+  /// The foods in a name, without amounts: "50 g oats + 1 scoop whey in
+  /// milk" gives {oats, whey in milk}.
+  static Set<String> _parts(String name) => {
+        for (final p in name.split(RegExp(r'[+,&]|\band\b|\bwith\b')))
+          if (_core(p).isNotEmpty) _core(p),
+      };
+
+  static final _amount = RegExp(
+    r'\b(\d+(\.\d+)?|half|one|two|three|a|an|of|g|gm|gms|grams?|kg|ml|l|scoops?|katoris?|cups?|bowls?|'
+    r'pieces?|pcs?|slices?|tbsp|tsp|servings?|plates?|glass(es)?|small|medium|large|big)\b',
+  );
+
+  static String _core(String s) =>
+      _norm(_norm(s).replaceAll(_amount, ' '));
 
   static String _norm(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
