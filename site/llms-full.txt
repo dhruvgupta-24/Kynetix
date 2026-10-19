@@ -15,7 +15,7 @@ Last updated: 2026-10-20
 - Made by: Dhruv Gupta, an independent developer in India.
 - Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
 - Age: 18 and over.
-- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Account and data deletion inside the app.
+- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Account and data deletion inside the app.
 - Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.
 - AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked). Estimates, not medical advice.
 - Source code: https://github.com/dhruvgupta-24/Kynetix
@@ -68,7 +68,7 @@ Yes. There are four Android home screen widgets, 2x2, 4x2, 2x4 and 4x4, showing 
 
 ### Is my data private, and can I delete my account?
 
-Yes. There are no ads, no data selling and no third-party trackers in the app. You can delete your account and all of its data from inside the app at any time, or by email using the delete account page.
+Yes. There are no ads, no data selling and no third-party trackers or analytics; simple usage stats stay in Kynetix's own database. You can delete your account and all of its data from inside the app at any time, or by email using the delete account page.
 
 ### Is Kynetix available on iPhone?
 
