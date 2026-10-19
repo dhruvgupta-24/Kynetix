@@ -25,19 +25,34 @@
 <link rel="preload" href="assets/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/css/site.css">
-<script>document.documentElement.classList.add('js')</script>
+<script>(function(d){d.classList.add('js');try{if(sessionStorage.getItem('kx-wipe')){sessionStorage.removeItem('kx-wipe');if(!matchMedia('(prefers-reduced-motion: reduce)').matches)d.classList.add('wiping')}}catch(e){}})(document.documentElement)</script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
 <g id="kx" fill="#F2F1EC"><path d="M50 930V270H209V561Q246 539 276.5 508.0Q307 477 329.5 440.0Q352 403 367.5 360.0Q383 317 390 270H569Q559 322 538.5 371.0Q518 420 487.0 462.5Q456 505 417.0 539.0Q378 573 331 594V605Q376 603 409.5 612.5Q443 622 467.5 641.5Q492 661 508.0 691.5Q524 722 534 763L576 930H403L376 799Q368 752 353.5 725.0Q339 698 315.0 686.5Q291 675 252 675H209V930Z"/><path d="M775 930V718L566 270H757L856 587H862L960 270H1144L938 717V930Z"/><path d="M1166 930V270H1363L1578 700H1586L1581 270H1733V930H1548L1321 482H1313L1319 930Z"/><path d="M1803 930V270H1962V930ZM1917 930V801H2232V930ZM1917 655V538H2192V655ZM1917 398V270H2231V398Z"/><path d="M2400 930V270H2559V930ZM2243 401V270H2716V401Z"/><path d="M2748 930V270H2909V930Z"/><path d="M2938 930 3125 600 2941 270H3130L3229 520H3236L3335 270H3526L3340 598L3529 930H3338L3236 673H3229L3128 930Z"/></g>
 <clipPath id="ct"><path d="M-2000,-2000 H9000 V590 H-2000 Z"/></clipPath>
 <clipPath id="cb"><path d="M-2000,612 H9000 V3000 H-2000 Z"/></clipPath>
+<symbol id="i-food" viewBox="0 0 24 24"><path d="M7 3v18M4.5 3v5.2A2.5 2.5 0 0 0 7 10.7a2.5 2.5 0 0 0 2.5-2.5V3M17.5 21V3c-2.2 1.2-3.5 3.6-3.5 6.6V14h3.5"/></symbol>
+<symbol id="i-train" viewBox="0 0 24 24"><path d="M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11"/></symbol>
+<symbol id="i-kyno" viewBox="0 0 24 24"><rect x="4" y="7.5" width="16" height="12" rx="4.5"/><path d="M12 7.5V4.5"/><circle cx="12" cy="3.6" r=".9"/><path d="M9.2 13.2v1.4M14.8 13.2v1.4"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 14.5V3.5M8 7.2l4-3.7 4 3.7M5.5 12v6.5a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V12"/></symbol>
+<symbol id="i-privacy" viewBox="0 0 24 24"><path d="M12 3.2 19 6v5.2c0 4.4-2.9 8.2-7 9.6-4.1-1.4-7-5.2-7-9.6V6Z"/><path d="M9.2 12.1l2 2 3.8-3.9"/></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M3.5 9h17M7.5 15h13"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-phone" viewBox="0 0 26 26"><rect x="7" y="2.5" width="12" height="21" rx="3.2"/><path d="M11 5.4h4"/></symbol>
+<symbol id="i-play" viewBox="0 0 26 26"><path d="M6 3.8v18.4c0 .8.9 1.3 1.6.9l15.2-9.2c.7-.4.7-1.4 0-1.8L7.6 2.9C6.9 2.5 6 3 6 3.8Z"/></symbol>
 </defs></svg>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="wrap">
-<a class="brand" href="#top" aria-label="Kynetix home"><svg viewBox="-188.8 250 3797.8 700" role="img" aria-label="Kynetix"><path d="M-170,592.2 H634 A8.8,8.8 0 0 1 634,609.8 H-170 A8.8,8.8 0 0 1 -170,592.2 Z" fill="#FF6A3D"/><use href="#kx" clip-path="url(#cb)"/><g clip-path="url(#ct)"><use href="#kx" transform="translate(70 0)"/></g></svg></a>
-<nav class="nav" aria-label="Main"><a class="wide" href="#food">Food</a><a class="wide" href="#training">Training</a><a class="wide" href="#kyno">Kyno</a><a class="wide" href="#share">Share cards</a><a href="privacy/">Privacy</a></nav>
+<header class="top"><div class="island">
+<a class="brand" href="#top" aria-label="Kynetix home"><svg class="bm" viewBox="-188.8 250 3797.8 700" role="img" aria-label="Kynetix"><path class="bm-cut" d="M-170,592.2 H634 A8.8,8.8 0 0 1 634,609.8 H-170 A8.8,8.8 0 0 1 -170,592.2 Z" fill="#FF6A3D"/><use href="#kx" clip-path="url(#cb)"/><g clip-path="url(#ct)"><g class="bm-t"><use href="#kx" transform="translate(70 0)"/></g></g></svg></a>
+<nav class="links" aria-label="Main"><span class="ind" aria-hidden="true"></span><a href="#food" data-sec="food"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-food"/></svg><span class="lb">Food</span></a><a href="#training" data-sec="training"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-train"/></svg><span class="lb">Train</span></a><a href="#kyno" data-sec="kyno"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-kyno"/></svg><span class="lb">Kyno</span></a><a href="#share" data-sec="share"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-share"/></svg><span class="lb">Share</span></a><span class="sep" aria-hidden="true"></span><a href="privacy/" data-page="privacy"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-privacy"/></svg><span class="lb">Privacy</span></a></nav>
 </div></header>
+<nav class="dock" aria-label="Sections"><span class="ind" aria-hidden="true"></span><a href="#food" data-sec="food"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-food"/></svg><span class="lb">Food</span></a><a href="#training" data-sec="training"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-train"/></svg><span class="lb">Train</span></a><a href="#kyno" data-sec="kyno"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-kyno"/></svg><span class="lb">Kyno</span></a><a href="#share" data-sec="share"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-share"/></svg><span class="lb">Share</span></a><button type="button" class="menu-btn" aria-haspopup="dialog" aria-controls="menu" aria-expanded="false"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg><span class="lb">Menu</span></button></nav>
+<dialog class="menu" id="menu" aria-label="Menu"><div class="menu-in">
+<div class="menu-top"><a class="brand" href="#top" aria-label="Kynetix home"><svg class="bm" viewBox="-188.8 250 3797.8 700" role="img" aria-label="Kynetix"><path class="bm-cut" d="M-170,592.2 H634 A8.8,8.8 0 0 1 634,609.8 H-170 A8.8,8.8 0 0 1 -170,592.2 Z" fill="#FF6A3D"/><use href="#kx" clip-path="url(#cb)"/><g clip-path="url(#ct)"><g class="bm-t"><use href="#kx" transform="translate(70 0)"/></g></g></svg></a><button type="button" class="menu-x" aria-label="Close menu"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button></div>
+<ol class="menu-list"><li style="--i:0"><a href="#food">Food</a></li><li style="--i:1"><a href="#training">Training</a></li><li style="--i:2"><a href="#kyno">Kyno</a></li><li style="--i:3"><a href="#share">Share cards</a></li><li style="--i:4"><a href="privacy/">Privacy</a></li><li style="--i:5"><a href="terms/">Terms</a></li><li style="--i:6"><a href="delete-account/">Delete account</a></li></ol>
+<div class="menu-foot"><p>Android, coming soon to Google Play. iPhone is on the roadmap.</p><a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a></div>
+</div><span class="menu-cut" aria-hidden="true"></span></dialog>
 <main id="main">
 <section class="hero" id="top" aria-labelledby="hero-title">
 <div class="wrap">
@@ -45,13 +60,19 @@
 <div class="hero-copy">
 <p class="tag rise">Real food. Real lifts.</p>
 <p class="lede rise" style="--d:.1s">An Android app for people who eat dal and roti and lift four days a week. <strong>Log meals in your own words, log every set, and ask Kyno</strong>, a coach that reads both.</p>
-<div class="ctas rise" style="--d:.2s"><p class="play" role="note" aria-label="Coming soon to Google Play"><svg viewBox="0 0 26 26" aria-hidden="true" focusable="false"><path d="M6 3.8v18.4c0 .8.9 1.3 1.6.9l15.2-9.2c.7-.4.7-1.4 0-1.8L7.6 2.9C6.9 2.5 6 3 6 3.8Z" fill="none" stroke="#F2F1EC" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.4 3.4 15.6 13 6.4 22.6" fill="none" stroke="#FF6A3D" stroke-width="1.6" stroke-linejoin="round"/></svg><span><small>Android</small><b>Coming soon to Google Play</b></span><span class="dot" aria-hidden="true"></span></p><a class="link-arrow" href="#food"><span>See how it works</span></a></div>
+<div class="ctas rise" style="--d:.2s">
+<div class="badges">
+<p class="badge play" role="note" aria-label="Android: coming soon to Google Play" data-magnetic><svg class="b-ico" viewBox="0 0 26 26" aria-hidden="true" focusable="false"><path d="M6 3.8v18.4c0 .8.9 1.3 1.6.9l15.2-9.2c.7-.4.7-1.4 0-1.8L7.6 2.9C6.9 2.5 6 3 6 3.8Z" fill="none" stroke="#F2F1EC" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.4 3.4 15.6 13 6.4 22.6" fill="none" stroke="#FF6A3D" stroke-width="1.6" stroke-linejoin="round"/></svg><span><small>Android</small><b>Coming soon to Google Play</b></span><span class="dot" aria-hidden="true"></span></p>
+<p class="badge ios" role="note" aria-label="iPhone: App Store, coming later. It is on the roadmap." data-magnetic><svg class="b-ico" aria-hidden="true" focusable="false"><use href="#i-phone"/></svg><span><small>iPhone</small><b>App Store, coming later</b></span></p>
+</div>
+<a class="link-arrow" href="#food" data-magnetic><span>See how it works</span></a>
+</div>
 </div>
 </div>
 <div class="hero-phones" aria-hidden="true">
-<div class="phone" style="--d:0s"><div class="screen"><img src="assets/img/shot-train.webp" width="540" height="1152" alt="" decoding="async"></div></div>
-<div class="phone" style="--d:.08s"><div class="screen"><img src="assets/img/shot-session.webp" width="540" height="1152" alt="" decoding="async" fetchpriority="high"></div></div>
-<div class="phone" style="--d:.16s"><div class="screen"><img src="assets/img/shot-kyno.webp" width="540" height="1152" alt="" decoding="async"></div></div>
+<div class="phone" style="--d:0s"><div class="screen"><img src="assets/img/app-workout-540.webp" srcset="assets/img/app-workout-540.webp 540w, assets/img/app-workout-810.webp 810w" sizes="(min-width: 760px) 26vw, 300px" width="540" height="1152" alt="" decoding="async"></div></div>
+<div class="phone" style="--d:.08s"><div class="screen"><img src="assets/img/app-home-540.webp" srcset="assets/img/app-home-540.webp 540w, assets/img/app-home-810.webp 810w" sizes="(min-width: 760px) 26vw, 300px" width="540" height="1152" alt="" decoding="async" fetchpriority="high"></div></div>
+<div class="phone" style="--d:.16s"><div class="screen"><img src="assets/img/app-kyno-empty-540.webp" srcset="assets/img/app-kyno-empty-540.webp 540w, assets/img/app-kyno-empty-810.webp 810w" sizes="(min-width: 760px) 26vw, 300px" width="540" height="1152" alt="" decoding="async"></div></div>
 </div>
 </section>
 
@@ -62,76 +83,94 @@
 <article class="chapter" id="food" data-screen="0">
 <p class="kicker">Food</p>
 <h2 class="shear">Eat like you eat</h2>
-<p>Type it the way you'd say it. Two roti, dal, a bowl of aloo sabzi, curd on the side. Kyno works out the calories and protein, and calls it <strong>Kyno's estimate</strong> until you say it's right.</p>
-<div class="describe" aria-label="Example of describing a meal"><span class="k" aria-hidden="true">k</span><span><span class="lbl">Describe it</span><span class="typed" data-lines="2 roti, dal makhani, half bowl rice|mess thali, extra paneer|4 egg whites + 400 ml milk|1 plate poha and a cutting chai">2 roti, dal makhani, half bowl rice<span class="caret" aria-hidden="true"></span></span></span></div>
-<p>Packaged? Scan the barcode and log the exact pack. Fix a portion once and Kynetix remembers how you eat it.</p>
-<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/shot-logmeal.webp" width="540" height="1152" alt="The Log a meal sheet in Kynetix, with two options: Describe it, type it like you would say it, and Scan a barcode for packaged food." loading="lazy" decoding="async"></div></div></div>
+<p data-reveal>Type it the way you'd say it. Two roti, dal, a bowl of aloo sabzi, curd on the side. Kyno works out the calories and protein, and calls it <strong>Kyno's estimate</strong> until you say it's right.</p>
+<div class="describe" data-reveal aria-label="Example of describing a meal"><span class="k" aria-hidden="true">k</span><span><span class="lbl">Describe it</span><span class="typed" data-lines="2 roti, dal makhani, half bowl rice|mess thali, extra paneer|4 egg whites + 400 ml milk|1 plate poha and a cutting chai">2 roti, dal makhani, half bowl rice<span class="caret" aria-hidden="true"></span></span></span></div>
+<p data-reveal>Packaged? Scan the barcode and log the exact pack. Fix a portion once and Kynetix remembers how you eat it.</p>
+<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/app-meal-540.webp" width="540" height="1152" alt="Adding to breakfast in Kynetix: 22 roti, rajma and salad typed in plain words, estimated at 3,545 kcal and 128 g of protein with high confidence, with ingredients you can adjust." loading="lazy" decoding="async"></div></div></div>
 </article>
 
 <article class="chapter" id="training" data-screen="1">
 <p class="kicker">Training</p>
 <h2 class="shear">Every set counts</h2>
-<p>Big numbers, quick steppers and your last set right there. Log it in a tap and the rest timer takes over.</p>
-<p>Kyno suggests the next weight from your own history. Hit a personal record and you hear about it on the spot. <strong>Gravity filed a complaint.</strong></p>
-<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/shot-session.webp" width="540" height="1152" alt="A workout in progress: Flat Bench Press, 65 kg for 8 reps, with weight and rep steppers, the last set and Kyno's suggestion of 52.5 kg for 12." loading="lazy" decoding="async"></div></div></div>
+<p data-reveal>Big numbers, quick steppers and your last set right there. Log it in a tap and the rest timer takes over.</p>
+<p data-reveal>Kyno suggests the next weight from your own history. Hit a personal record and you hear about it on the spot. <strong>Gravity filed a complaint.</strong></p>
+<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/app-workout-540.webp" width="540" height="1152" alt="A workout in progress: Close Grip Seated Cable Row, 40 kg for 11 reps, with weight and rep steppers, the last set of 40 kg for 10 and Kyno's suggestion of 40 kg for 11." loading="lazy" decoding="async"></div></div></div>
 </article>
 
 <article class="chapter" data-screen="2">
 <p class="kicker">Your week</p>
 <h2 class="shear">Your split, your week</h2>
-<p>Push, pull, legs, a bro split or your own thing. Pick a split and Kynetix lays out the week: what's on today, how long it runs, and what you've moved so far.</p>
-<p>Kilos lifted, sets, streak and records, without a spreadsheet in sight.</p>
-<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/shot-train.webp" width="540" height="1152" alt="The Train screen: today's Chest and Triceps session done, a week strip, muscles trained this week, and totals for kilos lifted, sets, streak and records." loading="lazy" decoding="async"></div></div></div>
+<p data-reveal>Push, pull, legs, a bro split or your own thing. Pick a split and Kynetix lays out the week: what's on today, how long it runs, and what you've moved so far.</p>
+<p data-reveal>Kilos lifted, sets, streak and records, without a spreadsheet in sight.</p>
+<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/app-train-540.webp" width="540" height="1152" alt="The Train screen: today's Back and Biceps session done, 6 exercises in about 54 minutes, a week strip with 2 of 6 days trained, muscles trained this week, and 6.3k kg lifted over 17 sets." loading="lazy" decoding="async"></div></div></div>
 </article>
 
 <article class="chapter" data-screen="3">
 <p class="kicker">Targets</p>
 <h2 class="shear">Targets that know leg day</h2>
-<p>Your calorie and protein targets come from your body, your goal and your training. Train days eat a little more. Rest days a little less.</p>
-<p>Connect Health Connect and Kynetix reads four things to keep the numbers honest. Read only. It never writes.</p>
-<ul class="reads" aria-label="Read from Health Connect"><li>Steps</li><li>Weight</li><li>Sleep</li><li>HRV</li></ul>
-<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/shot-targets.webp" width="540" height="1152" alt="The targets step of onboarding: 2191 kcal and 126 g of protein a day, with 2281 kcal on training days and 2101 kcal on rest days." loading="lazy" decoding="async"></div></div></div>
+<p data-reveal>Your calorie and protein targets come from your body, your goal and your training. Train days eat a little more. Rest days a little less.</p>
+<p data-reveal>Connect Health Connect and Kynetix reads four things to keep the numbers honest. Read only. It never writes.</p>
+<ul class="reads" data-reveal aria-label="Read from Health Connect"><li>Steps</li><li>Weight</li><li>Sleep</li><li>HRV</li></ul>
+<div class="inline-shot"><div class="phone"><div class="screen"><img src="assets/img/app-home-540.webp" width="540" height="1152" alt="The Kynetix home screen: Good morning, Dhruv, with 1,901 kcal left of 2,459, 27 of 144 g of protein eaten, and breakfast logged." loading="lazy" decoding="async"></div></div></div>
 </article>
 
 </div>
-<div class="stick"><div class="stick-inner"><div class="phone"><div class="screen screens"><div class="scr on"><img class="h-t" src="assets/img/shot-logmeal.webp" width="540" height="1152" alt="The Log a meal sheet in Kynetix, with two options: Describe it, type it like you would say it, and Scan a barcode for packaged food." loading="eager" decoding="async"><img class="h-b" src="assets/img/shot-logmeal.webp" width="540" height="1152" alt="" aria-hidden="true" loading="eager" decoding="async"></div><div class="scr"><img class="h-t" src="assets/img/shot-session.webp" width="540" height="1152" alt="A workout in progress: Flat Bench Press, 65 kg for 8 reps, with weight and rep steppers, the last set and Kyno's suggestion of 52.5 kg for 12." loading="lazy" decoding="async"><img class="h-b" src="assets/img/shot-session.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div><div class="scr"><img class="h-t" src="assets/img/shot-train.webp" width="540" height="1152" alt="The Train screen: today's Chest and Triceps session done, a week strip, muscles trained this week, and totals for kilos lifted, sets, streak and records." loading="lazy" decoding="async"><img class="h-b" src="assets/img/shot-train.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div><div class="scr"><img class="h-t" src="assets/img/shot-targets.webp" width="540" height="1152" alt="The targets step of onboarding: 2191 kcal and 126 g of protein a day, with 2281 kcal on training days and 2101 kcal on rest days." loading="lazy" decoding="async"><img class="h-b" src="assets/img/shot-targets.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div><span class="slash" aria-hidden="true"></span></div></div></div></div>
+<div class="stick"><div class="stick-inner"><div class="phone tilt"><div class="screen screens">
+<div class="scr on"><img class="h-t" src="assets/img/app-meal-540.webp" width="540" height="1152" alt="Adding to breakfast in Kynetix: 22 roti, rajma and salad typed in plain words, estimated at 3,545 kcal and 128 g of protein with high confidence." loading="lazy" decoding="async"><img class="h-b" src="assets/img/app-meal-540.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div>
+<div class="scr"><img class="h-t" src="assets/img/app-workout-540.webp" width="540" height="1152" alt="A workout in progress: Close Grip Seated Cable Row, 40 kg for 11 reps, with Kyno's suggestion of 40 kg for 11." loading="lazy" decoding="async"><img class="h-b" src="assets/img/app-workout-540.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div>
+<div class="scr"><img class="h-t" src="assets/img/app-train-540.webp" width="540" height="1152" alt="The Train screen: Back and Biceps done for today, a week strip and totals for kilos lifted, sets and streak." loading="lazy" decoding="async"><img class="h-b" src="assets/img/app-train-540.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div>
+<div class="scr"><img class="h-t" src="assets/img/app-home-540.webp" width="540" height="1152" alt="The Kynetix home screen: Good morning, Dhruv, with 1,901 kcal left of 2,459 and protein for the day." loading="lazy" decoding="async"><img class="h-b" src="assets/img/app-home-540.webp" width="540" height="1152" alt="" aria-hidden="true" loading="lazy" decoding="async"></div>
+<span class="slash" aria-hidden="true"></span></div></div>
+<ol class="dots" aria-hidden="true"><li class="on"></li><li></li><li></li><li></li></ol>
+</div></div>
 </div>
 </section>
 
 <section class="sec kyno" id="kyno" aria-labelledby="kyno-title">
 <div class="wrap kyno-grid">
-<div><div class="phone"><div class="screen"><img src="assets/img/shot-kyno.webp" width="540" height="1152" alt="Kyno, the coach in Kynetix, greeting Arjun with today's numbers, 2,459 kcal and 144 g protein left, and suggested questions." loading="lazy" decoding="async"></div></div></div>
+<div class="kyno-phones" aria-live="off">
+<div class="phone k-answer"><div class="screen"><img src="assets/img/app-kyno-answer-540.webp" srcset="assets/img/app-kyno-answer-540.webp 540w, assets/img/app-kyno-answer-810.webp 810w" sizes="(min-width: 980px) 340px, 300px" width="540" height="1152" alt="Kyno answering Is my diet slipping this week: logged days average 611 kcal and 27 g of protein against 2,459 kcal and 144 g targets, with three regular meals to lock in." loading="lazy" decoding="async"></div></div>
+<div class="phone k-empty"><div class="screen"><img src="assets/img/app-kyno-empty-540.webp" srcset="assets/img/app-kyno-empty-540.webp 540w, assets/img/app-kyno-empty-810.webp 810w" sizes="(min-width: 980px) 340px, 300px" width="540" height="1152" alt="Kyno greeting Dhruv: 1,901 kcal and 117 g of protein left on Back and Biceps day, a note that protein came up short yesterday, and a suggested question." loading="lazy" decoding="async"></div></div>
+</div>
 <div class="kyno-copy">
 <p class="kicker">Kyno</p>
 <h2 class="shear" id="kyno-title">Meet Kyno</h2>
-<p>Kyno is the coach inside Kynetix. It has already read your last two weeks of meals, lifts, steps and weight, so you can skip the backstory and just ask.</p>
-<ul class="asks" data-in aria-label="Things people ask Kyno">
-<li style="--i:0">What should I eat to hit my macros today?</li>
-<li style="--i:1">Is my diet slipping this week?</li>
-<li style="--i:2">Plan tomorrow's food around my training</li>
-<li style="--i:3">How is my recovery looking?</li>
-<li style="--i:4">Give me a cheaper high-protein swap for what I eat</li>
+<p data-reveal>Kyno is the coach inside Kynetix. It has already read your last two weeks of meals, lifts, steps and weight, so you can skip the backstory and just ask.</p>
+<p class="ask-hint" data-reveal><span class="fine">Hover a question</span><span class="coarse">Tap a question</span> to see how Kyno answers.</p>
+<ul class="asks" data-reveal aria-label="Things people ask Kyno">
+<li class="ask" style="--i:0"><h3><button type="button" class="ask-q" id="q1" aria-expanded="false" aria-controls="a1"><span>What should I eat to hit my macros today?</span><i aria-hidden="true"></i></button></h3>
+<div class="ask-a" id="a1" role="region" aria-labelledby="q1"><div class="ask-in"><div class="bubble"><span class="who"><span class="av" aria-hidden="true">k</span>Kyno</span><p>You've got 1,901 kcal and 117 g of protein left. Paneer bhurji with 2 roti for lunch, curd and a banana at 5, and dal chawal with chicken for dinner gets you close. I skipped anything you've already had today.</p></div></div></div></li>
+<li class="ask" style="--i:1" data-shot="answer"><h3><button type="button" class="ask-q" id="q2" aria-expanded="false" aria-controls="a2"><span>Is my diet slipping this week?</span><i aria-hidden="true"></i></button></h3>
+<div class="ask-a" id="a2" role="region" aria-labelledby="q2"><div class="ask-in"><div class="bubble"><span class="who"><span class="av" aria-hidden="true">k</span>Kyno</span><p>Yes, and not subtly. The days you logged average 611 kcal and 27 g of protein, against 2,459 and 144. Either you're under-eating or under-logging. Log every meal this week and I'll tell you which.</p></div></div></div></li>
+<li class="ask" style="--i:2"><h3><button type="button" class="ask-q" id="q3" aria-expanded="false" aria-controls="a3"><span>Plan tomorrow's food around my training</span><i aria-hidden="true"></i></button></h3>
+<div class="ask-a" id="a3" role="region" aria-labelledby="q3"><div class="ask-in"><div class="bubble"><span class="who"><span class="av" aria-hidden="true">k</span>Kyno</span><p>Tomorrow is Back + Biceps, so you're on the training day target. Poha and a whey shake before, rajma chawal with curd after, paneer and roti at night. Most of the carbs land around the session, where they do some work.</p></div></div></div></li>
+<li class="ask" style="--i:3"><h3><button type="button" class="ask-q" id="q4" aria-expanded="false" aria-controls="a4"><span>How is my recovery looking?</span><i aria-hidden="true"></i></button></h3>
+<div class="ask-a" id="a4" role="region" aria-labelledby="q4"><div class="ask-in"><div class="bubble"><span class="who"><span class="av" aria-hidden="true">k</span>Kyno</span><p>Sleep has been under 6.5 hours three nights running, and your rows have sat at 40 kg for two sessions. Keep the weight tomorrow, drop one set, and get to bed earlier. That's a pattern in your logs, not a diagnosis.</p></div></div></div></li>
+<li class="ask" style="--i:4"><h3><button type="button" class="ask-q" id="q5" aria-expanded="false" aria-controls="a5"><span>Give me a cheaper high-protein swap for what I eat</span><i aria-hidden="true"></i></button></h3>
+<div class="ask-a" id="a5" role="region" aria-labelledby="q5"><div class="ask-in"><div class="bubble"><span class="who"><span class="av" aria-hidden="true">k</span>Kyno</span><p>Your whey costs more per gram of protein than soya chunks. 50 g of dry soya is about 26 g of protein for a few rupees. Stir it into the rajma and nobody at the table will notice.</p></div></div></div></li>
 </ul>
-<p class="note">Snap a menu or your plate and Kyno reads it too. Already pay for ChatGPT? Connect your account in Settings and Kyno runs on it. Kyno's numbers are estimates, and Kyno is not a doctor. If a reply is off, report it right from the reply.</p>
+<p class="note" data-reveal>Example replies. The real ones come from your own logs. Snap a menu or your plate and Kyno reads it too. Already pay for ChatGPT? Connect your account in Settings and Kyno runs on it. Kyno's numbers are estimates, and Kyno is not a doctor. If a reply is off, report it right from the reply.</p>
 </div>
 </div>
 </section>
 
-<section class="sec" id="share" aria-labelledby="share-title">
-<div class="wrap"><div class="sec-head">
+<section class="sec share" id="share" aria-labelledby="share-title">
+<div class="wrap share-head">
+<div class="sec-head">
 <p class="kicker">Share cards</p>
 <h2 class="shear" id="share-title">Share the damage</h2>
-<p>Finish a session and turn it into a card. Five styles, story or post size, on graphite, paper or your own photo.</p>
-</div></div>
+<p data-reveal>Finish a session and Kynetix tallies it up: new bests, kilos moved, the lot. Then turn it into a card. Five styles, story or post size, on graphite, paper or your own photo.</p>
+</div>
+<div class="done-shot" data-reveal><div class="phone"><div class="screen"><img src="assets/img/app-done-540.webp" width="540" height="1152" alt="Session saved: Back and Biceps, 2 new bests, 3,370 kg moved over 7 sets, with the new bests listed." loading="lazy" decoding="async"></div></div></div>
+</div>
 <div class="cards-wrap">
-<ul class="cards" aria-label="The five share cards">
-<li style="--i:0;--o:-2;--a:2"><figure><div class="card"><img src="assets/img/card-poster.webp" width="540" height="675" alt="Poster card: PUSH DAY, 12,450 kg moved today, 21 sets, 1 h 04 m, 2 records." loading="lazy" decoding="async"></div><figcaption><b>Poster</b><span>The big number, front and centre.</span></figcaption></figure></li>
-<li style="--i:1;--o:-1;--a:1"><figure><div class="card"><img src="assets/img/card-receipt.webp" width="540" height="675" alt="Receipt card: an itemised till slip of the session, total 12,450 kg, ending with Gravity has been billed." loading="lazy" decoding="async"></div><figcaption><b>Receipt</b><span>Itemised. Gravity has been billed.</span></figcaption></figure></li>
-<li style="--i:2;--o:0;--a:0"><figure><div class="card"><img src="assets/img/card-skyline.webp" width="540" height="675" alt="Skyline card: every set of push day drawn as a bar, to scale, with records in ember." loading="lazy" decoding="async"></div><figcaption><b>Skyline</b><span>Every set, to scale.</span></figcaption></figure></li>
-<li style="--i:3;--o:1;--a:1"><figure><div class="card"><img src="assets/img/card-equivalent.webp" width="540" height="675" alt="In real terms card: 12,450 kg is about 19 Maruti 800s. The whole family fits in there." loading="lazy" decoding="async"></div><figcaption><b>In real terms</b><span>12,450 kg is about 19 Maruti 800s.</span></figcaption></figure></li>
-<li style="--i:4;--o:2;--a:2"><figure><div class="card sticker"><img src="assets/img/card-sticker.webp" width="540" height="675" alt="Sticker card: a transparent PUSH DAY sticker with the session totals, to lay over your own photo." loading="lazy" decoding="async"></div><figcaption><b>Sticker</b><span>Transparent. Lay it on your own photo.</span></figcaption></figure></li>
+<ul class="cards" aria-label="Three of the five share cards">
+<li style="--i:0;--o:-1"><figure><button type="button" class="card" data-cursor="Open" data-full="assets/img/share-poster-540.webp" aria-label="Open the Poster card larger"><img src="assets/img/share-poster-360.webp" srcset="assets/img/share-poster-360.webp 360w, assets/img/share-poster-540.webp 540w" sizes="(min-width: 980px) 280px, 64vw" width="360" height="640" alt="Poster card: BACK + BICEPS, 3,370 kg moved today, 7 sets, 3 minutes, 2 records." loading="lazy" decoding="async"></button><figcaption><b>Poster</b><span>The big number, front and centre.</span></figcaption></figure></li>
+<li style="--i:1;--o:0"><figure><button type="button" class="card" data-cursor="Open" data-full="assets/img/share-receipt-540.webp" aria-label="Open the Receipt card larger"><img src="assets/img/share-receipt-360.webp" srcset="assets/img/share-receipt-360.webp 360w, assets/img/share-receipt-540.webp 540w" sizes="(min-width: 980px) 280px, 64vw" width="360" height="640" alt="Receipt card: an itemised till slip of the session, total 3,370 kg, signed off with Paid in sweat. No refunds." loading="lazy" decoding="async"></button><figcaption><b>Receipt</b><span>Itemised. Gravity has been billed.</span></figcaption></figure></li>
+<li style="--i:2;--o:1"><figure><button type="button" class="card" data-cursor="Open" data-full="assets/img/share-skyline-540.webp" aria-label="Open the Skyline card larger"><img src="assets/img/share-skyline-360.webp" srcset="assets/img/share-skyline-360.webp 360w, assets/img/share-skyline-540.webp 540w" sizes="(min-width: 980px) 280px, 64vw" width="360" height="640" alt="Skyline card: every set of Back and Biceps drawn as a bar, to scale, with records in ember, 3,370 kg in total." loading="lazy" decoding="async"></button><figcaption><b>Skyline</b><span>Every set, to scale.</span></figcaption></figure></li>
 </ul>
 </div>
+<p class="also wrap" data-reveal>Also in the deck: <b>In real terms</b>, which turns your total into Maruti 800s, and <b>Sticker</b>, a transparent cut-out to lay over your own photo.</p>
 <p class="quip wrap" aria-hidden="true">PAID IN SWEAT. NO REFUNDS.</p>
 </section>
 
@@ -140,15 +179,15 @@
 <div class="sec-head">
 <p class="kicker">Your data</p>
 <h2 class="shear" id="promise-title">No funny business</h2>
-<p>Your meals and lifts are yours. Here's the deal in plain words.</p>
+<p data-reveal>Your meals and lifts are yours. Here's the deal in plain words.</p>
 </div>
-<ul class="promise">
-<li><b>No ads</b><span>None. Not now, not as a &ldquo;free tier&rdquo;.</span></li>
-<li><b>We don't sell your data</b><span>Not to advertisers, not to anyone.</span></li>
-<li><b>No third-party trackers</b><span>No analytics or ad SDKs in the app. Error reports go to our own database, scrubbed first.</span></li>
-<li><b>Health Connect is read only</b><span>Steps, weight, sleep and HRV, only if you allow it. Kynetix never writes to it.</span></li>
-<li><b>AI only when you ask</b><span>Meal text, photos and questions go to an AI provider only when you use Kyno or an estimate. Photos aren't stored.</span></li>
-<li><b>Delete means delete</b><span>One screen in the app wipes your account and everything in it, straight away.</span></li>
+<ul class="promise" data-reveal>
+<li style="--i:0"><b>No ads</b><span>None. Not now, not as a &ldquo;free tier&rdquo;.</span></li>
+<li style="--i:1"><b>We don't sell your data</b><span>Not to advertisers, not to anyone.</span></li>
+<li style="--i:2"><b>No third-party trackers</b><span>No analytics or ad SDKs in the app. Error reports go to our own database, scrubbed first.</span></li>
+<li style="--i:3"><b>Health Connect is read only</b><span>Steps, weight, sleep and HRV, only if you allow it. Kynetix never writes to it.</span></li>
+<li style="--i:4"><b>AI only when you ask</b><span>Meal text, photos and questions go to an AI provider only when you use Kyno or an estimate. Photos aren't stored.</span></li>
+<li style="--i:5"><b>Delete means delete</b><span>One screen in the app wipes your account and everything in it, straight away.</span></li>
 </ul>
 <p class="after-list"><a class="link-arrow" href="privacy/"><span>Read the privacy policy</span></a><a class="link-arrow" href="delete-account/"><span>How to delete your account</span></a></p>
 </div>
@@ -157,21 +196,26 @@
 <section class="sec close" aria-labelledby="close-title" style="padding-top:0">
 <div class="wrap">
 <h2 class="shear" id="close-title">Real food. Real lifts.</h2>
-<div class="ctas"><p class="play" role="note" aria-label="Coming soon to Google Play"><svg viewBox="0 0 26 26" aria-hidden="true" focusable="false"><path d="M6 3.8v18.4c0 .8.9 1.3 1.6.9l15.2-9.2c.7-.4.7-1.4 0-1.8L7.6 2.9C6.9 2.5 6 3 6 3.8Z" fill="none" stroke="#F2F1EC" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.4 3.4 15.6 13 6.4 22.6" fill="none" stroke="#FF6A3D" stroke-width="1.6" stroke-linejoin="round"/></svg><span><small>Android</small><b>Coming soon to Google Play</b></span><span class="dot" aria-hidden="true"></span></p></div>
-<p style="margin-top:20px">For Android, 18 and over. Questions? <a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a></p>
+<div class="badges">
+<p class="badge play" role="note" aria-label="Android: coming soon to Google Play" data-magnetic><svg class="b-ico" viewBox="0 0 26 26" aria-hidden="true" focusable="false"><path d="M6 3.8v18.4c0 .8.9 1.3 1.6.9l15.2-9.2c.7-.4.7-1.4 0-1.8L7.6 2.9C6.9 2.5 6 3 6 3.8Z" fill="none" stroke="#F2F1EC" stroke-width="1.6" stroke-linejoin="round"/><path d="M6.4 3.4 15.6 13 6.4 22.6" fill="none" stroke="#FF6A3D" stroke-width="1.6" stroke-linejoin="round"/></svg><span><small>Android</small><b>Coming soon to Google Play</b></span><span class="dot" aria-hidden="true"></span></p>
+<p class="badge ios" role="note" aria-label="iPhone: App Store, coming later. It is on the roadmap." data-magnetic><svg class="b-ico" aria-hidden="true" focusable="false"><use href="#i-phone"/></svg><span><small>iPhone</small><b>App Store, coming later</b></span></p>
+</div>
+<p style="margin-top:20px">Android first, for 18 and over. iPhone is on the roadmap, no date yet. Questions? <a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a></p>
 </div>
 </section>
 </main>
+<dialog class="lightbox" id="lightbox" aria-label="Share card"><button type="button" class="lb-x" aria-label="Close">
+<svg class="ico" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button><img src="" alt="" width="540" height="960"><p class="lb-cap"></p></dialog>
 <footer class="foot"><div class="wrap">
-<div>
-<a class="brand" href="./" aria-label="Kynetix home"><svg viewBox="-188.8 250 3797.8 700" role="img" aria-label="Kynetix"><path d="M-170,592.2 H634 A8.8,8.8 0 0 1 634,609.8 H-170 A8.8,8.8 0 0 1 -170,592.2 Z" fill="#FF6A3D"/><use href="#kx" clip-path="url(#cb)"/><g clip-path="url(#ct)"><use href="#kx" transform="translate(70 0)"/></g></svg></a>
-<p style="margin:14px 0 0">Real food. Real lifts. Made in India by Dhruv Gupta. &copy; 2026</p>
+<div class="foot-a">
+<a class="brand" href="#top" aria-label="Kynetix home"><svg class="bm" viewBox="-188.8 250 3797.8 700" role="img" aria-label="Kynetix"><path class="bm-cut" d="M-170,592.2 H634 A8.8,8.8 0 0 1 634,609.8 H-170 A8.8,8.8 0 0 1 -170,592.2 Z" fill="#FF6A3D"/><use href="#kx" clip-path="url(#cb)"/><g clip-path="url(#ct)"><g class="bm-t"><use href="#kx" transform="translate(70 0)"/></g></g></svg></a>
+<p>Real food. Real lifts. Made in India by Dhruv Gupta. &copy; 2026</p>
 </div>
+<p class="talk"><b>Got thoughts?</b> Talk to us inside the app (<span class="path">Profile &gt; Talk to us</span>) or email <a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a></p>
 <nav aria-label="Footer"><ul>
 <li><a href="privacy/">Privacy policy</a></li>
 <li><a href="terms/">Terms of use</a></li>
 <li><a href="delete-account/">Delete your account</a></li>
-<li><a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a></li>
 </ul></nav>
 </div></footer>
 <script src="assets/js/site.js" defer></script>
