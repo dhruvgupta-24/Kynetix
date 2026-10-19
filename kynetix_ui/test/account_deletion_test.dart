@@ -15,7 +15,7 @@ Map<String, Object> _twoUsers() => {
       'user_profile_v2_$_a': '{"name":"A"}',
       'onboarding_done_v1_$_a': true,
       'workout_data_v2_$_a': '[]',
-      'privacy_consent_v1_$_a': '{"version":"2026-10-20"}',
+      'privacy_consent_v1_$_a': '{"version":"2026-10-20b"}',
       'chatgpt_siwc_client_id_$_a': 'client-a',
       'rule_plateau_bench_press_$_a': true,
       'backup_pre_migration_day_logs_v1_$_a': '{}',
@@ -25,7 +25,7 @@ Map<String, Object> _twoUsers() => {
       'user_profile_v2_$_b': '{"name":"B"}',
       'onboarding_done_v1_$_b': true,
       'workout_data_v2_$_b': '[{"id":1}]',
-      'privacy_consent_v1_$_b': '{"version":"2026-10-20"}',
+      'privacy_consent_v1_$_b': '{"version":"2026-10-20b"}',
       'migration_verified_v1_$_b': true,
       // Device-wide
       'ui_theme_mode_v1': 'dark',

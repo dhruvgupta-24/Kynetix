@@ -13,6 +13,7 @@ import '../models/workout_split.dart' show ExerciseExecutionMode;
 import '../ui/k_brand_intro.dart' show KShearWordmark, kBrandBone, kBrandEmber, kBrandGraphite;
 import '../ui/k_segmented.dart';
 import '../ui/k_shear_text.dart';
+import '../services/analytics_service.dart';
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -1083,6 +1084,7 @@ class WorkoutShareCard extends StatelessWidget {
 
 /// Swipe through the templates, pick a format and a backdrop, share a PNG.
 Future<void> showWorkoutShareSheet(BuildContext context, WorkoutShareData data) {
+  AnalyticsService.instance.track('share_opened');
   return showKSheet<void>(
     context: context,
     builder: (_) => _ShareSheet(data: data),
@@ -1147,11 +1149,14 @@ class _ShareSheetState extends State<_ShareSheet> {
       if (bytes == null) throw StateError('encode failed');
       final d = widget.data.date;
       final name = 'kynetix-workout-${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}.png';
-      await SharePlus.instance.share(ShareParams(
+      final shared = await SharePlus.instance.share(ShareParams(
         files: [XFile.fromData(bytes.buffer.asUint8List(), mimeType: 'image/png', name: name)],
         fileNameOverrides: [name],
         text: '${widget.data.dayName} done. Logged on Kynetix.',
       ));
+      if (shared.status != ShareResultStatus.dismissed) {
+        AnalyticsService.instance.track('share_exported', {'template': _template.name.toLowerCase(), 'format': _format.name.toLowerCase(), 'backdrop': _backdrop.name.toLowerCase()});
+      }
     } catch (e) {
       debugPrint('[WORKOUT_SHARE] failed: $e');
       if (mounted) setState(() => _error = 'Couldn\'t make the image. Try again in a moment.');

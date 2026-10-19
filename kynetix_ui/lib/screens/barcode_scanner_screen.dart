@@ -22,6 +22,7 @@ import '../widgets/barcode_scan_sheet.dart';
 import '../widgets/barcode_viewfinder.dart';
 import 'add_meal_screen.dart';
 import 'day_detail_screen.dart';
+import '../services/analytics_service.dart';
 
 /// Where the scan flow was opened from.
 /// - [log]: dashboard dock and day screen. The product sheet logs directly.
@@ -256,6 +257,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     setState(() => _lookingUp = code);
     await _pauseCamera();
     final res = await BarcodeFoodService.instance.lookup(code);
+    AnalyticsService.instance.track('barcode_scanned', {'found': res.isFound});
     if (!mounted) return;
     setState(() => _lookingUp = null);
 

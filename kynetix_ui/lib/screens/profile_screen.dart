@@ -24,12 +24,14 @@ import '../services/insights_report_service.dart';
 import '../services/feedback_service.dart';
 import '../widgets/feedback_sheet.dart';
 import 'feedback_inbox_screen.dart';
+import 'analytics_screen.dart';
 import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
 import '../ui/k_rolling.dart';
 import '../ui/k_shake.dart';
 import '../widgets/k_equal_height_row.dart';
+import '../services/analytics_service.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
 
@@ -225,6 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final hasPerm = await HealthService().hasPermission();
     if (!hasPerm) {
       final granted = await HealthService().requestPermission();
+      if (granted) AnalyticsService.instance.track('health_connected');
       if (!granted) {
         if (mounted) {
           setState(() {
@@ -291,6 +294,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _saveProfile(UserProfile newProfile) {
+    final old = _profile;
+    final targets = <String>[
+      if (old.goal != newProfile.goal) 'goal',
+      if (old.useCustomTargets != newProfile.useCustomTargets) 'custom',
+      if (old.customMaintenanceCalories != newProfile.customMaintenanceCalories ||
+          old.customTrainingDayCalories != newProfile.customTrainingDayCalories ||
+          old.customRestDayCalories != newProfile.customRestDayCalories)
+        'calories',
+      if (old.customProteinTarget != newProfile.customProteinTarget) 'protein',
+    ];
+    if (targets.isNotEmpty) AnalyticsService.instance.track('targets_changed', {'field': targets.join('_')});
     currentUserProfile = newProfile;
     // Local write + cloud backup of the whole profile.
     ProfileService.instance.save(currentUserProfile!).ignore();
@@ -1601,6 +1615,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
                 FeedbackService.instance.refreshNewCount();
               },
+            ),
+          ),
+        if (_isCurator)
+          _SettingRow(
+            icon: Icons.insights_outlined,
+            tint: KColor.textSecondary,
+            label: 'Analytics',
+            subtitle: 'Users, retention and what gets used',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
             ),
           ),
       ],
@@ -3320,6 +3344,7 @@ class _WidgetPickerSheet extends StatelessWidget {
 
   Future<void> _pin(BuildContext context, String size) async {
     final ok = await WidgetService.pinWidget(size);
+    if (ok) AnalyticsService.instance.track('widget_pinned', {'size': size});
     if (!context.mounted) return;
     Navigator.of(context).pop();
     if (!ok) {

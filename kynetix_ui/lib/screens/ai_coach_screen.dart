@@ -30,6 +30,7 @@ import '../widgets/kyno_presence.dart';
 import '../widgets/k_typing_dots.dart';
 import 'add_meal_screen.dart';
 import 'day_detail_screen.dart';
+import '../services/analytics_service.dart';
 
 // ─── Chat message model ───────────────────────────────────────────────────────
 
@@ -462,6 +463,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     if ((text.isEmpty && _pendingImages.isEmpty) || _loading || _isStreaming) return;
 
     final imageList = List<Uint8List>.from(_pendingImages);
+    AnalyticsService.instance.track('kyno_message_sent', {'has_photo': imageList.isNotEmpty});
     setState(() {
       _messages.add(_ChatMessage(role: _Role.user, text: text, imagesBytes: imageList));
       _loading       = true;
@@ -1405,6 +1407,7 @@ class _ReportReplySheetState extends State<_ReportReplySheet> {
         prompt: widget.prompt,
         note: _note.text,
       );
+      AnalyticsService.instance.track('kyno_reply_reported', {'reason': reason.code});
       KHaptics.success();
       if (navigator.mounted) navigator.pop();
       _showToast(toaster, "Thanks. Kyno's team will review it.", success: true);

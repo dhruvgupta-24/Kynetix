@@ -11,6 +11,7 @@ import 'persistence_service.dart';
 import 'user_session_coordinator.dart';
 import 'widget_service.dart';
 import 'internal/net_timeouts.dart';
+import 'analytics_service.dart';
 
 /// Why an account deletion did not go through. Nothing local was removed.
 class AccountDeletionException implements Exception {
@@ -80,6 +81,9 @@ class AccountDeletionService {
       try {
         await _flushPending();
       } catch (_) {}
+      // Goes up now; the row is then deleted with the account like the rest.
+      AnalyticsService.instance.track('account_deleted');
+      await AnalyticsService.instance.flushBeforeSignOut();
 
       final Object? response;
       try {

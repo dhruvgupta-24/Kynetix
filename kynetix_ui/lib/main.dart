@@ -18,6 +18,7 @@ import 'services/persistence_service.dart';
 import 'services/global_food_service.dart';
 import 'services/error_reporter.dart';
 import 'services/secure_session_storage.dart';
+import '../services/analytics_service.dart';
 
 Future<void> main() async {
   final stopwatch = Stopwatch()..start();
@@ -79,6 +80,8 @@ Future<void> main() async {
   // and runs UserSessionCoordinator.initializeForUser itself, so a new user
   // still onboards and nobody ever sees another account's (or stale) data.
   runApp(const KynetixApp());
+  final coldStartMs = stopwatch.elapsedMilliseconds;
+  AnalyticsService.instance.init().then((_) => AnalyticsService.instance.track('app_open', {'cold_start_ms': coldStartMs})).ignore();
   debugPrint('[Startup Profile] runApp at ${stopwatch.elapsedMilliseconds} ms');
 
   _warmUpGlobalServices(stopwatch);

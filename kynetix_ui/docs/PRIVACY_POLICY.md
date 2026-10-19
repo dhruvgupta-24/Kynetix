@@ -73,11 +73,19 @@ You pick each type on Android's permission screen and can turn access off at any
 
 When something breaks in the app, it sends an error report to our own database. A report holds the error type, a short technical message, the app version, the platform and your account ID. Email addresses, phone numbers and sign-in tokens are stripped out before the report leaves your phone. We do not use any third-party crash reporting or analytics service.
 
-### 2.10 Technical information
+### 2.10 Product analytics
+
+The app records simple usage events, like opening a screen, logging a meal or finishing a workout, so we can see what works and improve the app. Each event is tied to your account and holds only its name and a few numbers or options, never what you typed. Events are stored in our own database, are never shared with third parties or used for ads, and are deleted with your account.
+
+### 2.11 Feedback and Kyno reports
+
+When you send feedback from Profile > Talk to us, we store your message, the kind you picked (idea, bug, love it or other), the app version, your phone platform and, if you leave the option on, your email so we can reply. When you report a Kyno reply, we store the reason, your optional note, the reply and the question that led to it. Only the Kynetix team can read these. They are deleted with your account.
+
+### 2.12 Technical information
 
 When the app talks to our servers, Supabase receives your IP address and basic request details, and our server functions keep short-lived logs. Exercise images and videos load from GitHub and jsDelivr, which see your IP address when the media loads.
 
-### 2.11 On your phone
+### 2.13 On your phone
 
 To work quickly and offline, the app keeps a copy of your profile, recent logs, food memory, insights and the numbers on the home-screen widget in its private storage. Your sign-in session is kept in Android's secure, encrypted storage.
 
@@ -90,7 +98,8 @@ We use your information only to:
 1. Run the app: your account, logging, sync, targets, progress and insights.
 2. Run the AI features when you use them: meal estimates from text or photos, Kyno's replies and AI-written summaries.
 3. Keep the service secure, stop abuse, and find and fix bugs.
-4. Meet our legal obligations.
+4. Understand which features get used, from the usage events in Section 2.10, so we can improve the app.
+5. Meet our legal obligations.
 
 We will not use your data for a new, unrelated purpose without telling you first and, where the law requires it, asking for your consent.
 
@@ -133,7 +142,7 @@ We share data only with the services that help run Kynetix, and only what each o
 
 | Service | What it does | Data involved |
 |---|---|---|
-| Supabase | Hosts our database, sign-in and server functions | Your account, profile, logs, error reports and Kyno reports |
+| Supabase | Hosts our database, sign-in and server functions | Your account, profile, logs, usage events, feedback, error reports and Kyno reports |
 | Google | "Continue with Google" sign-in, and Gemini AI | Sign-in details; AI requests as in Section 4 |
 | Groq and OpenRouter | AI estimates and coaching | AI requests as in Section 4 |
 | OpenAI | Only if you connect ChatGPT | AI requests as in Section 4 |
@@ -155,7 +164,7 @@ Some of these services process data outside India, in particular the AI provider
 ## 7. How long we keep data
 
 - **Your account data and logs** are kept while your account exists.
-- **When you delete your account,** your profile, logs, workouts, food memory, insights, error reports, Kyno reports, ChatGPT connection, profile photo and sign-in are deleted from our live database straight away.
+- **When you delete your account,** your profile, logs, workouts, food memory, insights, usage events, feedback, error reports, Kyno reports, ChatGPT connection, profile photo and sign-in are deleted from our live database straight away.
 - **Backups and server logs** are purged within 30 days.
 - **ChatGPT connection tokens** are deleted as soon as you disconnect.
 - **Photos** you send to Kyno are not stored by us.

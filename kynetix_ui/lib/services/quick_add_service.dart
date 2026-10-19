@@ -15,6 +15,7 @@ import 'nutrition_target_engine.dart';
 import 'user_session_coordinator.dart';
 import 'user_nutrition_memory.dart';
 import 'food_link_service.dart';
+import 'analytics_service.dart';
 
 // Logging in this file is debug-only: release builds skip the console I/O.
 void _debugLog(String? message, {int? wrapWidth}) {
@@ -212,6 +213,7 @@ class QuickAddService {
 
     // 5. Store in DayLog and MealMemory
     dayLog.add(section, entry);
+    AnalyticsService.instance.track('meal_logged', {'method': 'quick', 'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     // The in-memory log now holds the entry (source of truth): let the UI
     // confirm immediately while persistence below completes.
     onInserted?.call(entry);

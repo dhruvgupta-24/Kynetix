@@ -6,6 +6,7 @@ import '../config/supabase_client.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/user_session_coordinator.dart';
+import 'analytics_service.dart';
 
 class AuthService {
   const AuthService();
@@ -28,6 +29,7 @@ class AuthService {
         emailRedirectTo: emailCallback,
       );
       debugPrint('[AuthService] signUp success. User ID: ${response.user?.id}');
+      AnalyticsService.instance.track('sign_in', {'method': 'email_signup'});
       return response;
     } catch (e) {
       debugPrint('[AuthService] signUp failed: $e');
@@ -40,8 +42,10 @@ class AuthService {
 
   /// Confirms a new account with the 6-digit code from the sign-up email.
   /// A successful check returns a session, which signs the person in.
-  Future<AuthResponse> verifyEmailCode({required String email, required String code}) {
-    return supabase.auth.verifyOTP(email: email, token: code, type: OtpType.signup);
+  Future<AuthResponse> verifyEmailCode({required String email, required String code}) async {
+    final res = await supabase.auth.verifyOTP(email: email, token: code, type: OtpType.signup);
+    AnalyticsService.instance.track('sign_in', {'method': 'email_code'});
+    return res;
   }
 
   /// Sends the sign-up confirmation email again (a fresh code and link).
@@ -60,6 +64,7 @@ class AuthService {
         password: password,
       );
       debugPrint('[AuthService] signIn success. User ID: ${response.user?.id}');
+      AnalyticsService.instance.track('sign_in', {'method': 'email'});
       return response;
     } catch (e) {
       debugPrint('[AuthService] signIn failed: $e');
@@ -70,6 +75,10 @@ class AuthService {
   Future<void> signOut() async {
     debugPrint('[AuthService] Initiating signOut sequence.');
     try {
+      // Step 0: the last events go up while they still have a session.
+      AnalyticsService.instance.track('sign_out');
+      await AnalyticsService.instance.flushBeforeSignOut();
+
       // Step 1: Flush all user-specific in-memory states (Hard Boundary)
       // Closes hydration gate and wipes in-memory caches without deleting disk stores.
       await UserSessionCoordinator.instance.clearAllUserServices();
@@ -118,6 +127,7 @@ class AuthService {
         type: OtpType.sms,
       );
       debugPrint('[AuthService] OTP verified. User ID: ${response.user?.id}');
+      AnalyticsService.instance.track('sign_in', {'method': 'phone'});
       return response;
     } catch (e) {
       debugPrint('[AuthService] verifyPhoneOtp failed: $e');
@@ -157,6 +167,7 @@ class AuthService {
       );
       
       debugPrint('[AuthService] Native Google Auth successful');
+      AnalyticsService.instance.track('sign_in', {'method': 'google'});
       return true;
     } catch (e) {
       debugPrint('[AuthService] signInWithGoogle failed natively: $e');

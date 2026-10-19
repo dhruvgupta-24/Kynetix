@@ -13,6 +13,7 @@ import 'workout_session_screen.dart';
 import 'ai_coach_screen.dart';
 import 'profile_tab.dart';
 import '../widgets/k_avatar.dart';
+import '../services/analytics_service.dart';
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
@@ -450,6 +451,7 @@ class AppShellState extends State<AppShell> {
     );
 
     await service.saveSession(session);
+    AnalyticsService.instance.track('workout_finished', {'sets': session.totalSets, 'duration_min': session.durationMinutes, 'from_draft': true});
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(WorkoutService.instance.recoveryPrefKey);
@@ -506,6 +508,7 @@ class AppShellState extends State<AppShell> {
     _compact.value = false;
     setState(() => _tab = index);
     AppShell.currentTab.value = index;
+    AnalyticsService.instance.track('screen_view', {'tab': const ['nutrition', 'train', 'kyno', 'profile'][index.clamp(0, 3)]});
   }
 
   // ── The island follows the scroll ─────────────────────────────────────────

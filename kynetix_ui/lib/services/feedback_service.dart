@@ -204,8 +204,7 @@ class FeedbackService {
   }
 
   /// "android 16", "ios 18.1": the OS name and its version, whitespace
-  /// collapsed. Pure, for tests.
-  @visibleForTesting
+  /// collapsed. Pure.
   static String platformLabel(String os, String version) {
     final v = version.replaceAll(RegExp(r'\s+'), ' ').trim();
     return v.isEmpty ? os : '$os $v';

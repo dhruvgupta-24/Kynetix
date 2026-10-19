@@ -22,6 +22,7 @@ import '../ui/k_toast.dart';
 import '../widgets/kyno_avatar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
+import '../services/analytics_service.dart';
 
 export '../models/user_profile.dart';
 
@@ -371,6 +372,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       _forward = step > _currentStep;
       _currentStep = step;
     });
+    AnalyticsService.instance.track('onboarding_step', {'step': step});
     if (d > Duration.zero) {
       _navLock.duration = d;
       _navLock.forward(from: 0);
@@ -436,6 +438,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       await ProfileService.instance.save(currentUserProfile!);
       await PersistenceService.setOnboardingDone();
       saved = true;
+      AnalyticsService.instance.track('onboarding_done');
 
       // Mark hydration complete since this is a new onboarding flow with fresh/empty memory
       final userId = Supabase.instance.client.auth.currentUser?.id;

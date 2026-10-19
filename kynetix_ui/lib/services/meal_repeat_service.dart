@@ -8,6 +8,7 @@
 import '../models/day_log.dart';
 import 'meal_tombstones.dart';
 import 'persistence_service.dart';
+import 'analytics_service.dart';
 
 /// A food from recent days, with the newest entry to copy.
 class RecentFood {
@@ -85,6 +86,9 @@ abstract final class MealRepeatService {
       );
       log.add(copy.section, copy);
       added.add(copy);
+    }
+    for (final e in added) {
+      AnalyticsService.instance.track('meal_logged', {'method': 'repeat', 'kcal_bucket': AnalyticsService.kcalBucket(e.calMid)});
     }
     if (persist && added.isNotEmpty) {
       await PersistenceService.saveDay(date);

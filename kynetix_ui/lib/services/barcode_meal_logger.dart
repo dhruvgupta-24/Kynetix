@@ -3,6 +3,7 @@ import '../models/day_log.dart';
 import 'kyno_context_service.dart';
 import 'meal_memory.dart';
 import 'persistence_service.dart';
+import 'analytics_service.dart';
 
 /// Logs an exact amount of a scanned product straight to a day and section.
 ///
@@ -54,6 +55,7 @@ class BarcodeMealLogger {
     PersistenceService.saveDay(date).ignore();
     PersistenceService.notifyLogsChanged();
     KynoContextService.instance.invalidate();
+    AnalyticsService.instance.track('meal_logged', {'method': 'barcode', 'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     return entry;
   }
 

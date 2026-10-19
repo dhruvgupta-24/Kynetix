@@ -25,6 +25,7 @@ import '../ui/k_rolling.dart';
 import '../widgets/k_progress_line.dart';
 import '../widgets/k_success_check.dart';
 import 'barcode_scanner_screen.dart';
+import '../services/analytics_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
 class DeleteSentinel {
@@ -142,6 +143,9 @@ class _AddMealScreenState extends State<AddMealScreen>
 
   final List<_IngredientRow> _rows = [];
   bool _rememberEdits = true;
+
+  /// The estimate came from a scanned barcode (analytics method only).
+  bool _usedBarcode = false;
   double _totalCal = 0;
   double _totalPro = 0;
   double _totalCarb = 0;
@@ -697,6 +701,7 @@ class _AddMealScreenState extends State<AddMealScreen>
       mode: BarcodeFlowMode.fill,
     );
     if (outcome == null || !mounted) return;
+    _usedBarcode = true;
     final scanned = outcome.result;
     final scannedText = scanned.canonicalMeal;
 
@@ -974,8 +979,10 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (isEditing) {
       logFor(widget.date).replace(widget.initialEntry!.section, widget.initialEntry!, entry);
       MealTombstones.instance.recordReplace(dateKey(widget.date), widget.initialEntry!, entry);
+      AnalyticsService.instance.track('meal_edited', {'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     } else {
       logFor(widget.date).add(widget.section, entry);
+      AnalyticsService.instance.track('meal_logged', {'method': _usedBarcode ? 'barcode' : 'text', 'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     }
     
     // The in-memory log above is the source of truth, so the screen closes

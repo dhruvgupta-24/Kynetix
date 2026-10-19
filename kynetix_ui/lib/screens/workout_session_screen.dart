@@ -36,6 +36,7 @@ import '../widgets/k_success_check.dart';
 import '../widgets/k_ticking_text.dart';
 import '../ui/k_rolling.dart';
 import 'package:flutter/services.dart' show HapticFeedback, SystemSound, SystemSoundType;
+import '../services/analytics_service.dart';
 
 // ─── WorkoutSessionScreen ─────────────────────────────────────────────────────
 //
@@ -497,6 +498,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       });
     } else {
       _startTime = DateTime.now();
+      AnalyticsService.instance.track('workout_started', {'exercises': widget.splitDay.exercises.length});
       _sessionExercises = List.of(widget.splitDay.exercises);
       _selectedIndex = 0;
 
@@ -1814,6 +1816,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     });
     // A finished workout is a genuine milestone (DESIGN_SYSTEM.md, Haptics).
     KHaptics.milestone();
+    AnalyticsService.instance.track('workout_finished', {
+      'sets': session.totalSets,
+      'duration_min': session.durationMinutes,
+      'prs': _WorkoutCompletionOverlayState._findBests(session).length,
+    });
   }
 
   Future<void> _confirmDiscard() async {

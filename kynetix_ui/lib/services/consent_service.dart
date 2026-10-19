@@ -69,7 +69,7 @@ class ConsentService {
   static final ConsentService instance = ConsentService._();
 
   /// Bump when the policy changes in a way that needs fresh consent.
-  static const policyVersion = '2026-10-20';
+  static const policyVersion = '2026-10-20b';
 
   static String prefsKey(String userId) => 'privacy_consent_v1_$userId';
 

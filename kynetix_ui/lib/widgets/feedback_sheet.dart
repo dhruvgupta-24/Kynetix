@@ -4,6 +4,7 @@ import '../config/app_theme.dart';
 import '../services/feedback_service.dart';
 import '../ui/k_segmented.dart';
 import '../ui/k_toast.dart';
+import '../services/analytics_service.dart';
 
 // ─── Feedback sheet ───────────────────────────────────────────────────────────
 // "Talk to us": pick a kind, say it, send. On success the sheet closes with a
@@ -65,6 +66,7 @@ class _FeedbackSheetState extends State<FeedbackSheet> {
         message: _text.text,
         replyTo: _replyOk ? widget.email : null,
       );
+      AnalyticsService.instance.track('feedback_sent', {'kind': _kind.code});
       KHaptics.success();
       if (navigator.mounted) navigator.pop();
       toaster.show('Got it. Straight to the team.', kind: KToastKind.success);
