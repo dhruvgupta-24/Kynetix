@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
 import '../ui/k_toast.dart';
+import '../ui/k_brand_intro.dart' show KShearWordmark;
 import '../ui/k_segmented.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
@@ -586,6 +587,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: KReveal(index: i, child: sections[i]),
               ),
+            // The sign-off: the mark, quiet, and the line under it.
+            Padding(
+              padding: const EdgeInsets.only(top: KSpacing.xxxl + KSpacing.lg),
+              child: Column(
+                children: [
+                  KShearWordmark(fontSize: 30, ink: KColor.textMuted, ember: KColor.ember),
+                  const SizedBox(height: KSpacing.sm),
+                  Text('Real food. Real lifts.', style: KText.caption.copyWith(color: KColor.textMuted)),
+                ],
+              ),
+            ),
           ],
         ),
       ),

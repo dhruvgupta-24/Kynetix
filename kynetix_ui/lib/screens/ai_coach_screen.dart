@@ -7,6 +7,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_theme.dart';
+import '../ui/k_brand_intro.dart' show KShearWordmark;
 import '../ui/k_toast.dart';
 import '../services/ai_coach_service.dart';
 import '../services/chatgpt_link_service.dart';
@@ -871,6 +872,30 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     final insights = _isToday
         ? KynoCoachingInsightService.instance.getActiveInsights()
         : const <KynoCoachingInsight>[];
+    // A blank chat carries the mark: a big, faint sheared K behind the
+    // greeting. It goes the moment the first message lands.
+    return Stack(
+      children: [
+        Positioned(
+          top: -KSpacing.md,
+          right: KSpacing.sm,
+          child: IgnorePointer(
+            child: ExcludeSemantics(
+              child: KShearWordmark(
+                fontSize: 170,
+                kOnly: true,
+                ink: KColor.textPrimary.withValues(alpha: KColor.isDark ? 0.06 : 0.07),
+                ember: KColor.ember.withValues(alpha: 0.3),
+              ),
+            ),
+          ),
+        ),
+        _emptyList(i, brief, first, hello, insights),
+      ],
+    );
+  }
+
+  Widget _emptyList(int i, KynoBrief? brief, String? first, String hello, List<KynoCoachingInsight> insights) {
     return ListView(
       controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.lg, KSpacing.p, KSpacing.xxl),

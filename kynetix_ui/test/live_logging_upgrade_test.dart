@@ -11,6 +11,7 @@ import 'package:kynetix/services/superset_advance.dart';
 import 'package:kynetix/services/warmup_calculator.dart';
 import 'package:kynetix/widgets/barbell_plate_calculator.dart';
 import 'package:kynetix/widgets/pr_celebration.dart';
+import 'package:kynetix/ui/k_brand_intro.dart' show KShearWordmark;
 import 'package:kynetix/widgets/workout_share_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -300,7 +301,7 @@ void main() {
           home: Center(child: WorkoutShareCard(data: data, palette: palette)),
         ));
         expect(tester.takeException(), isNull);
-        expect(find.text('kynetix'), findsOneWidget);
+        expect(find.byType(KShearWordmark), findsOneWidget);
         expect(find.textContaining('12,450', findRichText: true), findsOneWidget);
         expect(find.text('82.5 × 5'), findsOneWidget);
         expect(tester.getSize(find.byType(WorkoutShareCard)), kShareCardSize);
