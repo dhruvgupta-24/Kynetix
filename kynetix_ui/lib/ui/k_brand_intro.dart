@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_theme.dart';
@@ -184,10 +185,17 @@ class _StaticShearPainter extends CustomPainter {
 /// finished mark shows on its own. Text is laid out once per size, so a frame
 /// only clips and translates cached glyphs.
 class KBrandIntro extends StatefulWidget {
-  const KBrandIntro({super.key, required this.onDone});
+  const KBrandIntro({super.key, required this.onDone, this.onReveal, this.onMoving});
 
   /// Called once the intro has faded out.
   final VoidCallback onDone;
+
+  /// Called as the fade begins: the app underneath may wake its animations.
+  final VoidCallback? onReveal;
+
+  /// Called when the K starts moving. From here until [onReveal] the intro
+  /// covers the screen completely, so the app underneath need not paint.
+  final VoidCallback? onMoving;
 
   /// The full run, hold and fade included.
   static const Duration total = Duration(milliseconds: 2400);
@@ -196,12 +204,23 @@ class KBrandIntro extends StatefulWidget {
   State<KBrandIntro> createState() => _KBrandIntroState();
 }
 
-class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStateMixin {
+class _KBrandIntroState extends State<KBrandIntro> with TickerProviderStateMixin {
   late final AnimationController _t = AnimationController(vsync: this, duration: KBrandIntro.total);
+
+  /// A soft highlight running along the ember while the intro waits for the
+  /// phone to settle, so the held K is alive rather than frozen.
+  late final AnimationController _sheen = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
+
+  static const _splash = MethodChannel('com.kynetix.app/splash');
+
   bool _hapticDone = false;
+  bool _revealed = false;
   bool _finished = false;
   bool _starting = false;
+  bool _went = false;
   Timer? _delay;
+  Timer? _fallback;
+  Ticker? _probe;
 
   @override
   void initState() {
@@ -216,39 +235,50 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_starting || _t.isAnimating || _t.value > 0) return;
+    _starting = true;
     if (MediaQuery.disableAnimationsOf(context)) {
       // Reduced motion: the finished mark, briefly, then a plain fade.
-      _starting = true;
       _t.value = _Timeline.holdStart;
       _delay = Timer(const Duration(milliseconds: 700), () {
         if (mounted) _t.forward();
       });
-    } else {
-      _starting = true;
-      // Hold the splash K until Android's splash has finished slicing it and
-      // handed over (Android 12+), and cold start has settled, so the glide
-      // is actually seen. Elsewhere the wait returns at once.
-      WidgetsBinding.instance.endOfFrame.then((_) {
-        if (!mounted) return;
-        // Never wait more than 1.5 s for the native side.
-        _fallback = Timer(const Duration(milliseconds: 1500), _go);
-        _splash.invokeMethod<bool>('waitForSplash').then((_) => _go(), onError: (Object _) => _go());
-      });
+      return;
     }
+    // 1. Wait for the Android splash to finish slicing its K and hand over
+    //    (returns at once elsewhere; never more than 1.5 s).
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      if (!mounted) return;
+      _fallback = Timer(const Duration(milliseconds: 1500), _waitForCalm);
+      _splash.invokeMethod<bool>('waitForSplash').then((_) => _waitForCalm(), onError: (Object _) => _waitForCalm());
+    });
   }
 
-  static const _splash = MethodChannel('com.kynetix.app/splash');
-  Timer? _fallback;
-  bool _went = false;
-
-  /// The native splash is gone (or we stopped waiting): a beat, then go.
-  void _go() {
+  /// 2. Cold start is busy (session restore, the first screen building). An
+  ///    animation run on a clock through that drops frames and skips ahead,
+  ///    so hold the K, with the sheen running, until frames arrive on time:
+  ///    six in a row under 24 ms. Never longer than 1.4 s.
+  void _waitForCalm() {
     if (_went || !mounted) return;
     _went = true;
     _fallback?.cancel();
-    _delay = Timer(const Duration(milliseconds: 160), () {
-      if (mounted && !_t.isAnimating && _t.value == 0) _t.forward();
-    });
+    _sheen.repeat();
+    var calm = 0;
+    Duration? last;
+    _probe = createTicker((elapsed) {
+      final prev = last;
+      if (prev != null) calm = (elapsed - prev).inMilliseconds < 24 ? calm + 1 : 0;
+      last = elapsed;
+      if (calm >= 6 || elapsed > const Duration(milliseconds: 1400)) _start();
+    })..start();
+  }
+
+  void _start() {
+    _probe?.dispose();
+    _probe = null;
+    if (!mounted || _t.isAnimating || _t.value > 0) return;
+    _sheen.stop();
+    widget.onMoving?.call();
+    _t.forward();
   }
 
   void _onTick() {
@@ -256,11 +286,20 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
       _hapticDone = true;
       KHaptics.commit();
     }
+    if (!_revealed && _t.value >= _Timeline.fade.begin) {
+      _revealed = true;
+      widget.onReveal?.call();
+    }
   }
 
   void _skip() {
     _starting = true;
+    _went = true;
     _delay?.cancel();
+    _fallback?.cancel();
+    _probe?.dispose();
+    _probe = null;
+    _sheen.stop();
     if (_t.value < _Timeline.holdStart) {
       _hapticDone = true;
       _t.value = _Timeline.holdStart;
@@ -271,13 +310,19 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
   void _finish() {
     if (_finished) return;
     _finished = true;
+    if (!_revealed) {
+      _revealed = true;
+      widget.onReveal?.call();
+    }
     widget.onDone();
   }
 
   @override
   void dispose() {
+    _probe?.dispose();
     _fallback?.cancel();
     _delay?.cancel();
+    _sheen.dispose();
     _t.dispose();
     super.dispose();
   }
@@ -291,15 +336,18 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
         behavior: HitTestBehavior.opaque,
         onTap: _skip,
         child: AnimatedBuilder(
-          animation: _t,
+          animation: Listenable.merge([_t, _sheen]),
           builder: (context, _) {
             final fade = _Timeline.fade.at(_t.value);
+            final waiting = _t.value == 0 && _sheen.isAnimating;
             return Opacity(
               opacity: 1 - Curves.easeIn.transform(fade),
               child: ColoredBox(
                 color: kBrandGraphite,
                 child: SizedBox.expand(
-                  child: RepaintBoundary(child: CustomPaint(painter: _IntroPainter(_t.value))),
+                  child: RepaintBoundary(
+                    child: CustomPaint(painter: _IntroPainter(_t.value, waiting ? _sheen.value : null)),
+                  ),
                 ),
               ),
             );
@@ -332,8 +380,12 @@ abstract final class _Timeline {
 }
 
 class _IntroPainter extends CustomPainter {
-  _IntroPainter(this.t);
+  _IntroPainter(this.t, this.sheen);
   final double t;
+
+  /// Position (0..1) of the highlight running along the waiting K's ember,
+  /// or null once the intro is moving.
+  final double? sheen;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -369,6 +421,22 @@ class _IntroPainter extends CustomPainter {
       Paint()..color = kBrandEmber,
     );
     _paintHalves(canvas, g, 0, 1, origin, cutY, gap, shift);
+    // While waiting: a soft highlight sweeps along the ember, then rests.
+    final sh = sheen;
+    if (sh != null && sh < 0.62) {
+      final p = Curves.easeInOutSine.transform(sh / 0.62);
+      final len = kEmberRight - kEmberLeft;
+      final cx = kEmberLeft - len * 0.25 + len * 1.5 * p;
+      final half = f * 0.22;
+      canvas.drawRRect(
+        RRect.fromLTRBR(math.max(kEmberLeft, cx - half), cutY + gap / 2 - emberH / 2, math.min(kEmberRight, cx + half),
+            cutY + gap / 2 + emberH / 2, Radius.circular(emberH / 2)),
+        Paint()
+          ..shader = const LinearGradient(
+            colors: [Color(0x00FFD7C8), Color(0xCCFFE6DC), Color(0x00FFD7C8)],
+          ).createShader(Rect.fromLTRB(cx - half, 0, cx + half, 1)),
+      );
+    }
     canvas.restore();
 
     // ── 2. The tail slides out from behind the K, unsheared at first.
@@ -429,5 +497,5 @@ class _IntroPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_IntroPainter old) => old.t != t;
+  bool shouldRepaint(_IntroPainter old) => old.t != t || old.sheen != sheen;
 }

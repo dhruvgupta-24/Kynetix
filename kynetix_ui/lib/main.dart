@@ -98,6 +98,15 @@ class _KynetixAppState extends State<KynetixApp> {
   /// The Shear intro plays once per cold start, over whatever AuthGate shows.
   bool _introDone = false;
 
+  /// Until the intro starts fading, the app underneath keeps its animations
+  /// paused, so the intro never shares frames with them.
+  bool _introRevealed = false;
+
+  /// While the intro is moving it covers everything, so the app underneath
+  /// is kept (state, layout) but not painted: each intro frame draws only the
+  /// mark. It has already painted once, while the K was holding.
+  bool _introMoving = false;
+
   @override
   void initState() {
     super.initState();
@@ -122,8 +131,21 @@ class _KynetixAppState extends State<KynetixApp> {
         // Light / dark flips are revealed as a circle from the last touch.
         builder: (context, child) => Stack(
           children: [
-            KThemeReveal(child: child ?? const SizedBox.shrink()),
-            if (!_introDone) Positioned.fill(child: KBrandIntro(onDone: () => setState(() => _introDone = true))),
+            Offstage(
+              offstage: _introMoving && !_introRevealed,
+              child: TickerMode(
+                enabled: _introRevealed,
+                child: KThemeReveal(child: child ?? const SizedBox.shrink()),
+              ),
+            ),
+            if (!_introDone)
+              Positioned.fill(
+                child: KBrandIntro(
+                  onMoving: () => setState(() => _introMoving = true),
+                  onReveal: () => setState(() => _introRevealed = true),
+                  onDone: () => setState(() => _introDone = true),
+                ),
+              ),
           ],
         ),
         home: const AuthGate(),

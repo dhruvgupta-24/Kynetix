@@ -24,15 +24,34 @@ void main() {
   testWidgets('plays through and reports done once', (tester) async {
     var done = 0;
     await tester.pumpWidget(_host(() => done++));
-    // Starts a beat after the first frame, once cold start settles.
+    // Starts once frames arrive on time: six smooth 60 fps frames.
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
     await tester.pump(const Duration(milliseconds: 1200));
     expect(done, 0);
     await tester.pump(KBrandIntro.total);
     await tester.pump();
     expect(done, 1);
     expect(find.bySemanticsLabel('Kynetix'), findsOneWidget);
+  });
+
+  testWidgets('holds the K while frames are janky, then starts', (tester) async {
+    var done = 0;
+    await tester.pumpWidget(_host(() => done++));
+    await tester.pump();
+    // Long frames (a busy cold start): the intro waits rather than skipping.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 120));
+    }
+    expect(done, 0);
+    // The 1.8 s cap starts it regardless, and it plays to the end.
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(); // the animation's first tick
+    await tester.pump(KBrandIntro.total);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(done, 1);
   });
 
   testWidgets('a tap skips to the finished mark and fades out', (tester) async {
