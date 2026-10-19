@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemap.xml
