@@ -125,6 +125,8 @@
     }
     if (fan && window.innerWidth >= 980) {
       var r = fan.getBoundingClientRect();
+      /* Far away the fan keeps its resting spread (CSS default), so the cards never sit stacked out of sight. */
+      if (r.top > vh * 1.6 || r.bottom < -vh) { fan.style.removeProperty('--p'); } else
       fan.style.setProperty('--p', clamp((vh - r.top) / (vh * 0.75), 0, 1).toFixed(3));
     }
   }

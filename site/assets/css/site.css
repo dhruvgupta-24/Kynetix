@@ -236,7 +236,7 @@ html.cursor-on, html.cursor-on * { cursor: none !important; }
   text-transform: uppercase;
   font-size: clamp(2.4rem, 9vw, 6.4rem);
   padding-right: var(--sx);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .shear .sh-b, .shear .sh-t { display: block; }
 .shear .sh-b {
@@ -347,7 +347,7 @@ html.cursor-on, html.cursor-on * { cursor: none !important; }
 @media (min-width: 760px) { .hero-phones .phone:nth-child(1), .hero-phones .phone:nth-child(3) { display: block; } }
 .hero-phones::after { content: ""; position: absolute; inset: auto 0 0 0; height: 45%; background: linear-gradient(to bottom, transparent, var(--graphite)); pointer-events: none; }
 .motion .hero-phones .phone { animation: phone-in 1.2s var(--ease-out) both; animation-delay: calc(1.15s + var(--d, 0s)); }
-@keyframes phone-in { from { opacity: 0; translate: 0 80px; } to { opacity: 1; translate: 0 0; } }
+@keyframes phone-in { from { opacity: .01; translate: 0 80px; } to { opacity: 1; translate: 0 0; } }
 
 /* ── Phone frame ────────────────────────────────────────── */
 .phone {
@@ -657,6 +657,47 @@ section { position: relative; }
 .motion .lightbox[open]::backdrop { animation: fade .3s ease both; }
 @keyframes lb-in { from { opacity: 0; transform: translateY(24px) scale(.94); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } }
+
+/* ── What is Kynetix: a plain, quotable definition ───────── */
+.what { padding: clamp(40px, 7vw, 88px) 0 0; }
+.what-in { display: grid; gap: 18px; }
+.what h2 { font: 600 15px/1.2 var(--text); color: var(--ash); display: flex; align-items: center; gap: 10px; margin: 0; }
+.what h2::before { content: ""; width: 22px; height: 2px; background: var(--ember); border-radius: 2px; }
+.what p { margin: 0; max-width: 46em; font-size: clamp(1.15rem, 2.2vw, 1.5rem); line-height: 1.5; color: #DAD9D3; text-wrap: pretty; }
+.facts { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.facts li { display: inline-flex; gap: 8px; align-items: baseline; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; font-size: 14.5px; color: var(--ash); }
+.facts b { color: var(--bone); font-weight: 600; }
+
+/* ── FAQ ──────────────────────────────────────────────── */
+.faq { padding-top: 0; }
+.faq-grid { display: grid; gap: 32px; }
+.faq .sec-head { margin-bottom: 0; align-content: start; }
+.faq .shear { font-size: clamp(2.4rem, 4.4vw, 4.4rem); }
+.faq-more { font-size: 15.5px !important; }
+.faq-list { border-top: 1px solid var(--line); }
+.qa { border-bottom: 1px solid var(--line); position: relative; }
+.qa summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; padding: 16px 0; cursor: pointer; }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary h3 { margin: 0; font: 600 1.08rem/1.4 var(--text); color: var(--bone); transition: transform .45s var(--spring); }
+.qa summary i { flex: none; width: 10px; height: 10px; margin-right: 4px; border-right: 2px solid var(--ash); border-bottom: 2px solid var(--ash); transform: rotate(45deg) translateY(-3px); transition: transform .4s var(--spring), border-color .3s ease; }
+.qa[open] summary i { transform: rotate(225deg) translateY(-3px); border-color: var(--ember); }
+.qa summary:hover h3 { transform: translateX(4px); }
+.qa-a p { margin: 0 0 20px; max-width: 40em; color: var(--ash); font-size: 1.02rem; line-height: 1.65; }
+.qa::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 1px; width: 100%; background: var(--ember); transform: scaleX(0); transform-origin: left; transition: transform .6s var(--ease-out); }
+.qa[open]::after { transform: scaleX(1); }
+.motion .qa[open] .qa-a { animation: rise .5s var(--ease-out) both; }
+@media (min-width: 980px) {
+  .faq-grid { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); column-gap: clamp(48px, 7vw, 120px); }
+  .faq .sec-head { position: sticky; top: 110px; }
+}
+
+/* About: press screenshots */
+.press-shots { list-style: none; padding: 0 !important; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }
+.press-shots li { margin: 0; }
+.press-shots a { display: grid; gap: 8px; text-decoration: none; color: var(--ash); font-size: 14px; }
+.press-shots img { border-radius: 16px; box-shadow: 0 0 0 1px var(--line); transition: transform .4s var(--spring); }
+.press-shots a:hover img { transform: translateY(-4px); }
+.prose th[scope="row"] { width: 9em; }
 
 /* ── Privacy band ───────────────────────────────────────── */
 .promise { display: grid; gap: 0; border-top: 1px solid var(--line); list-style: none; margin: 0; padding: 0; }

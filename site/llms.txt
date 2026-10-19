@@ -1,0 +1,31 @@
+# Kynetix
+
+> Kynetix is an Android app for calorie, protein and workout tracking, built around Indian food. You log meals in plain words like "2 roti and dal", log your sets and personal records, and ask Kyno, an AI coach that reads both. It is free during early access, has no ads, and is made in India by Dhruv Gupta.
+
+## Key facts
+
+- Name: Kynetix. The AI coach inside it is called Kyno.
+- What it is: an Android app for calorie, protein and workout tracking, built around Indian food.
+- Platform: Android. iPhone is on the roadmap, no date yet.
+- Status: coming soon to Google Play. No public release date yet.
+- Price: free during early access. No ads.
+- Made by: Dhruv Gupta, an independent developer in India.
+- Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
+- Age: 18 and over.
+- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Account and data deletion inside the app.
+- Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.
+- AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked). Estimates, not medical advice.
+- Source code: https://github.com/dhruvgupta-24/Kynetix
+
+## Pages
+
+- [Home](https://dhruvgupta-24.github.io/Kynetix/): What Kynetix does: food logging in plain words, training, Kyno, widgets, share cards, FAQ.
+- [About and press kit](https://dhruvgupta-24.github.io/Kynetix/about/): Key facts, founder, brand files, screenshots and contact.
+- [Privacy policy](https://dhruvgupta-24.github.io/Kynetix/privacy/): What is collected, why, AI providers, retention, deletion and rights under India's DPDP Act.
+- [Terms of use](https://dhruvgupta-24.github.io/Kynetix/terms/): Rules for using Kynetix: 18 and over, not medical advice, AI can be wrong.
+- [Delete your account](https://dhruvgupta-24.github.io/Kynetix/delete-account/): How to delete a Kynetix account and its data, in the app or by email.
+
+## Optional
+
+- [Full text for AI systems](https://dhruvgupta-24.github.io/Kynetix/llms-full.txt): every fact and FAQ answer in one file.
+- [Source code](https://github.com/dhruvgupta-24/Kynetix): the Flutter app, Supabase backend and this website.
