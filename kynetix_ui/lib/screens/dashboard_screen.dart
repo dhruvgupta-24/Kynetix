@@ -2377,12 +2377,12 @@ class _DayCell extends StatelessWidget {
           height: height,
           margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
-            // Selected = a solid ink chip. Target met keeps a faint ink wash
+            // Selected = a solid ink chip. Target met keeps a brass wash
             // (shape, not just the dot); today gets an ink outline.
             color: isSelected
                 ? KColor.ink
                 : isCompleted
-                    ? KColor.green.withValues(alpha: dark ? 0.12 : 0.1)
+                    ? KColor.goal.withValues(alpha: dark ? 0.18 : 0.16)
                     : Colors.transparent,
             borderRadius: KRadius.sm,
             border: isToday && !isSelected
@@ -2406,7 +2406,7 @@ class _DayCell extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (isCompleted)
-                      _Dot(color: KColor.ink, ring: isSelected)
+                      _Dot(color: KColor.goal, ring: isSelected)
                     else if (isLogged)
                       _Dot(color: KColor.textMuted, ring: isSelected),
                     if (hasGym) _Dot(color: KColor.ember, ring: isSelected),

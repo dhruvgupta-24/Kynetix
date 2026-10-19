@@ -10,8 +10,8 @@ import '../services/persistence_service.dart';
 
 // ─── Consistency heatmap ──────────────────────────────────────────────────────
 // The last sixteen weeks as a grid: one column per week (Monday on top), one
-// square per day. Empty days sit on the track, logged days are a soft ember,
-// days that met the calorie target are full ember, today wears an ink ring.
+// square per day. Empty days sit on the track, logged days are a soft brass,
+// days that met the calorie target are full brass, today wears an ink ring.
 // The whole grid is one CustomPainter; taps resolve by position through the
 // same geometry the painter used, and open that day.
 
@@ -249,7 +249,7 @@ class _ConsistencyHeatmapState extends State<ConsistencyHeatmap> with SingleTick
                         labels: labels,
                         progress: _fill,
                         track: KColor.track,
-                        ember: KColor.ember,
+                        fill: KColor.goal,
                         ring: KColor.ink,
                       ),
                     ),
@@ -307,7 +307,7 @@ class ConsistencyPainter extends CustomPainter {
     required this.geometry,
     required this.progress,
     required this.track,
-    required this.ember,
+    required this.fill,
     required this.ring,
     this.labels,
   }) : super(repaint: progress);
@@ -315,7 +315,7 @@ class ConsistencyPainter extends CustomPainter {
   final ConsistencyScene scene;
   final ConsistencyGeometry geometry;
   final Animation<double> progress;
-  final Color track, ember, ring;
+  final Color track, fill, ring;
   final ConsistencyLabels? labels;
 
   final Paint _fill = Paint();
@@ -341,7 +341,7 @@ class ConsistencyPainter extends CustomPainter {
 
     final p = progress.value;
     final radius = Radius.circular(math.min(3.0, geometry.cell / 4));
-    final soft = ember.withValues(alpha: 0.45);
+    final soft = fill.withValues(alpha: 0.38);
     for (var c = 0; c < ConsistencyScene.weeks; c++) {
       for (var r = 0; r < 7; r++) {
         final mark = scene.markAt(c, r);
@@ -357,7 +357,7 @@ class ConsistencyPainter extends CustomPainter {
         final base = switch (mark) {
           DayMark.none => track,
           DayMark.logged => soft,
-          DayMark.completed => ember,
+          DayMark.completed => fill,
         };
         final rect = geometry.rectFor(c, r);
         final scale = 0.6 + 0.4 * KMotion.easeOut.transform(t);
@@ -380,7 +380,7 @@ class ConsistencyPainter extends CustomPainter {
       old.geometry.origin != geometry.origin ||
       old.geometry.cell != geometry.cell ||
       old.track != track ||
-      old.ember != ember ||
+      old.fill != fill ||
       old.ring != ring ||
       !identical(old.labels, labels);
 }

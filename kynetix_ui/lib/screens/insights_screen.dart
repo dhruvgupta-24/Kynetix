@@ -1129,7 +1129,7 @@ class _InsightsScreenState extends State<InsightsScreen>
     return switch (outcome) {
       // Met days in ink, the surplus in the accent, the in-between days in
       // tints. The legend names every swatch.
-      DayOutcome.hitCaloriesAndProtein => (label: 'Calories and protein met', color: KColor.ink),
+      DayOutcome.hitCaloriesAndProtein => (label: 'Calories and protein met', color: KColor.goal),
       DayOutcome.hitCaloriesMissedProtein => (label: 'Calories hit, protein low', color: KColor.fat),
       DayOutcome.hitProteinOverCalories => (label: 'Protein met, calories high', color: KColor.carbs),
       DayOutcome.underCaloriesUnderProtein => (label: 'Under calories and protein', color: KColor.fiber),

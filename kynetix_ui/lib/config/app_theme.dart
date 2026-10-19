@@ -36,6 +36,11 @@ export '../ui/k_widgets.dart';
 //
 //   Dark   Sage #79D49B       Light  Fern #1E7A4C
 //
+// Goal has its own colour too, used only for a day that met its targets
+// (calendar days, the consistency heatmap, "targets hit"):
+//
+//   Dark   Brass #E0B65C      Light  Deep brass #8E6A12
+//
 // Base is the ground. Ink is text and primary buttons.
 // Ember is the one accent, kept for one meaning on a small part of the
 // screen: calories, the open tab, the log action, and what needs attention.
@@ -62,6 +67,7 @@ class KPalette {
     required this.greenDark,
     required this.ember,
     required this.protein,
+    required this.goal,
     required this.saffron,
     required this.violet,
     required this.cyan,
@@ -90,6 +96,9 @@ class KPalette {
 
   /// Protein only: rings, dots, bars and numbers. Nothing else wears it.
   final Color protein;
+
+  /// Targets met: calendar days, heatmap cells, "targets hit". Nothing else.
+  final Color goal;
   final Color textPrimary, textSecondary, textMuted, textDisabled;
   final Color onAccent;
   final Color shadow;
@@ -117,6 +126,7 @@ class KPalette {
     greenDark: Color(0xFF2B2B2C),
     ember: Color(0xFFFF6A3D),
     protein: Color(0xFF79D49B),
+    goal: Color(0xFFE0B65C),
     saffron: Color(0xFFFF6A3D),
     violet: Color(0xFFFF6A3D),
     cyan: Color(0xFFFF6A3D),
@@ -150,6 +160,7 @@ class KPalette {
     greenDark: Color(0xFF151515),
     ember: Color(0xFFB8401A),
     protein: Color(0xFF1E7A4C),
+    goal: Color(0xFF8E6A12),
     saffron: Color(0xFFB8401A),
     violet: Color(0xFFB8401A),
     cyan: Color(0xFFB8401A),
@@ -225,6 +236,7 @@ abstract class KColor {
   // ── Semantic
   static Color get calorie => _p.ember;
   static Color get protein => _p.protein;
+  static Color get goal => _p.goal;
   static Color get amber => _p.saffron;
   static Color get blue => _p.blue;
   static Color get danger => _p.danger;
