@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,7 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
   bool _hapticDone = false;
   bool _finished = false;
   bool _starting = false;
+  Timer? _delay;
 
   @override
   void initState() {
@@ -51,7 +53,7 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
     if (MediaQuery.disableAnimationsOf(context)) {
       // Reduced motion: the finished mark, briefly, then a plain fade.
       _t.value = _Timeline.holdStart;
-      Future.delayed(const Duration(milliseconds: 700), () {
+      _delay = Timer(const Duration(milliseconds: 700), () {
         if (mounted) _t.forward();
       });
     } else if (!_starting) {
@@ -59,8 +61,11 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
       // Cold start is busy (session restore, first route): frames drop for a
       // moment. Start once the first frame is on screen and things settle,
       // so the K's landing is actually seen. The screen stays graphite.
-      WidgetsBinding.instance.endOfFrame.then((_) => Future.delayed(const Duration(milliseconds: 380))).then((_) {
-        if (mounted && !_t.isAnimating && _t.value == 0) _t.forward();
+      WidgetsBinding.instance.endOfFrame.then((_) {
+        if (!mounted) return;
+        _delay = Timer(const Duration(milliseconds: 380), () {
+          if (mounted && !_t.isAnimating && _t.value == 0) _t.forward();
+        });
       });
     }
   }
@@ -89,6 +94,7 @@ class _KBrandIntroState extends State<KBrandIntro> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    _delay?.cancel();
     _t.dispose();
     super.dispose();
   }
