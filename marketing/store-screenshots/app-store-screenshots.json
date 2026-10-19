@@ -14,7 +14,7 @@
   "slidesByDevice": {
     "iphone": [
       {
-        "id": "s_mvfpkvfx_0",
+        "id": "s_mvfqebnv_0",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -25,7 +25,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_1",
+        "id": "s_mvfqebnv_1",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -36,7 +36,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_2",
+        "id": "s_mvfqebnv_2",
         "layout": "two-devices",
         "label": {
           "en": "FEATURE 02"
@@ -48,7 +48,7 @@
         "screenshotSecondary": ""
       },
       {
-        "id": "s_mvfpkvfx_3",
+        "id": "s_mvfqebnv_3",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 03"
@@ -60,7 +60,7 @@
         "inverted": true
       },
       {
-        "id": "s_mvfpkvfx_4",
+        "id": "s_mvfqebnv_4",
         "layout": "no-device",
         "label": {
           "en": "MORE"
@@ -441,241 +441,136 @@
         }
       },
       {
-        "id": "k08-wall",
+        "id": "k08-widgets",
         "layout": "no-device",
         "label": {
-          "en": "AND THE REST"
+          "en": "HOME SCREEN WIDGETS"
         },
         "headline": {
-          "en": ""
+          "en": "YOUR RINGS.\nNO APP [NEEDED]."
         },
         "screenshot": "",
+        "typography": {
+          "headlineScale": 1.15
+        },
         "transforms": {
           "caption": {
-            "x": 70,
+            "x": 40,
             "y": 150,
-            "width": 940,
-            "height": 80,
+            "width": 1000,
+            "height": 300,
             "rotation": 0,
             "zIndex": 4
           }
         },
-        "textElements": [
-          {
-            "id": "w1",
-            "text": {
-              "en": "HEALTH CONNECT"
-            },
-            "transform": {
-              "x": 60,
-              "y": 250,
-              "width": 960,
-              "height": 120,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 104,
-            "fontWeight": 800,
-            "align": "left"
-          },
-          {
-            "id": "w1s",
-            "text": {
-              "en": "Steps, weight, sleep and HRV."
-            },
-            "transform": {
-              "x": 64,
-              "y": 362,
-              "width": 960,
-              "height": 60,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 36,
-            "fontWeight": 500,
-            "color": "#8A8984",
-            "align": "left"
-          },
-          {
-            "id": "w2",
-            "text": {
-              "en": "WIDGETS"
-            },
-            "transform": {
-              "x": 60,
-              "y": 500,
-              "width": 960,
-              "height": 120,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 104,
-            "fontWeight": 800,
-            "align": "left"
-          },
-          {
-            "id": "w2s",
-            "text": {
-              "en": "Your rings on the home screen."
-            },
-            "transform": {
-              "x": 64,
-              "y": 612,
-              "width": 960,
-              "height": 60,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 36,
-            "fontWeight": 500,
-            "color": "#8A8984",
-            "align": "left"
-          },
-          {
-            "id": "w3",
-            "text": {
-              "en": "BARCODE SCAN"
-            },
-            "transform": {
-              "x": 60,
-              "y": 750,
-              "width": 960,
-              "height": 120,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 104,
-            "fontWeight": 800,
-            "align": "left"
-          },
-          {
-            "id": "w3s",
-            "text": {
-              "en": "Packaged food in one look."
-            },
-            "transform": {
-              "x": 64,
-              "y": 862,
-              "width": 960,
-              "height": 60,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 36,
-            "fontWeight": 500,
-            "color": "#8A8984",
-            "align": "left"
-          },
-          {
-            "id": "w4",
-            "text": {
-              "en": "NO [ADS]"
-            },
-            "transform": {
-              "x": 60,
-              "y": 1000,
-              "width": 960,
-              "height": 120,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 104,
-            "fontWeight": 800,
-            "align": "left"
-          },
-          {
-            "id": "w4s",
-            "text": {
-              "en": "Not now. Not later."
-            },
-            "transform": {
-              "x": 64,
-              "y": 1112,
-              "width": 960,
-              "height": 60,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 36,
-            "fontWeight": 500,
-            "color": "#8A8984",
-            "align": "left"
-          },
-          {
-            "id": "w5",
-            "text": {
-              "en": "DELETE {ANYTIME}"
-            },
-            "transform": {
-              "x": 60,
-              "y": 1250,
-              "width": 960,
-              "height": 120,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 104,
-            "fontWeight": 800,
-            "align": "left"
-          },
-          {
-            "id": "w5s",
-            "text": {
-              "en": "Your data, your call. One tap."
-            },
-            "transform": {
-              "x": 64,
-              "y": 1362,
-              "width": 960,
-              "height": 60,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 36,
-            "fontWeight": 500,
-            "color": "#8A8984",
-            "align": "left"
-          },
-          {
-            "id": "tag",
-            "text": {
-              "en": "Real food. Real lifts."
-            },
-            "transform": {
-              "x": 250,
-              "y": 1690,
-              "width": 700,
-              "height": 90,
-              "rotation": 0,
-              "zIndex": 6
-            },
-            "fontSize": 44,
-            "fontWeight": 600,
-            "align": "left"
-          }
-        ],
         "imageElements": [
           {
-            "id": "icon",
-            "src": "/app-icon.png",
+            "id": "w-day",
+            "src": "/widgets/widget-4x4-day.png",
             "transform": {
-              "x": 70,
-              "y": 1665,
-              "width": 140,
-              "height": 140,
+              "x": 60,
+              "y": 495,
+              "width": 614,
+              "height": 676,
+              "rotation": 0,
+              "zIndex": 5
+            },
+            "fit": "cover",
+            "radius": 44,
+            "border": "rgba(242,241,236,0.16)",
+            "shadow": 55
+          },
+          {
+            "id": "w-wide",
+            "src": "/widgets/widget-4x2-wide.png",
+            "transform": {
+              "x": 60,
+              "y": 1195,
+              "width": 614,
+              "height": 331,
+              "rotation": 0,
+              "zIndex": 5
+            },
+            "fit": "cover",
+            "radius": 44,
+            "border": "rgba(242,241,236,0.16)",
+            "shadow": 55
+          },
+          {
+            "id": "w-rings",
+            "src": "/widgets/widget-2x2-rings.png",
+            "transform": {
+              "x": 698,
+              "y": 495,
+              "width": 322,
+              "height": 329,
+              "rotation": 0,
+              "zIndex": 5
+            },
+            "fit": "cover",
+            "radius": 44,
+            "border": "rgba(242,241,236,0.16)",
+            "shadow": 55
+          },
+          {
+            "id": "w-tall",
+            "src": "/widgets/widget-2x4-tall.png",
+            "transform": {
+              "x": 698,
+              "y": 848,
+              "width": 322,
+              "height": 681,
+              "rotation": 0,
+              "zIndex": 5
+            },
+            "fit": "cover",
+            "radius": 44,
+            "border": "rgba(242,241,236,0.16)",
+            "shadow": 55
+          }
+        ],
+        "textElements": [
+          {
+            "id": "rest",
+            "text": {
+              "en": "HEALTH CONNECT / BARCODE SCAN\nNO ADS / DELETE ANYTIME"
+            },
+            "transform": {
+              "x": 40,
+              "y": 1590,
+              "width": 1000,
+              "height": 170,
               "rotation": 0,
               "zIndex": 6
             },
-            "fit": "cover",
-            "radius": 32,
-            "border": "rgba(242,241,236,0.16)"
+            "fontSize": 50,
+            "fontWeight": 800,
+            "align": "center"
+          },
+          {
+            "id": "rest-sub",
+            "text": {
+              "en": "Steps, weight, sleep and HRV. Packaged food in one look."
+            },
+            "transform": {
+              "x": 60,
+              "y": 1770,
+              "width": 960,
+              "height": 60,
+              "rotation": 0,
+              "zIndex": 6
+            },
+            "fontSize": 32,
+            "fontWeight": 500,
+            "color": "#8A8984",
+            "align": "center"
           }
         ]
       }
     ],
     "ipad": [
       {
-        "id": "s_mvfpkvfx_a",
+        "id": "s_mvfqebnv_a",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -686,7 +581,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_b",
+        "id": "s_mvfqebnv_b",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -697,7 +592,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_c",
+        "id": "s_mvfqebnv_c",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -711,7 +606,7 @@
     ],
     "tvos": [
       {
-        "id": "s_mvfpkvfx_d",
+        "id": "s_mvfqebnv_d",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -722,7 +617,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_e",
+        "id": "s_mvfqebnv_e",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 01"
@@ -733,7 +628,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_f",
+        "id": "s_mvfqebnv_f",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -745,7 +640,7 @@
         "inverted": true
       },
       {
-        "id": "s_mvfpkvfx_g",
+        "id": "s_mvfqebnv_g",
         "layout": "no-device",
         "label": {
           "en": "MORE"
@@ -758,7 +653,7 @@
     ],
     "watchos": [
       {
-        "id": "s_mvfpkvfx_h",
+        "id": "s_mvfqebnv_h",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -769,7 +664,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_i",
+        "id": "s_mvfqebnv_i",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -780,7 +675,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_j",
+        "id": "s_mvfqebnv_j",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -794,7 +689,7 @@
     ],
     "carplay": [
       {
-        "id": "s_mvfpkvfx_k",
+        "id": "s_mvfqebnv_k",
         "layout": "split-landscape",
         "label": {
           "en": "CARPLAY"
@@ -805,7 +700,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_l",
+        "id": "s_mvfqebnv_l",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -816,7 +711,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_m",
+        "id": "s_mvfqebnv_m",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -830,7 +725,7 @@
     ],
     "mac": [
       {
-        "id": "s_mvfpkvfx_n",
+        "id": "s_mvfqebnv_n",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -841,7 +736,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_o",
+        "id": "s_mvfqebnv_o",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 01"
@@ -852,7 +747,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_p",
+        "id": "s_mvfqebnv_p",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -864,7 +759,7 @@
         "inverted": true
       },
       {
-        "id": "s_mvfpkvfx_q",
+        "id": "s_mvfqebnv_q",
         "layout": "two-devices",
         "label": {
           "en": "FEATURE 03"
@@ -876,7 +771,7 @@
         "screenshotSecondary": ""
       },
       {
-        "id": "s_mvfpkvfx_r",
+        "id": "s_mvfqebnv_r",
         "layout": "no-device",
         "label": {
           "en": "MORE"
@@ -889,7 +784,7 @@
     ],
     "android-7": [
       {
-        "id": "s_mvfpkvfx_s",
+        "id": "s_mvfqebnv_s",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -900,7 +795,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_t",
+        "id": "s_mvfqebnv_t",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 01"
@@ -913,7 +808,7 @@
     ],
     "android-10": [
       {
-        "id": "s_mvfpkvfx_u",
+        "id": "s_mvfqebnv_u",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -924,7 +819,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_v",
+        "id": "s_mvfqebnv_v",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 01"
@@ -1003,7 +898,7 @@
     ],
     "duo-outer": [
       {
-        "id": "s_mvfpkvfx_x",
+        "id": "s_mvfqebnv_x",
         "layout": "hero",
         "label": {
           "en": "MEET YOUR APP"
@@ -1014,7 +909,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_y",
+        "id": "s_mvfqebnv_y",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -1025,7 +920,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_z",
+        "id": "s_mvfqebnv_z",
         "layout": "two-devices",
         "label": {
           "en": "OPEN IT"
@@ -1037,7 +932,7 @@
         "screenshotSecondary": ""
       },
       {
-        "id": "s_mvfpkvfx_10",
+        "id": "s_mvfqebnv_10",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -1049,7 +944,7 @@
         "inverted": true
       },
       {
-        "id": "s_mvfpkvfx_11",
+        "id": "s_mvfqebnv_11",
         "layout": "no-device",
         "label": {
           "en": "MORE"
@@ -1062,7 +957,7 @@
     ],
     "duo-outer-landscape": [
       {
-        "id": "s_mvfpkvfx_12",
+        "id": "s_mvfqebnv_12",
         "layout": "hero",
         "label": {
           "en": "TURN IT"
@@ -1073,7 +968,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_13",
+        "id": "s_mvfqebnv_13",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 01"
@@ -1084,7 +979,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_14",
+        "id": "s_mvfqebnv_14",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -1098,7 +993,7 @@
     ],
     "duo-inner": [
       {
-        "id": "s_mvfpkvfx_15",
+        "id": "s_mvfqebnv_15",
         "layout": "hero",
         "label": {
           "en": "UNFOLD IT"
@@ -1109,7 +1004,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_16",
+        "id": "s_mvfqebnv_16",
         "layout": "device-bottom",
         "label": {
           "en": "FEATURE 01"
@@ -1120,7 +1015,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_17",
+        "id": "s_mvfqebnv_17",
         "layout": "two-devices",
         "label": {
           "en": "FOLDED + OPEN"
@@ -1132,7 +1027,7 @@
         "screenshotSecondary": ""
       },
       {
-        "id": "s_mvfpkvfx_18",
+        "id": "s_mvfqebnv_18",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 02"
@@ -1146,7 +1041,7 @@
     ],
     "duo-inner-landscape": [
       {
-        "id": "s_mvfpkvfx_19",
+        "id": "s_mvfqebnv_19",
         "layout": "hero",
         "label": {
           "en": "UNFOLD IT"
@@ -1157,7 +1052,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_1a",
+        "id": "s_mvfqebnv_1a",
         "layout": "two-devices",
         "label": {
           "en": "FOLDED + OPEN"
@@ -1169,7 +1064,7 @@
         "screenshotSecondary": ""
       },
       {
-        "id": "s_mvfpkvfx_1b",
+        "id": "s_mvfqebnv_1b",
         "layout": "split-landscape",
         "label": {
           "en": "FEATURE 02"
@@ -1180,7 +1075,7 @@
         "screenshot": ""
       },
       {
-        "id": "s_mvfpkvfx_1c",
+        "id": "s_mvfqebnv_1c",
         "layout": "device-top",
         "label": {
           "en": "FEATURE 03"
@@ -1192,7 +1087,7 @@
         "inverted": true
       },
       {
-        "id": "s_mvfpkvfx_1d",
+        "id": "s_mvfqebnv_1d",
         "layout": "no-device",
         "label": {
           "en": "MORE"
@@ -1205,7 +1100,7 @@
     ],
     "creative-universal": [
       {
-        "id": "s_mvfpkvfx_1e",
+        "id": "s_mvfqebnv_1e",
         "layout": "split-landscape",
         "label": {
           "en": "NEW"
@@ -1218,7 +1113,7 @@
     ],
     "creative-header": [
       {
-        "id": "s_mvfpkvfx_1f",
+        "id": "s_mvfqebnv_1f",
         "layout": "split-landscape",
         "label": {
           "en": "NEW"
@@ -1231,7 +1126,7 @@
     ],
     "creative-search": [
       {
-        "id": "s_mvfpkvfx_1g",
+        "id": "s_mvfqebnv_1g",
         "layout": "split-landscape",
         "label": {
           "en": "NEW"

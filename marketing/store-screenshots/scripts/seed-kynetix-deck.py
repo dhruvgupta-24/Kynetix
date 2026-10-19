@@ -48,6 +48,11 @@ def slide(id_, layout, label, headline, shot="", **kw):
     return s
 
 
+def widget(id_, name, x, y, w, h):
+    return {"id": id_, "src": f"/widgets/{name}.png", "fit": "cover", "transform": t(x, y, w, h, 0, 5),
+            "radius": 44, "border": BONE_LINE, "shadow": 55}
+
+
 WM = {"id": "wordmark", "src": "/brand/kynetix-wordmark.svg", "fit": "contain"}
 
 android = [
@@ -98,24 +103,22 @@ android = [
     slide("k07-prs", "hero", "SPLITS, PRS, STREAKS", "EVERY PR,\n[COUNTED].", SHOT + "done.png", inverted=True,
           typography={"headlineScale": 1.3},
           transforms={"caption": t(40, 150, 1000, 380, 0, 4), "device": phone(175, 600, 730)}),
-    # 08 CLOSER: one-word feature wall.
-    slide("k08-wall", "no-device", "AND THE REST", "",
-          transforms={"caption": t(70, 150, 940, 80, 0, 4)},
-          textElements=[
-              txt("w1", "HEALTH CONNECT", 60, 250, 960, 120, 104),
-              txt("w1s", "Steps, weight, sleep and HRV.", 64, 362, 960, 60, 36, 500, "#8A8984"),
-              txt("w2", "WIDGETS", 60, 500, 960, 120, 104),
-              txt("w2s", "Your rings on the home screen.", 64, 612, 960, 60, 36, 500, "#8A8984"),
-              txt("w3", "BARCODE SCAN", 60, 750, 960, 120, 104),
-              txt("w3s", "Packaged food in one look.", 64, 862, 960, 60, 36, 500, "#8A8984"),
-              txt("w4", "NO [ADS]", 60, 1000, 960, 120, 104),
-              txt("w4s", "Not now. Not later.", 64, 1112, 960, 60, 36, 500, "#8A8984"),
-              txt("w5", "DELETE {ANYTIME}", 60, 1250, 960, 120, 104),
-              txt("w5s", "Your data, your call. One tap.", 64, 1362, 960, 60, 36, 500, "#8A8984"),
-              txt("tag", "Real food. Real lifts.", 250, 1690, 700, 90, 44, 600, None, "left"),
+    # 08 WIDGETS: real home-screen widget crops as a bento, plus the rest in one line.
+    slide("k08-widgets", "no-device", "HOME SCREEN WIDGETS", "YOUR RINGS.\nNO APP [NEEDED].",
+          typography={"headlineScale": 1.15},
+          transforms={"caption": t(40, 150, 1000, 300, 0, 4)},
+          imageElements=[
+              widget("w-day", "widget-4x4-day", 60, 495, 614, 676),
+              widget("w-wide", "widget-4x2-wide", 60, 1195, 614, 331),
+              widget("w-rings", "widget-2x2-rings", 698, 495, 322, 329),
+              widget("w-tall", "widget-2x4-tall", 698, 848, 322, 681),
           ],
-          imageElements=[{"id": "icon", "src": "/app-icon.png", "fit": "cover", "transform": t(70, 1665, 140, 140, 0, 6),
-                          "radius": 32, "border": BONE_LINE}]),
+          textElements=[
+              txt("rest", "HEALTH CONNECT / BARCODE SCAN\nNO ADS / DELETE ANYTIME", 40, 1590, 1000, 170, 50, 800,
+                  None, "center"),
+              txt("rest-sub", "Steps, weight, sleep and HRV. Packaged food in one look.", 60, 1770, 960, 60, 32, 500,
+                  "#8A8984", "center"),
+          ]),
 ]
 
 feature = [
