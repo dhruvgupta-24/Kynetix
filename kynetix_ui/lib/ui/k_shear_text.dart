@@ -21,6 +21,7 @@ class KShearText extends StatelessWidget {
     this.trail = 0.17,
     this.capHeight = 0.66,
     this.maxLines,
+    this.textAlign = TextAlign.left,
   });
 
   final String text;
@@ -30,6 +31,7 @@ class KShearText extends StatelessWidget {
   final Color? ember;
   final double shift, gap, trail, capHeight;
   final int? maxLines;
+  final TextAlign textAlign;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +44,8 @@ class KShearText extends StatelessWidget {
         textDirection: TextDirection.ltr,
         maxLines: maxLines,
         ellipsis: maxLines == null ? null : '…',
+        textAlign: textAlign,
+        textWidthBasis: TextWidthBasis.longestLine,
         textScaler: TextScaler.noScaling,
       )..layout(maxWidth: maxW);
       return Semantics(

@@ -216,7 +216,7 @@ String _thousands(double v) {
   return b.toString();
 }
 
-String _dur(int minutes) => minutes >= 60 ? '${minutes ~/ 60}H ${(minutes % 60).toString().padLeft(2, '0')}M' : '${minutes}M';
+String _dur(int minutes) => minutes < 1 ? '<1M' : minutes >= 60 ? '${minutes ~/ 60}H ${(minutes % 60).toString().padLeft(2, '0')}M' : '${minutes}M';
 
 /// The session's name as the cards set it.
 String _title(WorkoutShareData d) => d.dayName.trim().isEmpty ? 'WORKOUT' : d.dayName.trim().toUpperCase();
@@ -403,7 +403,7 @@ class _S {
 Widget _masthead(_S s, String right) => Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        s.wordmark(15),
+        s.wordmark(18),
         const Spacer(),
         Text(right, style: s.label(color: s.ink.muted)),
       ],
@@ -961,6 +961,14 @@ class _Sticker extends StatelessWidget {
   final WorkoutShareData d;
   final _S s;
 
+  /// One big line when the name allows it; two lines rather than tiny type.
+  double _stickerTitleSize(String title, double width) {
+    final max = s.tall ? 46.0 : 34.0;
+    final one = KShearText.fit(title, s.brand(10), width, maxLines: 1, min: 12, max: max, ember: true);
+    if (one >= max * 0.7) return one;
+    return KShearText.fit(title, s.brand(10), width, maxLines: 2, min: 20, max: max, ember: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final ink = s.ink;
@@ -986,12 +994,12 @@ class _Sticker extends StatelessWidget {
           child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          KShearWordmark(fontSize: s.tall ? 34 : 26, ink: ink.fg, ember: ink.ember, kOnly: true),
+          KShearWordmark(fontSize: s.tall ? 30 : 24, ink: ink.fg, ember: ink.ember),
           SizedBox(height: s.tall ? 18 : 12),
           KShearText(_title(d),
-              style: s.brand(KShearText.fit(_title(d), s.brand(10), c.maxWidth - 8,
-                  maxLines: 2, min: 20, max: s.tall ? 46 : 34, ember: true)),
+              style: s.brand(_stickerTitleSize(_title(d), c.maxWidth - 8)),
               ember: ink.ember,
+              textAlign: TextAlign.center,
               maxLines: 2),
           SizedBox(height: s.tall ? 22 : 14),
           Row(
@@ -1015,7 +1023,7 @@ class _Sticker extends StatelessWidget {
             ),
           ],
           SizedBox(height: s.tall ? 16 : 10),
-          Text('KYNETIX  ·  ${_dots(d.date)}', style: s.label(color: ink.fg.withValues(alpha: 0.75))),
+          Text(_dots(d.date), style: s.label(color: ink.fg.withValues(alpha: 0.75))),
         ],
           ),
         ),
