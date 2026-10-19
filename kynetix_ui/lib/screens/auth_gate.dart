@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../ui/k_brand_intro.dart';
 import '../config/app_theme.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
@@ -134,15 +135,7 @@ class _BrandLoader extends StatelessWidget {
         loader: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Kynetix',
-              style: KText.display.copyWith(
-                fontSize: 44,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -2.2,
-                height: 0.95,
-              ),
-            ),
+            const KShearWordmark(fontSize: 40),
             const SizedBox(height: KSpacing.lg),
             const KLoadingDots(),
           ],

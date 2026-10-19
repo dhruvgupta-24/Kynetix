@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/ui/k_brand_intro.dart';
 
@@ -8,6 +9,18 @@ Widget _host(VoidCallback onDone, {bool reduceMotion = false}) => MediaQuery(
     );
 
 void main() {
+  // The native side reports the Android splash gone straight away.
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('com.kynetix.app/splash'),
+      (call) async => true,
+    );
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('com.kynetix.app/splash'), null);
+  });
+
   testWidgets('plays through and reports done once', (tester) async {
     var done = 0;
     await tester.pumpWidget(_host(() => done++));

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Plain graphite while the engine starts; the Shear intro takes over. -->
+<!-- Graphite with the Shear K, the same K the Flutter intro starts from. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><color android:color="#0B0B0C"/></item>
+    <item android:gravity="center" android:width="288dp" android:height="288dp" android:drawable="@drawable/splash_mark"/>
 </layer-list>

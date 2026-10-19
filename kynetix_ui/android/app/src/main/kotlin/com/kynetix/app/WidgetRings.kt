@@ -59,6 +59,13 @@ object WidgetRings {
         numFace ?: face(context, "flutter_assets/assets/fonts/inter_tight/InterTight-600.ttf", Typeface.create("sans-serif", Typeface.BOLD))
             .also { numFace = it }
 
+    @Volatile private var brandFace: Typeface? = null
+
+    /** Bricolage 800: the Shear wordmark's face. */
+    private fun brand(context: Context): Typeface =
+        brandFace ?: face(context, "flutter_assets/assets/fonts/bricolage/BricolageGrotesque-Display800.ttf", Typeface.create("sans-serif", Typeface.BOLD))
+            .also { brandFace = it }
+
     private fun label(context: Context): Typeface =
         labelFace ?: face(context, "flutter_assets/assets/fonts/inter/Inter-500.ttf", Typeface.create("sans-serif-medium", Typeface.NORMAL))
             .also { labelFace = it }
@@ -157,7 +164,7 @@ object WidgetRings {
         val nf = num(context)
         val lf = label(context)
         if (d == null) {
-            text(c, "Kynetix", cx, cy + inner * 0.04f, fit("Kynetix", inner * 0.7f, inner * 0.2f, nf), nf, TEXT, Paint.Align.CENTER)
+            shearMark(c, brand(context), cx, cy + inner * 0.04f, inner * 0.68f)
             val sub = "Open to sync"
             text(c, sub, cx, cy + inner * 0.2f, fit(sub, inner * 0.7f, inner * 0.095f, lf), lf, TEXT_SOFT, Paint.Align.CENTER)
             return
@@ -373,6 +380,43 @@ object WidgetRings {
             this.color = color
         }
         c.drawArc(oval, -90f, if (full) 360f else maxOf(p * 360f, 4f), false, arc)
+    }
+
+    /**
+     * The Shear wordmark, KYNETIX cut through the middle with the top half
+     * moved forward and an ember line in the cut under the K, centred on [cx]
+     * with its baseline at [baseline], [width] wide. Same proportions as the
+     * app's KShear (in units of the type size).
+     */
+    private fun shearMark(c: Canvas, face: Typeface, cx: Float, baseline: Float, width: Float) {
+        val word = "KYNETIX"
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            typeface = face
+            textSize = 100f
+            letterSpacing = -0.03f
+            color = TEXT
+            textAlign = Paint.Align.LEFT
+        }
+        val size = 100f * width / (p.measureText(word) + 100f * (0.17f + 0.07f))
+        p.textSize = size
+        val textW = p.measureText(word)
+        val trail = size * 0.17f
+        val shift = size * 0.07f
+        val left = cx - (trail + textW + shift) / 2f + trail
+        val cut = baseline - size * 0.34f  // 0.32 below the cap top (cap height 0.66)
+        val gap = size * 0.022f
+        val kRight = left + p.measureText("K") - size * 0.02f
+        val h = maxOf(size * 0.016f, gap * 0.8f)
+        val ember = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = CAL }
+        c.drawRoundRect(RectF(left - trail, cut + gap / 2f - h / 2f, kRight + shift, cut + gap / 2f + h / 2f), h / 2f, h / 2f, ember)
+        c.save()
+        c.clipRect(0f, cut + gap, c.width.toFloat() * 4f, c.height.toFloat() * 4f)
+        c.drawText(word, left, baseline, p)
+        c.restore()
+        c.save()
+        c.clipRect(0f, 0f, c.width.toFloat() * 4f, cut)
+        c.drawText(word, left + shift, baseline, p)
+        c.restore()
     }
 
     private fun fit(s: String, maxWidth: Float, maxSize: Float, face: Typeface): Float {

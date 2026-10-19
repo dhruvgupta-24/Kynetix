@@ -74,22 +74,26 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
   flutter_native_splash: ^2.4.0
 
+# Do NOT re-run flutter_launcher_icons or flutter_native_splash: the Shear
+# icons are hand-built vectors (adaptive + themed monochrome layers, the
+# animated Android 12 splash avd_splash, the notification K), generated from
+# the KShear geometry. These configs only document the raster fallbacks.
 flutter_launcher_icons:
-  android: true
-  ios: true
-  image_path: "assets/branding/kynetix_icon_fg.png" # Ensures no iOS crop
-  adaptive_icon_background: "#060606"
+  android: false
+  ios: false
+  image_path: "assets/branding/kynetix_icon.png"
+  adaptive_icon_background: "#0B0B0C"
   adaptive_icon_foreground: "assets/branding/kynetix_icon_fg.png"
 
 flutter_native_splash:
   # Kynetix is dark first: the splash is Graphite in both phone themes, so a
   # light-mode phone never flashes white before the dark app.
-  color: "#0A0A0B"
-  color_dark: "#0A0A0B"
+  color: "#0B0B0C"
+  color_dark: "#0B0B0C"
   image: "assets/branding/kynetix_logo_padded.png"
   android_12:
     image: "assets/branding/kynetix_icon_padded.png"
-    icon_background_color: "#0A0A0B"
+    icon_background_color: "#0B0B0C"
     color: "#0A0A0B"
     icon_background_color_dark: "#0A0A0B"
     color_dark: "#0A0A0B"

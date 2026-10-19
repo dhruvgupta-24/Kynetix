@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The finished splash K (pre-Android 12 launch screen). Matches KShear.splashFontSize. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="288dp" android:height="288dp" android:viewportWidth="288" android:viewportHeight="288">
+    <group android:translateX="94.546" android:translateY="49.200" android:scaleX="0.15800" android:scaleY="0.15800">
+        <group>
+            <clip-path android:pathData="M-2000,612 H6000 V3000 H-2000 Z"/>
+            <path android:fillColor="#F2F1EC" android:pathData="M50 930V270H209V561Q246 539 276.5 508.0Q307 477 329.5 440.0Q352 403 367.5 360.0Q383 317 390 270H569Q559 322 538.5 371.0Q518 420 487.0 462.5Q456 505 417.0 539.0Q378 573 331 594V605Q376 603 409.5 612.5Q443 622 467.5 641.5Q492 661 508.0 691.5Q524 722 534 763L576 930H403L376 799Q368 752 353.5 725.0Q339 698 315.0 686.5Q291 675 252 675H209V930Z"/>
+        </group>
+        <group android:translateX="70">
+            <clip-path android:pathData="M-2000,-2000 H6000 V590 H-2000 Z"/>
+            <path android:fillColor="#F2F1EC" android:pathData="M50 930V270H209V561Q246 539 276.5 508.0Q307 477 329.5 440.0Q352 403 367.5 360.0Q383 317 390 270H569Q559 322 538.5 371.0Q518 420 487.0 462.5Q456 505 417.0 539.0Q378 573 331 594V605Q376 603 409.5 612.5Q443 622 467.5 641.5Q492 661 508.0 691.5Q524 722 534 763L576 930H403L376 799Q368 752 353.5 725.0Q339 698 315.0 686.5Q291 675 252 675H209V930Z"/>
+        </group>
+        <!-- The ember last, so it reads as the cut across the K. -->
+        <path android:pathData="M-170,601 L634,601" android:strokeColor="#FF6A3D" android:strokeWidth="17.6" android:strokeLineCap="round"/>
+    </group>
+</vector>

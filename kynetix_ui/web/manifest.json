@@ -3,9 +3,9 @@
     "short_name": "Kynetix",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Kynetix AI Fitness Engine",
+    "background_color": "#0B0B0C",
+    "theme_color": "#0B0B0C",
+    "description": "Real food. Real lifts.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

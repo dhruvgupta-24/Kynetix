@@ -5,7 +5,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,6 +23,13 @@ class MainActivity : FlutterFragmentActivity() {
     // Launch actions (Health Connect's "privacy policy" link) for Flutter.
     private var pendingLaunchAction: String? = null
     private var launchChannel: MethodChannel? = null
+
+    // The Android 12+ splash plays the Shear K animation (avd_splash). It is
+    // held until that animation ends, then removed at once (no fade) over the
+    // identical K Flutter is already drawing. Dart waits for this before the
+    // intro carries on.
+    private var splashGone = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+    private val splashWaiters = mutableListOf<MethodChannel.Result>()
 
     companion object {
         private const val LAUNCH_CHANNEL = "com.kynetix.app/launch"
@@ -34,6 +45,31 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent, coldStart = true)
+        holdSplashForIconAnimation()
+    }
+
+    private fun holdSplashForIconAnimation() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val shownAt = SystemClock.uptimeMillis()
+        splashScreen.setOnExitAnimationListener { view ->
+            // Let the K finish its slice and shear, then hand over instantly.
+            val duration = view.iconAnimationDuration?.toMillis() ?: 0L
+            val elapsed = SystemClock.uptimeMillis() - shownAt
+            val wait = (duration - elapsed + 40L).coerceIn(0L, 1000L)
+            Handler(Looper.getMainLooper()).postDelayed({
+                view.remove()
+                markSplashGone()
+            }, wait)
+        }
+        // If the system never shows a splash (some launches), don't hold Dart.
+        Handler(Looper.getMainLooper()).postDelayed({ markSplashGone() }, 2500L)
+    }
+
+    private fun markSplashGone() {
+        if (splashGone) return
+        splashGone = true
+        splashWaiters.forEach { it.success(true) }
+        splashWaiters.clear()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -70,6 +106,14 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kynetix.app/splash").setMethodCallHandler { call, result ->
+            if (call.method == "waitForSplash") {
+                if (splashGone) result.success(true) else splashWaiters.add(result)
+            } else {
+                result.notImplemented()
+            }
+        }
 
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kynetix.app/widget")
         methodChannel?.setMethodCallHandler { call, result ->

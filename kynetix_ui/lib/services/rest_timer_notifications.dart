@@ -109,7 +109,7 @@ class RestTimerNotifications {
     try {
       await _plugin.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('ic_stat_rest'),
+          android: AndroidInitializationSettings('ic_stat_kynetix'),
         ),
       );
       _initialized = true;
@@ -153,7 +153,7 @@ class RestTimerNotifications {
             _countdownChannel,
             'Rest countdown',
             channelDescription: 'Shows the time left on your rest between sets.',
-            icon: 'ic_stat_rest',
+            icon: 'ic_stat_kynetix',
             importance: Importance.low,
             priority: Priority.low,
             playSound: false,
@@ -182,7 +182,7 @@ class RestTimerNotifications {
           _overChannel,
           'Rest over',
           channelDescription: 'Tells you when your rest between sets is up.',
-          icon: 'ic_stat_rest',
+          icon: 'ic_stat_kynetix',
           importance: Importance.high,
           priority: Priority.high,
           playSound: true,

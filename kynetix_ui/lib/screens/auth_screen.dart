@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../services/user_session_coordinator.dart';
 import '../services/dev_test_harness.dart';
+import '../ui/k_brand_intro.dart';
 import '../config/app_theme.dart';
 import '../ui/k_segmented.dart';
 import 'app_shell.dart';
@@ -654,16 +655,17 @@ class _KineticOrbitState extends State<KineticOrbit> with SingleTickerProviderSt
                   border: dark ? Border.all(color: KColor.fg.withValues(alpha: 0.14)) : null,
                   boxShadow: KShadow.card,
                 ),
+                // The app icon: the Shear K on graphite.
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(m * 0.28),
-                  child: Image.asset(
-                    'assets/branding/kynetix_icon_fg.png',
-                    width: m,
-                    height: m,
-                    cacheWidth: (m * 3).round(),
-                    fit: BoxFit.cover,
-                    excludeFromSemantics: true,
-                    errorBuilder: (_, _, _) => SizedBox.square(dimension: m),
+                  child: ColoredBox(
+                    color: kBrandGraphite,
+                    child: SizedBox.square(
+                      dimension: m,
+                      child: Center(
+                        child: KShearWordmark(fontSize: m * 0.62, ink: kBrandBone, ember: kBrandEmber, kOnly: true),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -774,15 +776,9 @@ class _Hero extends StatelessWidget {
               children: [
                 Semantics(
                   header: true,
-                  child: Text(
-                    'Kynetix',
-                    style: KText.display.copyWith(
-                      fontSize: 64,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -3.4,
-                      height: 0.92,
-                    ),
-                  ),
+                  label: 'Kynetix',
+                  // The Shear wordmark, where the launch intro leaves it.
+                  child: const KShearWordmark(fontSize: 54),
                 ),
                 const SizedBox(height: KSpacing.md),
                 Text(
