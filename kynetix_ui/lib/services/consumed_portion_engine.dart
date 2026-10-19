@@ -20,10 +20,11 @@ import 'eating_pattern_service.dart';
 //   Paneer chunks are eaten fully (independent of carb load).
 //   Only the surrounding gravy/oil usage scales with carb load.
 //
-// CALIBRATION (validated against example day, April 2026):
-//   2 roti + 1 ladle rice + rajma     → rajma component: ~149 kcal, 10.2g protein ✓
+// CALIBRATION (IFCT 2017 / USDA cooked-dish densities, home/mess cooking):
+//   2 roti + 1 ladle rice + rajma     → rajma component: ~118g, ~125–140 kcal, ~6–6.5g protein
+//   2 roti + rajma                     → rajma component: ~84g,  ~90–100 kcal,  ~4–4.6g protein
 //   3 comp. paneer + 2r + 1.5l.r      → paneer component: ~340–380 kcal, 18–20g protein ✓
-//   2 roti + thin dal                  → dal component:    ~90–110 kcal, 4–5g protein ✓
+//   2 roti + thin dal                  → dal component:    ~120ml, ~60–70 kcal, ~3–3.6g protein
 //
 // USAGE (from NutritionGuardrails):
 //   final floor = ConsumedPortionEngine.instance.estimate(rawInput);
@@ -85,8 +86,9 @@ class ConsumedPortionEngine {
 
     return switch (ctx.profile!) {
       _DishProfile.paneer      => _paneer(ctx, scaledCarbLoad),
-      _DishProfile.lentilDal   => _dal(ctx, scaledCarbLoad, heavy: false),
-      _DishProfile.enrichedDal => _dal(ctx, scaledCarbLoad, heavy: true),
+      _DishProfile.lentilDal   => _dal(ctx, scaledCarbLoad, kind: _DalKind.thin),
+      _DishProfile.enrichedDal => _dal(ctx, scaledCarbLoad, kind: _DalKind.tadka),
+      _DishProfile.dalMakhani  => _dal(ctx, scaledCarbLoad, kind: _DalKind.makhani),
       _DishProfile.beans       => _beans(ctx, scaledCarbLoad),
       _DishProfile.drySabzi    => _drySabzi(ctx, scaledCarbLoad),
       _DishProfile.gravySabzi  => _gravySabzi(ctx, scaledCarbLoad),
@@ -96,40 +98,59 @@ class ConsumedPortionEngine {
   }
 
   // ── Dal ─────────────────────────────────────────────────────────
-  // Thin hostel dal: ~55–65 kcal/100ml, ~3g protein/100ml.
-  // Heavy dal (dal makhani, tadka): ~95–110 kcal/100ml, ~5g protein/100ml.
+  // Thin hostel dal (toor/moong/masoor/urad): ~58 kcal/100ml, ~3g protein/100ml.
+  // Dal tadka / dal fry (thicker, tempered):  ~105 kcal/100ml, ~4.5g protein/100ml.
+  // Dal makhani (urad + rajma, butter/cream): ~140 kcal/100ml, ~5.5g protein/100ml.
 
-  ConsumedFloor _dal(_MealCtx ctx, double carbLoad, {required bool heavy}) {
-    final mlPerUnit = heavy ? 55.0 : 60.0;
+  ConsumedFloor _dal(_MealCtx ctx, double carbLoad, {required _DalKind kind}) {
+    final mlPerUnit = kind == _DalKind.thin ? 60.0 : 55.0;
     final consumed  = carbLoad * mlPerUnit;
-    final kcalPer   = heavy ? 102.0 : 58.0;
-    final proPer    = heavy ?   5.0 :  3.0;
+    final (kcalPer, proPer) = switch (kind) {
+      _DalKind.thin    => ( 58.0, 3.0),
+      _DalKind.tadka   => (105.0, 4.5),
+      _DalKind.makhani => (140.0, 5.5),
+    };
+    // Floors: roughly what one roti's worth of that dal would give.
+    final (calFloorMin, calFloorMax, proFloorMin, proFloorMax) = switch (kind) {
+      _DalKind.thin    => ( 50.0,  65.0, 2.5, 3.5),
+      _DalKind.tadka   => ( 90.0, 105.0, 3.5, 4.5),
+      _DalKind.makhani => (120.0, 140.0, 4.5, 5.5),
+    };
     final multiplier = ctx.isRestaurant ? 1.35 : 1.0;
+    final label = switch (kind) {
+      _DalKind.thin    => 'Thin',
+      _DalKind.tadka   => 'Tadka',
+      _DalKind.makhani => 'Makhani',
+    };
     return ConsumedFloor(
-      caloriesMin: ((consumed * kcalPer / 100) * multiplier * 0.85).clamp(heavy ? 140.0 : 70.0, 600.0).toDouble(),
-      caloriesMax: ((consumed * kcalPer / 100) * multiplier       ).clamp(heavy ? 180.0 : 90.0, 700.0).toDouble(),
-      proteinMin:  ((consumed * proPer  / 100) * multiplier * 0.85).clamp(heavy ? 5.0  :  3.0, 40.0).toDouble(),
-      proteinMax:  ((consumed * proPer  / 100) * multiplier       ).clamp(heavy ? 7.0  :  4.0, 50.0).toDouble(),
-      rationale: '${heavy ? "Heavy" : "Thin"} dal: ~${consumed.toInt()}ml consumed '
+      caloriesMin: ((consumed * kcalPer / 100) * multiplier * 0.85).clamp(calFloorMin, 600.0).toDouble(),
+      caloriesMax: ((consumed * kcalPer / 100) * multiplier       ).clamp(calFloorMax, 700.0).toDouble(),
+      proteinMin:  ((consumed * proPer  / 100) * multiplier * 0.85).clamp(proFloorMin, 40.0).toDouble(),
+      proteinMax:  ((consumed * proPer  / 100) * multiplier       ).clamp(proFloorMax, 50.0).toDouble(),
+      rationale: '$label dal: ~${consumed.toInt()}ml consumed '
                  '(${carbLoad.toStringAsFixed(1)} carb units × ${mlPerUnit.toInt()}ml/unit)',
     );
   }
 
   // ── Beans (Rajma / Chole / Black Chana) ─────────────────────────
-  // Cooked kidney/chickpea beans: ~127 kcal/100g, ~8.7g protein/100g.
-  // Rajma and chole are similar; black chana slightly denser.
+  // Home/mess bean CURRY (beans + gravy), not plain boiled beans:
+  //   rajma / lobia curry: ~120 kcal/100g, ~5.5g protein/100g
+  //   chole (kabuli chana): ~150 kcal/100g, ~6g protein/100g
+  //   kala chana curry:     ~135 kcal/100g, ~6g protein/100g
 
   ConsumedFloor _beans(_MealCtx ctx, double carbLoad) {
     final gPerUnit = ctx.isBlackChana ? 38.0 : 42.0;
     final consumed = carbLoad * gPerUnit;
-    final kcalPer  = ctx.isBlackChana ? 140.0 : 127.0;
-    final proPer   = ctx.isBlackChana ?   8.2  :   8.7;
+    final isRajma  = !ctx.isBlackChana &&
+        _MealCtx._hasAny(ctx.lc, ['rajma', 'rajmah', 'kidney bean', 'lobia']);
+    final kcalPer  = ctx.isBlackChana ? 135.0 : isRajma ? 120.0 : 150.0;
+    final proPer   = ctx.isBlackChana ?   6.0 : isRajma ?   5.5 :   6.0;
     final multiplier = ctx.isRestaurant ? 1.30 : 1.0;
     return ConsumedFloor(
-      caloriesMin: ((consumed * kcalPer / 100) * multiplier * 0.88).clamp(120.0, 500.0).toDouble(),
-      caloriesMax: ((consumed * kcalPer / 100) * multiplier       ).clamp(150.0, 600.0).toDouble(),
-      proteinMin:  ((consumed * proPer  / 100) * multiplier * 0.88).clamp(5.0,   40.0).toDouble(),
-      proteinMax:  ((consumed * proPer  / 100) * multiplier       ).clamp(7.0,   50.0).toDouble(),
+      caloriesMin: ((consumed * kcalPer / 100) * multiplier * 0.88).clamp(80.0,  500.0).toDouble(),
+      caloriesMax: ((consumed * kcalPer / 100) * multiplier       ).clamp(100.0, 600.0).toDouble(),
+      proteinMin:  ((consumed * proPer  / 100) * multiplier * 0.88).clamp(3.5,   40.0).toDouble(),
+      proteinMax:  ((consumed * proPer  / 100) * multiplier       ).clamp(4.5,   50.0).toDouble(),
       rationale: 'Beans: ~${consumed.toInt()}g consumed '
                  '(${carbLoad.toStringAsFixed(1)} units × ${gPerUnit.toInt()}g/unit)',
     );
@@ -230,33 +251,34 @@ class ConsumedPortionEngine {
   }
 
   // ── Soya ────────────────────────────────────────────────────────
-  // Soya chunks: ~120 kcal/100g dry-cooked, ~7g protein/100g.
+  // Soya chunk curry (hydrated chunks + gravy): ~135 kcal/100g, ~12g protein/100g.
   // Chilli soya / kadai soya — chunk-based, more fully eaten than dal.
 
   ConsumedFloor _soya(_MealCtx ctx, double carbLoad) {
     final gPerUnit = 46.0;
     final consumed  = carbLoad * gPerUnit;
     return ConsumedFloor(
-      caloriesMin: (consumed * 1.18 * 0.88).clamp(150.0, 500.0).toDouble(),
-      caloriesMax: (consumed * 1.18       ).clamp(180.0, 600.0).toDouble(),
-      proteinMin:  (consumed * 0.068 * 0.88).clamp(8.0,  50.0).toDouble(),
-      proteinMax:  (consumed * 0.068       ).clamp(10.0, 60.0).toDouble(),
+      caloriesMin: (consumed * 1.35 * 0.88).clamp(110.0, 500.0).toDouble(),
+      caloriesMax: (consumed * 1.35       ).clamp(130.0, 600.0).toDouble(),
+      proteinMin:  (consumed * 0.12 * 0.88).clamp(9.0,  50.0).toDouble(),
+      proteinMax:  (consumed * 0.12       ).clamp(11.0, 60.0).toDouble(),
       rationale: 'Soya: ~${consumed.toInt()}g consumed',
     );
   }
 
   // ── Kadhi ───────────────────────────────────────────────────────
   // Kadhi (yogurt+besan gravy): ~58 kcal/100ml, ~2.3g protein/100ml.
-  // With pakoda: adds ~40–80 kcal extra.
+  // With pakoda: adds ~100–150 kcal extra (2–3 fried besan pakodas).
 
   ConsumedFloor _kadhi(_MealCtx ctx, double carbLoad) {
     final mlPerUnit = 65.0;
     final consumed  = carbLoad * mlPerUnit;
     final hasPakoda = ctx.lc.contains('pakoda') || ctx.lc.contains('pakora');
-    final pakodaKcal = hasPakoda ? 60.0 : 0.0;
+    final pakodaKcalMin = hasPakoda ? 100.0 : 0.0;
+    final pakodaKcalMax = hasPakoda ? 150.0 : 0.0;
     return ConsumedFloor(
-      caloriesMin: ((consumed * 0.58) + pakodaKcal * 0.8).clamp(100.0, 500.0).toDouble(),
-      caloriesMax: ((consumed * 0.58) + pakodaKcal      ).clamp(130.0, 600.0).toDouble(),
+      caloriesMin: ((consumed * 0.58) + pakodaKcalMin).clamp(100.0, 500.0).toDouble(),
+      caloriesMax: ((consumed * 0.58) + pakodaKcalMax).clamp(130.0, 650.0).toDouble(),
       proteinMin:  (consumed * 0.023 * 0.88).clamp(3.0, 25.0).toDouble(),
       proteinMax:  (consumed * 0.023       ).clamp(4.0, 30.0).toDouble(),
       rationale: 'Kadhi: ~${consumed.toInt()}ml consumed'
@@ -287,14 +309,17 @@ class ConsumedFloor {
 
 enum _DishProfile {
   paneer,
-  lentilDal,
-  enrichedDal, // dal makhani, tadka dal (heavier)
-  beans,       // rajma, chole, black chana
+  lentilDal,   // toor / moong / masoor / plain urad dal (thin)
+  enrichedDal, // dal tadka / dal fry (thicker, tempered)
+  dalMakhani,  // dal makhani / black dal (butter + cream)
+  beans,       // rajma, chole, black chana, lobia
   drySabzi,    // dry veg (aloo jeera, bhindi, gobi)
   gravySabzi,  // mixed veg curry, methi, aloo matar
   soya,        // soya chunks dishes
   kadhi,       // yogurt-based gravy
 }
+
+enum _DalKind { thin, tadka, makhani }
 
 // ─── _MealCtx ─────────────────────────────────────────────────────────────────
 
@@ -341,7 +366,8 @@ class _MealCtx {
       riceLadles:       ladles,
       isThali:          isThali,
       isRestaurant:     isRestaurant,
-      isBlackChana:     _hasAny(lc, ['kala chana', 'black chana', 'black channa']),
+      isBlackChana:     _hasAny(lc, ['kala chana', 'kale chane', 'kale chana',
+                                     'black chana', 'black channa']),
       compartmentCount: compartments,
     );
   }
@@ -357,14 +383,23 @@ class _MealCtx {
     if (_hasAny(lc, ['kadhi'])) {
       return _DishProfile.kadhi;
     }
-    if (_hasAny(lc, ['dal makhani', 'makhani dal',
-                      'tadka dal', 'dal tadka', 'black dal',
-                      'urad dal'])) {
+    if (_hasAny(lc, ['dal makhani', 'makhani dal', 'black dal',
+                      'dal makahani', 'maa ki dal'])) {
+      return _DishProfile.dalMakhani;
+    }
+    if (_hasAny(lc, ['tadka dal', 'dal tadka', 'dal fry'])) {
       return _DishProfile.enrichedDal;
     }
-    if (_hasAny(lc, ['rajma', 'chole', 'chana masala',
-                      'chickpea', 'chhole', 'kala chana',
-                      'black chana', 'kidney bean'])) {
+    // Chana dal / roasted chana are not bean curries: blank them out before
+    // the broad 'chana' bean keywords run.
+    final beanLc = lc.replaceAll(
+        RegExp(r'chann?a\s+daa?l|chan[ae]\s+ki\s+daa?l|roasted\s+chann?a|bhuna\s+chana'),
+        ' ');
+    if (_hasAny(beanLc, ['rajma', 'rajmah', 'chole', 'chana masala',
+                          'chickpea', 'chhole', 'kala chana',
+                          'black chana', 'kidney bean', 'chana', 'chane',
+                          'channa', 'white chana', 'safed chana', 'kabuli',
+                          'lobia'])) {
       return _DishProfile.beans;
     }
     if (_hasAny(lc, ['dal', 'daal', 'lentil', 'moong',

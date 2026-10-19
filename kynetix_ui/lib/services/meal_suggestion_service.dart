@@ -648,11 +648,13 @@ const _candidates = <_SuggestionCandidate>[
     mealStyles: {_MealStyle.snack, _MealStyle.proteinCorrection},
   ),
   _SuggestionCandidate(
-    title: 'Paneer sabzi',
-    quantity: '150 g paneer',
-    prefilledText: '150g paneer sabzi',
-    proteinG: 18,
-    caloriesKcal: 350,
+    // A dish, not 150 g of raw paneer (that alone is ~440 kcal, 27 g P):
+    // 1 katori bhurji ≈ 90 g paneer + onion, tomato and oil.
+    title: 'Paneer bhurji',
+    quantity: '1 katori paneer bhurji',
+    prefilledText: '1 katori paneer bhurji',
+    proteinG: 17,
+    caloriesKcal: 330,
     isProteinFocused: true,
     isCarbHeavy: false,
     defaultReason: 'Good protein with a satisfying portion.',
@@ -661,10 +663,11 @@ const _candidates = <_SuggestionCandidate>[
   ),
   _SuggestionCandidate(
     title: 'Curd + fruit + whey',
-    quantity: '200 g curd + 1 scoop whey',
-    prefilledText: '200g curd 1 scoop whey',
+    // 200 g curd (~120 kcal, 6 g P) + 1 banana (~90, 1) + whey (~120, 24)
+    quantity: '200 g curd + 1 banana + 1 scoop whey',
+    prefilledText: '200g curd 1 banana 1 scoop whey',
     proteinG: 31,
-    caloriesKcal: 240,
+    caloriesKcal: 300,
     isProteinFocused: true,
     isCarbHeavy: false,
     defaultReason: 'Easy recovery-friendly protein hit.',

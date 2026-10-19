@@ -309,7 +309,7 @@ class ExerciseDetailSheet extends StatelessWidget {
                                         ),
                                       ),
                                       Text(
-                                        '${amount(lastTopSet.weight)} kg × ${plural(lastTopSet.reps, 'rep')}',
+                                        '${lastTopSet.loadLabel} × ${plural(lastTopSet.reps, 'rep')}',
                                         style: KText.numSmall.copyWith(fontSize: 14),
                                       ),
                                     ],

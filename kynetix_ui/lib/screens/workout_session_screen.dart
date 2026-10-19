@@ -356,7 +356,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     final done = (_sets[ex.id] ?? const <SetEntry>[]).where((s) => s.isMainWorkingSet).length;
     final weight = switch (mode) {
       ExerciseExecutionMode.weightReps => _weightSelections[ex.id],
-      ExerciseExecutionMode.weightedBodyweight => _externalLoadSelections[ex.id],
+      ExerciseExecutionMode.bodyweightReps ||
+      ExerciseExecutionMode.weightedBodyweight =>
+        (_externalLoadSelections[ex.id] ?? 0) > 0 ? _externalLoadSelections[ex.id] : null,
       _ => null,
     };
     return restNextLine(
@@ -1356,14 +1358,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       return;
     }
 
+    final isBodyweight =
+        mode == ExerciseExecutionMode.bodyweightReps || mode == ExerciseExecutionMode.weightedBodyweight;
     final newSet = SetEntry(
-      weight: (mode == ExerciseExecutionMode.bodyweightReps && (externalLoad == null || externalLoad == 0.0)) ? 0.0 : w,
+      // Bodyweight sets carry their belt / vest load in externalLoadKg; the
+      // weight dial of another exercise must never leak in as "40 kg".
+      weight: isBodyweight ? 0.0 : w,
       reps: r,
       rpe: rpe,
       setType: type,
-      externalLoadKg: (mode == ExerciseExecutionMode.bodyweightReps || mode == ExerciseExecutionMode.weightedBodyweight)
-          ? externalLoad
-          : null,
+      externalLoadKg: isBodyweight ? (externalLoad ?? 0.0) : null,
       durationSeconds: (mode == ExerciseExecutionMode.timed || mode == ExerciseExecutionMode.cardio) ? duration : null,
       distanceMeters: mode == ExerciseExecutionMode.cardio ? distance : null,
     );
@@ -2796,6 +2800,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   late double _selectedWeight;
 
+  /// Load added on top of bodyweight (belt, vest, dumbbell), in kg.
+  double? _externalLoad;
+
   bool get _isBodyweight {
     final m = widget.exercise.effectiveExecutionMode;
     return m == ExerciseExecutionMode.bodyweightReps || m == ExerciseExecutionMode.weightedBodyweight;
@@ -2833,6 +2840,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     super.initState();
     _loadProgressionAdvice();
     _selectedWeight = widget.initialWeight;
+    _externalLoad = widget.initialExternalLoad;
     _selectedReps = widget.initialReps;
     _selectedRpe = widget.initialRpe;
     _selectedSetType = widget.initialSetType;
@@ -2863,6 +2871,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     if (oldWidget.exercise.id != widget.exercise.id) {
       _loadProgressionAdvice();
       _selectedWeight = widget.initialWeight;
+      _externalLoad = widget.initialExternalLoad;
       _selectedReps = widget.initialReps;
       _selectedRpe = widget.initialRpe;
       _selectedSetType = widget.initialSetType;
@@ -2876,6 +2885,10 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       // Exercise is the same, but values might have restored asynchronously
       if (_selectedWeight != widget.initialWeight) {
         _selectedWeight = widget.initialWeight;
+      }
+      // Loaded from outside (last session's value, a restore).
+      if (oldWidget.initialExternalLoad != widget.initialExternalLoad) {
+        _externalLoad = widget.initialExternalLoad;
       }
       if (_selectedReps != widget.initialReps) {
         _selectedReps = widget.initialReps;
@@ -3205,7 +3218,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${mainSet.weight.toStringAsFixed(mainSet.weight == mainSet.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${plural(mainSet.reps, 'rep')}',
+                                  '${mainSet.loadLabel}  ×  ${plural(mainSet.reps, 'rep')}',
                                   style: _WsText.num.copyWith(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                                 ),
                                 const SizedBox(height: 2),
@@ -3294,7 +3307,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          '${drop.weight.toStringAsFixed(drop.weight == drop.weight.truncateToDouble() ? 0 : 1)} kg  ×  ${plural(drop.reps, 'rep')}  (${drop.volume.toStringAsFixed(0)} kg)',
+                                          '${drop.loadLabel}  ×  ${plural(drop.reps, 'rep')}  (${drop.volume.toStringAsFixed(0)} kg)',
                                           style: _WsText.num.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
                                         ),
                                       ),
@@ -3446,8 +3459,8 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
         ? WorkoutService.instance.lastSessionDisplay(widget.lastEntry).replaceAll('Last: ', '')
         : '';
     final bestVal = WorkoutService.instance.bestSetEver(widget.exercise.id);
-    final bestStr = bestVal != null ? '${kg(bestVal.weight)} kg × ${bestVal.reps}' : '';
-    final currentStr = widget.sets.map((s) => '${kg(s.weight)}×${s.reps}').join(', ');
+    final bestStr = bestVal != null ? '${bestVal.loadLabel} × ${bestVal.reps}' : '';
+    final currentStr = widget.sets.map((s) => s.shortLabel).join(', ');
 
     // Typical working weight and rep range from history.
     double totalSetsCount = 0;
@@ -3898,10 +3911,12 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           // Hero readout: the set you are about to lift, as big as the screen allows.
           Semantics(
             label: _isBodyweight
-                ? 'Next set: bodyweight for ${plural(_selectedReps, 'rep')}'
+                ? 'Next set: bodyweight${(_externalLoad ?? 0) > 0 ? ' plus ${amount(_externalLoad!)} kilograms' : ''} for ${plural(_selectedReps, 'rep')}'
                 : 'Next set: ${amount(_selectedWeight)} kilograms for ${plural(_selectedReps, 'rep')}',
             excludeSemantics: true,
-            child: Wrap(
+            // One line always: a longer "BW + 5 kg" scales down rather than
+            // wrapping and shoving the steppers down mid-tap.
+            child: FittedBox(fit: BoxFit.scaleDown, child: Wrap(
               alignment: WrapAlignment.center,
               crossAxisAlignment: WrapCrossAlignment.end,
               spacing: 12,
@@ -3917,10 +3932,21 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                     crossAxisAlignment: CrossAxisAlignment.baseline,
                     textBaseline: TextBaseline.alphabetic,
                     children: [
-                      // Bodyweight lifts read "BW"; the added load lives in the dial below.
-                      if (_isBodyweight)
-                        Text('BW', style: _WsText.numHero)
-                      else ...[
+                      // Bodyweight lifts read "BW", plus the belt load when there is one.
+                      if (_isBodyweight) ...[
+                        Text('BW', style: _WsText.numHero),
+                        if ((_externalLoad ?? 0) > 0) ...[
+                          Text(
+                            ' + ',
+                            style: _WsText.num.copyWith(fontSize: 22, fontWeight: FontWeight.w600, color: KColor.textSecondary),
+                          ),
+                          KRollingNumber(amount(_externalLoad!), style: _WsText.numHero, duration: KMotion.standard),
+                          Text(
+                            ' kg',
+                            style: _WsText.num.copyWith(fontSize: 18, fontWeight: FontWeight.w600, color: KColor.textSecondary),
+                          ),
+                        ],
+                      ] else ...[
                         KRollingNumber(amount(_selectedWeight), style: _WsText.numHero, duration: KMotion.standard),
                         Text(
                           ' kg',
@@ -3950,7 +3976,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                   ),
                 ),
               ],
-            ),
+            )),
           ),
 
               ],
@@ -3970,7 +3996,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             exercise: widget.exercise,
             selectedWeight: _selectedWeight,
             selectedReps: _selectedReps,
-            externalLoadKg: widget.initialExternalLoad,
+            externalLoadKg: _externalLoad,
             durationSeconds: widget.initialDurationSeconds,
             distanceMeters: widget.initialDistanceMeters,
             onWeightChanged: (w) {
@@ -3986,6 +4012,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
               widget.onInputChange(_selectedWeight, _selectedReps, _selectedRpe, _selectedSetType);
             },
             onExternalLoadChanged: (load) {
+              if (load == _externalLoad) return;
+              _externalLoad = load;
+              _dialTick.value++;
               widget.onExternalLoadChange?.call(load);
             },
             onDurationChanged: (dur) {
@@ -5779,7 +5808,7 @@ class _ExerciseHistorySheet extends StatelessWidget {
                       style: KText.numMedium.copyWith(fontSize: 24, color: KColor.ember),
                     ),
                     Text(
-                      '(${best.weight.toStringAsFixed(0)}×${best.reps})',
+                      '(${best.shortLabel})',
                       style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: KColor.textSecondary),
                     ),
                   ],
@@ -5827,7 +5856,7 @@ class _HistoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateStr = '${date.day}/${date.month}/${date.year % 100}';
     final setsStr = entry.sets
-        .map((s) => '${s.weight.toStringAsFixed(s.weight == s.weight.truncateToDouble() ? 0 : 1)}×${s.reps}')
+        .map((s) => s.shortLabel)
         .join(', ');
 
     return Container(
@@ -5877,8 +5906,11 @@ class _SessionBest {
   final SetEntry? previous;
 }
 
-String _liftLabel(SetEntry s) =>
-    s.weight > 0 ? '${amount(s.weight)} kg × ${s.reps}' : 'BW × ${s.reps}';
+String _liftLabel(SetEntry s) {
+  final ext = s.externalLoadKg;
+  if (ext != null) return ext > 0 ? 'BW + ${amount(ext)} kg × ${s.reps}' : 'BW × ${s.reps}';
+  return s.weight > 0 ? '${amount(s.weight)} kg × ${s.reps}' : 'BW × ${s.reps}';
+}
 
 class _WorkoutCompletionOverlay extends StatefulWidget {
   final WorkoutSession session;

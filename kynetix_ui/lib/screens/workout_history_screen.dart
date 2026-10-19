@@ -5360,9 +5360,6 @@ class _ExerciseDetailCard extends StatelessWidget {
         topSet != null &&
         WorkoutService.beatsPreviousBest(topSet, prevBest);
 
-    String fmtKg(double w) =>
-        w.toStringAsFixed(w == w.truncateToDouble() ? 0 : 1);
-
     final badges = <Widget>[
       if (entry.isSkipped)
         _Badge(
@@ -5486,7 +5483,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                   crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     Text(
-                                      '${fmtKg(set.weight)} kg × ${plural(set.reps, 'rep')}',
+                                      '${set.loadLabel} × ${plural(set.reps, 'rep')}',
                                       style: _num(
                                         14,
                                         color: KColor.textPrimary,
@@ -5565,7 +5562,7 @@ class _ExerciseDetailCard extends StatelessWidget {
                                         const SizedBox(width: 6),
                                         Expanded(
                                           child: Text(
-                                            '${fmtKg(drop.weight)} kg × ${plural(drop.reps, 'rep')}',
+                                            '${drop.loadLabel} × ${plural(drop.reps, 'rep')}',
                                             style: _num(
                                               13,
                                               color: KColor.textSecondary,

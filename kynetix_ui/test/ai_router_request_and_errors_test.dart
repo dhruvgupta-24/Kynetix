@@ -57,6 +57,30 @@ void main() {
       expect(hasSystemMessage(body), isFalse);
     });
 
+    test('meal estimate carries the whole meal only when mealContext is given', () {
+      ProfileService.instance.currentUserProfile = null;
+      String content(Map<String, dynamic> body) =>
+          ((body['messages'] as List).single as Map)['content'] as String;
+      const base = AiEscalationContext(
+        localInterpretation: 'dal',
+        localMatchConfidence: 0.5,
+        localCoverageConfidence: 0.5,
+        overallLocalConfidence: 0.5,
+      );
+      expect(content(AiNutritionService.instance.buildRequestBody('dal', context: base)),
+          isNot(contains('Whole meal as typed')));
+      const withMeal = AiEscalationContext(
+        localInterpretation: 'dal',
+        localMatchConfidence: 0.5,
+        localCoverageConfidence: 0.5,
+        overallLocalConfidence: 0.5,
+        mealContext: '3 roti, 1 ladle rice and dal',
+      );
+      final text = content(AiNutritionService.instance.buildRequestBody('dal', context: withMeal));
+      expect(text, contains('Whole meal as typed: "3 roti, 1 ladle rice and dal"'));
+      expect(text, contains('Return exactly one item, for "dal" only.'));
+    });
+
     test('weekly summary: purpose and user message only', () {
       final body = InsightsReportService.weeklySummaryRequestBody('Weekly Report Data: x');
       expect(body['purpose'], 'weekly_summary');

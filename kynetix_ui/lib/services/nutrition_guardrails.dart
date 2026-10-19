@@ -168,7 +168,8 @@ class NutritionGuardrails {
     }
 
     // Naan (260 kcal each — different from roti)
-    final naans = _count(lc, ['naan', 'nan']);
+    // Word-boundary match so 'banana' never counts as a naan.
+    final naans = _countWord(lc, ['naan', 'nan']);
     if (naans > 0) {
       final flr = naans * 260.0;
       if (calMax < flr) {
@@ -290,20 +291,21 @@ class NutritionGuardrails {
   //   skim / fat-free        → 36 kcal/100ml
   //   double-toned / low-fat → 46 kcal/100ml
   //   toned milk (default)   → 58 kcal/100ml
-  //   full cream             → 65 kcal/100ml
-  //   buffalo / whole milk   → 117 kcal/100ml  (~6–7% fat vs 3% for toned)
+  //   full cream / whole     → 88 kcal/100ml, 3.2 g P  (~6% fat)
+  //   buffalo                → 105 kcal/100ml, 4.2 g P (~6.5% fat, IFCT)
 
   static double _milkKcalPerMl(String lc) {
     if (_containsAny(lc, ['skim', 'skimmed', 'fat free', '0%'])) return 0.36;
     if (_containsAny(lc, ['double toned', 'double-toned', 'low fat'])) return 0.46;
-    if (_containsAny(lc, ['buffalo', 'full fat', 'whole milk'])) return 1.17; // Amul Buffalo Milk: 117 kcal/100ml
-    if (_containsAny(lc, ['full cream', 'fullcream'])) return 0.65;
+    if (lc.contains('buffalo')) return 1.05; // IFCT buffalo milk: ~105 kcal/100ml
+    if (_containsAny(lc, ['full cream', 'fullcream', 'full fat', 'whole milk'])) return 0.88;
     return 0.58;
   }
 
   static double _milkProteinPerMl(String lc) {
     if (_containsAny(lc, ['skim', 'skimmed'])) return 0.036;
-    if (_containsAny(lc, ['buffalo', 'full fat'])) return 0.032;
+    if (lc.contains('buffalo')) return 0.042;
+    if (_containsAny(lc, ['full cream', 'fullcream', 'full fat', 'whole milk'])) return 0.032;
     return 0.034;
   }
 
@@ -340,6 +342,19 @@ class NutritionGuardrails {
       final ms = RegExp(r'(\d+)\s+' + RegExp.escape(kw)).allMatches(lc);
       for (final m in ms) { total += int.tryParse(m.group(1)!) ?? 0; }
       if (total == 0 && lc.contains(kw)) total = 1;
+    }
+    return total;
+  }
+
+  /// Like [_count] but only matches whole words (optional plural 's'), so
+  /// short keywords such as 'nan' never match inside 'banana'.
+  static int _countWord(String lc, List<String> kws) {
+    int total = 0;
+    for (final kw in kws) {
+      final word = RegExp.escape(kw) + r's?\b';
+      final ms = RegExp(r'(\d+)\s+' + word).allMatches(lc);
+      for (final m in ms) { total += int.tryParse(m.group(1)!) ?? 0; }
+      if (total == 0 && RegExp(r'\b' + word).hasMatch(lc)) total = 1;
     }
     return total;
   }

@@ -53,17 +53,18 @@ export function coachInputError(body: any): InputError | null {
 const PORTION_HINTS: Record<'carbAnchored' | 'curryAnchored' | 'balanced', string> = {
   carbAnchored:
     'User eats a fixed roti/rice amount and uses sabzi or dal as a condiment ' +
-    '(~2–3 tbsp per roti). Do NOT assume a full katori of dal/sabzi unless ' +
-    'the user explicitly mentions a large serving.',
+    '(about 35 g dal per roti, 60 g per rice ladle). Do NOT assume a full ' +
+    'katori of dal/sabzi unless the user explicitly mentions a large serving.',
   curryAnchored:
     'User eats until the dal/sabzi runs out, treating it as the main dish. ' +
-    'Assume a full serving (~150 ml katori) of dal/sabzi per meal.',
+    'Assume one full katori of dal (150 ml) only when no carb count is ' +
+    'given; keep the stated roti count.',
   balanced:
     'User eats balanced portions of carbs and sides. Use standard Indian ' +
-    'hostel meal estimates for roti+dal/sabzi.',
+    'hostel estimates: about 50 g dal per roti, 85 g per rice ladle.',
 };
 
-/** Accepts an enum name ('carbAnchored' …) or the legacy hint text the app
+/** Accepts an enum name ('carbAnchored' etc.) or the legacy hint text the app
  *  sends today, and returns the matching server-owned text (or null). */
 export function coachPortionHint(v: unknown): string | null {
   if (typeof v !== 'string') return null;

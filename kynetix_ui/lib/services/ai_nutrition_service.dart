@@ -17,6 +17,9 @@ class AiEscalationContext {
   final double localCoverageConfidence;
   final double overallLocalConfidence;
   final List<String> flags;
+  /// The whole meal as the user typed it, when the text being estimated is
+  /// one item of a larger meal. Used only to size accompaniments.
+  final String? mealContext;
 
   const AiEscalationContext({
     required this.localInterpretation,
@@ -24,6 +27,7 @@ class AiEscalationContext {
     required this.localCoverageConfidence,
     required this.overallLocalConfidence,
     this.flags = const [],
+    this.mealContext,
   });
 }
 
@@ -311,7 +315,11 @@ class AiNutritionService {
         '${useCal.min.round()}-${useCal.max.round()} kcal  '
         '${usePro.min.round()}-${usePro.max.round()}g protein');
 
-    final aiScore = json['mealQualityScore'] as int?;
+    // Tolerate 72.5 or "72" from the model; only used for logging.
+    final rawScore = json['mealQualityScore'];
+    final int? aiScore = rawScore is num
+        ? rawScore.round()
+        : rawScore is String ? num.tryParse(rawScore.trim())?.round() : null;
     final localScore = NutritionResult.calculateLocalQualityScore(
       useCal.mid,
       usePro.mid,
@@ -393,8 +401,7 @@ class AiNutritionService {
 - Weight: ${profile.weight.toStringAsFixed(1)} kg
 - Workout frequency: ${profile.workoutDaysMin}-${profile.workoutDaysMax} days/week
 
-- Goal: ${profile.goal}
-- Health sync enabled: ${profile.healthSyncEnabled ? 'yes' : 'no'}''';
+- Goal: ${profile.goal}''';
 
   final contextBlock = context == null
     ? 'No local pre-interpretation was available.'
@@ -414,13 +421,26 @@ Use this context as prior evidence:
   final memorySection = foodMemoryBlock == null || foodMemoryBlock.isEmpty
       ? ''
       : '''
-══ USER'S CONFIRMED FOOD MEMORY (HIGHEST PRIORITY) ══
-The following entries have been personally confirmed by this user.
-If the meal you are estimating matches ANY entry below, you MUST use
-those exact values, do NOT substitute your own estimate.
+══ USER FOOD MEMORY ══
+Entries marked "User Override" or "Saved Food/Recipe" are confirmed by the
+user: when the same food appears, use their per-unit values and scale
+linearly to the quantity in this meal. "Known Food" and "History Match"
+entries are earlier estimates: use them as a prior only. Never reuse a
+memory total when the quantity differs.
 
 $foodMemoryBlock
 ═══════════════════════════════════════════════════''';
+
+    final mealContext = context?.mealContext?.trim();
+    final mealContextBlock = mealContext == null || mealContext.isEmpty
+        ? ''
+        : '''
+
+This is ONE item from a bigger meal. Whole meal as typed: "$mealContext"
+Return exactly one item, for "$rawInput" only. Do not include the roti,
+rice or anything else from the rest of the meal in its numbers or as extra
+items; use them only to size how much of this item was eaten (accompaniment
+rules, eater type).''';
 
     return '''$profileContext
 
@@ -429,7 +449,7 @@ $memorySection
 $contextBlock
 
 Estimate nutrition for this meal text:
-$rawInput
+$rawInput$mealContextBlock
 
 Return JSON only.''';
   }
@@ -579,11 +599,17 @@ Return JSON only.''';
       final cand = item.candidate;
       final cal = cand.calories.round();
       final pro = cand.protein.round();
-      buffer.writeln('• ${cand.name}: $cal kcal, ${pro}g protein (${cand.source})');
+      buffer.writeln('• ${cand.name} = ${_fmtQty(cand.quantity)} ${cand.unit}: $cal kcal, ${pro}g protein (${cand.source})');
       count++;
     }
 
     return buffer.toString().trim();
+  }
+
+  /// 1.0 -> "1", 1.5 -> "1.5", 0.333 -> "0.33".
+  static String _fmtQty(double q) {
+    if (q == q.roundToDouble()) return q.toStringAsFixed(0);
+    return double.parse(q.toStringAsFixed(2)).toString();
   }
 }
 

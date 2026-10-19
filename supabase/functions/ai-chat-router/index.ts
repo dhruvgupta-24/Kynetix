@@ -437,8 +437,9 @@ async function callChat(
   a:         ProviderAttempt,
   messages:  any[],
   maxTokens: number = 1500,
+  jsonMode:  boolean = false,
 ): Promise<{ text: string; usage: any }> {
-  console.log(`[AI ROUTER] → ${a.provider} model=${a.model} msgs=${messages.length} max_tokens=${maxTokens}`);
+  console.log(`[AI ROUTER] → ${a.provider} model=${a.model} msgs=${messages.length} max_tokens=${maxTokens} json=${jsonMode}`);
 
   const res = await timedFetch(a.endpoint, {
     method:  'POST',
@@ -447,7 +448,7 @@ async function callChat(
       'Content-Type':  'application/json',
       ...a.headers,
     },
-    body: JSON.stringify(chatBody(a, messages, maxTokens, false)),
+    body: JSON.stringify(chatBody(a, messages, maxTokens, false, jsonMode)),
   });
 
   if (!res.ok) {
@@ -700,6 +701,8 @@ Deno.serve(async (req: Request) => {
       }
     };
     const maxTok = guarded.limits.maxOutputTokens;
+    // JSON-only purposes ask providers that support it for a JSON object.
+    const jsonMode = !allowsStreaming(guarded.purpose);
 
     console.log(`[AI ROUTER] request user=${user.id} purpose=${guarded.purpose}${guarded.legacy ? ' (legacy)' : ''} msgs=${messages.length} chars=${guarded.textChars} images=${guarded.imageCount} stream=${streamMode}`);
 
@@ -926,7 +929,7 @@ Deno.serve(async (req: Request) => {
     for (const a of fallbackChain) {
       try {
         console.log(`[AI ROUTER] trying ${a.provider} model=${a.model} stream=false`);
-        const { text, usage } = await callChat(a, messages, maxTok);
+        const { text, usage } = await callChat(a, messages, maxTok, jsonMode);
         console.log(`[AI ROUTER] provider=${a.provider} model=${a.model} success`);
         const out = finalizeOrError(text);
         if (out instanceof Response) return out;

@@ -1,5 +1,5 @@
 /// Things people add to Indian food and forget to log: ghee on roti, the
-/// tadka oil in dal, butter on paratha, sugar in chai. Each is one standard
+/// tadka oil in dal, butter on paratha, sugar in coffee. Each is one standard
 /// spoon with label-style numbers, offered only when the meal suggests it.
 class HiddenExtra {
   final String id;
@@ -20,7 +20,10 @@ abstract final class HiddenExtras {
   static const cream = HiddenExtra('cream', '1 tbsp malai', 50, 0.5, 0.5, 5);
 
   static final _rules = <(RegExp, List<HiddenExtra>)>[
-    (RegExp(r'\b(chai|tea|coffee|lassi|nimbu pani|shikanji)\b'), [sugar]),
+    // Not chai / tea: the chai estimate (mock 'Chai (with milk & sugar)' and
+    // the AI's Indian default) already includes ~2 tsp sugar, so suggesting
+    // it again would double count.
+    (RegExp(r'\b(coffee|lassi|nimbu pani|shikanji)\b'), [sugar]),
     (RegExp(r'\b(paratha|parantha|pav|bun|toast|bread|kulcha)\b'), [butter, ghee]),
     (RegExp(r'\b(roti|chapati|phulka|rotis|chapatis)\b'), [ghee, butter]),
     (RegExp(r'\b(dal|daal|sabzi|sabji|curry|bhaji|rajma|chole|chana|kadhi|sambar|poha|upma|khichdi|bhurji)\b'), [oil, ghee]),

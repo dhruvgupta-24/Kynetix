@@ -62,6 +62,24 @@ class FoodRoleClassifier {
   // These are lower-cased substrings — matching uses String.contains().
   // Add new keywords here; do NOT add food-specific if/else blocks.
 
+  // Named curry dishes, checked BEFORE addOn and protein: "butter chicken"
+  // contains 'butter' and 'chicken', "palak paneer" contains 'paneer', but
+  // each is a gravy eaten with roti/rice. Plain 'paneer' / 'chicken' / 'egg'
+  // stay protein.
+  static const _accompanimentDishKeywords = <String>[
+    'paneer butter masala', 'butter paneer', 'paneer makhani',
+    'palak paneer', 'shahi paneer', 'kadai paneer', 'kadhai paneer',
+    'matar paneer', 'mutter paneer',
+    'egg curry', 'anda curry', 'fish curry', 'chicken curry',
+    'butter chicken', 'murgh makhani',
+    'malai kofta', 'dal makhani', 'makhani dal',
+  ];
+
+  // Any dal / daal (plain, moong, toor, masoor, chana, makhani) is eaten as
+  // an accompaniment, even though its lentil keyword is also a protein.
+  // Whole-word so 'daliya' / 'dalia' stay primary.
+  static final _dalPattern = RegExp(r'\b(dal|daal)\b');
+
   static const _addOnKeywords = <String>[
     'peanut butter', 'almond butter', 'cashew butter', 'nut butter',
     'butter', 'ghee', 'oil', 'olive oil', 'coconut oil',
@@ -111,6 +129,8 @@ class FoodRoleClassifier {
     'sambar', 'rasam', 'kadhi', 'korma', 'makhani',
     'aloo sabzi', 'bhindi', 'gobhi', 'gobi', 'baingan',
     'kala chana', 'black chana', 'kidney bean',
+    'chana', 'chane', 'lobia', 'matar', 'kofta', 'aloo',
+    'mix veg', 'kadhai',
     // Western / global
     'sauce', 'pasta sauce', 'marinara', 'bolognese', 'alfredo', 'pesto',
     'salsa', 'enchilada sauce', 'tikka sauce',
@@ -127,9 +147,14 @@ class FoodRoleClassifier {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Classifies the food role of a single normalised food name.
-  /// Priority: addOn → protein → primary → accompaniment → completeMeal.
+  /// Priority: named curry dish / dal → addOn → protein → primary →
+  /// accompaniment → completeMeal.
   static FoodRole classify(String normalizedFoodName) {
     final lc = normalizedFoodName.toLowerCase();
+    if (_dalPattern.hasMatch(lc) ||
+        _matchesAny(lc, _accompanimentDishKeywords)) {
+      return FoodRole.accompaniment;
+    }
     // addOn checked first — "peanut butter" contains "butter" and must not
     // be mis-classified as primary or protein.
     if (_matchesAny(lc, _addOnKeywords))        return FoodRole.addOn;

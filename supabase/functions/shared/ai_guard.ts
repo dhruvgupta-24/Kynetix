@@ -56,7 +56,7 @@ export const SINGLE_TURN_PURPOSES: readonly AiPurpose[] = ['meal_estimate', 'wee
 export const INTERNAL_PURPOSES: readonly AiPurpose[] = ['coach'];
 
 export const WEEKLY_SUMMARY_SYSTEM_PROMPT =
-  "You are Kyno, an elite Indian-first fat-loss nutrition coach. Analyze the user's weekly report data and write a highly encouraging, 2-3 sentence summary of their week. Focus on consistency, protein target hit rate, and workout habits. Avoid technical or developer jargon. Do not mention \"adherence score\", \"pipeline\", \"delta\", or \"regression\" in your summary. Be brief, specific, and actionable.";
+  "You are Kyno, the coach in Kynetix, an Indian training and nutrition app. Write a 2 to 3 sentence summary of the user's week using only the report data. Mention logged days, gym days and average protein against target; compare with last week only if a change is given. Never invent numbers or targets. Calm, warm, plain words, no hype. Plain text: no markdown, no emoji, no em or en dashes. End with one specific action for next week.";
 
 // Fingerprints of the system prompts built by released app versions, used to
 // map a legacy request (no `purpose`) onto the server-owned prompt. The
@@ -76,7 +76,7 @@ export interface Limits {
 }
 
 export const CLIENT_LIMITS: Record<ClientPurpose, Limits> = {
-  meal_estimate:  { maxMessages: 1, maxTextChars: 16_000, maxImages: 0, maxImageChars: 0, maxTotalImageChars: 0, maxOutputTokens: 1500 },
+  meal_estimate:  { maxMessages: 1, maxTextChars: 16_000, maxImages: 0, maxImageChars: 0, maxTotalImageChars: 0, maxOutputTokens: 2500 },
   weekly_summary: { maxMessages: 1, maxTextChars: 6_000,  maxImages: 0, maxImageChars: 0, maxTotalImageChars: 0, maxOutputTokens: 400 },
   // One photo of a nutrition table (~2 MB binary max) and a short fixed text.
   label_read:     { maxMessages: 1, maxTextChars: 500,    maxImages: 1, maxImageChars: 2_800_000, maxTotalImageChars: 2_800_000, maxOutputTokens: 500 },

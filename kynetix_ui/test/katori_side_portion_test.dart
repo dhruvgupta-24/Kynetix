@@ -7,7 +7,8 @@ void main() {
   test('a katori of dal is about two ladles, fully eaten', () {
     final r = mockProcessMealInput('1 katori dal');
     expect(r.calories.mid, inInclusiveRange(110, 150));
-    expect(r.protein.mid, greaterThanOrEqualTo(7));
+    // Two ladles of thin mess dal at 3.0-3.5 g protein per ladle.
+    expect(r.protein.mid, greaterThanOrEqualTo(6));
   });
 
   test('plain "dal" keeps the mess ladle partial-eat model', () {

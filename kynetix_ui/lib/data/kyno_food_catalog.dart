@@ -102,7 +102,8 @@ const List<CatalogFood> kynoFoodCatalog = [
   CatalogFood('high-protein milkshake (Amul)', '1 bottle (250 ml)', 150, 20, 14, 1.5, slots: _snack, noCook: true),
   CatalogFood('high-protein lassi (Amul)', '1 pack (200 ml)', 104, 15, 10, 0.3, slots: _snack, noCook: true),
   CatalogFood('skyr / protein yogurt', '1 cup (100 g)', 70, 10, 6, 0.5, slots: _snackLate, noCook: true),
-  CatalogFood('cottage cheese (cheela filling)', '50 g', 100, 9, 2, 6, slots: _bf),
+  // Indian 'cottage cheese' as a cheela filling is paneer (IFCT ~290 kcal/100 g).
+  CatalogFood('cottage cheese (cheela filling)', '50 g', 145, 9, 1.5, 11, slots: _bf),
 
   // ── Eggs ────────────────────────────────────────────────────────────────
   CatalogFood('boiled eggs', '2 eggs', 155, 13, 1, 11, diet: FoodDiet.egg, slots: _any, noCook: true),
@@ -131,8 +132,8 @@ const List<CatalogFood> kynoFoodCatalog = [
   CatalogFood('tofu bhurji', '1 katori (150 g)', 240, 22, 6, 14, slots: _bf),
   CatalogFood('moong dal (home)', '1 katori (150 g)', 110, 7, 16, 2, fiber: 4, slots: _main),
   CatalogFood('chana dal (home)', '1 katori (150 g)', 150, 8, 20, 4, fiber: 5, slots: _main),
-  CatalogFood('rajma (home)', '1 katori (150 g)', 140, 7, 20, 3.5, fiber: 6, slots: _main),
-  CatalogFood('chole (home)', '1 katori (150 g)', 180, 8, 24, 6, fiber: 7, slots: _main),
+  CatalogFood('rajma (home)', '1 katori (150 g)', 180, 8.5, 23, 6, fiber: 6, slots: _main),
+  CatalogFood('chole (home)', '1 katori (150 g)', 225, 9, 27, 9, fiber: 7, slots: _main),
   CatalogFood('sprouts chaat', '1 bowl (150 g)', 140, 10, 22, 1.5, fiber: 6, slots: _bfSnack, noCook: true),
   CatalogFood('besan cheela', '2 cheelas', 240, 12, 28, 8, fiber: 5, slots: _bf),
   CatalogFood('moong dal cheela', '2 cheelas', 220, 13, 30, 5, fiber: 5, slots: _bf),
@@ -149,7 +150,7 @@ const List<CatalogFood> kynoFoodCatalog = [
   // ── Grains & breakfasts ─────────────────────────────────────────────────
   CatalogFood('oats with milk', '50 g oats + 200 ml milk', 310, 15, 42, 9, fiber: 5, slots: _bf, logAs: '50 g oats + 200 ml milk'),
   CatalogFood('overnight oats + whey', '50 g oats + 1 scoop', 310, 30, 36, 5, fiber: 5, slots: _bf, noCook: true, logAs: '50 g oats + 1 scoop whey'),
-  CatalogFood('poha', '1 plate (200 g)', 250, 5, 42, 7, fiber: 2, slots: _bf),
+  CatalogFood('poha', '1 plate (200 g)', 320, 6, 52, 10, fiber: 2, slots: _bf),
   CatalogFood('upma', '1 plate (200 g)', 250, 6, 38, 8, fiber: 3, slots: _bf),
   CatalogFood('idli with sambar', '3 idlis + 1 katori', 280, 10, 52, 3, fiber: 5, slots: _bf, logAs: '3 idli + 1 katori sambar'),
   CatalogFood('plain dosa with sambar', '1 dosa + 1 katori', 300, 9, 48, 8, fiber: 4, slots: _bf, logAs: '1 plain dosa + 1 katori sambar'),
@@ -166,7 +167,7 @@ const List<CatalogFood> kynoFoodCatalog = [
   CatalogFood('chicken biryani', '1 plate (300 g)', 490, 25, 55, 18, diet: FoodDiet.nonVeg, slots: _main),
 
   // ── Vegetables & salads ─────────────────────────────────────────────────
-  CatalogFood('mixed veg sabzi', '1 katori (150 g)', 110, 3, 12, 6, fiber: 4, slots: _main),
+  CatalogFood('mixed veg sabzi', '1 katori (150 g)', 143, 3.5, 14, 8, fiber: 4, slots: _main),
   CatalogFood('palak paneer', '1 katori (150 g)', 230, 11, 8, 17, fiber: 3, slots: _main),
   CatalogFood('kachumber salad', '1 bowl', 45, 2, 9, 0.3, fiber: 3, slots: _main, noCook: true),
   CatalogFood('chicken salad', '1 bowl (150 g chicken)', 300, 42, 10, 9, fiber: 3, diet: FoodDiet.nonVeg, slots: _main, noCook: true, logAs: '150 g chicken salad'),
@@ -192,7 +193,7 @@ const List<CatalogFood> kynoFoodCatalog = [
   // For Navratri / Ekadashi style fasts: no grains or pulses. Values per the
   // serving from IFCT 2017 ingredients (sago, buckwheat, water-chestnut
   // flour, barnyard millet) with typical peanuts / ghee in the dish.
-  CatalogFood('sabudana khichdi', '1 plate (200 g)', 350, 4, 55, 13, fiber: 2, slots: _any, tags: _vrat),
+  CatalogFood('sabudana khichdi', '1 plate (200 g)', 440, 6, 63, 18, fiber: 2, slots: _any, tags: _vrat),
   CatalogFood('kuttu roti', '1 roti', 140, 4.5, 26, 2, fiber: 3, slots: _main, tags: _vrat),
   CatalogFood('singhare atta roti', '1 roti', 140, 2.5, 28, 2, fiber: 2, slots: _main, tags: _vrat),
   CatalogFood('samak rice (vrat ke chawal)', '1 bowl (150 g)', 165, 3.5, 33, 2, fiber: 3, slots: _main, tags: _vrat),

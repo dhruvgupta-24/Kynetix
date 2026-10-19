@@ -224,8 +224,8 @@ class AiCoachService {
     if (appContext != null) body['app_context'] = appContext;
 
     // Weight context — compact summary only, never raw history.
-    // The edge function appends toPromptString() to its system prompt.
-    // low_confidence_weight signals the edge function to soften weight claims.
+    // The edge function puts toPromptString() in the fenced user-data block
+    // of its system prompt; low_confidence_weight makes it hedge weight claims.
     if (weightContext != null) {
       body['weight_context'] = weightContext.toPromptString();
       if (weightContext.quality.confidenceLabel == 'low') {

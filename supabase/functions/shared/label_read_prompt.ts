@@ -19,6 +19,7 @@ export const LABEL_READ_SYSTEM_PROMPT: string = [
   '',
   'Rules:',
   '- If energy is only in kJ, convert: kcal = kJ / 4.184.',
+  '- If both per 100 g (or per 100 ml) and per serving columns exist, use the per 100 g (or per 100 ml) column.',
   '- If the table is only per serving, convert to per 100 using the serving size. If the serving size is not printed, set readable to false.',
   '- Use "Total sugars" for sugar_g. Use dietary fibre for fibre_g. Use null for a value that is not printed.',
   '- If the photo is not a nutrition table, or the numbers cannot be read with confidence, set readable to false and the numbers to null.',

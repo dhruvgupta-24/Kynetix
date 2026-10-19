@@ -330,6 +330,7 @@ class NutritionResult {
   });
 
   NutritionResult copyWith({
+    List<NutritionItem>? items,
     String? source,
     String? fallbackReason,
     NutrientRange? calories,
@@ -349,7 +350,7 @@ class NutritionResult {
     EstimationAudit? estimationAudit,
   }) => NutritionResult(
         canonicalMeal:  canonicalMeal,
-        items:          items,
+        items:          items ?? this.items,
         calories:       calories ?? this.calories,
         protein:        protein ?? this.protein,
         confidence:     confidence,

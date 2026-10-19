@@ -140,6 +140,9 @@ class _FoodEntry {
   final int?          servingMl;
   /// If set, one "unit" = servingGrams g (enables "150g tofu" → qty).
   final int?          servingGrams;
+  /// Adjacent-word phrases whose tokens this entry must never claim
+  /// (e.g. chole must not eat the 'chana' in "chana dal").
+  final List<String>  excludePhrases;
 
   const _FoodEntry({
     required this.keywords,
@@ -151,6 +154,7 @@ class _FoodEntry {
     this.tier         = _Tier.medium,
     this.servingMl,
     this.servingGrams,
+    this.excludePhrases = const [],
   });
 
   double get baseConfidence => switch (tier) {
@@ -230,12 +234,12 @@ const List<_FoodEntry> _db = [
     isCarb:   true,
     tier:     _Tier.medium,
   ),
-  // Aloo paratha ≈ 230 kcal
+  // Aloo paratha ≈ 280 kcal (home, ~1 tsp oil/ghee)
   _FoodEntry(
     label:    'Aloo Paratha',
     keywords: ['aloo paratha', 'potato paratha'],
-    calories: NutrientRange(min: 210, max: 250),   // ±9 %
-    protein:  NutrientRange(min: 4.3, max: 5.2),
+    calories: NutrientRange(min: 260, max: 300),   // ±7 %
+    protein:  NutrientRange(min: 5.0, max: 6.0),
     isCarb:   true,
     tier:     _Tier.medium,
   ),
@@ -270,8 +274,8 @@ const List<_FoodEntry> _db = [
   _FoodEntry(
     label:    'Biryani (1 serving)',
     keywords: ['biryani', 'biriyani'],
-    calories: NutrientRange(min: 320, max: 390),   // ±10 % – mixed meal
-    protein:  NutrientRange(min: 11.0, max: 17.0),
+    calories: NutrientRange(min: 450, max: 520),   // ±7 %, 1 plate (~300 g)
+    protein:  NutrientRange(min: 13.0, max: 19.0),
     isCarb:   true,
     tier:     _Tier.medium,
   ),
@@ -286,12 +290,14 @@ const List<_FoodEntry> _db = [
 
   // ── Proteins ──────────────────────────────────────────────────────────────
   // Paneer 1 mess serving ≈ 80 g → 240 kcal; fully eaten.
+  // servingGrams=80 so "200 g paneer" logs 2.5 servings, not one.
   _FoodEntry(
-    label:    'Paneer (1 serving)',
-    keywords: ['paneer', 'cottage cheese'],
-    calories: NutrientRange(min: 220, max: 260),   // ±8 %
-    protein:  NutrientRange(min: 14.0, max: 17.0),
-    tier:     _Tier.high,
+    label:        'Paneer (1 serving)',
+    keywords:     ['paneer', 'cottage cheese'],
+    calories:     NutrientRange(min: 220, max: 260),   // ±8 %
+    protein:      NutrientRange(min: 14.0, max: 17.0),
+    tier:         _Tier.high,
+    servingGrams: 80,
   ),
   _FoodEntry(
     label:    'Paneer Bhurji',
@@ -316,21 +322,23 @@ const List<_FoodEntry> _db = [
     protein:  NutrientRange(min: 22.0, max: 26.0),
     tier:     _Tier.veryHigh,
   ),
-  // Chicken ≈ 250 kcal per mess serving
+  // Chicken ≈ 250 kcal per mess serving (~100 g cooked meat + some gravy)
   _FoodEntry(
-    label:    'Chicken (1 serving)',
-    keywords: ['chicken', 'murgh'],
-    calories: NutrientRange(min: 225, max: 275),   // ±10 %
-    protein:  NutrientRange(min: 23.0, max: 28.0),
-    tier:     _Tier.high,
+    label:        'Chicken (1 serving)',
+    keywords:     ['chicken', 'murgh'],
+    calories:     NutrientRange(min: 225, max: 275),   // ±10 %
+    protein:      NutrientRange(min: 23.0, max: 28.0),
+    tier:         _Tier.high,
+    servingGrams: 100,
   ),
-  // Soya chunks 1 serving ≈ 165 kcal
+  // Soya chunks 1 serving ≈ 165 kcal (~45 g dry chunks)
   _FoodEntry(
-    label:    'Soya Chunks (1 serving)',
-    keywords: ['soya', 'soy', 'soya chunks', 'meal maker'],
-    calories: NutrientRange(min: 150, max: 178),   // ±8 %
-    protein:  NutrientRange(min: 18.5, max: 22.5),
-    tier:     _Tier.high,
+    label:        'Soya Chunks (1 serving)',
+    keywords:     ['soya', 'soy', 'soya chunks', 'meal maker'],
+    calories:     NutrientRange(min: 150, max: 178),   // ±8 %
+    protein:      NutrientRange(min: 18.5, max: 22.5),
+    tier:         _Tier.high,
+    servingGrams: 45,
   ),
 
   // ── Dal / Lentils ─────────────────────────────────────────────────────────
@@ -339,7 +347,7 @@ const List<_FoodEntry> _db = [
     label:    'Dal (1 ladle)',
     keywords: ['dal', 'daal', 'lentil', 'lentils', 'tadka dal'],
     calories: NutrientRange(min: 60, max: 70),     // ±8 % tight base
-    protein:  NutrientRange(min: 3.8, max: 4.8),
+    protein:  NutrientRange(min: 3.0, max: 3.5),   // thin mess dal
     isSide:   true,
     tier:     _Tier.medium,
   ),
@@ -361,18 +369,25 @@ const List<_FoodEntry> _db = [
   ),
   _FoodEntry(
     label:    'Chole (1 serving)',
-    keywords: ['chole', 'chana', 'channa', 'chickpea', 'chhole'],
+    keywords: ['chole', 'chhole', 'chana masala', 'white chana',
+               'safed chana', 'kabuli chana', 'chane', 'channa', 'chickpea'],
     calories: NutrientRange(min: 145, max: 168),   // ±7 %
     protein:  NutrientRange(min: 7.5, max: 9.0),
     isSide:   true,
     tier:     _Tier.medium,
+    // Lentil / snack forms of chana are different foods.
+    excludePhrases: ['chana dal', 'chana daal', 'channa dal', 'chane ki dal',
+                     'chana ki dal',
+                     'kala chana', 'kala channa', 'kale chane', 'kale chana',
+                     'roasted chana', 'roasted channa', 'bhuna chana'],
   ),
 
   // ── Sabzi / Vegetables ────────────────────────────────────────────────────
-  // Mixed veg sabzi 1 serving ≈ 70 kcal base
+  // Mixed veg sabzi 1 serving ≈ 70 kcal base. No bare 'curry' keyword:
+  // "chicken curry" / "egg curry" would otherwise also log a sabzi.
   _FoodEntry(
     label:    'Sabzi (mixed veg)',
-    keywords: ['sabzi', 'sabji', 'bhaji', 'bhajji', 'curry', 'vegetable'],
+    keywords: ['sabzi', 'sabji', 'bhaji', 'bhajji', 'veg curry', 'vegetable'],
     calories: NutrientRange(min: 62, max: 78),     // ±11 % base
     protein:  NutrientRange(min: 1.8, max: 3.0),
     isSide:   true,
@@ -404,22 +419,24 @@ const List<_FoodEntry> _db = [
   ),
 
   // ── Dairy / Snacks ────────────────────────────────────────────────────────
-  // Milk 250 ml glass ≈ 122 kcal  (servingMl=250 enables ml-based qty)
+  // Milk 250 ml glass of toned milk (58 kcal, 3.2 g P per 100 ml) ≈ 145 kcal
+  // (servingMl=250 enables ml-based qty; matches MessCalibration.milkGlassMl)
   _FoodEntry(
     label:      'Milk (1 glass)',
     keywords:   ['milk', 'doodh'],
-    calories:   NutrientRange(min: 114, max: 130),   // ±6 %
-    protein:    NutrientRange(min: 6.5, max: 7.5),
+    calories:   NutrientRange(min: 140, max: 150),   // ±4 %
+    protein:    NutrientRange(min: 8.0, max: 8.5),
     tier:       _Tier.veryHigh,
     servingMl:  250,
   ),
-  // Curd 100 ml ≈ 75 kcal
+  // Curd 100 g (toned-milk dahi) ≈ 60 kcal, 3.1 g protein
   _FoodEntry(
-    label:    'Curd / Dahi',
-    keywords: ['curd', 'dahi', 'yogurt'],
-    calories: NutrientRange(min: 68, max: 82),     // ±9 %
-    protein:  NutrientRange(min: 3.8, max: 4.8),
-    tier:     _Tier.high,
+    label:        'Curd / Dahi',
+    keywords:     ['curd', 'dahi', 'yogurt'],
+    calories:     NutrientRange(min: 56, max: 64),     // ±7 %
+    protein:      NutrientRange(min: 2.9, max: 3.3),
+    tier:         _Tier.high,
+    servingGrams: 100,
   ),
   // Oats 40 g ≈ 155 kcal
   _FoodEntry(
@@ -430,12 +447,12 @@ const List<_FoodEntry> _db = [
     isCarb:   true,
     tier:     _Tier.veryHigh,
   ),
-  // Samosa ≈ 145 kcal (oil varies)
+  // Samosa (1 medium, ~70 g, deep-fried) ≈ 255 kcal (oil varies)
   _FoodEntry(
     label:    'Samosa (1 piece)',
     keywords: ['samosa'],
-    calories: NutrientRange(min: 128, max: 162),   // ±12 %
-    protein:  NutrientRange(min: 3.0, max: 4.5),
+    calories: NutrientRange(min: 230, max: 280),   // ±10 %
+    protein:  NutrientRange(min: 4.0, max: 5.0),
     tier:     _Tier.low,
   ),
   // Banana ≈ 90 kcal
@@ -509,7 +526,7 @@ const List<_FoodEntry> _db = [
     label:      'Shake / Smoothie (1 glass)',
     keywords:   ['shake', 'smoothie', 'milkshake', 'frappuccino', 'thickshake'],
     calories:   NutrientRange(min: 280, max: 360),   // ±12 %
-    protein:    NutrientRange(min: 4.0, max: 8.0),
+    protein:    NutrientRange(min: 8.0, max: 11.0),  // ~250 ml milk base
     tier:       _Tier.low,
     servingMl:  300,
   ),
@@ -556,13 +573,18 @@ NutrientRange _scaleRange(NutrientRange r, double minF, double maxF) =>
 bool _hasWord(List<String> tokens, Iterable<String> words) =>
     tokens.any(words.contains);
 
+// Weight / volume units. A number in front of one of these is an amount
+// ("200 g"), never a piece count, so _extractQty must not hop over them.
+const _unitTokens = {'g', 'gm', 'gms', 'gram', 'grams', 'ml'};
+
 /// Extract an integer/decimal immediately before or after keyword position.
 /// Returns (value, certain) — certain=false means we guessed qty=1.
 (double qty, bool certain) _extractQty(List<String> tokens, int idx) {
   if (idx > 0) {
     final n = double.tryParse(tokens[idx - 1]);
     if (n != null && n > 0 && n < 20) return (n, true);
-    if (idx > 1 && _coverageFillerTokens.contains(tokens[idx - 1])) {
+    if (idx > 1 && _coverageFillerTokens.contains(tokens[idx - 1]) &&
+        !_unitTokens.contains(tokens[idx - 1])) {
       final n2 = double.tryParse(tokens[idx - 2]);
       if (n2 != null && n2 > 0 && n2 < 20) return (n2, true);
     }
@@ -570,7 +592,8 @@ bool _hasWord(List<String> tokens, Iterable<String> words) =>
   if (idx < tokens.length - 1) {
     final n = double.tryParse(tokens[idx + 1]);
     if (n != null && n > 0 && n < 20) return (n, true);
-    if (idx < tokens.length - 2 && _coverageFillerTokens.contains(tokens[idx + 1])) {
+    if (idx < tokens.length - 2 && _coverageFillerTokens.contains(tokens[idx + 1]) &&
+        !_unitTokens.contains(tokens[idx + 1])) {
       final n2 = double.tryParse(tokens[idx + 2]);
       if (n2 != null && n2 > 0 && n2 < 20) return (n2, true);
     }
@@ -617,7 +640,11 @@ bool _isFuzzyMatch(String token, String part) {
   if (token == '${part}s' || token == '${part}es' || part == '${token}s' || part == '${token}es') {
     return true;
   }
-  if (part.length <= 3) return false;
+  // Short words and a different first letter are never treated as typos:
+  // without this, "ice" (cream) fuzzy-matched "rice" and "kala" (chana)
+  // matched "kela" (banana).
+  if (part.length <= 4) return false;
+  if (token.length < 4 || token[0] != part[0]) return false;
   final dist = _levenshtein(token, part);
   final maxDist = part.length <= 6 ? 1 : 2;
   return dist <= maxDist;
@@ -669,21 +696,49 @@ double? _rawMlForEntry(String raw, List<String> keywords) {
   return null;
 }
 
-/// Scan [raw] for a `N g` / `Ng` pattern near ANY of [keywords].
+/// Scan [raw] for a `N g` / `Ng` / `N grams` amount attached to ANY of
+/// [keywords]: directly before it ("200 g chicken", "150g of grilled
+/// paneer") or directly after it ("tofu 150g"). An amount that belongs to a
+/// different food in the same sentence is not borrowed.
 double? _rawGramsForEntry(String raw, List<String> keywords) {
-  final gPat = RegExp(r'(\d+(?:\.\d+)?)\s*g\b', caseSensitive: false);
+  final gPat = RegExp(r'(\d+(?:\.\d+)?)\s*(?:g|gm|gms|gram|grams)\b',
+      caseSensitive: false);
+  final before = RegExp(r'^\s*(?:of\s+)?(?:[a-z]+\s+)?$');
+  final after  = RegExp(r'^[\s(:\-]*$');
   for (final kw in keywords) {
     final kwPat   = RegExp(RegExp.escape(kw), caseSensitive: false);
     final kwMatch = kwPat.firstMatch(raw);
     if (kwMatch == null) continue;
     for (final m in gPat.allMatches(raw)) {
-      if ((m.start - kwMatch.start).abs() < 35) {
+      final attached = m.end <= kwMatch.start
+          ? before.hasMatch(raw.substring(m.end, kwMatch.start))
+          : m.start >= kwMatch.end &&
+              after.hasMatch(raw.substring(kwMatch.end, m.start));
+      if (attached) {
         final v = double.tryParse(m.group(1)!);
         if (v != null) return v;
       }
     }
   }
   return null;
+}
+
+/// Token indices covered by any of [phrases] as consecutive tokens.
+Set<int> _phraseTokenIndices(List<String> tokens, List<String> phrases) {
+  final out = <int>{};
+  for (final p in phrases) {
+    final parts = p.split(' ');
+    for (int i = 0; i + parts.length <= tokens.length; i++) {
+      var ok = true;
+      for (int j = 0; j < parts.length; j++) {
+        if (tokens[i + j] != parts[j]) { ok = false; break; }
+      }
+      if (ok) {
+        for (int j = 0; j < parts.length; j++) { out.add(i + j); }
+      }
+    }
+  }
+  return out;
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -780,7 +835,10 @@ LocalEstimationAnalysis analyzeLocalEstimation(String input) {
   final matchedEntries = <_FoodEntry>[];
 
   for (final entry in sortedDb) {
-    final matchIdx = _matchedIndices(entry.keywords, tokens, claimedTokens);
+    final blocked = entry.excludePhrases.isEmpty
+        ? claimedTokens
+        : {...claimedTokens, ..._phraseTokenIndices(tokens, entry.excludePhrases)};
+    final matchIdx = _matchedIndices(entry.keywords, tokens, blocked);
     if (matchIdx == null) continue;
     if (seenLabels.contains(entry.label)) continue;
     seenLabels.add(entry.label);

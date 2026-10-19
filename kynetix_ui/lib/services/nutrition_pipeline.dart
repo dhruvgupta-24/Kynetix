@@ -19,6 +19,8 @@ import '../services/unit_normalizer.dart';
 import '../services/food_role_classifier.dart';
 import '../services/eating_pattern_service.dart';
 import '../services/cloud_sync_service.dart';
+import '../data/indian_curry_table.dart';
+import 'accompaniment_portion_resolver.dart';
 import '../models/user_profile.dart';
 import 'profile_service.dart';
 
@@ -104,6 +106,10 @@ class NutritionPipeline {
     final priorityLevels = <String>{};
     final uncertaintyFactors = <String>[];
 
+    // Names whose values the person set themselves (their override, their
+    // saved food, a scanned pack): the portion resolver leaves these alone.
+    final pinned = <String>{};
+
     // ── 2. ITEM-LEVEL MEMORY LOOKUP ─────────────────────────────────────────
     for (final parsed in parsedItems) {
       // Normalize quantity and unit to base units (g, ml, or count).
@@ -119,6 +125,7 @@ class NutritionPipeline {
           .resolveItem(name, normParsed.quantity, normParsed.unit);
       if (linkedItem != null) {
         finalItems.add(linkedItem);
+        pinned.add(linkedItem.name.toLowerCase().trim());
         matchesUsed.add('linked_barcode: $name');
         priorityLevels.add('Branded Food');
         continue;
@@ -139,6 +146,7 @@ class NutritionPipeline {
           if (_isSane(candidate, name)) {
             _debugLog('[Pipeline]     ✅ Match in UserNutritionMemory: ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
             finalItems.add(candidate);
+            pinned.add(candidate.name.toLowerCase().trim());
             matchesUsed.add('user_override: $name');
             priorityLevels.add('User Memory');
             continue;
@@ -158,6 +166,7 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           _debugLog('[Pipeline]     ✅ Match in PersonalNutritionMemory (exact): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
+          pinned.add(candidate.name.toLowerCase().trim());
           matchesUsed.add('personal_exact: $itemStr');
           priorityLevels.add('Saved Meal');
           continue;
@@ -169,6 +178,7 @@ class NutritionPipeline {
         if (_isSane(candidate, name)) {
           _debugLog('[Pipeline]     ✅ Match in PersonalNutritionMemory (template): ${candidate.calories.mid.toStringAsFixed(1)} kcal, ${candidate.protein.mid.toStringAsFixed(1)}g protein, AI BLOCKED');
           finalItems.add(candidate);
+          pinned.add(candidate.name.toLowerCase().trim());
           matchesUsed.add('personal_template: $itemStr');
           priorityLevels.add('Saved Meal');
           continue;
@@ -203,6 +213,17 @@ class NutritionPipeline {
         }
       }
       _debugLog('[Pipeline]     No match in MealMemory');
+
+      // ── INDIAN CURRY TABLE ──────────────────────────────────────────────────────
+      // Dal, sabzi, chole, paneer and meat gravies: cited per 100 g values. The
+      // portion resolver below sizes them by the roti and rice in the meal.
+      final curry = IndianCurryTable.match(name);
+      if (curry != null) {
+        finalItems.add(_curryPlaceholder(normParsed, curry));
+        matchesUsed.add('curry_table: $name');
+        priorityLevels.add('Food Library');
+        continue;
+      }
 
       // ── GLOBAL FOOD DEFAULTS (KYNETIX CURATED) ──────────────────────────────────
       _debugLog('[Pipeline]   Checking GlobalFoodService...');
@@ -274,10 +295,15 @@ class NutritionPipeline {
                 localCoverageConfidence: localGate.coverageConfidence,
                 overallLocalConfidence: localGate.overallConfidence,
                 flags: complexity.flags,
+                mealContext: parsedItems.length > 1 ? trimmed : null,
               ),
             );
             final aiResult = NutritionGuardrails.apply(raw, itemStr, classification: classification).normalizedUncertainty();
-            final item = _pullBestItem(aiResult, parsed);
+            // Kyno saw the whole meal and the eater type, so its amount is
+            // already sized to the roti and rice: the eater-type pass must
+            // not shrink it a second time.
+            final pulled = _pullBestItem(_onlyAskedItem(aiResult, parsed, parsedItems), parsed);
+            final item = parsedItems.length > 1 ? pulled.withScalar(1.0) : pulled;
             finalItems.add(item);
             aiUsed = true;
             matchesUsed.add('ai_estimate: $itemStr');
@@ -307,7 +333,13 @@ class NutritionPipeline {
       }
     }
 
-    // Apply eating pattern scalars and Portion Anchor meal-level adjustments
+    // Size dal / sabzi / chole by the roti and rice they were eaten with, then
+    // apply eating pattern scalars and Portion Anchor meal-level adjustments.
+    finalItems = AccompanimentPortionResolver.resolve(
+      finalItems,
+      anchor: ProfileService.instance.activePortionAnchor,
+      pinned: pinned,
+    );
     finalItems = _withMicros(_applyMealLevelPortionAnchorPass(finalItems));
 
     // ── 4. AGGREGATION ───────────────────────────────────────────────────────
@@ -639,6 +671,45 @@ class NutritionPipeline {
     return true;
   }
 
+  /// When Kyno was shown the whole meal for one item, keep only what it
+  /// returned for that item: a stray roti or rice row must not be added into
+  /// the sabzi's numbers.
+  NutritionResult _onlyAskedItem(NutritionResult r, ParsedFoodItem asked, List<ParsedFoodItem> meal) {
+    if (meal.length < 2 || r.items.length < 2) return r;
+    final others = [for (final p in meal) if (!identical(p, asked)) p.normalizedName.toLowerCase()];
+    Set<String> words(String s) => s.toLowerCase().split(RegExp(r'[^a-z]+')).where((w) => w.length > 2).toSet();
+    final askedWords = words(asked.normalizedName);
+    final keep = [
+      for (final i in r.items)
+        if (words(i.name).intersection(askedWords).isNotEmpty ||
+            !others.any((o) => words(o).intersection(words(i.name)).isNotEmpty))
+          i,
+    ];
+    if (keep.isEmpty || keep.length == r.items.length) return r;
+    final cal = keep.fold<NutrientRange>(const NutrientRange(min: 0, max: 0), (a, i) => a + i.calories);
+    final pro = keep.fold<NutrientRange>(const NutrientRange(min: 0, max: 0), (a, i) => a + i.protein);
+    return r.copyWith(items: keep, calories: cal, protein: pro);
+  }
+
+  /// A curry from [IndianCurryTable] at one katori per serving (or the amount
+  /// typed), keeping the typed quantity and unit so that
+  /// [AccompanimentPortionResolver] can size it against the meal's carbs.
+  NutritionItem _curryPlaceholder(ParsedFoodItem parsed, CurryDish dish) {
+    final asTyped = NutritionItem(
+      name: parsed.normalizedName,
+      quantity: parsed.quantity,
+      unit: parsed.unit,
+      estimated: true,
+      mode: EstimationMode.contextualIntake,
+      calories: const NutrientRange(min: 0, max: 0),
+      protein: const NutrientRange(min: 0, max: 0),
+    );
+    final grams = AccompanimentPortionResolver.explicitGramsOf(asTyped) ??
+        AccompanimentPortionResolver.katoriGrams * (parsed.quantity > 0 ? parsed.quantity : 1);
+    return AccompanimentPortionResolver.itemFor(dish, grams,
+        name: parsed.normalizedName, quantity: parsed.quantity, unit: parsed.unit);
+  }
+
   NutritionItem _pullBestItem(NutritionResult result, ParsedFoodItem parsed) {
     if (result.items.isEmpty) {
       final calMid = result.calories.mid;
@@ -880,6 +951,7 @@ class NutritionPipeline {
 
     final parsedItems = ItemParser.parse(trimmed);
     var finalItems = <NutritionItem>[];
+    final pinned = <String>{};
 
     for (final parsed in parsedItems) {
       final normParsed = _normalizeParsed(parsed);
@@ -888,7 +960,7 @@ class NutritionPipeline {
 
       final linkedItem = FoodLinkService.instance
           .resolveItem(name, normParsed.quantity, normParsed.unit);
-      if (linkedItem != null) { finalItems.add(linkedItem); continue; }
+      if (linkedItem != null) { finalItems.add(linkedItem); pinned.add(linkedItem.name.toLowerCase().trim()); continue; }
 
       final userOverride = UserNutritionMemory.instance.lookup(name);
       if (userOverride != null) {
@@ -899,20 +971,20 @@ class NutritionPipeline {
               'input=${normParsed.unit} for "$name", skipping user memory');
         } else {
           final candidate = _itemFromPerUnitMemory(normParsed, userOverride);
-          if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+          if (_isSane(candidate, name)) { finalItems.add(candidate); pinned.add(candidate.name.toLowerCase().trim()); continue; }
         }
       }
 
       final personalExact = PersonalNutritionMemory.instance.lookupExact(itemStr);
       if (personalExact != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalExact);
-        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+        if (_isSane(candidate, name)) { finalItems.add(candidate); pinned.add(candidate.name.toLowerCase().trim()); continue; }
       }
 
       final personalTemplate = PersonalNutritionMemory.instance.lookupTemplate(itemStr);
       if (personalTemplate != null) {
         final candidate = _itemFromPortionMemory(normParsed, personalTemplate);
-        if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
+        if (_isSane(candidate, name)) { finalItems.add(candidate); pinned.add(candidate.name.toLowerCase().trim()); continue; }
       }
 
       final exactKnown = MealMemory.instance.lookupExactKnownFood(itemStr);
@@ -926,6 +998,9 @@ class NutritionPipeline {
         final candidate = _itemFromPortionMemory(normParsed, cached);
         if (_isSane(candidate, name)) { finalItems.add(candidate); continue; }
       }
+
+      final curry = IndianCurryTable.match(name);
+      if (curry != null) { finalItems.add(_curryPlaceholder(normParsed, curry)); continue; }
 
       final localAnalysis = analyzeLocalEstimation(itemStr);
       if (localAnalysis.coverageConfidence >= 0.9 && localAnalysis.estimation.items.isNotEmpty) {
@@ -941,6 +1016,11 @@ class NutritionPipeline {
       return null; // Atomic item missed memory, requires AI -> fail sync lookup
     }
 
+    finalItems = AccompanimentPortionResolver.resolve(
+      finalItems,
+      anchor: ProfileService.instance.activePortionAnchor,
+      pinned: pinned,
+    );
     finalItems = _withMicros(_applyMealLevelPortionAnchorPass(finalItems));
 
     double sumCalMin = 0, sumCalMax = 0, sumProMin = 0, sumProMax = 0;

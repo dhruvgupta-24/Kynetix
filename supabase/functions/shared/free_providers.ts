@@ -123,19 +123,31 @@ export function isFreeOpenRouterModel(model: string): boolean {
   return model.endsWith(':free') || model === 'openrouter/free';
 }
 
-/** Body for a Chat Completions request to [a]. */
+/** Providers whose Chat Completions endpoint accepts
+ *  response_format {type:'json_object'}. Gemini's OpenAI-compatible endpoint
+ *  documents response_format only with a JSON schema, so it is left out and
+ *  relies on the prompt (the router validates the JSON either way). */
+export function supportsJsonObjectMode(provider: ProviderName | undefined): boolean {
+  return provider === 'groq' || provider === 'openrouter';
+}
+
+/** Body for a Chat Completions request to [a]. [jsonMode] asks for a single
+ *  JSON object (non-streaming requests to providers that support it only). */
 export function chatBody(
-  a: Pick<ProviderAttempt, 'model' | 'extraBody' | 'reasoningHeadroom'>,
+  a: Pick<ProviderAttempt, 'model' | 'extraBody' | 'reasoningHeadroom'> & { provider?: ProviderName },
   messages: unknown[],
   maxTokens: number,
   stream: boolean,
+  jsonMode = false,
 ): Record<string, unknown> {
+  const json = jsonMode && !stream && supportsJsonObjectMode(a.provider);
   return {
     model: a.model,
     messages,
     temperature: 0.25,
     max_tokens: maxTokens + a.reasoningHeadroom,
     ...a.extraBody,
+    ...(json ? { response_format: { type: 'json_object' } } : {}),
     ...(stream ? { stream: true } : {}),
   };
 }

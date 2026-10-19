@@ -105,11 +105,12 @@ class WorkoutShareData {
       final pr = isPr != null && e.sets.any((s) => s.isMainWorkingSet && isPr(e.exercise.id, s));
       lifts.add(ShareLift(
         name: e.exercise.name,
-        weight: top.weight,
+        // A bodyweight lift's weight is the belt / vest load on top.
+        weight: bwLift ? (top.externalLoadKg ?? top.weight) : top.weight,
         reps: top.reps,
         e1rm: top.estimatedOneRepMax,
         isPr: pr,
-        bodyweight: bwLift && top.weight <= 0,
+        bodyweight: bwLift,
       ));
     }
     lifts.sort((a, b) => b.e1rm.compareTo(a.e1rm));
@@ -255,7 +256,9 @@ class WorkoutShareCard extends StatelessWidget {
                             const SizedBox(width: 8),
                           ],
                           Text(
-                            l.bodyweight ? 'BW × ${l.reps}' : '${_num(l.weight)} × ${l.reps}',
+                            l.bodyweight
+                                ? (l.weight > 0 ? 'BW+${_num(l.weight)} × ${l.reps}' : 'BW × ${l.reps}')
+                                : '${_num(l.weight)} × ${l.reps}',
                             style: _t(15, FontWeight.w800, p.textPrimary, tabular: true, spacing: -0.3),
                           ),
                         ],

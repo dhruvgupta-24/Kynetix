@@ -7,6 +7,9 @@ import '../models/nutrition_result.dart';
 import '../data/micronutrient_library.dart';
 import '../models/day_log.dart';
 import '../services/nutrition_pipeline.dart';
+import '../services/accompaniment_portion_resolver.dart';
+import '../services/profile_service.dart';
+import '../data/indian_curry_table.dart';
 import '../services/hidden_extras.dart';
 import '../services/meal_memory.dart';
 import '../services/meal_tombstones.dart';
@@ -83,6 +86,10 @@ class _IngredientRow {
   /// [microsKcal]. Scaled to the saved calories; null means not tracked.
   Micronutrients? micros;
   double microsKcal = 0;
+
+  /// A dal / sabzi / chole whose amount was sized by the roti and rice in
+  /// the meal (not typed). It follows the carbs when their count changes.
+  bool carbSized = false;
 
   _IngredientRow({
     required String rawText,
@@ -345,7 +352,10 @@ class _AddMealScreenState extends State<AddMealScreen>
         originalCalories: cal,
       )
         ..micros = item.micros
-        ..microsKcal = cal;
+        ..microsKcal = cal
+        ..carbSized = item.unit == 'g' &&
+            item.mode == EstimationMode.contextualIntake &&
+            IndianCurryTable.match(item.name) != null;
 
       row.calCtrl.addListener(_onMacroFieldChanged);
       row.proCtrl.addListener(_onMacroFieldChanged);
@@ -440,7 +450,72 @@ class _AddMealScreenState extends State<AddMealScreen>
       row.micros = row.micros?.scaled(scale);
       row.microsKcal = row.microsKcal * scale;
       row.parsed = p;
+      if (row.carbSized) {
+        // The person set this curry's amount themselves now.
+        row.carbSized = false;
+      } else {
+        _resizeCarbSizedCurries();
+      }
       _updateTotalsAndValidate();
+    }
+  }
+
+  /// After a roti or rice count changes, the dal / sabzi / chole that was
+  /// sized by the carbs is sized again: 3 roti take more chole than 2.
+  /// Rows whose macros were edited by hand, or that hold the person's own
+  /// saved values, are left alone.
+  void _resizeCarbSizedCurries() {
+    bool untouched(_IngredientRow r) =>
+        ((double.tryParse(r.calCtrl.text) ?? 0) - r.originalCalories).abs() < 1;
+    final follow = {
+      for (final r in _rows)
+        if (r.carbSized && !r.isSaved && untouched(r)) r,
+    };
+    if (follow.isEmpty) return;
+
+    NutrientRange at(TextEditingController c) {
+      final v = double.tryParse(c.text) ?? 0;
+      return NutrientRange(min: v, max: v);
+    }
+
+    final items = [
+      for (final r in _rows)
+        NutritionItem(
+          name: r.parsed.normalizedName,
+          quantity: follow.contains(r) ? 1 : r.parsed.quantity,
+          unit: follow.contains(r) ? 'serving' : r.parsed.unit,
+          estimated: true,
+          mode: EstimationMode.contextualIntake,
+          calories: at(r.calCtrl),
+          protein: at(r.proCtrl),
+        ),
+    ];
+    final sized = AccompanimentPortionResolver.resolve(
+      items,
+      anchor: ProfileService.instance.activePortionAnchor,
+    );
+    for (var i = 0; i < _rows.length; i++) {
+      final row = _rows[i];
+      if (!follow.contains(row)) continue;
+      final it = sized[i];
+      final cal = it.calories.mid;
+      row.parsed = ParsedFoodItem(
+        rawChunk: row.parsed.rawChunk,
+        normalizedName: row.parsed.normalizedName,
+        quantity: it.quantity,
+        unit: it.unit,
+      );
+      final text = _constructItemString(row.parsed);
+      row.textCtrl.text = text;
+      row.lastParsedText = text;
+      row.calCtrl.text = cal.toStringAsFixed(0);
+      row.proCtrl.text = it.protein.mid.toStringAsFixed(1);
+      row.carbCtrl.text = (it.carbohydrates?.mid ?? 0).toStringAsFixed(1);
+      row.fatCtrl.text = (it.fat?.mid ?? 0).toStringAsFixed(1);
+      row.fibCtrl.text = (it.fiber?.mid ?? 0).toStringAsFixed(1);
+      if (row.microsKcal > 0) row.micros = row.micros?.scaled(cal / row.microsKcal);
+      row.microsKcal = cal;
+      row.originalCalories = cal;
     }
   }
 

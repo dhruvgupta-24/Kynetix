@@ -360,8 +360,20 @@ class ItemParser {
     'pratha': 'paratha',
     'biryni': 'biryani',
     'rajmah': 'rajma',
+    'chane': 'chana',
+    'channe': 'chana',
+    'chhole': 'chole',
     'makhni': 'makhani',
     'makahani': 'makhani',
+    'rotti': 'roti',
+    'rottis': 'roti',
+    'roties': 'roti',
+    'chappati': 'chapati',
+    'chappatti': 'chapati',
+    'chapathi': 'chapati',
+    'parantha': 'paratha',
+    'paratha\'s': 'paratha',
+    'chawl': 'chawal',
     // Multi-word corrections
     'aloo pratha': 'aloo paratha',
   };
@@ -429,6 +441,17 @@ class ItemParser {
         continue;
       }
 
+      // Layer 2 (Known Food Corrections, word-by-word) runs before the
+      // exact-match check so known spelling variants normalise even when the variant itself is a
+      // dictionary word (e.g. 'chane' / 'chhole' are local DB keywords).
+      final knownVariant = _knownCorrections[word];
+      if (knownVariant != null) {
+        suggestedWords.add(knownVariant);
+        hasCorrection = true;
+        minConfidence = minConfidence < 0.98 ? minConfidence : 0.98;
+        continue;
+      }
+
       // Layer 1: Exact Match check FIRST
       if (dictionary.contains(word)) {
         suggestedWords.add(word);
@@ -452,15 +475,6 @@ class ItemParser {
       // If the word matches a protected brand or user custom food, keep it as is
       if (_isProtectedWord(word)) {
         suggestedWords.add(word);
-        continue;
-      }
-
-      // Layer 2: Known Food Correction Layer (Word-by-word)
-      final knownWord = _knownCorrections[word];
-      if (knownWord != null) {
-        suggestedWords.add(knownWord);
-        hasCorrection = true;
-        minConfidence = minConfidence < 0.98 ? minConfidence : 0.98;
         continue;
       }
 

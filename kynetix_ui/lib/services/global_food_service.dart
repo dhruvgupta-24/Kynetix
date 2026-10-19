@@ -167,7 +167,7 @@ class GlobalFoodService {
       id: 'default_roti',
       canonicalName: 'roti',
       aliases: ['chapati', 'phulka', 'roties', 'chapatis'],
-      // One plain roti (~40 g atta). 200 kcal / 6 g is two rotis.
+      // One plain roti (~30 g atta). 200 kcal / 6 g is two rotis.
       caloriesMid: 100.0,
       proteinMid: 3.0,
       carbsMid: 17.5,

@@ -585,6 +585,7 @@ class InsightsReportService extends ChangeNotifier {
       if (!status.isConnected) return;
 
       // The system prompt is server-owned (purpose 'weekly_summary').
+      final protein = _weekProteinStats(report, profile);
       final userPrompt = 'Weekly Report Data:\n'
           '- Week: ${report.weekKey}\n'
           '- Consistency Score: ${report.consistencyScore.score}/100\n'
@@ -592,6 +593,8 @@ class InsightsReportService extends ChangeNotifier {
           '- Gym Days: ${report.gymDaysCount}\n'
           '- Avg Calories: ${report.avgCalories.round()} kcal\n'
           '- Avg Protein: ${report.avgProtein.round()}g\n'
+          '${protein != null ? '- Protein target: ${protein.target}g\n' : ''}'
+          '${protein != null ? '- Days protein target hit: ${protein.hitDays}/7\n' : ''}'
           '${report.deltaVsPrior != null ? '- Score change vs last week: ${report.deltaVsPrior!.consistencyScoreDelta ?? 0} pts' : ''}\n'
           '${report.topImprovement != null ? '- Top improvement: ${report.topImprovement!.label}' : ''}\n'
           'User Name: ${profile.name}';
@@ -888,6 +891,31 @@ class InsightsReportService extends ChangeNotifier {
       }
     }
     return streak;
+  }
+
+  /// Protein target (average over the week's logged days, or all 7 days when
+  /// none are logged) and the days that reached it, from the same engine and
+  /// 90% rule as the protein streak. Null when no target can be computed.
+  ({int target, int hitDays})? _weekProteinStats(WeeklyReport report, UserProfile profile) {
+    final start = DateTime(report.weekStart.year, report.weekStart.month, report.weekStart.day);
+    final loggedTargets = <double>[];
+    final allTargets = <double>[];
+    var hitDays = 0;
+    for (var i = 0; i < 7; i++) {
+      final date = DateTime(start.year, start.month, start.day + i);
+      final target = NutritionTargetEngine.instance
+          .effectiveTargetForDate(date, profile: profile)
+          .protein;
+      allTargets.add(target);
+      final log = dayLogStore[dateKey(date)];
+      if (log == null || log.isEmpty) continue;
+      loggedTargets.add(target);
+      if (_isProteinHit(log, profile, date)) hitDays++;
+    }
+    final source = loggedTargets.isNotEmpty ? loggedTargets : allTargets;
+    final avg = source.fold<double>(0, (a, t) => a + t) / source.length;
+    if (!avg.isFinite || avg <= 0) return null;
+    return (target: avg.round(), hitDays: hitDays);
   }
 
   bool _isProteinHit(DayLog log, UserProfile profile, DateTime date) {

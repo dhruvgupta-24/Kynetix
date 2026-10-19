@@ -98,3 +98,16 @@ Deno.test('chatBody keeps request shape and adds per-provider reasoning settings
   const gpt = chain.find((a) => a.model.startsWith('openai/gpt-oss'))!;
   eq(chatBody(gpt, msgs, 400, false).include_reasoning, false, 'groq gpt-oss hides reasoning');
 });
+
+Deno.test('jsonMode adds response_format only for Groq/OpenRouter, never when streaming', () => {
+  const msgs = [{ role: 'user', content: 'json please' }];
+  const chain = buildFallbackChain(envOf({ GEMINI_API_KEY: 'g', GROQ_API_KEY: 'q', OPENROUTER_API_KEY: 'o' }), false);
+  const json = { type: 'json_object' };
+  for (const a of chain) {
+    const b = chatBody(a, msgs, 400, false, true);
+    if (a.provider === 'gemini') assert(!('response_format' in b), 'gemini left to the prompt');
+    else eq(b.response_format, json, `${a.provider} json mode`);
+    assert(!('response_format' in chatBody(a, msgs, 400, true, true)), 'never with stream');
+    assert(!('response_format' in chatBody(a, msgs, 400, false)), 'off by default');
+  }
+});

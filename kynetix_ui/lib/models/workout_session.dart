@@ -87,6 +87,23 @@ class SetEntry {
       ? (externalLoadKg! > 0 ? externalLoadKg! : 0.0) * reps
       : weight * reps;
 
+  /// What was lifted, for display: "BW + 10 kg" or "BW" for a bodyweight
+  /// set, "62.5 kg" otherwise.
+  String get loadLabel {
+    String n(double v) => v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    final ext = externalLoadKg;
+    if (ext != null) return ext > 0 ? 'BW + ${n(ext)} kg' : 'BW';
+    return '${n(weight)} kg';
+  }
+
+  /// Short form for lists of sets: "62.5×8", "BW+10×8", "BW×12".
+  String get shortLabel {
+    String n(double v) => v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    final ext = externalLoadKg;
+    if (ext != null) return ext > 0 ? 'BW+${n(ext)}×$reps' : 'BW×$reps';
+    return '${n(weight)}×$reps';
+  }
+
   Map<String, dynamic> toJson() => {
         'weight':  weight,
         'reps':    reps,

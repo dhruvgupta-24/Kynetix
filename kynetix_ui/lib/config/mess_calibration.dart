@@ -16,15 +16,15 @@ class MessCalibration {
   MessCalibration._();
 
   // ── Volume / weight references ─────────────────────────────────────────────
-  static const int milkGlassMl          = 200;  // user's hostel glass
+  static const int milkGlassMl          = 250;  // standard glass, matches mock_estimation_service
   static const int milkKcalPer100ml     = 58;   // TONED milk (NOT double-toned 46)
   static const int milkProteinPer100ml  = 3;    // ~3.0–3.4 g/100ml for toned
 
   // Rice: calibrated to 130 kcal per ladle (user-stated measurement)
-  static const int riceLadleKcal        = 130;  // ≈85–90g cooked rice per ladle
+  static const int riceLadleKcal        = 130;  // ≈100–105g cooked rice per ladle (~1.3 kcal/g)
   static const int riceLadleProtein     = 3;    // ~2.5–3g protein per ladle
-  static const int riceLadleGMin        = 85;   // cooked g per ladle (lower)
-  static const int riceLadleGMax        = 95;   // cooked g per ladle (upper)
+  static const int riceLadleGMin        = 100;  // cooked g per ladle (lower)
+  static const int riceLadleGMax        = 105;  // cooked g per ladle (upper)
 
   // Dal
   static const int dalLadleMlMin        = 60;
@@ -77,8 +77,8 @@ MESS COMPARTMENT SIZES (critical for thali/tray meals):
 
 CONSUMED PORTION RULES (hostel/mess context, estimate EATEN, not SERVED):
 - Dal/sabzi alongside roti/rice: estimate what was used to finish carbs (~60-80% of one katori)
-- Rajma/chole alongside roti/rice: ~70-90g cooked (one ladle-sized portion, ~160-200 kcal)
-- Dal alongside roti: ~70-85 ml per 2 roti (~100-130 kcal from dal portion)
+- Rajma/chole alongside roti/rice: ~70-90g cooked (one ladle-sized portion, ~85-130 kcal, ~4-5.5g protein)
+- Dal alongside roti: ~70-85 ml per 2 roti (~50-80 kcal, ~2.5-4g protein from dal portion)
 - Paneer: eat ALL paneer pieces, leave ~35% of gravy/oil → net ~220-290 kcal per mess serving
 - Full thali (roti + rice + curry): estimate TOTAL consumed, not all compartments at full value''';
 }
