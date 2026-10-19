@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +17,7 @@ import 'services/health_service.dart';
 import 'services/persistence_service.dart';
 import 'services/global_food_service.dart';
 import 'services/error_reporter.dart';
+import 'services/secure_session_storage.dart';
 
 Future<void> main() async {
   final stopwatch = Stopwatch()..start();
@@ -32,6 +35,12 @@ Future<void> main() async {
     yield LicenseEntryWithLineBreaks(const ['Inter', 'Inter Tight'], ofl);
   });
 
+  // A plain graphite frame at once. Android won't draw the window (so the
+  // splash can't hand over to the native intro) until Flutter has drawn
+  // something, and Supabase's start (a keystore on first run) takes a while.
+  // The intro covers this frame; the real app replaces it below.
+  runApp(const ColoredBox(color: Color(0xFF0B0B0C)));
+
   // Only what the first frame truly needs blocks runApp:
   //  • the theme preference (System / Light / Dark) so there is no flash, and
   //  • Supabase, because AuthGate routes on its restored session.
@@ -40,6 +49,15 @@ Future<void> main() async {
   await Supabase.initialize(
     url: SupabaseSecrets.url,
     anonKey: SupabaseSecrets.anonKey,
+    // Session in the Keystore/Keychain, migrated once from the old
+    // SharedPreferences key. Web keeps supabase_flutter's default.
+    authOptions: kIsWeb
+        ? const FlutterAuthClientOptions()
+        : FlutterAuthClientOptions(
+            localStorage: SecureSessionStorage(
+              persistSessionKey: SecureSessionStorage.defaultPersistSessionKey(SupabaseSecrets.url),
+            ),
+          ),
   );
   await themeLoad;
   debugPrint('[Startup Profile] Theme + Supabase ready in ${stopwatch.elapsedMilliseconds} ms');
@@ -95,8 +113,14 @@ class KynetixApp extends StatefulWidget {
 class _KynetixAppState extends State<KynetixApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// On Android the intro is native (MainActivity's LaunchIntro, on the
+  /// RenderThread, so startup work can't make it stutter). Elsewhere the
+  /// Dart KBrandIntro plays it.
+  static final bool _nativeIntro = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  static const _splashChannel = MethodChannel('com.kynetix.app/splash');
+
   /// The Shear intro plays once per cold start, over whatever AuthGate shows.
-  bool _introDone = false;
+  bool _introDone = _nativeIntro;
 
   /// Until the intro starts fading, the app underneath keeps its animations
   /// paused, so the intro never shares frames with them.
@@ -110,12 +134,52 @@ class _KynetixAppState extends State<KynetixApp> {
   @override
   void initState() {
     super.initState();
+    if (_nativeIntro) _handOverToNativeIntro();
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (data.event == AuthChangeEvent.passwordRecovery) {
         _navigatorKey.currentState?.push(
           kRiseRoute(builder: (_) => const ResetPasswordScreen()),
         );
       }
+    });
+  }
+
+  /// Tells the native intro once the app underneath has drawn, then wakes the
+  /// app's own animations as the intro fades.
+  Timer? _introFallback;
+
+  @override
+  void dispose() {
+    _introFallback?.cancel();
+    appLanded.removeListener(_onLanded);
+    super.dispose();
+  }
+
+  void _handOverToNativeIntro() {
+    void reveal() {
+      if (mounted && !_introRevealed) setState(() => _introRevealed = true);
+    }
+
+    // Never stay asleep if the platform side doesn't answer.
+    _introFallback = Timer(const Duration(seconds: 6), reveal);
+    _splashChannel.invokeMethod<bool>('waitForIntro').then((_) {
+      _introFallback?.cancel();
+      reveal();
+    }, onError: (Object _) {
+      _introFallback?.cancel();
+      reveal();
+    });
+    appLanded.addListener(_onLanded);
+    _onLanded();
+  }
+
+  /// Ready once the gate has landed on a real screen (not its loader) and
+  /// that screen has been on screen for a frame.
+  void _onLanded() {
+    if (!appLanded.value) return;
+    appLanded.removeListener(_onLanded);
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      _splashChannel.invokeMethod<bool>('appReady').catchError((Object _) => false);
     });
   }
 

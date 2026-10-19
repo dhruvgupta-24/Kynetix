@@ -83,12 +83,20 @@ class _AuthGateState extends State<AuthGate> {
 // Duration: emphasized in, instant out. Haptic: none (no user action).
 // Reduced motion: instant swap.
 
+/// True once the gate shows a real destination (sign-in, onboarding, the
+/// app) rather than its loader. The launch intro waits for it, so it lifts
+/// onto the screen the user came for.
+final ValueNotifier<bool> appLanded = ValueNotifier(false);
+
 class _GateSwitcher extends StatelessWidget {
   const _GateSwitcher({required this.child});
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    if (!appLanded.value && child is! _BrandLoader) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => appLanded.value = true);
+    }
     return ColoredBox(
       color: KColor.bg,
       child: AnimatedSwitcher(

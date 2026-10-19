@@ -31,6 +31,9 @@ class MainActivity : FlutterFragmentActivity() {
     private var splashGone = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
     private val splashWaiters = mutableListOf<MethodChannel.Result>()
 
+    // The full Shear intro, played natively over the app (see LaunchIntro).
+    private lateinit var intro: LaunchIntro
+
     companion object {
         private const val LAUNCH_CHANNEL = "com.kynetix.app/launch"
         private const val ACTION_PRIVACY_POLICY = "privacy_policy"
@@ -45,11 +48,23 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent, coldStart = true)
-        holdSplashForIconAnimation()
+        intro = LaunchIntro(this)
+        if (savedInstanceState == null) {
+            intro.attach()
+            holdSplashForIconAnimation()
+        } else {
+            // Recreated (rotation, theme): no intro, no splash to wait for.
+            intro.skipEntirely()
+            markSplashGone()
+        }
     }
 
     private fun holdSplashForIconAnimation() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // No animated splash: the intro starts on the first frame.
+            window.decorView.post { intro.start() }
+            return
+        }
         val shownAt = SystemClock.uptimeMillis()
         splashScreen.setOnExitAnimationListener { view ->
             // Let the K finish its slice and shear, then hand over instantly.
@@ -57,12 +72,18 @@ class MainActivity : FlutterFragmentActivity() {
             val elapsed = SystemClock.uptimeMillis() - shownAt
             val wait = (duration - elapsed + 40L).coerceIn(0L, 1000L)
             Handler(Looper.getMainLooper()).postDelayed({
+                // The intro's first frame is the splash's last: start it,
+                // then lift the splash off in the same frame.
+                intro.start()
                 view.remove()
                 markSplashGone()
             }, wait)
         }
-        // If the system never shows a splash (some launches), don't hold Dart.
-        Handler(Looper.getMainLooper()).postDelayed({ markSplashGone() }, 2500L)
+        // If the system never shows a splash (some launches), go anyway.
+        Handler(Looper.getMainLooper()).postDelayed({
+            intro.start()
+            markSplashGone()
+        }, 3000L)
     }
 
     private fun markSplashGone() {
@@ -108,10 +129,16 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kynetix.app/splash").setMethodCallHandler { call, result ->
-            if (call.method == "waitForSplash") {
-                if (splashGone) result.success(true) else splashWaiters.add(result)
-            } else {
-                result.notImplemented()
+            when (call.method) {
+                "waitForSplash" -> if (splashGone) result.success(true) else splashWaiters.add(result)
+                // Dart has drawn the app underneath the intro.
+                "appReady" -> {
+                    intro.markAppReady()
+                    result.success(true)
+                }
+                // Completes as the intro starts fading: the app may animate.
+                "waitForIntro" -> intro.whenRevealed { result.success(true) }
+                else -> result.notImplemented()
             }
         }
 
