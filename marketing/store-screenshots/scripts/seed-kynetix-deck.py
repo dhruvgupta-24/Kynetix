@@ -59,16 +59,16 @@ android = [
     # 02 MEAL: type it in your own words, loupe on the input.
     slide("k02-meal", "device-bottom", "DAL, ROTI, KATORI. SORTED.", "TYPE IT LIKE\nYOU [SAY] IT.", SHOT + "meal.png",
           typography={"headlineScale": 1.12},
-          callout={"focusX": 0.36, "focusY": 0.205, "zoom": 1.9, "shape": "rounded"},
+          callout={"focusX": 0.475, "focusY": 0.206, "zoom": 1.5, "shape": "rounded"},
           transforms={"caption": t(40, 150, 1000, 360, 0, 4), "device": phone(215, 560, 650),
-                      "callout": t(70, 760, 700, 230, -3, 5)}),
+                      "callout": t(50, 740, 780, 220, -3, 5)}),
     # 03 KYNO: the differentiator, on bone for contrast.
     slide("k03-kyno", "two-devices", "MEET KYNO", "A COACH THAT\nREADS [BOTH].", SHOT + "kyno_answer.png",
           screenshotSecondary=SHOT + "kyno_empty.png", inverted=True,
           typography={"headlineScale": 1.12},
           transforms={"caption": t(40, 150, 1000, 360, 0, 4),
-                      "deviceSecondary": phone(-70, 700, 560, -7, 2),
-                      "device": phone(395, 590, 640, 4, 3)},
+                      "deviceSecondary": phone(80, 700, 560, -7, 2),
+                      "device": phone(380, 590, 640, 4, 3)},
           textElements=[txt("sub", "Meals and lifts, read together.", 140, 430, 800, 70, 40, 500, "#55544F", "center")]),
     # 04 WORKOUT: device on top, tilted, caption below.
     slide("k04-sets", "device-top", "TRAINING", "EVERY SET.\n[ONE] TAP.", SHOT + "workout.png",
@@ -79,9 +79,10 @@ android = [
           typography={"headlineScale": 1.3},
           transforms={"caption": t(40, 150, 1000, 360, 0, 4)},
           imageElements=[
-              card("eq", "card-equivalent-graphite.png", 60, 650, 400, -9, 5),
-              card("poster", "card-poster-paper.png", 335, 590, 400, -1, 6),
-              card("receipt", "card-receipt-graphite.png", 605, 630, 400, 7, 7),
+              card("eq", "card-equivalent-graphite.png", 72, 690, 370, -11, 4),
+              card("sticker", "card-sticker-on-tile.png", 225, 630, 370, -5, 5),
+              card("poster", "card-poster-paper.png", 430, 600, 370, 2, 6),
+              card("receipt", "card-receipt-graphite.png", 650, 650, 370, 9, 7),
               # Connected moment: the Skyline card's own bars, stretched into one
               # skyline that runs across screens 5 and 6. The seam splits an ember
               # bar, like the shear cut in the wordmark. No text crosses.
