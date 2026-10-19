@@ -2,6 +2,9 @@ import '../models/day_log.dart';
 import 'kyno_historical_analysis_service.dart';
 import 'user_session_coordinator.dart';
 import '../ui/k_format.dart';
+import '../models/workout_split.dart' show Exercise;
+import 'kyno_progression_engine.dart';
+import 'workout_service.dart';
 
 enum KynoInsightSeverity {
   needsAttention,
@@ -175,7 +178,8 @@ class KynoCoachingInsightService {
           title: '$exName has stalled',
           evidence: plateau,
           explanation: 'You have logged the identical load and repetitions across consecutive sessions without rep progression. Progressive overload requires adding reps or load.',
-          recommendation: 'For your next session on $exName, keep the same weight and strive to add 1-2 reps on your first working set.',
+          recommendation: _stallPlan(exName) ??
+              'For your next session on $exName, keep the same weight and strive to add 1-2 reps on your first working set.',
           datePeriod: 'Recent sessions',
           createdAt: now,
         );
@@ -276,5 +280,31 @@ class KynoCoachingInsightService {
     final lastTime = _lastGeneratedTimeByKey[key];
     if (lastTime == null) return true;
     return now.difference(lastTime) > _cooldownDuration;
+  }
+}
+
+/// Kyno's own next step for a stalled lift (its plan, and a swap when it has
+/// one), so the insight card says the same thing as the workout screen.
+String? _stallPlan(String exerciseName) {
+  try {
+    final lc = exerciseName.toLowerCase();
+    Exercise? ex;
+    for (final s in WorkoutService.instance.sessions.reversed) {
+      for (final e in s.entries) {
+        if (e.exercise.name.toLowerCase() == lc) {
+          ex = e.exercise;
+          break;
+        }
+      }
+      if (ex != null) break;
+    }
+    if (ex == null) return null;
+    final plan = KynoProgressionEngine.instance.planFor(ex);
+    if (plan.sets.isEmpty) return null;
+    final swap = plan.swap;
+    return 'Next session: ${plan.headline} (${plan.setsLine}).'
+        '${swap != null ? ' If it is still stuck after that, swap to ${swap.name} for 4 to 6 weeks.' : ''}';
+  } catch (_) {
+    return null;
   }
 }

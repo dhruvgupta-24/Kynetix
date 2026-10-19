@@ -18,6 +18,8 @@ import '../widgets/exercise_execution_input_view.dart';
 import '../widgets/exercise_progression_chart.dart';
 import '../services/wakelock_service.dart';
 import '../services/kyno_progression_engine.dart';
+import '../services/kyno_coach_planner.dart';
+import '../services/exercise_library_service.dart';
 import '../services/rest_timer_prefs.dart';
 import '../services/rest_timer_notifications.dart';
 import '../services/previous_set_lookup.dart';
@@ -486,16 +488,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
           _temporaryAdditions[ex.id] = matchingEntry.isTemporaryAddition;
         }
 
-        // Initialize default dial values
-        final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
-        final lastTop = lastEntry?.topSet;
-        if (lastTop != null) {
-          _weightSelections[ex.id] = lastTop.weight;
-          _repsSelections[ex.id] = lastTop.reps;
-        } else {
-          _weightSelections[ex.id] = 40.0;
-          _repsSelections[ex.id] = 10;
-        }
+        _seedDials(ex);
       }
 
       _restoreState().then((_) {
@@ -512,16 +505,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
         _setTypeSelections[ex.id] = SetType.normal;
         _rpeSelections[ex.id] = 8.0;
 
-        // Initialize default dial values
-        final lastEntry = _service.lastEntryFor(ex.id, widget.splitDay.name);
-        final lastTop = lastEntry?.topSet;
-        if (lastTop != null) {
-          _weightSelections[ex.id] = lastTop.weight;
-          _repsSelections[ex.id] = lastTop.reps;
-        } else {
-          _weightSelections[ex.id] = 40.0;
-          _repsSelections[ex.id] = 10;
-        }
+        _seedDials(ex);
       }
 
       // Clear recovery state to make sure it's fresh
@@ -1592,6 +1576,30 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     _queueRecoverySave();
   }
 
+  /// Opening dial values: Kyno's first planned set when there is a plan,
+  /// else last time's top set, else a neutral 40 kg × 10.
+  void _seedDials(Exercise ex) {
+    PlannedSet? first;
+    try {
+      first = KynoProgressionEngine.instance.planFor(ex).setAt(0);
+    } catch (_) {}
+    if (first != null) {
+      _weightSelections[ex.id] = first.bodyweight ? 0.0 : first.load;
+      _repsSelections[ex.id] = first.reps;
+      if (first.bodyweight) _externalLoadSelections[ex.id] = first.load;
+      return;
+    }
+    final lastTop = _service.lastEntryFor(ex.id, widget.splitDay.name)?.topSet;
+    if (lastTop != null) {
+      _weightSelections[ex.id] = lastTop.weight;
+      _repsSelections[ex.id] = lastTop.reps;
+      if (lastTop.externalLoadKg != null) _externalLoadSelections[ex.id] = lastTop.externalLoadKg;
+    } else {
+      _weightSelections[ex.id] = 40.0;
+      _repsSelections[ex.id] = 10;
+    }
+  }
+
   void _clearWarmUpPlan(String exId) {
     setState(() {
       _warmUpPlans.remove(exId);
@@ -1977,9 +1985,14 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          _confirmDiscard();
+        if (didPop) return;
+        // The workout is already saved behind the summary: back means Done,
+        // not "discard this session?".
+        if (_showCompletionScreen) {
+          Navigator.of(context).pop(true);
+          return;
         }
+        _confirmDiscard();
       },
       child: Scaffold(
         backgroundColor: KColor.bg,
@@ -2126,6 +2139,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                               restSeconds: RestTimerPrefs.instance.durationFor(ex),
                               onEditRest: () => _editRestDuration(forExercise: ex),
                               onCopyPrevious: (prev) => _copyPreviousSet(ex, prev),
+                              onSwapSuggested: (replacement) => _replaceExercise(ex.id, replacement),
                             );
                           },
                         );
@@ -2731,6 +2745,9 @@ class _ExerciseWorkoutPage extends StatefulWidget {
   final VoidCallback onEditRest;
   final ValueChanged<SetEntry> onCopyPrevious;
 
+  /// Swap this exercise for Kyno's suggestion, for today's session.
+  final ValueChanged<Exercise>? onSwapSuggested;
+
   const _ExerciseWorkoutPage({
     super.key,
     required this.exercise,
@@ -2787,6 +2804,7 @@ class _ExerciseWorkoutPage extends StatefulWidget {
     required this.restSeconds,
     required this.onEditRest,
     required this.onCopyPrevious,
+    this.onSwapSuggested,
   });
 
   @override
@@ -3556,6 +3574,21 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
           exercise: widget.exercise,
           advice: _progressionAdvice,
         ),
+        if (_progressionAdvice.plan case final plan? when plan.sets.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _CoachPlanCard(
+            plan: plan,
+            doneSets: widget.sets.where((s) => s.setType == SetType.normal).length,
+            onSwap: plan.swap == null || widget.onSwapSuggested == null
+                ? null
+                : () {
+                    final def = ExerciseLibraryService.instance.getById(plan.swap!.exerciseId);
+                    if (def == null) return;
+                    KHaptics.commit();
+                    widget.onSwapSuggested!(def.toExercise());
+                  },
+          ),
+        ],
         // A first-timer has no curve to draw; the stats strip already says so.
         if (widget.history.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -3728,17 +3761,14 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
 
   // ── Wheel Dials selectors (Change 1) ──────────────────────────────────────
 
-  /// Kyno's target for today, e.g. "72.5 × 8–10", parsed from the
-  /// progression engine's "72.5 kg • 4 sets • 8–10 reps". Null when it has
-  /// no concrete number (first sessions, timed work).
-  String? get _kynoTarget {
-    final t = _progressionAdvice.todayTarget;
-    final w = RegExp(r'(\d+(?:\.\d+)?)\s*kg').firstMatch(t);
-    final r = RegExp(r'(\d+(?:\s*[--]\s*\d+)?)\s*reps?').firstMatch(t);
-    if (w == null || r == null) return null;
-    final wv = double.tryParse(w.group(1)!);
-    if (wv == null || wv <= 0) return null;
-    return '${amount(wv)} × ${r.group(1)!.replaceAll(' ', '')}';
+  /// Kyno's planned set for the next working set ("62.5 × 8", "BW+10 × 8"):
+  /// set N of today's plan, or its last set once the plan is done. Null with
+  /// no plan yet (first session, timed work).
+  PlannedSet? get _kynoTarget {
+    final plan = _progressionAdvice.plan;
+    if (plan == null || plan.sets.isEmpty) return null;
+    final done = widget.sets.where((s) => s.setType == SetType.normal).length;
+    return plan.setAt(done) ?? plan.sets.last;
   }
 
   Widget _buildGhostRow() {
@@ -3812,16 +3842,38 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
             ),
           if (kyno != null)
             Semantics(
-              label: "Kyno's target: ${kyno.replaceAll('×', 'for')} reps",
+              button: true,
+              label: "Kyno's target for $setWord: ${kyno.label.replaceAll('×', 'for')} reps. Double tap to use it.",
               excludeSemantics: true,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  KDot(color: KColor.fat, size: 6),
-                  const SizedBox(width: 6),
-                  Text('Kyno  ', style: ghostStyle.copyWith(color: KColor.textMuted)),
-                  Text(kyno, style: ghostStyle.copyWith(fontWeight: FontWeight.w600)),
-                ],
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const Key('ghost_kyno_target'),
+                  // Loads Kyno's set into the dials, like last time's value.
+                  onTap: () => widget.onCopyPrevious(SetEntry(
+                    weight: kyno.bodyweight ? 0 : kyno.load,
+                    reps: kyno.reps,
+                    externalLoadKg: kyno.bodyweight ? kyno.load : null,
+                  )),
+                  borderRadius: KRadius.pill,
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: KRadius.pill,
+                      border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.14 : 0.16)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const KynoMark(size: 14),
+                        const SizedBox(width: 6),
+                        Text('Kyno  ', style: ghostStyle.copyWith(color: KColor.textMuted)),
+                        Text(kyno.label, style: ghostStyle.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
         ],
@@ -6476,4 +6528,174 @@ class _LeaderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LeaderPainter old) => old.color != color;
+}
+
+// ─── Kyno's plan card ─────────────────────────────────────────────────────────
+// Today's sets in the person's own loading pattern (done ones ticked, the next
+// one marked), a swap when the lift has stalled, and how the last session
+// went: when it fell short, the likely causes from food, sleep and spacing,
+// each with what to change.
+
+class _CoachPlanCard extends StatelessWidget {
+  const _CoachPlanCard({required this.plan, required this.doneSets, this.onSwap});
+
+  final CoachPlan plan;
+  final int doneSets;
+  final VoidCallback? onSwap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hair = KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border;
+    final label = KText.caption.copyWith(color: KColor.textSecondary, fontSize: 12, fontWeight: FontWeight.w600);
+    final body = KText.caption.copyWith(color: KColor.textSecondary, fontSize: 12.5, height: 1.4);
+    final below = plan.verdict == SessionVerdict.belowPar;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: KColor.card,
+        borderRadius: KRadius.md,
+        border: Border.all(color: hair),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const KynoMark(size: 16),
+              const SizedBox(width: 8),
+              Expanded(child: Text("Kyno's plan for today", style: label)),
+              Text(plan.pattern.label, style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 11.5)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(plan.headline, style: KText.h3.copyWith(fontSize: 16)),
+          const SizedBox(height: 8),
+          for (var i = 0; i < plan.sets.length; i++)
+            _PlanSetRow(index: i, set: plan.sets[i], done: i < doneSets, next: i == doneSets),
+          if (plan.dropSetFinisher) ...[
+            const SizedBox(height: 4),
+            Text('Then your usual drop: take off 20 to 25% and go to a clean failure.', style: body),
+          ],
+          // The stage card above already says why; this card is the sets.
+          if (plan.swap case final swap?) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: hair),
+            const SizedBox(height: 12),
+            Text('Stalled: try a swap', style: label),
+            const SizedBox(height: 4),
+            Text('${swap.name}. ${swap.reason}', style: body),
+            if (onSwap != null) ...[
+              const SizedBox(height: 8),
+              _CoachPillButton(label: 'Swap for today', semantic: 'Swap to ${swap.name} for today', onTap: onSwap!),
+            ],
+          ],
+          if (plan.verdictLine.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: hair),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  below ? Icons.trending_down_rounded : Icons.trending_up_rounded,
+                  size: 16,
+                  color: below ? KColor.danger : KColor.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(plan.verdictLine, style: body.copyWith(color: KColor.textPrimary))),
+              ],
+            ),
+            if (below)
+              for (final c in plan.causes) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(c.finding, style: body.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(c.fix, style: body),
+                    ],
+                  ),
+                ),
+              ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanSetRow extends StatelessWidget {
+  const _PlanSetRow({required this.index, required this.set, required this.done, required this.next});
+  final int index;
+  final PlannedSet set;
+  final bool done;
+  final bool next;
+
+  @override
+  Widget build(BuildContext context) {
+    final num = KText.numSmall.copyWith(
+      fontSize: 14,
+      fontWeight: next ? FontWeight.w700 : FontWeight.w500,
+      color: done ? KColor.textMuted : KColor.textPrimary,
+      decoration: done ? TextDecoration.lineThrough : null,
+    );
+    return Semantics(
+      label: 'Set ${index + 1}: ${set.label.replaceAll('×', 'for')} reps${done ? ', done' : next ? ', next' : ''}',
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              child: done
+                  ? Icon(Icons.check_rounded, size: 15, color: KColor.textMuted)
+                  : next
+                      ? Icon(Icons.chevron_right_rounded, size: 18, color: KColor.textPrimary)
+                      : const SizedBox.shrink(),
+            ),
+            SizedBox(
+              width: 56,
+              child: Text('Set ${index + 1}', style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 12)),
+            ),
+            Text(set.label, style: num),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoachPillButton extends StatelessWidget {
+  const _CoachPillButton({required this.label, required this.semantic, required this.onTap});
+  final String label;
+  final String semantic;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semantic,
+      excludeSemantics: true,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          foregroundColor: KColor.textPrimary,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          minimumSize: const Size(0, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: KRadius.pill,
+            side: BorderSide(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.18 : 0.2)),
+          ),
+        ),
+        child: Text(label, style: KText.caption.copyWith(color: KColor.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
 }

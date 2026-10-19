@@ -21,7 +21,10 @@ import 'kyno_notes_service.dart';
 import 'micronutrient_service.dart';
 import 'nutrition_target_engine.dart';
 import 'profile_service.dart';
+import 'kyno_coach_planner.dart';
+import 'kyno_progression_engine.dart';
 import 'workout_service.dart';
+import '../models/workout_split.dart' show Exercise;
 
 class KynoBrief {
   const KynoBrief({required this.json, required this.fuelPlan});
@@ -259,6 +262,7 @@ class KynoBriefService {
     final perExercise = <String, List<_LiftPoint>>{};
     final names = <String, String>{};
     final muscles = <String, String>{};
+    final exercises = <String, Exercise>{};
     for (final s in sessions) {
       final age = today.difference(_day(s.date)).inDays;
       if (age > 70) continue;
@@ -273,6 +277,7 @@ class KynoBriefService {
             );
         names[e.exercise.id] = e.exercise.name;
         muscles[e.exercise.id] = e.exercise.muscleGroup;
+        exercises.putIfAbsent(e.exercise.id, () => e.exercise);
       }
     }
     final lifts = <Map<String, dynamic>>[];
@@ -300,6 +305,7 @@ class KynoBriefService {
         if (b != null) 'best_e1rm_3_to_8w_ago_kg': b.round(),
         if (pct != null) 'change_pct': _r1(pct),
         'trend': trend,
+        ..._coachFields(exercises[id]!),
       });
     }
 
@@ -336,6 +342,30 @@ class KynoBriefService {
       'lifts': lifts,
       'working_sets_per_muscle_last_14d': setsPerMuscle(0, 14),
       'working_sets_per_muscle_prev_14d': setsPerMuscle(14, 28),
+    };
+  }
+
+  /// Kyno's coaching read on one lift, flat and short (the server caps
+  /// depth and string length): loading pattern, today's plan set by set,
+  /// stall and swap, and how the last session went with its likely causes.
+  Map<String, dynamic> _coachFields(Exercise exercise) {
+    final CoachPlan plan;
+    try {
+      plan = KynoProgressionEngine.instance.planFor(exercise);
+    } catch (_) {
+      return const {};
+    }
+    if (plan.sets.isEmpty) return const {};
+    String cap(String s) => s.length <= 78 ? s : '${s.substring(0, 77)}.';
+    return {
+      'loading_pattern': plan.pattern.label,
+      'kyno_plan_next_session': cap(plan.setsLine),
+      'kyno_action': cap(plan.headline),
+      if (plan.stalled) 'stalled': true,
+      if (plan.swap != null) 'suggested_swap': cap(plan.swap!.name),
+      if (plan.verdictLine.isNotEmpty) 'last_session': cap(plan.verdictLine),
+      if (plan.verdict == SessionVerdict.belowPar)
+        'likely_causes': [for (final c in plan.causes.take(4)) cap(c.finding)],
     };
   }
 
