@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/app_theme.dart';
+import 'ui/k_brand_intro.dart';
 import 'ui/k_theme_reveal.dart';
 import 'screens/auth_gate.dart';
 import 'screens/reset_password_screen.dart';
@@ -94,6 +95,9 @@ class KynetixApp extends StatefulWidget {
 class _KynetixAppState extends State<KynetixApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// The Shear intro plays once per cold start, over whatever AuthGate shows.
+  bool _introDone = false;
+
   @override
   void initState() {
     super.initState();
@@ -116,7 +120,12 @@ class _KynetixAppState extends State<KynetixApp> {
         theme: buildKynetixTheme(palette),
         themeAnimationDuration: Duration.zero,
         // Light / dark flips are revealed as a circle from the last touch.
-        builder: (context, child) => KThemeReveal(child: child ?? const SizedBox.shrink()),
+        builder: (context, child) => Stack(
+          children: [
+            KThemeReveal(child: child ?? const SizedBox.shrink()),
+            if (!_introDone) Positioned.fill(child: KBrandIntro(onDone: () => setState(() => _introDone = true))),
+          ],
+        ),
         home: const AuthGate(),
       ),
     );
