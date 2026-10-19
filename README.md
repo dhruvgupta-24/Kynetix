@@ -61,7 +61,7 @@
 - Finish a workout, pick a style: Poster, Receipt, Skyline, In real terms, Sticker. Post it. Be insufferable.
 
 **Widgets**
-- Home screen widgets in four sizes, so you can check your rings without opening anything.
+- Home screen widgets in four sizes, so you can check your rings without opening anything. See [Widgets](#widgets) below.
 
 **Health Connect**
 - Reads steps, weight, sleep and HRV. Read only. Kynetix never writes to Health Connect.
@@ -113,6 +113,21 @@ Five styles, all from the same Push Day. Graphite shown; each also comes on pape
 </table>
 
 Full-size renders live in [`docs/share-cards/`](docs/share-cards/).
+
+### Widgets
+
+Your rings on the home screen. No app needed. Four sizes, captured on a real phone.
+
+<table>
+  <tr>
+    <td align="center" valign="bottom"><img src="docs/readme/widget-2x2-rings.jpg" width="200" alt="2x2 widget: rings with 1,901 kcal left and 117 g protein"><br><sub>2x2 &nbsp;Rings</sub></td>
+    <td align="center" valign="bottom"><img src="docs/readme/widget-4x2-wide.jpg" width="408" alt="4x2 widget: rings plus carbs, fat and fiber bars for Legs day"><br><sub>4x2 &nbsp;Rings and macros</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="bottom"><img src="docs/readme/widget-2x4-tall.jpg" width="200" alt="2x4 widget: rings, five macro bars and a Log meal button"><br><sub>2x4 &nbsp;Every macro, plus Log meal</sub></td>
+    <td align="center" valign="bottom"><img src="docs/readme/widget-4x4-day.jpg" width="408" alt="4x4 widget: rings, calorie and protein bars, carbs, fat and fiber rings, and a Log meal button"><br><sub>4x4 &nbsp;The whole day</sub></td>
+  </tr>
+</table>
 
 ---
 

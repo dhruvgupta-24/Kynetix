@@ -45,7 +45,7 @@
   var island = $('.island');
   var dock = $('.dock');
   var navs = [$('.links'), dock].filter(Boolean);
-  var secIds = ['food', 'training', 'kyno', 'share'];
+  var secIds = ['food', 'training', 'widgets', 'kyno', 'share'];
   var secEls = secIds.map(function (id) { return doc.getElementById(id); });
   var onHome = secEls.every(Boolean);
   var shareEnd = onHome ? doc.getElementById('share') : null;
@@ -138,7 +138,10 @@
   var menu = $('#menu');
   var menuBtn = $('.menu-btn');
   var cursorHome = null;
-  function moveCursorInto(el) { if (cursorHome && cursorHome.el) el.appendChild(cursorHome.el); }
+  /* Dialogs sit in the top layer, above the custom cursor: use the native one there. */
+  var dialogOpen = false;
+  function moveCursorInto() { dialogOpen = true; if (cursorHome && cursorHome.el) { cursorHome.el.classList.remove('live'); root.classList.remove('cursor-on'); } }
+  function cursorBack() { dialogOpen = false; }
   function closeMenu(after) {
     if (!menu || !menu.open) { if (after) after(); return; }
     var done = function () {
@@ -153,7 +156,7 @@
     });
     menu.addEventListener('close', function () {
       menuBtn.setAttribute('aria-expanded', 'false');
-      if (cursorHome && cursorHome.el) doc.body.appendChild(cursorHome.el);
+      cursorBack();
     });
     menu.addEventListener('cancel', function (e) { e.preventDefault(); closeMenu(); });
     $('.menu-x', menu).addEventListener('click', function () { closeMenu(); });
@@ -371,55 +374,66 @@
     });
     $('.lb-x', lb).addEventListener('click', function () { lb.close(); });
     lb.addEventListener('click', function (e) { if (e.target === lb) lb.close(); });
-    lb.addEventListener('close', function () { if (cursorHome && cursorHome.el) doc.body.appendChild(cursorHome.el); });
+    lb.addEventListener('close', cursorBack);
   } else {
     $$('.card[data-full]').forEach(function (c) { c.addEventListener('click', function () { window.open(c.getAttribute('data-full'), '_blank'); }); });
   }
 
-  /* ── Custom cursor: a dot, a ring, and the ember cut over links ── */
+  /* ── Custom cursor: one transform per frame for dot and ring together ── */
   if (motion && mqFine.matches) {
     var cur = doc.createElement('div');
     cur.className = 'cur'; cur.setAttribute('aria-hidden', 'true');
-    cur.innerHTML = '<div class="cur-ring"><span class="cur-lb"></span></div><div class="cur-dot"></div>';
+    cur.innerHTML = '<div class="cur-ring"></div><div class="cur-bar"></div><div class="cur-beam"></div><div class="cur-fill"><span class="cur-lb"></span></div><div class="cur-dot"></div>';
     doc.body.appendChild(cur);
     cursorHome = { el: cur };
-    var ring = $('.cur-ring', cur), dot = $('.cur-dot', cur), lbl = $('.cur-lb', cur);
-    var mx = -100, my = -100, rx = -100, ry = -100, raf = null, state = '';
-    var frame = function () {
-      rx += (mx - rx) * 0.2; ry += (my - ry) * 0.2;
-      dot.style.transform = 'translate3d(' + mx + 'px,' + my + 'px,0)';
-      ring.style.transform = 'translate3d(' + rx.toFixed(2) + 'px,' + ry.toFixed(2) + 'px,0)';
-      raf = (Math.abs(mx - rx) + Math.abs(my - ry) > 0.2) ? requestAnimationFrame(frame) : null;
+    var lbl = $('.cur-lb', cur);
+    var px = -100, py = -100, raf = null, state = '', snapEl = null;
+    var paint = function () {
+      raf = null;
+      cur.style.transform = 'translate3d(' + px + 'px,' + py + 'px,0)';
+      if (snapEl) {
+        var r = snapEl.getBoundingClientRect();
+        cur.style.setProperty('--sx', ((r.left + r.width / 2 - px) * 0.3).toFixed(1) + 'px');
+        cur.style.setProperty('--sy', ((r.top + r.height / 2 - py) * 0.3).toFixed(1) + 'px');
+      }
     };
-    var textSel = 'p, li, h1, h2, h3, dd, dt, td, th, figcaption, code, input, textarea';
-    var setState = function (s, label) {
-      if (s === state && !label) return;
+    var textSel = 'p, li, h1, h2, h3, dd, dt, td, th, figcaption, code, small, blockquote, input, textarea';
+    var btnSel = 'button, [data-magnetic], .btn, .menu-x, .lb-x';
+    var setState = function (s, el) {
+      snapEl = s === 'btn' ? el : null;
+      if (s === state) return;
       state = s;
       cur.classList.toggle('is-link', s === 'link');
+      cur.classList.toggle('is-btn', s === 'btn');
       cur.classList.toggle('is-label', s === 'label');
       cur.classList.toggle('is-text', s === 'text');
-      if (label) lbl.textContent = label;
+    };
+    var classify = function (t) {
+      if (!(t instanceof Element)) return setState('');
+      var lab = t.closest('[data-cursor]');
+      if (lab) { lbl.textContent = lab.getAttribute('data-cursor'); return setState('label'); }
+      var btn = t.closest(btnSel);
+      if (btn && !btn.closest('.links, .dock, .asks')) return setState('btn', btn);
+      if (t.closest('a, button, summary, label, [role="button"]')) return setState('link');
+      if (t.closest(textSel)) return setState('text');
+      setState('');
     };
     doc.addEventListener('pointermove', function (e) {
-      if (e.pointerType !== 'mouse') { cur.classList.remove('live'); root.classList.remove('cursor-on'); return; }
-      mx = e.clientX; my = e.clientY;
-      if (!cur.classList.contains('live')) { rx = mx; ry = my; cur.classList.add('live'); root.classList.add('cursor-on'); }
-      if (!raf) raf = requestAnimationFrame(frame);
+      if (e.pointerType !== 'mouse' || dialogOpen) { cur.classList.remove('live'); root.classList.remove('cursor-on'); return; }
+      px = e.clientX; py = e.clientY;
+      if (!cur.classList.contains('live')) { cur.classList.add('live'); root.classList.add('cursor-on'); classify(e.target); }
+      if (!raf) raf = requestAnimationFrame(paint);
     }, { passive: true });
-    doc.addEventListener('pointerover', function (e) {
-      var t = e.target;
-      if (!(t instanceof Element)) return;
-      var lab = t.closest('[data-cursor]');
-      if (lab) { setState('label', lab.getAttribute('data-cursor')); return; }
-      if (t.closest('a, button, summary, label, [role="button"]')) { setState('link'); return; }
-      if (t.closest(textSel)) { setState('text'); return; }
-      setState('');
-    });
+    doc.addEventListener('pointerover', function (e) { if (e.pointerType === 'mouse') classify(e.target); });
+    window.addEventListener('scroll', function () {
+      if (!cur.classList.contains('live')) return;
+      classify(doc.elementFromPoint(px, py));
+      if (!raf) raf = requestAnimationFrame(paint);
+    }, { passive: true });
     doc.addEventListener('pointerdown', function () { cur.classList.add('down'); });
     doc.addEventListener('pointerup', function () { cur.classList.remove('down'); });
-    doc.documentElement.addEventListener('mouseleave', function () { cur.classList.remove('live'); });
-    doc.addEventListener('mouseout', function (e) { if (!e.relatedTarget) cur.classList.remove('live'); });
-    window.addEventListener('blur', function () { cur.classList.remove('live'); });
+    doc.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { cur.classList.remove('live'); root.classList.remove('cursor-on'); } });
+    window.addEventListener('blur', function () { cur.classList.remove('live'); root.classList.remove('cursor-on'); });
   }
 
   /* ── Magnetic badges and links ───────────────────────── */
