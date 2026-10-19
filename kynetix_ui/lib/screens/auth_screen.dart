@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
 import '../services/auth_service.dart';
 import '../services/user_session_coordinator.dart';
 import '../services/dev_test_harness.dart';
@@ -13,8 +12,6 @@ import 'email_verify_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'onboarding/password_toggle.dart';
 import 'onboarding/scene_backdrop.dart';
-
-enum AuthMethod { email, phone }
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -28,7 +25,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
   // Core States
   bool _isSignup = false;
-  AuthMethod _authMethod = AuthMethod.email;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -37,10 +33,10 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _noticeIsInfo = false;
 
   /// The in-flight request is Google sign-in, so the spinner shows on the
-  /// Google button rather than on the email/phone action.
+  /// Google button rather than on the email action.
   bool _googleLoading = false;
 
-  /// A social sign-in owns the spinner, so the email/phone action stays calm.
+  /// A social sign-in owns the spinner, so the email action stays calm.
   bool get _socialLoading => _googleLoading;
 
   // Email Controllers
@@ -49,24 +45,12 @@ class _AuthScreenState extends State<AuthScreen> {
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
 
-  // Phone Controllers
-  final _phoneCtrl = TextEditingController(); 
-  String _fullPhoneNumber = '';
-  final _otpCtrl = TextEditingController();
-  final _phoneFocus = FocusNode();
-  final _otpFocus = FocusNode();
-  bool _isOtpSent = false;
-
   @override
   void dispose() {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
-    _phoneCtrl.dispose();
-    _otpCtrl.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
-    _phoneFocus.dispose();
-    _otpFocus.dispose();
     super.dispose();
   }
 
@@ -75,8 +59,6 @@ class _AuthScreenState extends State<AuthScreen> {
     _errorMessage = null;
     _noticeIsInfo = false;
     _isLoading = false;
-    _isOtpSent = false;
-    _otpCtrl.clear();
   }
 
   /// ── EMAIL LOGIC ──────────────────────────────────────────────────────────
@@ -303,60 +285,6 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  /// ── PHONE LOGIC ──────────────────────────────────────────────────────────
-
-  Future<void> _handlePhoneOtpSend() async {
-    final phone = _fullPhoneNumber.trim();
-    if (phone.isEmpty || !phone.startsWith('+')) {
-      _showError("That number doesn't look right. Check it and try again.");
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _noticeIsInfo = false;
-    });
-
-    try {
-      await _authService.sendPhoneOtp(phone);
-      if (mounted) setState(() => _isOtpSent = true);
-    } on AuthException catch (e) {
-      _showError(_friendlyAuthError(e));
-    } catch (_) {
-      _showError("Couldn't send the code. Check your connection and try again.");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _handlePhoneOtpVerify() async {
-    final phone = _fullPhoneNumber.trim();
-    final token = _otpCtrl.text.trim();
-
-    if (token.length != 6) {
-      _showError('Enter the 6-digit code from your SMS.');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _noticeIsInfo = false;
-    });
-
-    try {
-      await _authService.verifyPhoneOtp(phone, token);
-      // AuthGate handles the route naturally.
-    } on AuthException catch (e) {
-      _showError(_friendlyAuthError(e));
-    } catch (_) {
-      _showError("That code didn't go through. Check it and try again.");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
   /// ── GOOGLE LOGIC ─────────────────────────────────────────────────────────
 
   Future<void> _handleGoogleSignIn() async {
@@ -397,13 +325,6 @@ class _AuthScreenState extends State<AuthScreen> {
   void _selectSignUp() {
     _resetAuthState();
     setState(() => _isSignup = true);
-  }
-
-  void _selectMethod(AuthMethod method) {
-    _resetAuthState();
-    setState(() {
-      _authMethod = method;
-    });
   }
 
   void _openPrivacyPolicy() {
@@ -487,45 +408,21 @@ class _AuthScreenState extends State<AuthScreen> {
           value: _isSignup,
           onChanged: (signup) => signup ? _selectSignUp() : _selectSignIn(),
         ),
-        const SizedBox(height: KSpacing.md),
-
-        // Method (Email / Phone): the dense size, a level below the mode.
-        KSegmented<AuthMethod>(
-          segments: const [
-            KSegment(AuthMethod.email, 'Email', icon: Icons.email_outlined, selectedIcon: Icons.email_rounded),
-            KSegment(AuthMethod.phone, 'Phone', icon: Icons.phone_android_rounded),
-          ],
-          value: _authMethod,
-          dense: true,
-          onChanged: _selectMethod,
-        ),
         const SizedBox(height: KSpacing.lg),
 
         // Error / info message
         _InlineNotice(message: _errorMessage, isInfo: _noticeIsInfo),
 
-        // Dynamic form area — remounts (with a short fade-rise) when the
-        // method or OTP stage changes, never when only the mode flips.
+        // Email and password; the forgot-password link swaps for space on
+        // sign-up, so the height eases rather than jumps.
         AnimatedSize(
           duration: KMotion.of(context, KMotion.standard),
           curve: KMotion.emphasizedCurve,
           alignment: Alignment.topCenter,
-          child: TweenAnimationBuilder<double>(
-            key: ValueKey('${_authMethod.name}-$_isOtpSent'),
-            tween: Tween(begin: 0, end: 1),
-            duration: KMotion.of(context, KMotion.standard),
-            curve: KMotion.decelerate,
-            builder: (context, v, child) => Opacity(
-              opacity: v,
-              child: Transform.translate(offset: Offset(0, 10 * (1 - v)), child: child),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: _authMethod == AuthMethod.email
-                  ? _emailFields(context)
-                  : _phoneFields(context),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _emailFields(context),
           ),
         ),
       ],
@@ -583,93 +480,6 @@ class _AuthScreenState extends State<AuthScreen> {
         width: double.infinity,
         loading: _isLoading && !_socialLoading,
         onTap: _submitEmailAuth,
-      ),
-    ];
-  }
-
-  List<Widget> _phoneFields(BuildContext context) {
-    if (!_isOtpSent) {
-      return [
-        _FocusRing(
-          focusNode: _phoneFocus,
-          child: IntlPhoneField(
-            key: const ValueKey('phone_field'),
-            controller: _phoneCtrl,
-            focusNode: _phoneFocus,
-            initialCountryCode: 'IN',
-            style: KText.bodyMedium.copyWith(fontSize: 15),
-            dropdownTextStyle: KText.bodyMedium.copyWith(fontSize: 15),
-            dropdownIconPosition: IconPosition.trailing,
-            dropdownIcon: Icon(Icons.arrow_drop_down, color: KColor.textMuted),
-            showCountryFlag: true,
-            cursorColor: KColor.ink,
-            decoration: _fieldDecoration(hint: 'Mobile number').copyWith(
-              counterStyle: KText.caption.copyWith(color: KColor.textMuted),
-            ),
-            onChanged: (phone) {
-              _fullPhoneNumber = phone.completeNumber;
-            },
-          ),
-        ),
-        const SizedBox(height: KSpacing.lg),
-        KButton(
-          label: 'Send code',
-          width: double.infinity,
-          loading: _isLoading && !_socialLoading,
-          onTap: _handlePhoneOtpSend,
-        ),
-      ];
-    }
-    return [
-      _StyledField(
-        key: const ValueKey('otp_field'),
-        controller: _otpCtrl,
-        focusNode: _otpFocus,
-        hint: '6-digit code',
-        icon: Icons.sms_outlined,
-        keyboardType: TextInputType.number,
-        tabular: true,
-      ),
-      const SizedBox(height: KSpacing.xl),
-      KButton(
-        label: 'Verify and ${_isSignup ? "sign up" : "sign in"}',
-        width: double.infinity,
-        loading: _isLoading && !_socialLoading,
-        onTap: _handlePhoneOtpVerify,
-      ),
-      const SizedBox(height: KSpacing.sm),
-      Wrap(
-        alignment: WrapAlignment.center,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: KSpacing.xs,
-        children: [
-          TextButton(
-            onPressed: _handlePhoneOtpSend,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              foregroundColor: KColor.textPrimary,
-              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
-            ),
-            child: Text('Resend code', style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
-          ),
-          ExcludeSemantics(
-            child: Text('·', style: KText.body.copyWith(color: KColor.textMuted)),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _isOtpSent = false;
-                _otpCtrl.clear();
-              });
-            },
-            style: TextButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              foregroundColor: KColor.textSecondary,
-              shape: const RoundedRectangleBorder(borderRadius: KRadius.pill),
-            ),
-            child: Text('Change number', style: KText.bodyMedium.copyWith(color: KColor.textSecondary)),
-          ),
-        ],
       ),
     ];
   }
@@ -1309,7 +1119,6 @@ class _StyledField extends StatefulWidget {
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
-  final bool tabular;
   final Iterable<String>? autofillHints;
 
   const _StyledField({
@@ -1322,7 +1131,6 @@ class _StyledField extends StatefulWidget {
     this.keyboardType,
     this.textInputAction,
     this.onSubmitted,
-    this.tabular = false,
     this.autofillHints,
   });
 
@@ -1345,7 +1153,7 @@ class _StyledFieldState extends State<_StyledField> {
 
   @override
   Widget build(BuildContext context) {
-    final base = widget.tabular ? KText.numSmall.copyWith(fontSize: 17, letterSpacing: 1.0) : KText.bodyMedium;
+    final base = KText.bodyMedium;
     return _FocusRing(
       focusNode: _node,
       child: TextField(
@@ -1360,7 +1168,7 @@ class _StyledFieldState extends State<_StyledField> {
         textInputAction: widget.textInputAction,
         onSubmitted: widget.onSubmitted,
         autofillHints: widget.autofillHints,
-        style: base.copyWith(fontSize: widget.tabular ? 17 : 15, color: KColor.textPrimary),
+        style: base.copyWith(fontSize: 15, color: KColor.textPrimary),
         cursorColor: KColor.ink,
         decoration: _fieldDecoration(hint: widget.hint, icon: widget.icon).copyWith(
           suffixIcon: widget.isPassword
