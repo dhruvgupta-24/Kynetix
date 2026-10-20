@@ -30,7 +30,7 @@ Bump `version:` in `pubspec.yaml` (e.g. `1.0.1+2`) before each upload.
 ## 3. Play Console checklist
 - **Account deletion:**
   - In-app: Settings → Delete account.
-  - Web: host `docs/web/account-deletion.html` at a public URL (GitHub Pages, Netlify or your site) and paste that URL into the Data safety form's "Delete account URL".
+  - Web: the public page is https://dhruvgupta-24.github.io/Kynetix/delete-account/ (from `site/delete-account/`); paste that URL into the Data safety form's "Delete account URL".
 - **Privacy policy URL:** publish `docs/PRIVACY_POLICY.md` as a web page after filling in the `[placeholders]`.
 - **Health Connect:** fill in the Health apps declaration (steps, weight, sleep, HRV, all read-only, to set calorie targets).
 - **Data safety:** draft answers are below. Check them against your final setup.

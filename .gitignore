@@ -42,3 +42,21 @@ supabase/.branches
 supabase/.temp
 
 qa
+# ── Local tooling (AI assistants, editors) ───────────────────────────────────
+.claude/
+skills-lock.json
+**/.serena/
+supabase/**/.temp/
+
+# ── Local notes and scratch work (kept on disk, not published) ───────────────
+kynetix_ui/scratch/
+interview_prep_crash_course.md
+EXERCISE_DISCOVERY_UX_REPORT.md
+kynetix_ui/PRODUCTION_FLIGHT_CHECK_REPORT.md
+kynetix_ui/docs/OPENAI_SIWC_APPLICATION.md
+pad_assets_smartly.py
+docs/prd.md
+docs/PROJECT_CONTEXT.md
+docs/Dev_Rules.md
+docs/api.md
+docs/system_design.md
