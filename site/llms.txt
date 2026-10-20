@@ -7,7 +7,7 @@
 - Name: Kynetix. The AI coach inside it is called Kyno.
 - What it is: an Android app for calorie, protein and workout tracking, built around Indian food.
 - Platform: Android. iPhone is on the roadmap, no date yet.
-- Status: coming soon to Google Play. No public release date yet.
+- Status: Android beta available now as a free APK from https://dhruvgupta-24.github.io/Kynetix/download/ . Google Play coming soon, no public date yet.
 - Price: free during early access. No ads.
 - Made by: Dhruv Gupta, an independent developer in India.
 - Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
@@ -25,7 +25,18 @@
 - [Terms of use](https://dhruvgupta-24.github.io/Kynetix/terms/): Rules for using Kynetix: 18 and over, not medical advice, AI can be wrong.
 - [Delete your account](https://dhruvgupta-24.github.io/Kynetix/delete-account/): How to delete a Kynetix account and its data, in the app or by email.
 
+## Learn
+
+- [Foods](https://dhruvgupta-24.github.io/Kynetix/foods/): Calories, protein, carbs, fat and fiber for 133 Indian foods per katori, roti, plate or 100 g, from the app's food table.
+- [Exercises](https://dhruvgupta-24.github.io/Kynetix/exercises/): 154 gym and bodyweight exercises: muscles worked, equipment, sets and reps, one form cue, how to progress.
+- [Guides](https://dhruvgupta-24.github.io/Kynetix/guides/): Practical guides: counting calories in Indian food, vegetarian protein, beginner splits, progressive overload, cutting and bulking, fasting, Health Connect.
+- [Tools](https://dhruvgupta-24.github.io/Kynetix/tools/): Calorie (TDEE), protein, macro, one rep max and BMI calculators using the app's own formulas.
+- [Compare](https://dhruvgupta-24.github.io/Kynetix/compare/): Neutral comparisons with HealthifyMe, MyFitnessPal, Hevy and Strong.
+- [Download](https://dhruvgupta-24.github.io/Kynetix/download/): The free Android beta APK, install steps and SHA-256 checksums.
+
+Localized pages: [हिन्दी](https://dhruvgupta-24.github.io/Kynetix/hi/) [मराठी](https://dhruvgupta-24.github.io/Kynetix/mr/) [தமிழ்](https://dhruvgupta-24.github.io/Kynetix/ta/) [తెలుగు](https://dhruvgupta-24.github.io/Kynetix/te/) [বাংলা](https://dhruvgupta-24.github.io/Kynetix/bn/) [ગુજરાતી](https://dhruvgupta-24.github.io/Kynetix/gu/) [ಕನ್ನಡ](https://dhruvgupta-24.github.io/Kynetix/kn/) [മലയാളം](https://dhruvgupta-24.github.io/Kynetix/ml/) [ਪੰਜਾਬੀ](https://dhruvgupta-24.github.io/Kynetix/pa/). The app itself is in English.
+
 ## Optional
 
-- [Full text for AI systems](https://dhruvgupta-24.github.io/Kynetix/llms-full.txt): every fact and FAQ answer in one file.
+- [Full text for AI systems](https://dhruvgupta-24.github.io/Kynetix/llms-full.txt): every fact, FAQ answer and hub in one file.
 - [Source code](https://github.com/dhruvgupta-24/Kynetix): the Flutter app, Supabase backend and this website.

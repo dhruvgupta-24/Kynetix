@@ -639,6 +639,34 @@
     });
   }
 
+  /* ── Release info: fill version, size, date and links from version.json ── */
+  var vEls = $$('[data-v], [data-v-href], [data-v-date]');
+  var copyBtns = $$('button[data-copy]');
+  var siteBase = (doc.currentScript && doc.currentScript.src.replace(/assets\/js\/site\.js.*$/, '')) || '/Kynetix/';
+  var pick = function (o, path) { return path.split('.').reduce(function (a, k) { return a == null ? a : a[k]; }, o); };
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  if (vEls.length && window.fetch) {
+    fetch(siteBase + 'version.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (v) {
+      if (!v) return;
+      vEls.forEach(function (el) {
+        var k = el.getAttribute('data-v'), h = el.getAttribute('data-v-href'), d = el.getAttribute('data-v-date');
+        if (k) { var t = pick(v, k); if (t) el.textContent = t; }
+        if (h) { var u = pick(v, h); if (u && /^https:\/\//.test(u)) el.setAttribute('href', u); }
+        if (d) { var s = pick(v, d); var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); if (m) el.textContent = (+m[3]) + ' ' + MONTHS[+m[2] - 1] + ' ' + m[1]; }
+      });
+    }).catch(function () {});
+  }
+  copyBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var code = doc.querySelector('code[data-v="' + b.getAttribute('data-copy') + '"]');
+      if (!code || !navigator.clipboard) return;
+      navigator.clipboard.writeText(code.textContent.trim()).then(function () {
+        var old = b.textContent; b.textContent = 'Copied'; b.classList.add('done');
+        setTimeout(function () { b.textContent = old; b.classList.remove('done'); }, 1600);
+      });
+    });
+  });
+
   /* If reduced motion is switched on mid-visit, settle everything. */
   if (mqReduce.addEventListener) mqReduce.addEventListener('change', function (e) {
     if (e.matches) {

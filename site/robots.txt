@@ -68,3 +68,10 @@ User-agent: *
 Allow: /
 
 Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemap.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/foods.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/exercises.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/guides.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/tools.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/compare.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/learn.xml
+Sitemap: https://dhruvgupta-24.github.io/Kynetix/sitemaps/i18n.xml
