@@ -115,7 +115,7 @@
       if (shareEnd && shareEnd.getBoundingClientRect().bottom < probe) id = null;
       setActive(id);
     }
-    if (!motion) return;
+    if (!motion || root.classList.contains('lite')) return;
     if (hero && wmTop && y < vh * 1.5) {
       var p = clamp(y / (vh * 0.9), 0, 1);
       wmTop.setAttribute('transform', 'translate(' + (p * 420).toFixed(1) + ' 0)');
@@ -636,6 +636,70 @@
     });
     window.addEventListener('pageshow', function (e) {
       if (e.persisted) $$('.wipe').forEach(function (w) { w.remove(); });
+    });
+  }
+
+  /* ── Phones: low-end scaling, download pill, card dots, widget taps ── */
+  var lite = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) || (navigator.deviceMemory && navigator.deviceMemory <= 3) ||
+             (navigator.connection && navigator.connection.saveData);
+  if (lite) root.classList.add('lite');
+
+  var pill = $('.dl-pill');
+  var heroB = $('.hero .badges'), closeB = $('.close .badges');
+  if (pill && heroB && 'IntersectionObserver' in window) {
+    var seenHero = true, seenClose = false, pastHero = false;
+    var updPill = function () { pill.classList.toggle('show', pastHero && !seenHero && !seenClose); };
+    new IntersectionObserver(function (es) {
+      es.forEach(function (en) {
+        if (en.target === heroB) { seenHero = en.isIntersecting; pastHero = !en.isIntersecting && en.boundingClientRect.top < 0; }
+        else seenClose = en.isIntersecting;
+      });
+      updPill();
+    }).observe(heroB);
+    if (closeB) new IntersectionObserver(function (es) { seenClose = es[0].isIntersecting; updPill(); }).observe(closeB);
+  }
+
+  var cardList = $('.cards');
+  if (cardList) {
+    var cardLis = $$('li', cardList);
+    var dots = doc.createElement('ol');
+    dots.className = 'card-dots';
+    dots.setAttribute('aria-label', 'Share cards');
+    cardLis.forEach(function (li, i) {
+      var name = (li.querySelector('figcaption b') || {}).textContent || ('Card ' + (i + 1));
+      var b = doc.createElement('button');
+      b.type = 'button'; b.setAttribute('aria-label', 'Show the ' + name + ' card');
+      b.addEventListener('click', function () { li.scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'nearest', inline: 'center' }); });
+      var item = doc.createElement('li'); item.appendChild(b); dots.appendChild(item);
+    });
+    cardList.parentNode.appendChild(dots);
+    var dotBtns = $$('button', dots), curCard = -1, cardTick = false;
+    var markCard = function () {
+      cardTick = false;
+      var r = cardList.getBoundingClientRect(), mid = r.left + r.width / 2, best = 0, bd = 1e9;
+      cardLis.forEach(function (li, i) { var lr = li.getBoundingClientRect(); var d = Math.abs(lr.left + lr.width / 2 - mid); if (d < bd) { bd = d; best = i; } });
+      if (best === curCard) return;
+      curCard = best;
+      cardLis.forEach(function (li, i) { li.classList.toggle('is-cur', i === best); });
+      dotBtns.forEach(function (b, i) { if (i === best) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+    };
+    cardList.addEventListener('scroll', function () { if (!cardTick) { cardTick = true; requestAnimationFrame(markCard); } }, { passive: true });
+    window.addEventListener('resize', markCard);
+    markCard();
+  }
+
+  var wgGrid = $('.wg');
+  var mqNarrow = window.matchMedia('(max-width: 1099.98px)');
+  if (wgGrid) {
+    wgGrid.addEventListener('click', function (ev) {
+      if (!mqNarrow.matches) return;
+      var t = ev.target.closest('.wg-tile[data-step]');
+      $$('.wg-tile.tapped', wgGrid).forEach(function (x) { if (x !== t) x.classList.remove('tapped'); });
+      if (t) t.classList.toggle('tapped');
+      wgGrid.classList.toggle('has-tap', !!$('.wg-tile.tapped', wgGrid));
+    });
+    doc.addEventListener('click', function (ev) {
+      if (!ev.target.closest('.wg')) { $$('.wg-tile.tapped', wgGrid).forEach(function (x) { x.classList.remove('tapped'); }); wgGrid.classList.remove('has-tap'); }
     });
   }
 

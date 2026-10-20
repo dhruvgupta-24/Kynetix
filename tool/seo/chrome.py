@@ -61,13 +61,15 @@ def header(c):
         (f"{p}exercises/", "Exercises"), (f"{p}guides/", "Guides"), (f"{p}tools/", "Calculators"), (f"{p}about/", "About and press"),
         (f"{p}privacy/", "Privacy"), (f"{p}terms/", "Terms"), (f"{p}delete-account/", "Delete account"),
     ]
+    pill = ('<a class="dl-pill" href="download/"><svg class="ico" aria-hidden="true" focusable="false"><use href="#i-down"/></svg><span>Download the beta</span></a>' + chr(10)
+            if c["home"] == "#top" else "")
     ml = "".join(f'<li style="--i:{i}"><a href="{h}">{t}</a></li>' for i, (h, t) in enumerate(menu_links))
     return f'''<a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="island">
 <a class="brand" href="{c["home"]}" aria-label="Kynetix home">{WM}</a>
 <nav class="links" aria-label="Main"><span class="ind" aria-hidden="true"></span>{nav}</nav>
 </div></header>
-<nav class="dock" aria-label="Sections"><span class="ind" aria-hidden="true"></span>{dock}</nav>
+{pill}<nav class="dock" aria-label="Sections"><span class="ind" aria-hidden="true"></span>{dock}</nav>
 <dialog class="menu" id="menu" aria-label="Menu"><div class="menu-in">
 <div class="menu-top"><a class="brand" href="{c["home"]}" aria-label="Kynetix home">{WM}</a><button type="button" class="menu-x" aria-label="Close menu">{ico("close")}</button></div>
 <ol class="menu-list">{ml}</ol>

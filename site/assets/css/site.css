@@ -978,4 +978,73 @@ html.content:not(.lang-en) .c-sec > h2 { font-family: inherit; font-weight: 700;
 .lede-l { font-size: 1.12rem; color: #DAD9D3; margin: 0; line-height: 1.65; }
 .badge.dl { text-decoration: none; background: var(--bone); color: var(--graphite); border-color: var(--bone); }
 .badge.dl small { color: #3A3A3F; }
+
+/* ── Phones: thumb-first, touch-native ───────────────────── */
+/* Press feedback on everything you tap. */
+@media (hover: none) {
+  .badge, .dl-btn, .dl-pill, .dock a, .dock button, .ask-q, .cards .card, .chips a, .food-list a, .link-arrow, .qa summary, .wg-tile, .copy, .btn {
+    transition: transform .35s var(--spring), background-color .2s ease, border-color .2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .badge:active, .dl-btn:active, .dl-pill:active, .dock a:active, .dock button:active, .chips a:active, .food-list a:active, .copy:active, .btn:active, .link-arrow:active { transform: scale(.95); }
+  .ask-q:active, .qa summary:active { transform: scale(.98); }
+  .cards .card:active, .wg-tile:active { transform: scale(.97); }
+}
+
+/* Download pill: rests above the dock once the hero has gone. */
+.dl-pill {
+  position: fixed; z-index: 59; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom));
+  display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 18px 0 14px;
+  border-radius: 999px; background: var(--bone); color: var(--graphite); font-weight: 700; font-size: 15px; text-decoration: none;
+  box-shadow: 0 14px 30px -12px rgba(0, 0, 0, .9);
+  transform: translate(-50%, 24px) scale(.9); opacity: 0; pointer-events: none; visibility: hidden;
+  transition: transform .5s var(--spring), opacity .25s ease, visibility 0s linear .5s;
+}
+.dl-pill .ico { width: 18px; height: 18px; color: var(--ember); stroke-width: 2.2; }
+.dl-pill.show { transform: translate(-50%, 0) scale(1); opacity: 1; pointer-events: auto; visibility: visible; transition: transform .55s var(--spring), opacity .25s ease, visibility 0s; }
+@media (min-width: 860px) { .dl-pill { display: none; } }
+
+/* Shear cut between sections: an ember line slices across as each section arrives. */
+.sec-cut { position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(90deg, var(--ember) 0 30%, var(--line) 30% 100%); transform-origin: left; pointer-events: none; z-index: 1; }
+.motion .sec-cut[data-reveal]:not(.is-in) { opacity: 1; transform: scaleX(0); }
+.motion .sec-cut[data-reveal] { transition: transform 1.1s var(--ease-cut); }
+.kyno .sec-cut { top: -1px; }
+
+/* Share cards on phones: momentum swipe with snap and progress dots. */
+.card-dots { display: none; }
+@media (max-width: 979.98px) {
+  .cards { scroll-padding-inline: var(--gutter); overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .cards li { width: min(72vw, 300px); transition: transform .45s var(--spring), opacity .3s ease; }
+  .cards li:not(.is-cur) { transform: scale(.94); opacity: .7; }
+  .card-dots { display: flex; justify-content: center; gap: 4px; list-style: none; margin: 14px 0 0; padding: 0; }
+  .card-dots button { width: 32px; height: 44px; border: 0; background: none; padding: 0; display: grid; place-items: center; cursor: pointer; }
+  .card-dots button::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--line-strong); transition: width .4s var(--spring), background-color .3s ease; }
+  .card-dots button[aria-current="true"]::before { width: 22px; background: var(--ember); }
+  .finish { justify-content: center; }
+}
+
+/* Widgets on phones: tap a tile to see what that size shows. */
+.wg-cap { display: none; }
+@media (max-width: 1099.98px) {
+  .wg-tile[data-step] { cursor: pointer; }
+  .wg-cap { display: block; position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 8px 10px; border-radius: 12px; background: rgba(11, 11, 12, .9);
+            border: 1px solid var(--line-strong); font-size: 13px; line-height: 1.35; color: var(--bone); transform: translateY(8px); opacity: 0;
+            transition: transform .4s var(--spring), opacity .2s ease; pointer-events: none; }
+  .wg-tile.tapped .wg-cap { transform: none; opacity: 1; }
+  .wg.has-tap .wg-tile:not(.tapped) { opacity: .55; }
+  .wg-tile { transition: opacity .3s ease, transform .4s var(--spring); }
+}
+
+/* Short screens: reveals travel less and start sooner. */
+@media (max-width: 859.98px) {
+  .motion [data-reveal]:not(.is-in) { transform: translateY(14px); }
+  .motion [data-reveal] { transition-duration: .55s, .7s; }
+  .hero { padding-top: 84px; }
+  .hero-phones { height: clamp(300px, 46vh, 420px); }
+  .hero-phones .phone:nth-child(2) { width: min(270px, 70vw); }
+}
+
+/* Low-end phones: keep it calm. */
+.lite body::after { display: none; }
+.lite .hero-phones .phone { animation-duration: .6s !important; }
 /* @content-end */

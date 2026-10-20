@@ -31,7 +31,7 @@ def css():
     s = f.read_text(encoding="utf-8")
     nl = chr(10)
     end = "/* @content-end */" + nl
-    block = "/* @content-start */" + nl + (HERE / "content.css").read_text(encoding="utf-8").strip() + nl + end
+    block = "/* @content-start */" + nl + (HERE / "content.css").read_text(encoding="utf-8").strip() + nl + nl + (HERE / "mobile.css").read_text(encoding="utf-8").strip() + nl + end
     if "/* @content-start */" in s:
         a = s.index("/* @content-start */"); b = s.index(end) + len(end)
         s = s[:a] + block + s[b:]

@@ -183,6 +183,7 @@ def head(key, c, inline_script):
             f'<link rel="preload" href="{p}assets/fonts/bricolage-800.woff2" as="font" type="font/woff2" crossorigin>',
             f'<link rel="preload" href="{p}assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>',
             f'<link rel="stylesheet" href="{p}assets/css/site.css">',
+            *([f'<link rel="preload" as="image" href="assets/img/app-home-540.webp" imagesrcset="assets/img/app-home-540.webp 540w, assets/img/app-home-810.webp 810w" imagesizes="(min-width: 760px) 26vw, 300px" fetchpriority="high">'] if key == "index.html" else []),
             inline_script]
     if c["path"] is not None:
         out.append('<script type="application/ld+json">' + json.dumps(ld_for(key, c), ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/") + '</script>')
