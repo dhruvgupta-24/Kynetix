@@ -14,6 +14,9 @@ import 'ai_coach_screen.dart';
 import 'profile_tab.dart';
 import '../widgets/k_avatar.dart';
 import '../services/analytics_service.dart';
+import '../config/distribution.dart';
+import '../widgets/update_sheet.dart';
+import 'auth_gate.dart' show introRevealed;
 
 // ─── AppShell ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +58,22 @@ class AppShellState extends State<AppShell> {
       AppShell.currentTab.value = _tab;
       _checkAndShowResumeDialog();
     });
+    if (kSideload) _promptUpdateAfterIntro();
+  }
+
+  /// Sideload builds: once the intro has lifted and the app has settled, ask
+  /// version.json (at most every 12 h) and offer a newer build.
+  void _promptUpdateAfterIntro() {
+    void go() {
+      if (!introRevealed.value) return;
+      introRevealed.removeListener(go);
+      Future<void>.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) maybePromptUpdate(context);
+      });
+    }
+
+    introRevealed.addListener(go);
+    go();
   }
 
   void _expandDock() => _compact.value = false;

@@ -246,6 +246,28 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
+        // Who installed this app ("com.android.vending" for Google Play, null
+        // for a sideloaded APK). The sideload updater never shows for Play.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.kynetix.app/install")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "installerPackage" -> {
+                        val installer = try {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                packageManager.getInstallSourceInfo(packageName).installingPackageName
+                            } else {
+                                @Suppress("DEPRECATION")
+                                packageManager.getInstallerPackageName(packageName)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        result.success(installer)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         sendActionToFlutter()
     }
 

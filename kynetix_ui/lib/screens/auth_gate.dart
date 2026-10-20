@@ -88,6 +88,11 @@ class _AuthGateState extends State<AuthGate> {
 /// onto the screen the user came for.
 final ValueNotifier<bool> appLanded = ValueNotifier(false);
 
+/// True once the launch intro has started to lift off the app (set by
+/// KynetixApp). Anything that wants to greet the user, like the update
+/// prompt, waits for it.
+final ValueNotifier<bool> introRevealed = ValueNotifier(false);
+
 class _GateSwitcher extends StatelessWidget {
   const _GateSwitcher({required this.child});
   final Widget child;

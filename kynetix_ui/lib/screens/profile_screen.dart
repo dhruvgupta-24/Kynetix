@@ -25,6 +25,9 @@ import '../services/feedback_service.dart';
 import '../widgets/feedback_sheet.dart';
 import 'feedback_inbox_screen.dart';
 import 'analytics_screen.dart';
+import '../config/distribution.dart';
+import '../services/update_check_service.dart';
+import '../widgets/update_sheet.dart';
 import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
@@ -84,6 +87,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Curators see the feedback inbox row; everyone else never does.
   bool _isCurator = false;
 
+  // Sideload builds not installed by Play get "Check for updates".
+  bool _updatesActive = false;
+  bool _checkingUpdate = false;
+
   // ── App version ─────────────────────────────────────────────────────────────
   // Read from the platform once per app run; null until it lands (or if the
   // lookup fails, in which case the row shows nothing rather than a guess).
@@ -114,6 +121,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadSettings();
     _loadVersion();
     _loadCurator();
+    if (kSideload) {
+      UpdateCheckService.instance.isActive().then((on) {
+        if (on && mounted) setState(() => _updatesActive = true);
+      });
+    }
+  }
+
+  Future<void> _checkForUpdates() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    final result = await UpdateCheckService.instance.check(force: true);
+    if (!mounted) return;
+    setState(() => _checkingUpdate = false);
+    if (result.kind != UpdateKind.none) {
+      await showUpdateSheet(context, result);
+    } else if (result.reached) {
+      showKToast(context, "You're on the latest.", kind: KToastKind.success);
+    } else {
+      showKToast(context, "Couldn't check right now. Try again in a bit.", kind: KToastKind.error);
+    }
   }
 
   Future<void> _loadCurator() async {
@@ -1643,6 +1670,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           label: 'Version',
           value: _version,
         ),
+        if (_updatesActive)
+          _SettingRow(
+            icon: Icons.system_update_rounded,
+            tint: KColor.textSecondary,
+            label: 'Check for updates',
+            value: _checkingUpdate ? 'Checking' : null,
+            onTap: _checkForUpdates,
+          ),
         _SettingRow(
           icon: Icons.restaurant_menu_rounded,
           tint: KColor.textSecondary,

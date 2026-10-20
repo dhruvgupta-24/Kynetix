@@ -160,6 +160,7 @@ class _KynetixAppState extends State<KynetixApp> {
 
   void _handOverToNativeIntro() {
     void reveal() {
+      introRevealed.value = true;
       if (mounted && !_introRevealed) setState(() => _introRevealed = true);
     }
 
@@ -209,7 +210,10 @@ class _KynetixAppState extends State<KynetixApp> {
               Positioned.fill(
                 child: KBrandIntro(
                   onMoving: () => setState(() => _introMoving = true),
-                  onReveal: () => setState(() => _introRevealed = true),
+                  onReveal: () {
+                    introRevealed.value = true;
+                    setState(() => _introRevealed = true);
+                  },
                   onDone: () => setState(() => _introDone = true),
                 ),
               ),
