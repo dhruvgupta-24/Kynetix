@@ -14,7 +14,7 @@ plugins {
 // debug-signed bundle can never reach Play. APKs keep the debug key unless
 // asked, so a sideloaded `flutter build apk` still installs over a dev
 // install on a phone without an uninstall (which would wipe local data):
-//   PowerShell:  $env:ORG_GRADLE_PROJECT_kynetixStoreRelease="true"; flutter build apk --release
+//   flutter build apk --release --android-project-arg=kynetixStoreRelease=true
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(FileInputStream(keystorePropertiesFile))
