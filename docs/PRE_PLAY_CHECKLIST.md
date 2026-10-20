@@ -191,7 +191,7 @@ Then register: https://play.google.com/console/signup (Personal, pay US$25, veri
 
 ---
 
-## Optional, before testers arrive (ask Claude to do these)
+## Optional, before testers arrive
 - **Crash reporting** (Sentry or Firebase Crashlytics) so tester crashes show up with details
 - **Feedback email alerts**: create a Gmail **app password** for kynetix.app@gmail.com at https://myaccount.google.com/apppasswords (needs 2-Step Verification on) and hand it over; every new feedback then emails amdhruvgupta@gmail.com
 - **Small backend tidy-ups** from the security audit
