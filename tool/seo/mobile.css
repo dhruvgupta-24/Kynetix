@@ -14,7 +14,7 @@
 /* Download pill: rests above the dock once the hero has gone. */
 .dl-pill {
   position: fixed; z-index: 59; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom));
-  display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 18px 0 14px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 18px 0 14px; white-space: nowrap;
   border-radius: 999px; background: var(--bone); color: var(--graphite); font-weight: 700; font-size: 15px; text-decoration: none;
   box-shadow: 0 14px 30px -12px rgba(0, 0, 0, .9);
   transform: translate(-50%, 24px) scale(.9); opacity: 0; pointer-events: none; visibility: hidden;
@@ -30,13 +30,12 @@
 .motion .sec-cut[data-reveal] { transition: transform 1.1s var(--ease-cut); }
 .kyno .sec-cut { top: -1px; }
 
-/* Share cards on phones: momentum swipe with snap and progress dots. */
+/* Share cards on phones: a deck you flick (play.js), with dots. */
 .card-dots { display: none; }
 @media (max-width: 979.98px) {
   .cards { scroll-padding-inline: var(--gutter); overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
-  .cards li { width: min(72vw, 300px); transition: transform .45s var(--spring), opacity .3s ease; }
-  .cards li:not(.is-cur) { transform: scale(.94); opacity: .7; }
-  .card-dots { display: flex; justify-content: center; gap: 4px; list-style: none; margin: 14px 0 0; padding: 0; }
+  .cards li { width: min(72vw, 300px); }
+  .card-dots { display: flex; justify-content: center; gap: 4px; list-style: none; margin: 0; padding: 0; }
   .card-dots button { width: 32px; height: 44px; border: 0; background: none; padding: 0; display: grid; place-items: center; cursor: pointer; }
   .card-dots button::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--line-strong); transition: width .4s var(--spring), background-color .3s ease; }
   .card-dots button[aria-current="true"]::before { width: 22px; background: var(--ember); }

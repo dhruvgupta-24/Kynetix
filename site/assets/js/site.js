@@ -106,7 +106,9 @@
     if (dock) dock.classList.toggle('compact', compact);
     lastY = y;
     var max = Math.max(1, doc.documentElement.scrollHeight - vh);
-    if (island) island.style.setProperty('--prog', clamp(y / max, 0, 1).toFixed(4));
+    var prog = clamp(y / max, 0, 1).toFixed(4);
+    if (island) island.style.setProperty('--prog', prog);
+    if (dock) dock.style.setProperty('--prog', prog);
 
     if (onHome) {
       var probe = vh * 0.4;
@@ -142,7 +144,7 @@
   var cursorHome = null;
   /* Dialogs sit in the top layer, above the custom cursor: use the native one there. */
   var dialogOpen = false;
-  function moveCursorInto() { dialogOpen = true; if (cursorHome && cursorHome.el) { cursorHome.el.classList.remove('live'); root.classList.remove('cursor-on'); } }
+  function moveCursorInto() { dialogOpen = true; if (cursorHome && cursorHome.el) { cursorHome.el.classList.remove('live'); root.classList.remove('cursor-on'); var bx = $('.cur-box'); if (bx) bx.classList.remove('on'); } }
   function cursorBack() { dialogOpen = false; }
   function closeMenu(after) {
     if (!menu || !menu.open) { if (after) after(); return; }
@@ -463,28 +465,74 @@
     $$('.card[data-full]').forEach(function (c) { c.addEventListener('click', function () { window.open(c.getAttribute('data-full'), '_blank'); }); });
   }
 
-  /* ── Custom cursor: one transform per frame for dot and ring together ── */
+  /* ── Custom cursor ─────────────────────────────────────
+     The dot and the ring ride one transform, set every frame from the latest
+     pointer position, so they can never drift apart. Life comes from shape:
+     the ring stretches along fast moves, cuts in two on links (the Kynetix
+     shear), wraps itself around buttons, and slashes on click. */
   if (motion && mqFine.matches) {
     var cur = doc.createElement('div');
     cur.className = 'cur'; cur.setAttribute('aria-hidden', 'true');
-    cur.innerHTML = '<div class="cur-ring"></div><div class="cur-bar"></div><div class="cur-beam"></div><div class="cur-fill"><span class="cur-lb"></span></div><div class="cur-dot"></div>';
+    cur.innerHTML = '<div class="cur-ring"><div class="cur-sq"><i class="cur-rt"></i><i class="cur-rb"></i></div></div><div class="cur-blade"></div><div class="cur-beam"></div><div class="cur-fill"><span class="cur-lb"></span></div><div class="cur-dot"></div>';
+    var box = doc.createElement('div');
+    box.className = 'cur-box'; box.setAttribute('aria-hidden', 'true');
+    doc.body.appendChild(box);
     doc.body.appendChild(cur);
     cursorHome = { el: cur };
-    var lbl = $('.cur-lb', cur);
-    var px = -100, py = -100, raf = null, state = '', snapEl = null;
+    var lbl = $('.cur-lb', cur), sq = $('.cur-sq', cur), blade = $('.cur-blade', cur);
+    var px = -100, py = -100, lx = -100, ly = -100, svx = 0, svy = 0, raf = null, state = '', snapEl = null, morphT = null;
     var paint = function () {
       raf = null;
       cur.style.transform = 'translate3d(' + px + 'px,' + py + 'px,0)';
+      /* Stretch along the direction of travel, never trail behind it. */
+      svx = svx * 0.6 + (px - lx) * 0.4; svy = svy * 0.6 + (py - ly) * 0.4; lx = px; ly = py;
+      var sp = Math.sqrt(svx * svx + svy * svy);
+      var k = Math.min(sp / 70, 0.3);
+      var ang = Math.atan2(svy, svx) * 57.2958;
+      sq.style.transform = k > 0.004 ? 'rotate(' + ang.toFixed(1) + 'deg) scale(' + (1 + k).toFixed(3) + ',' + (1 - k * 0.55).toFixed(3) + ') rotate(' + (-ang).toFixed(1) + 'deg)' : '';
       if (snapEl) {
         var r = snapEl.getBoundingClientRect();
-        cur.style.setProperty('--sx', ((r.left + r.width / 2 - px) * 0.3).toFixed(1) + 'px');
-        cur.style.setProperty('--sy', ((r.top + r.height / 2 - py) * 0.3).toFixed(1) + 'px');
+        var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        var pad = 7;
+        box.style.width = (r.width + pad * 2) + 'px';
+        box.style.height = (r.height + pad * 2) + 'px';
+        box.style.transform = 'translate3d(' + (r.left - pad + (px - cx) * 0.1).toFixed(1) + 'px,' + (r.top - pad + (py - cy) * 0.14).toFixed(1) + 'px,0)';
+      }
+      if (sp > 0.05 || snapEl) raf = requestAnimationFrame(paint);
+    };
+    var kick = function () { if (!raf) raf = requestAnimationFrame(paint); };
+    var boxTo = function (el) {
+      clearTimeout(morphT);
+      if (el) {
+        if (el === snapEl) return;
+        var rad = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 12;
+        if (!snapEl) {
+          /* Start as the ring, right under the pointer, then grow onto the button. */
+          box.classList.remove('morph', 'on');
+          box.style.width = box.style.height = '34px';
+          box.style.borderRadius = '17px';
+          box.style.transform = 'translate3d(' + (px - 17) + 'px,' + (py - 17) + 'px,0)';
+          void box.offsetWidth;
+        }
+        snapEl = el;
+        box.classList.add('morph', 'on');
+        box.style.borderRadius = Math.min(rad + 7, 40) + 'px';
+        morphT = setTimeout(function () { box.classList.remove('morph'); }, 300);
+        kick();
+      } else if (snapEl) {
+        snapEl = null;
+        box.classList.add('morph');
+        box.classList.remove('on');
+        box.style.width = box.style.height = '34px';
+        box.style.borderRadius = '17px';
+        box.style.transform = 'translate3d(' + (px - 17) + 'px,' + (py - 17) + 'px,0)';
+        morphT = setTimeout(function () { box.classList.remove('morph'); }, 300);
       }
     };
     var textSel = 'p, li, h1, h2, h3, dd, dt, td, th, figcaption, code, small, blockquote, input, textarea';
-    var btnSel = 'button, [data-magnetic], .btn, .menu-x, .lb-x';
+    var btnSel = 'button, [data-magnetic], .btn, .menu-x, .lb-x, .dl-btn, .copy';
     var setState = function (s, el) {
-      snapEl = s === 'btn' ? el : null;
+      boxTo(s === 'btn' ? el : null);
       if (s === state) return;
       state = s;
       cur.classList.toggle('is-link', s === 'link');
@@ -497,27 +545,35 @@
       var lab = t.closest('[data-cursor]');
       if (lab) { lbl.textContent = lab.getAttribute('data-cursor'); return setState('label'); }
       var btn = t.closest(btnSel);
-      if (btn && !btn.closest('.links, .dock, .asks')) return setState('btn', btn);
+      if (btn && !btn.closest('.links, .dock, .asks, .wg-steps')) {
+        var br = btn.getBoundingClientRect();
+        if (br.width < 420 && br.height < 160) return setState('btn', btn);
+      }
       if (t.closest('a, button, summary, label, [role="button"]')) return setState('link');
       if (t.closest(textSel)) return setState('text');
       setState('');
     };
+    var hide = function () { cur.classList.remove('live'); box.classList.remove('on'); root.classList.remove('cursor-on'); };
     doc.addEventListener('pointermove', function (e) {
-      if (e.pointerType !== 'mouse' || dialogOpen) { cur.classList.remove('live'); root.classList.remove('cursor-on'); return; }
+      if (e.pointerType !== 'mouse' || dialogOpen) { hide(); return; }
       px = e.clientX; py = e.clientY;
-      if (!cur.classList.contains('live')) { cur.classList.add('live'); root.classList.add('cursor-on'); classify(e.target); }
-      if (!raf) raf = requestAnimationFrame(paint);
+      if (!cur.classList.contains('live')) { lx = px; ly = py; cur.classList.add('live'); root.classList.add('cursor-on'); classify(e.target); if (snapEl) box.classList.add('on'); }
+      kick();
     }, { passive: true });
     doc.addEventListener('pointerover', function (e) { if (e.pointerType === 'mouse') classify(e.target); });
     window.addEventListener('scroll', function () {
       if (!cur.classList.contains('live')) return;
       classify(doc.elementFromPoint(px, py));
-      if (!raf) raf = requestAnimationFrame(paint);
+      kick();
     }, { passive: true });
-    doc.addEventListener('pointerdown', function () { cur.classList.add('down'); });
-    doc.addEventListener('pointerup', function () { cur.classList.remove('down'); });
-    doc.addEventListener('mouseout', function (e) { if (!e.relatedTarget) { cur.classList.remove('live'); root.classList.remove('cursor-on'); } });
-    window.addEventListener('blur', function () { cur.classList.remove('live'); root.classList.remove('cursor-on'); });
+    doc.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      cur.classList.add('down'); box.classList.add('down');
+      blade.classList.remove('slash'); void blade.offsetWidth; blade.classList.add('slash');
+    });
+    doc.addEventListener('pointerup', function () { cur.classList.remove('down'); box.classList.remove('down'); });
+    doc.addEventListener('mouseout', function (e) { if (!e.relatedTarget) hide(); });
+    window.addEventListener('blur', hide);
   }
 
   /* ── Magnetic badges and links ───────────────────────── */
@@ -659,35 +715,6 @@
     if (closeB) new IntersectionObserver(function (es) { seenClose = es[0].isIntersecting; updPill(); }).observe(closeB);
   }
 
-  var cardList = $('.cards');
-  if (cardList) {
-    var cardLis = $$('li', cardList);
-    var dots = doc.createElement('ol');
-    dots.className = 'card-dots';
-    dots.setAttribute('aria-label', 'Share cards');
-    cardLis.forEach(function (li, i) {
-      var name = (li.querySelector('figcaption b') || {}).textContent || ('Card ' + (i + 1));
-      var b = doc.createElement('button');
-      b.type = 'button'; b.setAttribute('aria-label', 'Show the ' + name + ' card');
-      b.addEventListener('click', function () { li.scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'nearest', inline: 'center' }); });
-      var item = doc.createElement('li'); item.appendChild(b); dots.appendChild(item);
-    });
-    cardList.parentNode.appendChild(dots);
-    var dotBtns = $$('button', dots), curCard = -1, cardTick = false;
-    var markCard = function () {
-      cardTick = false;
-      var r = cardList.getBoundingClientRect(), mid = r.left + r.width / 2, best = 0, bd = 1e9;
-      cardLis.forEach(function (li, i) { var lr = li.getBoundingClientRect(); var d = Math.abs(lr.left + lr.width / 2 - mid); if (d < bd) { bd = d; best = i; } });
-      if (best === curCard) return;
-      curCard = best;
-      cardLis.forEach(function (li, i) { li.classList.toggle('is-cur', i === best); });
-      dotBtns.forEach(function (b, i) { if (i === best) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
-    };
-    cardList.addEventListener('scroll', function () { if (!cardTick) { cardTick = true; requestAnimationFrame(markCard); } }, { passive: true });
-    window.addEventListener('resize', markCard);
-    markCard();
-  }
-
   var wgGrid = $('.wg');
   var mqNarrow = window.matchMedia('(max-width: 1099.98px)');
   if (wgGrid) {
@@ -736,7 +763,7 @@
     if (e.matches) {
       root.classList.remove('motion', 'cursor-on');
       revealables.forEach(function (el) { el.classList.add('is-in'); });
-      var c = $('.cur'); if (c) c.remove();
+      $$('.cur, .cur-box').forEach(function (c) { c.remove(); });
     }
   });
 })();
