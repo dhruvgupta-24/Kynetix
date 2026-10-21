@@ -757,7 +757,9 @@ section { position: relative; }
 .foot nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px 0 0; margin-right: 12px; color: var(--bone); text-decoration: none; }
 .foot nav a:hover { text-decoration: underline; text-decoration-color: var(--ember); }
 @media (min-width: 1000px) {
-  .foot .wrap { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 48px; }
+  /* The brand column keeps a real minimum so long translated link rows wrap instead of squeezing it to zero. */
+  .foot .wrap { grid-template-columns: minmax(18rem, 1fr) minmax(0, auto); align-items: center; column-gap: 48px; }
+  .foot .wrap > * { min-width: 0; }
   .talk { grid-column: 1 / -1; order: -1; max-width: none; justify-self: stretch; margin-bottom: 12px; }
 }
 
