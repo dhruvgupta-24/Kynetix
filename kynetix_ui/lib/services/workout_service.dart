@@ -1480,6 +1480,67 @@ class WorkoutService extends ChangeNotifier {
 
   // ── Write API ────────────────────────────────────────────────────────────
 
+  /// A finished session's id, from the id its draft carried: one workout
+  /// keeps one id, so finishing it again (a draft resumed after Finish)
+  /// replaces the first save instead of adding a second session.
+  static String finishedIdFor(String draftId) =>
+      draftId.startsWith('ws_draft_') ? 'ws_${draftId.substring(9)}' : draftId;
+
+  /// True when [draft] belongs to a session that has already been saved.
+  bool _isAlreadySaved(WorkoutSession draft) {
+    final id = finishedIdFor(draft.id);
+    return _sessions.any((s) => s.id == id);
+  }
+
+  /// What a session did, set by set: two sessions with the same day, split
+  /// day and sets are one workout saved twice.
+  static String _fingerprint(WorkoutSession s) => [
+        dateKey(s.date),
+        s.splitDayName,
+        for (final e in s.entries)
+          if (!e.isSkipped && e.sets.isNotEmpty) ...[
+            e.exercise.id,
+            for (final x in e.sets)
+              '${x.weight}/${x.reps}/${x.setType.name}/${x.externalLoadKg}/${x.durationSeconds}/${x.distanceMeters}',
+          ],
+      ].join('|');
+
+  /// Repairs workouts saved twice by older builds (Finish, app closed on the
+  /// summary, resumed, Finish again): keeps the first save of each identical
+  /// session, tombstones the copies and deletes them from the cloud.
+  Future<void> _dropDuplicateSessions() async {
+    final seen = <String>{};
+    final dupes = <WorkoutSession>[];
+    for (final s in _sessions) {
+      if (s.isEmpty || s.totalSets == 0) continue;
+      if (!seen.add(_fingerprint(s))) dupes.add(s);
+    }
+    if (dupes.isEmpty) return;
+    final ids = {for (final s in dupes) s.id};
+    debugPrint('[WorkoutService] Dropping ${ids.length} duplicate session(s)');
+    _sessions.removeWhere((s) => ids.contains(s.id));
+    for (final id in ids) {
+      _deletedSessionIds
+        ..remove(id)
+        ..add(id);
+    }
+    if (_deletedSessionIds.length > _maxDeletedSessionIds) {
+      _deletedSessionIds.removeRange(0, _deletedSessionIds.length - _maxDeletedSessionIds);
+    }
+    await _persistDeletedIds();
+    await _persist();
+    notifyListeners();
+    final uid = _currentUserId;
+    if (uid != null) {
+      try {
+        CloudSyncService.instance
+            .deleteWorkoutSessions(ids, expectedUserId: uid)
+            .catchError((_) => false)
+            .ignore();
+      } catch (_) {}
+    }
+  }
+
   Future<void> saveSession(WorkoutSession session) async {
     _sessions.removeWhere((s) => s.id == session.id);
     _sessions.add(session);
@@ -1495,7 +1556,8 @@ class WorkoutService extends ChangeNotifier {
     }
     
     // Once explicitly saved to active history, dispose of any matching draft.
-    if (_draftSession?.splitDayName == session.splitDayName) {
+    if (_draftSession?.splitDayName == session.splitDayName ||
+        (_draftSession != null && finishedIdFor(_draftSession!.id) == session.id)) {
       _draftSession = null;
       _draftStartedAt = null;
     }
@@ -1508,11 +1570,12 @@ class WorkoutService extends ChangeNotifier {
     }
     NutritionTargetEngine.instance.refreshTargetForDate(session.date).ignore();
     notifyListeners();
-    
+
     // Background cloud sync
     try {
       CloudSyncService.instance.syncWorkoutBackground(session).catchError((_) {}).ignore();
     } catch (_) {}
+    await _dropDuplicateSessions();
   }
 
   Future<void> deleteSession(String id) async {
@@ -1612,12 +1675,16 @@ class WorkoutService extends ChangeNotifier {
 
     await _persist();
     notifyListeners();
+    await _dropDuplicateSessions();
   }
 
   Future<void> saveDraftSession(
     WorkoutSession session, {
     DateTime? startedAt,
   }) async {
+    // A late write (app closed on the summary screen) must not bring a
+    // finished workout back as something to resume.
+    if (_isAlreadySaved(session)) return;
     _draftSession = session;
     // Only set startedAt on first save (crash recovery: preserve original start time).
     _draftStartedAt ??= startedAt ?? DateTime.now();
@@ -1847,6 +1914,11 @@ class WorkoutService extends ChangeNotifier {
           }
         }
       }
+      // A draft left behind by a workout that was already saved is stale.
+      if (_draftSession != null && _isAlreadySaved(_draftSession!)) {
+        _draftSession = null;
+        _draftStartedAt = null;
+      }
       _sleepHours = ScopedPrefs.getDouble(prefs, _kSleepHours, _currentUserId);
       _hrvRmssd = ScopedPrefs.getDouble(prefs, _kHrvRmssd, _currentUserId);
       _hrvBaseline =
@@ -1865,6 +1937,7 @@ class WorkoutService extends ChangeNotifier {
     }
     _ready = true;
     notifyListeners();
+    await _dropDuplicateSessions();
   }
 
   /// Wipes all workout splits, logged sessions, custom exercises, drafts, and setup configuration.

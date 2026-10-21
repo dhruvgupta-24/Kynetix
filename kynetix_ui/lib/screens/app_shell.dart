@@ -451,9 +451,7 @@ class AppShellState extends State<AppShell> {
     final entries = draft.entries;
 
     final session = WorkoutSession(
-      id: draft.id.startsWith('ws_draft_')
-          ? 'ws_${DateTime.now().millisecondsSinceEpoch}'
-          : draft.id,
+      id: WorkoutService.finishedIdFor(draft.id),
       date: draft.date,
       splitDayName: draft.splitDayName,
       splitDayWeekday: draft.splitDayWeekday,

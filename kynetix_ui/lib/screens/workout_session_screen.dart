@@ -441,6 +441,16 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   // Completion State
   bool _showCompletionScreen = false;
+
+  /// Set once the session is saved. From then on nothing writes a draft or
+  /// recovery copy: closing the app on the summary must not bring the
+  /// finished workout back as something to resume.
+  bool _finished = false;
+
+  /// One id for this workout from its first draft to its saved session, so a
+  /// second Finish replaces the first instead of adding a copy.
+  late final String _draftId =
+      widget.draftSession?.id ?? 'ws_draft_${DateTime.now().millisecondsSinceEpoch}';
   late WorkoutSession _completedSessionSummary;
   bool _enableRpeTracking = false;
 
@@ -533,6 +543,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
   void _queueRecoverySave() {
     _debounceTimer?.cancel();
+    if (_finished) return;
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
       _saveRecoveryState();
     });
@@ -629,7 +640,9 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // ── Recovery Persistence ─────────────────────────────────────────────────
 
   Future<void> _saveRecoveryState() async {
+    if (_finished) return;
     final prefs = await SharedPreferences.getInstance();
+    if (_finished) return;
     final recoveryData = <String, dynamic>{
       'selectedIndex': _selectedIndex,
       'setTypeSelections': _setTypeSelections.map((k, v) => MapEntry(k, v.name)),
@@ -801,7 +814,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   }
 
   void _saveDraftSessionState() {
-    if (_isSaving || _isDiscarding) return;
+    if (_isSaving || _isDiscarding || _finished) return;
     final entries = _sessionExercises
         .map((ex) => ExerciseEntry(
               exercise: ex,
@@ -818,7 +831,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     if (entries.isEmpty) return;
 
     final draft = WorkoutSession(
-      id: widget.draftSession?.id ?? 'ws_draft_${DateTime.now().millisecondsSinceEpoch}',
+      id: _draftId,
       date: widget.date,
       splitDayName: widget.splitDay.name,
       splitDayWeekday: widget.splitDay.weekday == 0 ? null : widget.splitDay.weekday,
@@ -1750,7 +1763,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     setState(() => _isSaving = true);
 
     final session = WorkoutSession(
-      id: 'ws_${DateTime.now().millisecondsSinceEpoch}',
+      id: WorkoutService.finishedIdFor(_draftId),
       date: widget.date,
       splitDayName: widget.splitDay.name,
       splitDayWeekday: widget.splitDay.weekday == 0 ? null : widget.splitDay.weekday,
@@ -1772,6 +1785,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
 
     try {
       await _service.saveSession(session);
+      _finished = true;
+      _debounceTimer?.cancel();
     } catch (e) {
       // Nothing was cleared: the draft and recovery copy still hold every set,
       // so the user can simply tap Finish again.
