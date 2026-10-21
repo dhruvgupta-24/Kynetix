@@ -1,10 +1,11 @@
 {
-  "versionCode": 2,
-  "versionName": "1.0.0-beta.2",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.2/kynetix-1.0.0-beta.2-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.2/kynetix-1.0.0-beta.2-armeabi-v7a.apk",
+  "versionCode": 3,
+  "versionName": "1.0.0-beta.3",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.3/kynetix-1.0.0-beta.3-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.3/kynetix-1.0.0-beta.3-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
+    "Finishing a workout and reopening the app no longer saves it twice. Copies already saved are cleaned up.",
     "Run Kyno on ChatGPT shows your connection when you're already linked.",
     "Share cards: take or pick a backdrop photo, and the Sticker can sit on it.",
     "The Receipt card shows the weight you lifted.",
@@ -13,8 +14,8 @@
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "d1d7503ed9822b2b07307979b3232c78fa0839346956f99924d8282a0def1a86",
-    "armv7": "a9098c7bfa5c0757fc7e6ee2021ac7cc2e5ee7242b20e3a232abfef43274c32b"
+    "arm64": "ab562c73de5ba4097fb0096b124199ccb089ae547105a4b9996fcbb48562b189",
+    "armv7": "9f97a275dea7fdda9f9fd727334c757a07e54030b1974e1ebe4adb44f5c84169"
   },
   "size": {
     "arm64": "39.5 MB",
