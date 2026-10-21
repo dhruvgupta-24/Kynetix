@@ -34,7 +34,10 @@ import '../services/chatgpt_siwc_service.dart';
 // real logic, not animation.
 
 class ConnectChatGptScreen extends StatefulWidget {
-  const ConnectChatGptScreen({super.key, this.embedded = false, this.onFinished});
+  const ConnectChatGptScreen({super.key, this.embedded = false, this.onFinished, this.loadStatus});
+
+  /// Reads the current link on open (pushed page only). Tests pass a fake.
+  final Future<ChatGptLinkStatus> Function()? loadStatus;
 
   /// Render inline (e.g. inside onboarding) instead of as a pushed page.
   final bool embedded;
@@ -47,6 +50,8 @@ class ConnectChatGptScreen extends StatefulWidget {
 }
 
 enum _Step {
+  checking,
+  linked,
   idle,
   browserWaiting,
   connecting,
@@ -96,10 +101,74 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
 
   _Method _connectedVia = _Method.browser;
 
+  // Existing link, read on open so a connected account doesn't land on the
+  // "Continue with ChatGPT" pitch again.
+  ChatGptLinkStatus? _linked;
+  bool _disconnecting = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (!widget.embedded) {
+      _step = _Step.checking;
+      _loadLink();
+    }
+  }
+
+  Future<void> _loadLink() async {
+    final status = await (widget.loadStatus ?? ChatGptLinkService.getStatus)();
+    if (!mounted || _step != _Step.checking) return;
+    setState(() {
+      _linked = status.isConnected ? status : null;
+      _step = status.isConnected ? _Step.linked : _Step.idle;
+    });
+  }
+
+  Future<void> _disconnect() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KColor.card,
+        title: Text('Disconnect ChatGPT?', style: KText.h2),
+        content: Text(
+          'Kyno goes back to Kynetix servers. You can connect again any time.',
+          style: KText.body.copyWith(color: KColor.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: KText.bodyMedium.copyWith(color: KColor.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Disconnect',
+              style: KText.bodyMedium.copyWith(color: KColor.danger, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _disconnecting = true);
+    try {
+      await ChatGptLinkService.disconnect();
+      if (!mounted) return;
+      KHaptics.select();
+      setState(() {
+        _linked = null;
+        _step = _Step.idle;
+      });
+      showKToast(context, 'ChatGPT disconnected.', kind: KToastKind.success);
+    } catch (e) {
+      debugPrint('[ConnectChatGpt] disconnect failed: ${e.runtimeType}');
+      if (mounted) {
+        showKToast(context, 'Couldn\'t disconnect. Check your connection and try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _disconnecting = false);
+    }
   }
 
   @override
@@ -517,6 +586,8 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
 
   Widget _buildBody() {
     return switch (_step) {
+      _Step.checking => _buildLoadingView('Checking your connection…', forCode: false),
+      _Step.linked => _buildLinkedView(),
       _Step.idle => _buildIdleView(),
       _Step.browserWaiting => _buildBrowserWaitingView(),
       _Step.connecting => _buildLoadingView('Checking your plan…', forCode: false),
@@ -956,6 +1027,97 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         width: double.infinity,
       ),
       const SizedBox(height: KSpacing.md),
+    ]);
+  }
+
+  // ── Already linked ────────────────────────────────────────────────────────
+
+  Widget _buildLinkedView() {
+    final st = _linked!;
+    final plan = st.usesChatGptPlan;
+    final model = st.activeModel ?? st.selectedModel;
+    final paused = st.planPausedUntil != null &&
+        st.planPausedUntil!.isAfter(DateTime.now());
+    final since = st.connectedAt == null
+        ? null
+        : MaterialLocalizations.of(context).formatMediumDate(st.connectedAt!.toLocal());
+
+    return _scrollShell([
+      const SizedBox(height: KSpacing.sm),
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: _headerIcon(Icons.check_circle_rounded, KColor.green),
+      ),
+      const SizedBox(height: KSpacing.xl),
+      Semantics(
+        header: true,
+        child: Text(
+          plan ? 'Kyno runs on your ChatGPT plan' : 'ChatGPT connected',
+          style: KText.h1,
+        ),
+      ),
+      const SizedBox(height: KSpacing.sm),
+      Text(
+        plan
+            ? 'Coaching, meal estimates and insights use your ChatGPT plan. '
+                'Hit a limit and Kyno switches to Kynetix servers until it\'s back.'
+            : 'Kyno runs on your ChatGPT account.',
+        style: KText.body.copyWith(color: KColor.textSecondary),
+      ),
+      const SizedBox(height: KSpacing.xl),
+      KCard(
+        padding: const EdgeInsets.all(KSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _detailRow('Status', plan ? 'Using ChatGPT plan' : 'Connected'),
+            if (model != null && model.isNotEmpty) ...[
+              const _Hairline(vertical: KSpacing.md),
+              _detailRow('Model', model),
+            ],
+            if (since != null) ...[
+              const _Hairline(vertical: KSpacing.md),
+              _detailRow('Connected', since),
+            ],
+          ],
+        ),
+      ),
+      if (paused) ...[
+        const SizedBox(height: KSpacing.md),
+        _noteBox(
+          icon: Icons.hourglass_bottom_rounded,
+          text:
+              'You\'re at your ChatGPT usage limit right now. Kyno uses '
+              'Kynetix servers until your plan has room again.',
+        ),
+      ],
+      if (plan) ...[
+        const SizedBox(height: KSpacing.sm),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: _manageUsageLink(),
+        ),
+      ],
+      const Spacer(),
+      const SizedBox(height: KSpacing.xxl),
+      KButton(
+        label: 'Done',
+        icon: Icons.check_rounded,
+        onTap: () => Navigator.of(context).maybePop(),
+        width: double.infinity,
+      ),
+      const SizedBox(height: KSpacing.sm),
+      _quietButton('Reconnect', _startBrowserFlow),
+      Center(
+        child: TextButton(
+          onPressed: _disconnecting ? null : _disconnect,
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          child: Text(
+            _disconnecting ? 'Disconnecting…' : 'Disconnect',
+            style: KText.bodyMedium.copyWith(color: KColor.danger, fontSize: 14),
+          ),
+        ),
+      ),
     ]);
   }
 

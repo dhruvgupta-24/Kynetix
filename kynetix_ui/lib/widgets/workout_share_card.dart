@@ -71,6 +71,16 @@ class ShareExercise {
   double get volume => sets.where((s) => !s.warmUp).fold(0.0, (a, s) => a + s.volume);
   int get workingSets => sets.where((s) => !s.warmUp && !s.drop).length;
   bool get hasPr => sets.any((s) => s.isPr);
+
+  /// Heaviest working set, as a till prints it: "85 KG", "BW", "BW+10".
+  String get topLoad {
+    final work = sets.where((s) => !s.warmUp && !s.drop);
+    final pool = work.isEmpty ? sets : work;
+    if (pool.isEmpty) return '';
+    final top = pool.map((s) => s.load).reduce(math.max);
+    if (pool.first.bodyweight) return top > 0 ? 'BW+${_num(top)}' : 'BW';
+    return top > 0 ? '${_num(top)} KG' : '';
+  }
 }
 
 /// Everything the share cards print, computed once from a saved session.
@@ -258,7 +268,8 @@ enum ShareTemplate {
   const ShareTemplate(this.label);
   final String label;
 
-  /// Drawn on nothing, for laying over the user's own photo in a story.
+  /// Drawn on nothing (or on a photo picked in the sheet), for laying over
+  /// the user's own picture.
   bool get transparent => this == ShareTemplate.sticker;
 }
 
@@ -325,7 +336,7 @@ class ShareCanvas extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (!template.transparent) ...[
+            if (!template.transparent || usePhoto) ...[
               if (usePhoto) ...[
                 Image(image: photo!, fit: BoxFit.cover, gaplessPlayback: true),
                 const DecoratedBox(
@@ -587,7 +598,7 @@ class _Receipt extends StatelessWidget {
                     line(
                       '  ${e.workingSets} × ${e.sets.where((x) => !x.warmUp && !x.drop).map((x) => x.reps).toSet().join('/')}'
                           '${e.hasPr ? '   * PR' : ''}',
-                      '',
+                      e.topLoad.isEmpty ? '' : '@ ${e.topLoad}',
                       color: e.hasPr ? const Color(0xFFD9481F) : const Color(0x991A1A1B),
                     ),
                   ],
@@ -1107,6 +1118,9 @@ class _ShareSheetState extends State<_ShareSheet> {
   late ShareBackdrop _backdrop = KColor.isDark ? ShareBackdrop.graphite : ShareBackdrop.paper;
   Uint8List? _photoBytes;
   ImageProvider? _photo;
+
+  /// The sticker's own backdrop choice: clear, or the picked photo.
+  bool _stickerOnPhoto = false;
   bool _busy = false;
   String? _error;
 
@@ -1117,15 +1131,45 @@ class _ShareSheetState extends State<_ShareSheet> {
   }
 
   Future<void> _pickPhoto() async {
+    final source = await showKSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: KSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const KSheetHeader('Backdrop photo', subtitle: 'Your gym, your mirror, your view'),
+              _SourceOption(
+                icon: Icons.camera_alt_rounded,
+                label: 'Take photo',
+                onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
+              ),
+              _SourceOption(
+                icon: Icons.photo_library_rounded,
+                label: 'Choose from gallery',
+                onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
     try {
-      final f = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 88, maxWidth: 1440);
+      final f = await ImagePicker().pickImage(source: source, imageQuality: 88, maxWidth: 1440);
       if (f == null) return;
       final bytes = await f.readAsBytes();
       if (!mounted) return;
       setState(() {
+        _error = null;
         _photoBytes = bytes;
         _photo = MemoryImage(bytes);
-        _backdrop = ShareBackdrop.photo;
+        if (_template.transparent) {
+          _stickerOnPhoto = true;
+        } else {
+          _backdrop = ShareBackdrop.photo;
+        }
       });
     } catch (e) {
       debugPrint('[WORKOUT_SHARE] photo failed: $e');
@@ -1183,7 +1227,11 @@ class _ShareSheetState extends State<_ShareSheet> {
         data: widget.data,
         template: t,
         format: _format,
-        backdrop: _photo == null && _backdrop == ShareBackdrop.photo ? ShareBackdrop.graphite : _backdrop,
+        backdrop: t.transparent
+            ? (_stickerOnPhoto && _photo != null ? ShareBackdrop.photo : ShareBackdrop.graphite)
+            : _photo == null && _backdrop == ShareBackdrop.photo
+                ? ShareBackdrop.graphite
+                : _backdrop,
         photo: _photo,
       ),
     );
@@ -1200,7 +1248,8 @@ class _ShareSheetState extends State<_ShareSheet> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (t.transparent) CustomPaint(painter: _CheckerPainter(KColor.isDark)),
+                if (t.transparent && !(_stickerOnPhoto && _photo != null))
+                  CustomPaint(painter: _CheckerPainter(KColor.isDark)),
                 FittedBox(child: SizedBox.fromSize(size: size, child: card)),
               ],
             ),
@@ -1209,6 +1258,20 @@ class _ShareSheetState extends State<_ShareSheet> {
       ),
     );
   }
+
+  Widget _changePhoto() => Align(
+        child: Semantics(
+          button: true,
+          label: 'Change backdrop photo',
+          onTap: _pickPhoto,
+          excludeSemantics: true,
+          child: TextButton.icon(
+            onPressed: _pickPhoto,
+            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+            label: const Text('Change photo'),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -1275,7 +1338,11 @@ class _ShareSheetState extends State<_ShareSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              _template.transparent ? 'Sticker · transparent, lay it on your own photo' : _template.label,
+              _template.transparent
+                  ? (_stickerOnPhoto && _photo != null
+                      ? 'Sticker on your photo'
+                      : 'Sticker · clear. Chats like WhatsApp show clear as black, so add a photo')
+                  : _template.label,
               textAlign: TextAlign.center,
               style: KText.caption.copyWith(color: KColor.textSecondary),
             ),
@@ -1297,6 +1364,30 @@ class _ShareSheetState extends State<_ShareSheet> {
                     value: _format,
                     onChanged: (f) => setState(() => _format = f),
                   ),
+                  if (_template.transparent) ...[
+                    const SizedBox(height: 10),
+                    KSegmented<bool>(
+                      dense: true,
+                      segments: [
+                        const KSegment(false, 'Clear', semanticLabel: 'Clear backdrop'),
+                        KSegment(
+                          true,
+                          'Photo',
+                          icon: Icons.photo_outlined,
+                          semanticLabel: _photoBytes == null ? 'Photo backdrop, choose a photo' : 'Photo backdrop',
+                        ),
+                      ],
+                      value: _stickerOnPhoto && _photo != null,
+                      onChanged: (v) {
+                        if (v && _photoBytes == null) {
+                          _pickPhoto();
+                          return;
+                        }
+                        setState(() => _stickerOnPhoto = v);
+                      },
+                    ),
+                    if (_stickerOnPhoto && _photo != null) _changePhoto(),
+                  ],
                   if (!_template.transparent) ...[
                     const SizedBox(height: 10),
                     KSegmented<ShareBackdrop>(
@@ -1320,20 +1411,7 @@ class _ShareSheetState extends State<_ShareSheet> {
                         setState(() => _backdrop = b);
                       },
                     ),
-                    if (_backdrop == ShareBackdrop.photo && _photo != null)
-                      Align(
-                        child: Semantics(
-                          button: true,
-                          label: 'Change backdrop photo',
-                          onTap: _pickPhoto,
-                          excludeSemantics: true,
-                          child: TextButton.icon(
-                            onPressed: _pickPhoto,
-                            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                            label: const Text('Change photo'),
-                          ),
-                        ),
-                      ),
+                    if (_backdrop == ShareBackdrop.photo && _photo != null) _changePhoto(),
                   ],
                   if (_error != null) ...[
                     const SizedBox(height: 10),
@@ -1363,6 +1441,39 @@ class _ShareSheetState extends State<_ShareSheet> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One row of the photo source picker.
+class _SourceOption extends StatelessWidget {
+  const _SourceOption({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: KSpacing.p, vertical: KSpacing.md),
+            child: Row(
+              children: [
+                Icon(icon, size: 22, color: KColor.textPrimary),
+                const SizedBox(width: KSpacing.lg),
+                Expanded(child: Text(label, style: KText.bodyMedium.copyWith(color: KColor.textPrimary))),
+              ],
+            ),
+          ),
         ),
       ),
     );

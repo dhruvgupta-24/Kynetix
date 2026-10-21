@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -122,12 +124,13 @@ class _GateSwitcher extends StatelessWidget {
 }
 
 // ─── Brand loader ─────────────────────────────────────────────────────────────
-// Calm, branded boot wait: the heavy wordmark from the sign-in masthead with
-// quiet loading dots beneath, and honest loader copy that rotates no faster
-// than the VOICE.md dwell. The dots loop only while ambient motion is
-// allowed. Reads correctly on Carbon and Paper.
+// The boot wait is the launch intro's last frame: the same graphite, the
+// same wordmark at the same size and place (avd_intro ends with the word at
+// 88 dp per em, cap box centred, scaled down on narrow screens). When the
+// intro lifts early (its 4.5 s cap, or a tap) nothing on screen moves. Only
+// if loading runs on does a quiet line of copy fade in under the mark.
 
-class _BrandLoader extends StatelessWidget {
+class _BrandLoader extends StatefulWidget {
   const _BrandLoader({
     super.key,
     required this.semanticLabel,
@@ -138,20 +141,71 @@ class _BrandLoader extends StatelessWidget {
   final List<String> messages;
 
   @override
+  State<_BrandLoader> createState() => _BrandLoaderState();
+}
+
+class _BrandLoaderState extends State<_BrandLoader> {
+  bool _slow = false;
+  late final Timer _slowTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _slowTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _slowTimer.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return KPage(
-      tone: KTone.neutral,
-      intensity: 0.5,
-      body: KLoaderPanel(
-        semanticsLabel: semanticLabel,
-        messages: messages,
-        loader: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const KShearWordmark(fontSize: 40),
-            const SizedBox(height: KSpacing.lg),
-            const KLoadingDots(),
-          ],
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: widget.semanticLabel,
+      child: ExcludeSemantics(
+        child: ColoredBox(
+          color: kBrandGraphite,
+          child: LayoutBuilder(
+            builder: (context, box) {
+              // Same numbers as LaunchIntro.kt and avd_intro.xml.
+              final fit = ((box.maxWidth - 32) / 311).clamp(0.0, 1.0);
+              final f = 88.0 * fit;
+              // Ink runs from the K's left (0.05 em past the trail) to the
+              // X's right (3.529 em); the native word sits 1.8 dp right of centre.
+              final inkCentre = f * (KShear.trail + (0.05 + 3.529) / 2);
+              final left = box.maxWidth / 2 + 1.8 * fit - inkCentre;
+              final top = box.maxHeight / 2 - f * KShear.kCenter.dy;
+              return Stack(
+                children: [
+                  Positioned(
+                    left: left,
+                    top: top,
+                    child: KShearWordmark(fontSize: f, ink: kBrandBone, ember: kBrandEmber),
+                  ),
+                  if (widget.messages.isNotEmpty)
+                    Positioned(
+                      left: KSpacing.p,
+                      right: KSpacing.p,
+                      top: top + f + KSpacing.xl,
+                      child: AnimatedOpacity(
+                        opacity: _slow ? 1 : 0,
+                        duration: KMotion.of(context, KMotion.standard),
+                        child: KLoadingLabel(
+                          messages: widget.messages,
+                          style: KText.caption.copyWith(color: kBrandBone.withValues(alpha: 0.6)),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

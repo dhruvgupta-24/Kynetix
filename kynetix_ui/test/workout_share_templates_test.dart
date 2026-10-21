@@ -83,6 +83,20 @@ void main() {
       expect(data.totalReps, 5 + 12 + 12 + 8);
     });
 
+    test('receipt load is the heaviest working set', () {
+      const lifts = ShareExercise(name: 'Squat', sets: [
+        ShareSet(load: 140, reps: 3, warmUp: true),
+        ShareSet(load: 100, reps: 8),
+        ShareSet(load: 112.5, reps: 5),
+        ShareSet(load: 80, reps: 12, drop: true),
+      ]);
+      expect(lifts.topLoad, '112.5 KG');
+      const dips = ShareExercise(name: 'Dip', sets: [ShareSet(load: 0, reps: 12, bodyweight: true)]);
+      expect(dips.topLoad, 'BW');
+      const weighted = ShareExercise(name: 'Dip', sets: [ShareSet(load: 10, reps: 8, bodyweight: true)]);
+      expect(weighted.topLoad, 'BW+10');
+    });
+
     test('exercisesOf groups sets and marks warm-ups, bodyweight and records', () {
       const bench = Exercise(id: 'b', name: 'Bench Press', muscleGroup: 'Chest', type: ExerciseType.barbellCompound);
       SetEntry w(double kg, int r, [SetType t = SetType.normal]) => SetEntry(weight: kg, reps: r, setType: t);
