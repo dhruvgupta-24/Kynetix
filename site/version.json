@@ -1,25 +1,24 @@
 {
-  "versionCode": 3,
-  "versionName": "1.0.0-beta.3",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.3/kynetix-1.0.0-beta.3-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.3/kynetix-1.0.0-beta.3-armeabi-v7a.apk",
+  "versionCode": 4,
+  "versionName": "1.0.0-beta.4",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.4/kynetix-1.0.0-beta.4-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.4/kynetix-1.0.0-beta.4-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Finishing a workout and reopening the app no longer saves it twice. Copies already saved are cleaned up.",
-    "Run Kyno on ChatGPT shows your connection when you're already linked.",
-    "Share cards: take or pick a backdrop photo, and the Sticker can sit on it.",
-    "The Receipt card shows the weight you lifted.",
-    "Loading now happens inside the logo animation."
+    "Just reinstall over your existing app — no need to delete it! It updates in place and your data stays completely intact.",
+    "Fixed all bottom sheet overflow glitches across the entire app (rest timer, exercise options, custom weights, quick adds).",
+    "Rest timer presets now wrap cleanly without layout clipping on any screen.",
+    "Polished splash loader and app gate styling with clean dark branding."
   ],
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "ab562c73de5ba4097fb0096b124199ccb089ae547105a4b9996fcbb48562b189",
-    "armv7": "9f97a275dea7fdda9f9fd727334c757a07e54030b1974e1ebe4adb44f5c84169"
+    "arm64": "4a35bdb6f24e6907ea7e171d8681b933420604eaadf751024050536efcc20526",
+    "armv7": "2d7e6b379bb67594a812f62cbfb41a3c8c7d5d07a3b7f742428a3640a2d1eca5"
   },
   "size": {
     "arm64": "39.5 MB",
     "armv7": "36.4 MB"
   },
-  "released": "2026-10-21"
+  "released": "2026-10-25"
 }
