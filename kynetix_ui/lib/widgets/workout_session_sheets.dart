@@ -18,9 +18,8 @@ Future<int?> showRestPickerSheet(
 }) {
   return showKSheet<int>(
     context: context,
-    isScrollControlled: false,
     builder: (ctx) => SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -71,19 +70,21 @@ class _RestChip extends StatelessWidget {
           borderRadius: KRadius.pill,
           child: Container(
             constraints: const BoxConstraints(minWidth: 72, minHeight: 48),
-            alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
               color: selected ? KColor.ink : Colors.transparent,
               borderRadius: KRadius.pill,
               border: Border.all(color: selected ? KColor.ink : KColor.fg.withValues(alpha: 0.16)),
             ),
-            child: Text(
-              restLabel(seconds),
-              style: KText.numSmall.copyWith(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: selected ? KColor.onInk : KColor.textPrimary,
+            child: Center(
+              widthFactor: 1.0,
+              child: Text(
+                restLabel(seconds),
+                style: KText.numSmall.copyWith(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? KColor.onInk : KColor.textPrimary,
+                ),
               ),
             ),
           ),

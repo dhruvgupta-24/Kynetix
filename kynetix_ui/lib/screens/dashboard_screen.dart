@@ -760,7 +760,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         return SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.only(bottom: KSpacing.md),
             child: Column(
               mainAxisSize: MainAxisSize.min,

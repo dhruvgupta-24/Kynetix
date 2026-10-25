@@ -76,7 +76,7 @@ class _ProfileTabState extends State<ProfileTab> {
             );
         return SafeArea(
           top: false,
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.only(top: KSpacing.sm, bottom: KSpacing.lg),
             child: Column(
               mainAxisSize: MainAxisSize.min,

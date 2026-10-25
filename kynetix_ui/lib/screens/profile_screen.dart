@@ -3391,7 +3391,7 @@ class _WidgetPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       top: false,
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.sm, KSpacing.p, KSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,

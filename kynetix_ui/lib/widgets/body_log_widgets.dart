@@ -68,7 +68,7 @@ class _WeightSheetState extends State<_WeightSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: KSpacing.lg),
           child: Column(
             mainAxisSize: MainAxisSize.min,

@@ -1988,7 +1988,6 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   void _openHistory(Exercise ex) {
     showKSheet(
       context: context,
-      isScrollControlled: false,
       builder: (context) => _ExerciseHistorySheet(
         exercise: ex,
         splitDayName: widget.splitDay.name,
@@ -2973,7 +2972,6 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
   void _showActionsMenu() {
     showKSheet(
       context: context,
-      isScrollControlled: false,
       builder: (context) => _ExerciseActionsSheet(
         exercise: widget.exercise,
         isSkipped: widget.isSkipped,
@@ -5331,92 +5329,94 @@ class _ExerciseActionsSheet extends StatelessWidget {
     final rampable = exercise.type != ExerciseType.bodyweight &&
         exercise.effectiveExecutionMode == ExerciseExecutionMode.weightReps;
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          KSheetHeader(exercise.name, subtitle: 'What do you want to do?'),
-          const SizedBox(height: 10),
-          Divider(height: 1, color: _hairline()),
-          if (!isSkipped) ...[
-            ListTile(
-              leading: Icon(Icons.block_rounded, color: KColor.danger),
-              title: Text('Skip exercise', style: _ActionText.title),
-              subtitle: Text('Sit this one out today', style: _ActionText.subtitle),
-              onTap: () {
-                Navigator.of(context).pop();
-                _showSkipReasonsSheet(context);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.swap_horiz_rounded, color: KColor.textPrimary),
-              title: Text('Swap exercise', style: _ActionText.title),
-              subtitle: Text('Pick something else for today', style: _ActionText.subtitle),
-              onTap: () {
-                Navigator.of(context).pop();
-                onReplace();
-              },
-            ),
-            if (rampable)
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KSheetHeader(exercise.name, subtitle: 'What do you want to do?'),
+            const SizedBox(height: 10),
+            Divider(height: 1, color: _hairline()),
+            if (!isSkipped) ...[
               ListTile(
-                leading: Icon(Icons.stacked_line_chart_rounded, color: KColor.textPrimary),
-                title: Text('Add warm-up sets', style: _ActionText.title),
-                subtitle: Text('Ramp up to your working weight', style: _ActionText.subtitle),
+                leading: Icon(Icons.block_rounded, color: KColor.danger),
+                title: Text('Skip exercise', style: _ActionText.title),
+                subtitle: Text('Sit this one out today', style: _ActionText.subtitle),
                 onTap: () {
                   Navigator.of(context).pop();
-                  onAddWarmUps();
+                  _showSkipReasonsSheet(context);
                 },
               ),
+              ListTile(
+                leading: Icon(Icons.swap_horiz_rounded, color: KColor.textPrimary),
+                title: Text('Swap exercise', style: _ActionText.title),
+                subtitle: Text('Pick something else for today', style: _ActionText.subtitle),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onReplace();
+                },
+              ),
+              if (rampable)
+                ListTile(
+                  leading: Icon(Icons.stacked_line_chart_rounded, color: KColor.textPrimary),
+                  title: Text('Add warm-up sets', style: _ActionText.title),
+                  subtitle: Text('Ramp up to your working weight', style: _ActionText.subtitle),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    onAddWarmUps();
+                  },
+                ),
+              ListTile(
+                leading: Icon(Icons.timer_outlined, color: KColor.textPrimary),
+                title: Text('Rest timer: ${restLabel(restSeconds)}', style: _ActionText.title),
+                subtitle: Text('Remembered for this exercise', style: _ActionText.subtitle),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onEditRest();
+                },
+              ),
+            ] else ...[
+              ListTile(
+                leading: Icon(Icons.refresh_rounded, color: KColor.textPrimary),
+                title: Text(isSubstitution ? 'Undo swap' : 'Bring it back', style: _ActionText.title),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  if (isSubstitution) {
+                    onUndoReplacement();
+                  } else {
+                    onUndoSkip();
+                  }
+                },
+              ),
+            ],
             ListTile(
-              leading: Icon(Icons.timer_outlined, color: KColor.textPrimary),
-              title: Text('Rest timer: ${restLabel(restSeconds)}', style: _ActionText.title),
-              subtitle: Text('Remembered for this exercise', style: _ActionText.subtitle),
+              leading: Icon(Icons.reorder_rounded, color: KColor.textSecondary),
+              title: Text('Reorder exercises', style: _ActionText.title),
+              subtitle: Text('Drag them into the order you train', style: _ActionText.subtitle),
               onTap: () {
                 Navigator.of(context).pop();
-                onEditRest();
+                onReorder();
               },
             ),
-          ] else ...[
             ListTile(
-              leading: Icon(Icons.refresh_rounded, color: KColor.textPrimary),
-              title: Text(isSubstitution ? 'Undo swap' : 'Bring it back', style: _ActionText.title),
+              leading: Icon(Icons.arrow_upward_rounded, color: KColor.textSecondary),
+              title: Text('Add exercise before', style: _ActionText.title),
               onTap: () {
                 Navigator.of(context).pop();
-                if (isSubstitution) {
-                  onUndoReplacement();
-                } else {
-                  onUndoSkip();
-                }
+                onAddBefore();
               },
             ),
+            ListTile(
+              leading: Icon(Icons.arrow_downward_rounded, color: KColor.textSecondary),
+              title: Text('Add exercise after', style: _ActionText.title),
+              onTap: () {
+                Navigator.of(context).pop();
+                onAddAfter();
+              },
+            ),
+            const SizedBox(height: 8),
           ],
-          ListTile(
-            leading: Icon(Icons.reorder_rounded, color: KColor.textSecondary),
-            title: Text('Reorder exercises', style: _ActionText.title),
-            subtitle: Text('Drag them into the order you train', style: _ActionText.subtitle),
-            onTap: () {
-              Navigator.of(context).pop();
-              onReorder();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.arrow_upward_rounded, color: KColor.textSecondary),
-            title: Text('Add exercise before', style: _ActionText.title),
-            onTap: () {
-              Navigator.of(context).pop();
-              onAddBefore();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.arrow_downward_rounded, color: KColor.textSecondary),
-            title: Text('Add exercise after', style: _ActionText.title),
-            onTap: () {
-              Navigator.of(context).pop();
-              onAddAfter();
-            },
-          ),
-          const SizedBox(height: 8),
-        ],
+        ),
       ),
     );
   }
@@ -5424,7 +5424,6 @@ class _ExerciseActionsSheet extends StatelessWidget {
   void _showSkipReasonsSheet(BuildContext context) {
     showKSheet(
       context: context,
-      isScrollControlled: false,
       builder: (context) {
         final reasons = [
           'Equipment Busy',
@@ -5434,22 +5433,24 @@ class _ExerciseActionsSheet extends StatelessWidget {
           'Other',
         ];
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              KSheetHeader(exercise.name, subtitle: 'Why skip it today? No judgement.'),
-              const SizedBox(height: 10),
-              Divider(height: 1, color: _hairline()),
-              ...reasons.map((r) => ListTile(
-                title: Text(r, style: _ActionText.title),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onSkip(r);
-                },
-              )),
-              const SizedBox(height: 8),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                KSheetHeader(exercise.name, subtitle: 'Why skip it today? No judgement.'),
+                const SizedBox(height: 10),
+                Divider(height: 1, color: _hairline()),
+                ...reasons.map((r) => ListTile(
+                  title: Text(r, style: _ActionText.title),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    onSkip(r);
+                  },
+                )),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
       },
@@ -5849,73 +5850,75 @@ class _ExerciseHistorySheet extends StatelessWidget {
     final trend = svc.exerciseTrendLabel(exercise.id);
     final note = svc.exerciseProgressNote(exercise, splitDayName);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const KDragHandle(),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(exercise.name, style: KText.h2),
-                    Text(exercise.muscleGroup, style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary)),
-                    const SizedBox(height: 3),
-                    Text(trend, style: KText.caption.copyWith(fontSize: 13, color: KColor.textPrimary, fontWeight: FontWeight.w600)),
-                  ],
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const KDragHandle(),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(exercise.name, style: KText.h2),
+                      Text(exercise.muscleGroup, style: KText.caption.copyWith(fontSize: 13, color: KColor.textSecondary)),
+                      const SizedBox(height: 3),
+                      Text(trend, style: KText.caption.copyWith(fontSize: 13, color: KColor.textPrimary, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
                 ),
+                if (best != null) ...[
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Best 1RM', style: _WsText.bodySmall.copyWith(fontSize: 12, color: KColor.textMuted)),
+                      Text(
+                        '${best.estimatedOneRepMax.toStringAsFixed(1)} kg',
+                        style: KText.numMedium.copyWith(fontSize: 24, color: KColor.ember),
+                      ),
+                      Text(
+                        '(${best.shortLabel})',
+                        style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: KColor.textSecondary),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: KColor.isDark ? KColor.card : KColor.cardHigh,
+                borderRadius: KRadius.md,
+                border: Border(left: BorderSide(color: KColor.fat, width: 2)),
               ),
-              if (best != null) ...[
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Best 1RM', style: _WsText.bodySmall.copyWith(fontSize: 12, color: KColor.textMuted)),
-                    Text(
-                      '${best.estimatedOneRepMax.toStringAsFixed(1)} kg',
-                      style: KText.numMedium.copyWith(fontSize: 24, color: KColor.ember),
-                    ),
-                    Text(
-                      '(${best.shortLabel})',
-                      style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: KColor.textSecondary),
-                    ),
-                  ],
+              child: Text(note, style: KText.body.copyWith(fontSize: 14, height: 1.45, color: KColor.textSecondary)),
+            ),
+            const SizedBox(height: 16),
+            if (history.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text('No history yet. Your first set starts it.', style: KText.body.copyWith(color: KColor.textMuted)),
                 ),
+              )
+            else ...[
+              for (final h in history) ...[
+                _HistoryRow(date: h.date, entry: h.entry),
+                const SizedBox(height: 8),
               ],
             ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: KColor.isDark ? KColor.card : KColor.cardHigh,
-              borderRadius: KRadius.md,
-              border: Border(left: BorderSide(color: KColor.fat, width: 2)),
-            ),
-            child: Text(note, style: KText.body.copyWith(fontSize: 14, height: 1.45, color: KColor.textSecondary)),
-          ),
-          const SizedBox(height: 16),
-          if (history.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Text('No history yet. Your first set starts it.', style: KText.body.copyWith(color: KColor.textMuted)),
-              ),
-            )
-          else ...[
-            for (final h in history) ...[
-              _HistoryRow(date: h.date, entry: h.entry),
-              const SizedBox(height: 8),
-            ],
           ],
-        ],
+        ),
       ),
     );
   }

@@ -1134,7 +1134,7 @@ class _ShareSheetState extends State<_ShareSheet> {
     final source = await showKSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: KSpacing.md),
           child: Column(
             mainAxisSize: MainAxisSize.min,

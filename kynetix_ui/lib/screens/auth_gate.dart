@@ -169,7 +169,7 @@ class _BrandLoaderState extends State<_BrandLoader> {
       liveRegion: true,
       label: widget.semanticLabel,
       child: ExcludeSemantics(
-        child: ColoredBox(
+        child: Material(
           color: kBrandGraphite,
           child: LayoutBuilder(
             builder: (context, box) {
@@ -198,7 +198,10 @@ class _BrandLoaderState extends State<_BrandLoader> {
                         duration: KMotion.of(context, KMotion.standard),
                         child: KLoadingLabel(
                           messages: widget.messages,
-                          style: KText.caption.copyWith(color: kBrandBone.withValues(alpha: 0.6)),
+                          style: KText.caption.copyWith(
+                            color: kBrandBone.withValues(alpha: 0.6),
+                            decoration: TextDecoration.none,
+                          ),
                         ),
                       ),
                     ),

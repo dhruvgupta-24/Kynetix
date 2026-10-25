@@ -1650,7 +1650,6 @@ class _HeatmapGridState extends State<_HeatmapGrid> {
     KHaptics.select();
     showKSheet(
       context: context,
-      isScrollControlled: false,
       builder: (context) {
         final dateStr =
             '${day.date.day} ${_monthName(day.date.month)} ${day.date.year}';

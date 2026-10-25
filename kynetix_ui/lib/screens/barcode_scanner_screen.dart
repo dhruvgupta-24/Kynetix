@@ -748,7 +748,7 @@ class _FallbackSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: KSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,

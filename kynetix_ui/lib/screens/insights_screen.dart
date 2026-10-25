@@ -1842,7 +1842,7 @@ class _InsightsScreenState extends State<InsightsScreen>
       context: context,
       builder: (sheetContext) => SafeArea(
         top: false,
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: KSpacing.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,

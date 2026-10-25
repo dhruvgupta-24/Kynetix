@@ -366,7 +366,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     final source = await showKSheet<ImageSource>(
       context: context,
       builder: (context) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: KSpacing.md),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1343,7 +1343,7 @@ Future<void> _showReplyActions(BuildContext context, {required String text, Stri
   final action = await showKSheet<String>(
     context: context,
     builder: (sheet) => SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: KSpacing.md),
         child: Column(
           mainAxisSize: MainAxisSize.min,
