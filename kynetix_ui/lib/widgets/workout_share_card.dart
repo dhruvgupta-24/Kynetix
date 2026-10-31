@@ -330,35 +330,37 @@ class ShareCanvas extends StatelessWidget {
       ShareTemplate.equivalent => _Equivalent(data, s),
       ShareTemplate.sticker => _Sticker(data, s),
     };
-    return SizedBox.fromSize(
-      size: format.size,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (!template.transparent || usePhoto) ...[
-              if (usePhoto) ...[
-                Image(image: photo!, fit: BoxFit.cover, gaplessPlayback: true),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x8C000000), Color(0x33000000), Color(0x59000000), Color(0xD9000000)],
-                      stops: [0, 0.3, 0.55, 1],
+    return MediaQuery.withNoTextScaling(
+      child: SizedBox.fromSize(
+        size: format.size,
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (!template.transparent || usePhoto) ...[
+                if (usePhoto) ...[
+                  Image(image: photo!, fit: BoxFit.cover, gaplessPlayback: true),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x8C000000), Color(0x33000000), Color(0x59000000), Color(0xD9000000)],
+                        stops: [0, 0.3, 0.55, 1],
+                      ),
                     ),
                   ),
-                ),
-              ] else
-                CustomPaint(painter: _GrainPainter(ink.bg, ink.fg)),
+                ] else
+                  CustomPaint(painter: _GrainPainter(ink.bg, ink.fg)),
+              ],
+              Padding(
+                padding: format == ShareFormat.story
+                    ? const EdgeInsets.fromLTRB(26, 58, 26, 62)
+                    : const EdgeInsets.fromLTRB(24, 24, 24, 22),
+                child: body,
+              ),
             ],
-            Padding(
-              padding: format == ShareFormat.story
-                  ? const EdgeInsets.fromLTRB(26, 58, 26, 62)
-                  : const EdgeInsets.fromLTRB(24, 24, 24, 22),
-              child: body,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -549,7 +551,7 @@ class _Receipt extends StatelessWidget {
             for (final l in d.topLifts)
               ShareExercise(name: l.name, sets: [ShareSet(load: l.weight, reps: l.reps, isPr: l.isPr, bodyweight: l.bodyweight)]),
           ];
-    final cap = s.tall ? 7 : 3;
+    final cap = s.tall ? 6 : 3;
     final shown = items.take(cap).toList();
     final more = items.length - shown.length;
     final order = ((d.date.year * 372 + d.date.month * 31 + d.date.day) * 7919) % 100000;
@@ -571,55 +573,58 @@ class _Receipt extends StatelessWidget {
         );
 
     return Center(
-      child: Transform.rotate(
-        angle: -0.018,
-        child: CustomPaint(
-          painter: _ReceiptPainter(_paper, shadow: s.ink.bg != _Ink.paper.bg || s.ink.shadow),
-          child: SizedBox(
-            width: s.tall ? 278 : 252,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(18, s.tall ? 26 : 18, 18, s.tall ? 26 : 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(child: KShearWordmark(fontSize: s.tall ? 24 : 19, ink: _ink, ember: kBrandEmber)),
-                  const SizedBox(height: 6),
-                  Text('IRON GOODS · EST. TODAY', textAlign: TextAlign.center, style: _m(small - 1, spacing: 1.2)),
-                  Text('CASHIER: KYNO   TILL 01', textAlign: TextAlign.center, style: _m(small - 1, spacing: 1.2)),
-                  const SizedBox(height: 6),
-                  line('${d.date.day} ${_months[d.date.month - 1]} ${d.date.year}  $hh:$mm', 'NO. ${order.toString().padLeft(5, '0')}'),
-                  dash,
-                  Text(d.dayName.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: _m(small + 1.5, w: FontWeight.w800, spacing: 0.6)),
-                  const SizedBox(height: 4),
-                  for (final e in shown) ...[
-                    line(e.name.toUpperCase(), '${_thousands(e.volume)} KG', bold: true),
-                    line(
-                      '  ${e.workingSets} × ${e.sets.where((x) => !x.warmUp && !x.drop).map((x) => x.reps).toSet().join('/')}'
-                          '${e.hasPr ? '   * PR' : ''}',
-                      e.topLoad.isEmpty ? '' : '@ ${e.topLoad}',
-                      color: e.hasPr ? const Color(0xFFD9481F) : const Color(0x991A1A1B),
-                    ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Transform.rotate(
+          angle: -0.018,
+          child: CustomPaint(
+            painter: _ReceiptPainter(_paper, shadow: s.ink.bg != _Ink.paper.bg || s.ink.shadow),
+            child: SizedBox(
+              width: s.tall ? 278 : 252,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(18, s.tall ? 22 : 18, 18, s.tall ? 22 : 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(child: KShearWordmark(fontSize: s.tall ? 24 : 19, ink: _ink, ember: kBrandEmber)),
+                    const SizedBox(height: 6),
+                    Text('IRON GOODS · EST. TODAY', textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: _m(small - 1, spacing: 1.2)),
+                    Text('CASHIER: KYNO   TILL 01', textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: _m(small - 1, spacing: 1.2)),
+                    const SizedBox(height: 6),
+                    line('${d.date.day} ${_months[d.date.month - 1]} ${d.date.year}  $hh:$mm', 'NO. ${order.toString().padLeft(5, '0')}'),
+                    dash,
+                    Text(d.dayName.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: _m(small + 1.5, w: FontWeight.w800, spacing: 0.6)),
+                    const SizedBox(height: 4),
+                    for (final e in shown) ...[
+                      line(e.name.toUpperCase(), '${_thousands(e.volume)} KG', bold: true),
+                      line(
+                        '  ${e.workingSets} × ${e.sets.where((x) => !x.warmUp && !x.drop).map((x) => x.reps).toSet().join('/')}'
+                            '${e.hasPr ? '   * PR' : ''}',
+                        e.topLoad.isEmpty ? '' : '@ ${e.topLoad}',
+                        color: e.hasPr ? const Color(0xFFD9481F) : const Color(0x991A1A1B),
+                      ),
+                    ],
+                    if (more > 0) line('  + $more MORE', ''),
+                    dash,
+                    line('SETS', '${d.sets}'),
+                    line('TIME', _dur(d.durationMinutes)),
+                    line('RECORDS', '${d.prs}'),
+                    const SizedBox(height: 4),
+                    line('TOTAL', '${_thousands(d.totalVolume)} KG', bold: true, size: small + 3),
+                    dash,
+                    const SizedBox(height: 6),
+                    SizedBox(height: s.tall ? 34 : 28, child: CustomPaint(painter: _BarcodePainter(d, _ink))),
+                    const SizedBox(height: 8),
+                    Text(quip, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: _m(small - 0.5, w: FontWeight.w700, spacing: 0.4)),
+                    Text('THANK YOU FOR LIFTING', textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: _m(small - 1.5, spacing: 1.4, color: const Color(0x991A1A1B))),
                   ],
-                  if (more > 0) line('  + $more MORE', ''),
-                  dash,
-                  line('SETS', '${d.sets}'),
-                  line('TIME', _dur(d.durationMinutes)),
-                  line('RECORDS', '${d.prs}'),
-                  const SizedBox(height: 4),
-                  line('TOTAL', '${_thousands(d.totalVolume)} KG', bold: true, size: small + 3),
-                  dash,
-                  const SizedBox(height: 6),
-                  SizedBox(height: s.tall ? 38 : 28, child: CustomPaint(painter: _BarcodePainter(d, _ink))),
-                  const SizedBox(height: 8),
-                  Text(quip, textAlign: TextAlign.center, style: _m(small - 0.5, w: FontWeight.w700, spacing: 0.4)),
-                  Text('THANK YOU FOR LIFTING', textAlign: TextAlign.center, style: _m(small - 1.5, spacing: 1.4, color: const Color(0x991A1A1B))),
-                ],
+                ),
               ),
-            ),
           ),
         ),
+      ),
       ),
     );
   }

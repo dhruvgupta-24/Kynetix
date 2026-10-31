@@ -27,8 +27,7 @@ if (buildingReleaseBundle && !keystorePropertiesFile.exists()) {
         "Release app bundles must be signed with the upload key: android/key.properties is missing.",
     )
 }
-val useStoreSigning = keystorePropertiesFile.exists() &&
-    (buildingReleaseBundle || (project.findProperty("kynetixStoreRelease") as String?)?.toBoolean() == true)
+val useStoreSigning = keystorePropertiesFile.exists()
 
 android {
     namespace = "com.kynetix.app"

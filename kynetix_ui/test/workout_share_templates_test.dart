@@ -49,6 +49,91 @@ void main() {
     }
   });
 
+  testWidgets('receipt renders without overflow for an 8-exercise session in story and post formats', (tester) async {
+    final sessionData = WorkoutShareData(
+      date: DateTime(2026, 10, 27, 18, 26),
+      dayName: 'Chest + Triceps',
+      durationMinutes: 96,
+      totalVolume: 10560,
+      sets: 26,
+      prs: 1,
+      topLifts: const [
+        ShareLift(name: 'Flat Bench Press', weight: 70, reps: 10, e1rm: 93),
+        ShareLift(name: 'Pec Dec', weight: 60, reps: 11, e1rm: 82),
+        ShareLift(name: 'Tricep Pushdown', weight: 45, reps: 12, e1rm: 63),
+      ],
+      muscles: const ['Chest', 'Triceps'],
+      exercises: const [
+        ShareExercise(name: 'Flat Bench Press', sets: [ShareSet(load: 70, reps: 10), ShareSet(load: 70, reps: 6), ShareSet(load: 70, reps: 7)]),
+        ShareExercise(name: 'Incline DB Press', sets: [ShareSet(load: 25, reps: 12), ShareSet(load: 25, reps: 8), ShareSet(load: 25, reps: 7)]),
+        ShareExercise(name: 'Cable Chest Fly', sets: [ShareSet(load: 30, reps: 11), ShareSet(load: 30, reps: 10)]),
+        ShareExercise(name: 'Pec Dec', sets: [ShareSet(load: 60, reps: 11), ShareSet(load: 60, reps: 10)]),
+        ShareExercise(name: 'Tricep Pushdown', sets: [ShareSet(load: 45, reps: 11), ShareSet(load: 45, reps: 12)]),
+        ShareExercise(name: 'Overhead Tricep Extension', sets: [ShareSet(load: 45, reps: 10), ShareSet(load: 45, reps: 6), ShareSet(load: 45, reps: 9, isPr: true)]),
+        ShareExercise(name: 'Captains Chair Straight Leg Raise', sets: [ShareSet(load: 0, reps: 12, bodyweight: true), ShareSet(load: 0, reps: 10, bodyweight: true)]),
+        ShareExercise(name: 'Dips', sets: [ShareSet(load: 0, reps: 10, bodyweight: true)]),
+      ],
+    );
+
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    for (final f in ShareFormat.values) {
+      await tester.pumpWidget(MaterialApp(
+        home: Center(
+          child: ShareCanvas(
+            data: sessionData,
+            template: ShareTemplate.receipt,
+            format: f,
+            backdrop: ShareBackdrop.graphite,
+          ),
+        ),
+      ));
+      expect(tester.takeException(), isNull, reason: 'failed on format ${f.name}');
+    }
+  });
+
+  testWidgets('receipt scales down gracefully even with extreme font scaling', (tester) async {
+    final sessionData = WorkoutShareData(
+      date: DateTime(2026, 10, 27, 18, 26),
+      dayName: 'Chest + Triceps',
+      durationMinutes: 96,
+      totalVolume: 10560,
+      sets: 26,
+      prs: 1,
+      topLifts: const [
+        ShareLift(name: 'Flat Bench Press', weight: 70, reps: 10, e1rm: 93),
+      ],
+      muscles: const ['Chest', 'Triceps'],
+      exercises: List.generate(
+        12,
+        (i) => ShareExercise(name: 'Exercise $i', sets: [ShareSet(load: 50, reps: 10)]),
+      ),
+    );
+
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true),
+      home: MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(1.8)),
+        child: Center(
+          child: ShareCanvas(
+            data: sessionData,
+            template: ShareTemplate.receipt,
+            format: ShareFormat.story,
+            backdrop: ShareBackdrop.graphite,
+          ),
+        ),
+      ),
+    ));
+
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('share sheet swipes templates and switches format', (tester) async {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 2.75;

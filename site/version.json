@@ -1,24 +1,23 @@
 {
-  "versionCode": 4,
-  "versionName": "1.0.0-beta.4",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.4/kynetix-1.0.0-beta.4-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.4/kynetix-1.0.0-beta.4-armeabi-v7a.apk",
+  "versionCode": 5,
+  "versionName": "1.0.0-beta.5",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.5/kynetix-1.0.0-beta.5-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.5/kynetix-1.0.0-beta.5-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Just reinstall over your existing app — no need to delete it! It updates in place and your data stays completely intact.",
-    "Fixed all bottom sheet overflow glitches across the entire app (rest timer, exercise options, custom weights, quick adds).",
-    "Rest timer presets now wrap cleanly without layout clipping on any screen.",
-    "Polished splash loader and app gate styling with clean dark branding."
+    "Just install over your existing app — no need to uninstall! It updates in place and your data stays completely intact.",
+    "Fixed receipt share card bottom overflow when sharing long sessions or custom text scales.",
+    "Auto-scaling receipt layout to guarantee clean shares on any story or post."
   ],
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "4a35bdb6f24e6907ea7e171d8681b933420604eaadf751024050536efcc20526",
-    "armv7": "2d7e6b379bb67594a812f62cbfb41a3c8c7d5d07a3b7f742428a3640a2d1eca5"
+    "arm64": "d9564a4c3476e7f5c057e2c61ccaba023e67c00bd970fa78ce3c5ee7845684da",
+    "armv7": "a274b0c04d3e315bdf955de1bbbdbfe89506d191e49c37d465726971c77b9fee"
   },
   "size": {
     "arm64": "39.5 MB",
     "armv7": "36.4 MB"
   },
-  "released": "2026-10-25"
+  "released": "2026-10-31"
 }

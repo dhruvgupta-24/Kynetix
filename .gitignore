@@ -48,7 +48,12 @@ skills-lock.json
 **/.serena/
 supabase/**/.temp/
 
+# ── Binaries & release artifacts (uploaded to GitHub Releases) ───────────────
+*.apk
+SHA256SUMS.txt
+
 # ── Local notes and scratch work (kept on disk, not published) ───────────────
+docs/interview/
 kynetix_ui/scratch/
 interview_prep_crash_course.md
 EXERCISE_DISCOVERY_UX_REPORT.md
