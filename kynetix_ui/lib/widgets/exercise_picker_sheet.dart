@@ -222,7 +222,10 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
   void _selectExercise(ExerciseDefinition def) {
     KHaptics.commit();
     UserExercisePreferencesService.instance.recordSelection(def.id);
-    Navigator.of(context).pop(def.toExercise());
+    // A custom exercise comes back exactly as the user made it (type, rep
+    // range, notes), not rebuilt from its search entry.
+    final own = WorkoutService.instance.customExercises.where((e) => e.id == def.id).firstOrNull;
+    Navigator.of(context).pop(own ?? def.toExercise());
   }
 
   void _toggleFavorite(String exerciseId) {
@@ -237,9 +240,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
     final navigator = Navigator.of(context);
     final ex = await showCreateCustomExerciseSheet(context);
     if (!mounted || ex == null) return;
-    ExerciseLibraryService.instance.registerCustomExercises(
-      WorkoutService.instance.customExercises,
-    );
+    UserExercisePreferencesService.instance.recordSelection(ex.id);
     navigator.pop(ex);
   }
 
@@ -249,6 +250,23 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
       text: name,
       selection: TextSelection.collapsed(offset: name.length),
     );
+  }
+
+  /// The user's custom exercises under the current filters, newest first.
+  List<ExerciseSearchResult> _ownExercises() {
+    final exclude = widget.excludeIds ?? const <String>{};
+    return [
+      for (final def in ExerciseLibraryService.instance.customDefinitions.reversed)
+        if (!exclude.contains(def.id) &&
+            (_selectedCategory == 'ALL' || def.category == _selectedCategory) &&
+            (_selectedEquipment == 'ALL' || def.equipmentGroup == _selectedEquipment))
+          ExerciseSearchResult(
+            definition: def,
+            score: 0,
+            isBestMatch: false,
+            matchReason: const MatchReason(MatchReasonType.categoryMatch, 'Your exercise'),
+          ),
+    ];
   }
 
   List<_Entry> _buildEntries({
@@ -283,12 +301,21 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
       return entries;
     }
 
-    // Empty query: favourites → recent → everything else (popular first).
+    // Empty query: your own exercises → favourites → recent → everything
+    // else (popular first). Customs are listed in full: the popularity cap
+    // on the browse list would otherwise hide them.
     final prefs = UserExercisePreferencesService.instance;
+    final own = _ownExercises();
+    final ownIds = {for (final r in own) r.definition.id};
     final favs = <ExerciseSearchResult>[];
     final recents = <ExerciseSearchResult>[];
     final rest = <ExerciseSearchResult>[];
+    if (own.isNotEmpty) {
+      entries.add(_HeaderEntry('Your exercises', KColor.ember, Icons.person_rounded));
+      entries.addAll(own.map((r) => _RowEntry(r, isBest: false)));
+    }
     for (final r in otherMatches) {
+      if (ownIds.contains(r.definition.id)) continue;
       if (prefs.isFavorite(r.definition.id)) {
         favs.add(r);
       } else if (_recentIds.contains(r.definition.id)) {
@@ -297,7 +324,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
         rest.add(r);
       }
     }
-    if (favs.isEmpty && recents.isEmpty) {
+    if (favs.isEmpty && recents.isEmpty && own.isEmpty) {
       entries.addAll(rest.map((r) => _RowEntry(r, isBest: false)));
       return entries;
     }

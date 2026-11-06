@@ -80,29 +80,32 @@ class MuscleBodyMap extends StatefulWidget {
 
 class _MuscleBodyMapState extends State<MuscleBodyMap> {
   static Map<String, dynamic>? _cachedGeometry;
-  static bool _isLoading = false;
 
-  static Future<void> preload() async {
-    if (_cachedGeometry != null) return;
-    _isLoading = true;
-    try {
-      final jsonStr = await rootBundle
-          .loadString('assets/data/body_paths.json')
-          .timeout(const Duration(milliseconds: 300));
-      _cachedGeometry = jsonDecode(jsonStr) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('Error preloading body_paths.json: $e');
-    } finally {
-      _isLoading = false;
-    }
+  /// The one load in flight. Every map that mounts before it lands waits on
+  /// it, so none is left on the placeholder. (Before, a map mounted while
+  /// another load ran never heard back, and a 300 ms timeout on a busy launch
+  /// left the cache empty: the stick figure showed at random.)
+  static Future<void>? _loading;
+
+  static Future<void> preload() {
+    if (_cachedGeometry != null) return Future.value();
+    return _loading ??= () async {
+      try {
+        final jsonStr = await rootBundle.loadString('assets/data/body_paths.json');
+        _cachedGeometry = jsonDecode(jsonStr) as Map<String, dynamic>;
+      } catch (e) {
+        debugPrint('Error preloading body_paths.json: $e');
+      } finally {
+        // A failed load can be tried again by the next map.
+        _loading = null;
+      }
+    }();
   }
 
   @override
   void initState() {
     super.initState();
-    if (_cachedGeometry == null && !_isLoading) {
-      _loadGeometry();
-    }
+    if (_cachedGeometry == null) _loadGeometry();
   }
 
   /// 1 when the geometry was already cached at mount (no fade needed);
@@ -111,7 +114,7 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
 
   Future<void> _loadGeometry() async {
     await preload();
-    if (mounted) {
+    if (mounted && _cachedGeometry != null) {
       setState(() => _fadeFrom = 0);
     }
   }
@@ -119,19 +122,12 @@ class _MuscleBodyMapState extends State<MuscleBodyMap> {
   @override
   Widget build(BuildContext context) {
     if (_cachedGeometry == null) {
+      // Holds the space while the geometry loads (a moment at most); the
+      // silhouette fades in over it.
       return SizedBox(
         key: const ValueKey('body-placeholder'),
         width: widget.width ?? 140,
         height: widget.height ?? 220,
-        child: Center(
-          child: ExcludeSemantics(
-            child: Icon(
-              Icons.accessibility_new_rounded,
-              size: 28,
-              color: KColor.textDisabled,
-            ),
-          ),
-        ),
       );
     }
 

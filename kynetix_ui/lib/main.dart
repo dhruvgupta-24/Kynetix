@@ -14,6 +14,7 @@ import 'screens/reset_password_screen.dart';
 import 'services/exercise_library_service.dart';
 import 'config/supabase_secrets.dart';
 import 'services/health_service.dart';
+import 'widgets/muscle_body_map.dart';
 import 'services/persistence_service.dart';
 import 'services/global_food_service.dart';
 import 'services/error_reporter.dart';
@@ -97,6 +98,7 @@ void _warmUpGlobalServices(Stopwatch stopwatch) {
       GlobalFoodService.instance.init(),
       ExerciseLibraryService.instance.initialize(),
       HealthService.ensureConfigured(),
+      MuscleBodyMap.preload(),
     ]).then((_) {
       debugPrint('[Startup Profile] Global services warmed in '
           '${stopwatch.elapsedMilliseconds - start} ms (after first frame)');

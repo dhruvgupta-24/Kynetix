@@ -94,6 +94,37 @@ void main() {
     }
   });
 
+  testWidgets('receipt and skyline print every exercise, never "+ N MORE"', (tester) async {
+    final many = WorkoutShareData(
+      date: DateTime(2026, 11, 2, 12, 48),
+      dayName: 'Push',
+      durationMinutes: 102,
+      totalVolume: 8705,
+      sets: 30,
+      prs: 1,
+      topLifts: const [],
+      muscles: const ['Chest'],
+      exercises: [
+        for (var i = 1; i <= 12; i++)
+          ShareExercise(name: 'Cable Pushdown With Rope Attachment $i', sets: const [ShareSet(load: 50, reps: 12), ShareSet(load: 50, reps: 10)]),
+      ],
+    );
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    for (final t in [ShareTemplate.receipt, ShareTemplate.skyline]) {
+      for (final f in ShareFormat.values) {
+        await tester.pumpWidget(MaterialApp(
+          home: Center(child: ShareCanvas(data: many, template: t, format: f)),
+        ));
+        expect(tester.takeException(), isNull, reason: '${t.name} ${f.name}');
+        expect(find.textContaining('MORE'), findsNothing, reason: '${t.name} ${f.name}');
+        expect(find.textContaining('ATTACHMENT 12', findRichText: true), findsOneWidget, reason: '${t.name} ${f.name}');
+      }
+    }
+  });
+
   testWidgets('receipt scales down gracefully even with extreme font scaling', (tester) async {
     final sessionData = WorkoutShareData(
       date: DateTime(2026, 10, 27, 18, 26),

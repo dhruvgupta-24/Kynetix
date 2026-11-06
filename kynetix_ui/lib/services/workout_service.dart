@@ -7,6 +7,7 @@ import '../models/workout_split.dart';
 import '../models/workout_session.dart';
 import '../services/cloud_sync_service.dart';
 import '../services/recovery_service.dart';
+import 'exercise_library_service.dart';
 import 'nutrition_target_engine.dart';
 import 'persistence_service.dart';
 import 'internal/scoped_prefs.dart';
@@ -1461,6 +1462,7 @@ class WorkoutService extends ChangeNotifier {
     _customExercises.removeWhere((e) => e.id == exercise.id);
     _customExercises.add(exercise);
     _splitUpdatedAt = DateTime.now();
+    _publishCustomExercises();
     await _persist();
     notifyListeners();
 
@@ -1471,11 +1473,35 @@ class WorkoutService extends ChangeNotifier {
   Future<void> removeCustomExercise(String id) async {
     _customExercises.removeWhere((e) => e.id == id);
     _splitUpdatedAt = DateTime.now();
+    _publishCustomExercises();
     await _persist();
     notifyListeners();
 
     // Sync to cloud
     CloudSyncService.instance.syncWorkoutSplitBackground(split, _customExercises);
+  }
+
+  /// Hands the custom exercises to the exercise library, so the picker and
+  /// search find them on every day, not only right after they were made.
+  void _publishCustomExercises() =>
+      ExerciseLibraryService.instance.registerCustomExercises(_customExercises);
+
+  /// Custom exercises that only live inside logged sessions (made before the
+  /// library kept them, or lost to an older cloud copy) join the library.
+  /// Returns whether any were added.
+  bool _adoptLoggedCustomExercises(Iterable<WorkoutSession> sessions) {
+    final known = {for (final e in _customExercises) e.id};
+    var added = false;
+    for (final s in sessions) {
+      for (final entry in s.entries) {
+        final ex = entry.exercise;
+        if (ex.id.startsWith('custom_') && known.add(ex.id)) {
+          _customExercises.add(ex);
+          added = true;
+        }
+      }
+    }
+    return added;
   }
 
   // ── Write API ────────────────────────────────────────────────────────────
@@ -1544,6 +1570,7 @@ class WorkoutService extends ChangeNotifier {
   Future<void> saveSession(WorkoutSession session) async {
     _sessions.removeWhere((s) => s.id == session.id);
     _sessions.add(session);
+    if (_adoptLoggedCustomExercises([session])) _publishCustomExercises();
     // Saving a session again (e.g. Undo) brings it back for good.
     if (_deletedSessionIds.remove(session.id)) _persistDeletedIds().ignore();
 
@@ -1728,7 +1755,16 @@ class WorkoutService extends ChangeNotifier {
   }) async {
     if (stillCurrent != null && !stillCurrent()) return;
     _split = cloudSplit;
-    _customExercises = cloudCustomExercises;
+    // Merge, never replace: a custom exercise made offline (not yet in the
+    // cloud copy) must survive the hydrate.
+    final cloudIds = {for (final e in cloudCustomExercises) e.id};
+    _customExercises = [
+      ...cloudCustomExercises,
+      for (final e in _customExercises)
+        if (!cloudIds.contains(e.id)) e,
+    ];
+    _adoptLoggedCustomExercises(_sessions);
+    _publishCustomExercises();
     _setupDone = true;
     _splitUpdatedAt = cloudUpdatedAt ?? DateTime.now();
     await _persist();
@@ -1754,6 +1790,7 @@ class WorkoutService extends ChangeNotifier {
     _split = null;
     _sessions = [];
     _customExercises = [];
+    _publishCustomExercises();
     _draftSession = null;
     _draftStartedAt = null;
     _setupDone = false;
@@ -1936,7 +1973,10 @@ class WorkoutService extends ChangeNotifier {
       _splitUpdatedAt = DateTime.fromMillisecondsSinceEpoch(0);
     }
     _ready = true;
+    final adopted = _adoptLoggedCustomExercises([..._sessions, ?_draftSession]);
+    _publishCustomExercises();
     notifyListeners();
+    if (adopted) await _persist();
     await _dropDuplicateSessions();
   }
 
@@ -1951,6 +1991,7 @@ class WorkoutService extends ChangeNotifier {
     _split = null;
     _sessions = [];
     _customExercises = [];
+    _publishCustomExercises();
     _draftSession = null;
     _draftStartedAt = null;
     _setupDone = false;

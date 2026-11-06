@@ -551,20 +551,19 @@ class _Receipt extends StatelessWidget {
             for (final l in d.topLifts)
               ShareExercise(name: l.name, sets: [ShareSet(load: l.weight, reps: l.reps, isPr: l.isPr, bodyweight: l.bodyweight)]),
           ];
-    final cap = s.tall ? 6 : 3;
-    final shown = items.take(cap).toList();
-    final more = items.length - shown.length;
+    // Every exercise prints: a long session makes a longer receipt, and the
+    // FittedBox below scales the whole slip to the card, never clipping it.
     final order = ((d.date.year * 372 + d.date.month * 31 + d.date.day) * 7919) % 100000;
     final quip = _quips[(d.date.day + d.date.month) % _quips.length];
     final hh = d.date.hour.toString().padLeft(2, '0');
     final mm = d.date.minute.toString().padLeft(2, '0');
     final small = s.tall ? 10.5 : 9.5;
     final dash = Text('-' * 40, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: _m(small, color: const Color(0x991A1A1B)));
-    Widget line(String l, String r, {bool bold = false, Color color = _ink, double? size}) => Row(
+    Widget line(String l, String r, {bool bold = false, Color color = _ink, double? size, int lines = 1}) => Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false,
+              child: Text(l, maxLines: lines, overflow: TextOverflow.ellipsis, softWrap: lines > 1,
                   style: _m(size ?? small, w: bold ? FontWeight.w800 : FontWeight.w500, color: color)),
             ),
             const SizedBox(width: 8),
@@ -597,8 +596,8 @@ class _Receipt extends StatelessWidget {
                     Text(d.dayName.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: _m(small + 1.5, w: FontWeight.w800, spacing: 0.6)),
                     const SizedBox(height: 4),
-                    for (final e in shown) ...[
-                      line(e.name.toUpperCase(), '${_thousands(e.volume)} KG', bold: true),
+                    for (final e in items) ...[
+                      line(e.name.toUpperCase(), '${_thousands(e.volume)} KG', bold: true, lines: 2),
                       line(
                         '  ${e.workingSets} × ${e.sets.where((x) => !x.warmUp && !x.drop).map((x) => x.reps).toSet().join('/')}'
                             '${e.hasPr ? '   * PR' : ''}',
@@ -606,7 +605,6 @@ class _Receipt extends StatelessWidget {
                         color: e.hasPr ? const Color(0xFFD9481F) : const Color(0x991A1A1B),
                       ),
                     ],
-                    if (more > 0) line('  + $more MORE', ''),
                     dash,
                     line('SETS', '${d.sets}'),
                     line('TIME', _dur(d.durationMinutes)),
@@ -719,7 +717,19 @@ class _Skyline extends StatelessWidget {
                 for (var i = 0; i < 3; i++) ShareSet(load: l.weight, reps: l.reps, isPr: l.isPr && i == 2),
               ]),
           ];
-    final key = ex.take(s.tall ? 8 : 4).toList();
+    // The key lists every exercise; past a column's worth it runs on as one
+    // flowing line so the skyline keeps its room.
+    final key = ex;
+    final flow = key.length > (s.tall ? 8 : 4);
+    final totals = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(_thousands(d.totalVolume), style: s.brand(s.tall ? 40 : 30, height: 1)),
+        const SizedBox(height: 4),
+        Text('KG  ·  ${d.sets} SETS  ·  ${_dur(d.durationMinutes)}', style: s.label()),
+      ],
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -739,42 +749,47 @@ class _Skyline extends StatelessWidget {
         const SizedBox(height: 8),
         s.rule(h: 1.5),
         SizedBox(height: s.tall ? 14 : 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 0; i < key.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text.rich(
-                        TextSpan(children: [
-                          TextSpan(text: '${(i + 1).toString().padLeft(2, '0')}  ', style: s.text(10, color: key[i].hasPr ? ink.ember : ink.muted, weight: FontWeight.w700)),
-                          TextSpan(text: key[i].name.toUpperCase(), style: s.text(10, weight: FontWeight.w600, spacing: 0.4)),
-                        ]),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  if (ex.length > key.length) Text('+ ${ex.length - key.length} MORE', style: s.label()),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_thousands(d.totalVolume), style: s.brand(s.tall ? 40 : 30, height: 1)),
-                const SizedBox(height: 4),
-                Text('KG  ·  ${d.sets} SETS  ·  ${_dur(d.durationMinutes)}', style: s.label()),
+        if (flow) ...[
+          // A long session: totals on their own line, the key full width.
+          Align(alignment: Alignment.centerRight, child: totals),
+          SizedBox(height: s.tall ? 10 : 6),
+          Text.rich(
+            TextSpan(children: [
+              for (var i = 0; i < key.length; i++) ...[
+                TextSpan(text: '${(i + 1).toString().padLeft(2, '0')} ', style: s.text(s.tall ? 9 : 8, color: key[i].hasPr ? ink.ember : ink.muted, weight: FontWeight.w700, height: 1.45)),
+                TextSpan(text: key[i].name.toUpperCase(), style: s.text(s.tall ? 9 : 8, weight: FontWeight.w600, spacing: 0.3, height: 1.45)),
+                if (i < key.length - 1) TextSpan(text: '   ', style: s.text(s.tall ? 9 : 8, height: 1.45)),
               ],
-            ),
-          ],
-        ),
+            ]),
+          ),
+        ] else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < key.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(text: '${(i + 1).toString().padLeft(2, '0')}  ', style: s.text(10, color: key[i].hasPr ? ink.ember : ink.muted, weight: FontWeight.w700)),
+                            TextSpan(text: key[i].name.toUpperCase(), style: s.text(10, weight: FontWeight.w600, spacing: 0.4)),
+                          ]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              totals,
+            ],
+          ),
       ],
     );
   }

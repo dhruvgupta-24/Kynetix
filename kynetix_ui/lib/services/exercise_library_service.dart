@@ -178,9 +178,16 @@ class ExerciseLibraryService extends ChangeNotifier {
         ),
       );
     }
-    ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
+    // Before the catalog loads, initialize() indexes these with it; building
+    // the index now would force the slow synchronous fallback.
+    if (_initialized || _allDefinitions.isNotEmpty) {
+      ExerciseSearchEngine.instance.setDefinitions(allDefinitions);
+    }
     notifyListeners();
   }
+
+  /// The user's own exercises, newest last.
+  List<ExerciseDefinition> get customDefinitions => List.unmodifiable(_customDefinitions);
 
   /// Detailed relevance-ranked search returning scored results with match reasons.
   List<ExerciseSearchResult> searchDetailed({
