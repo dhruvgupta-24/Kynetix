@@ -208,7 +208,7 @@ class _BirthdayScreenState extends State<BirthdayScreen> with SingleTickerProvid
                       style: _text(17, weight: FontWeight.w600),
                     ),
                     const SizedBox(height: 22),
-                    _Rules(),
+                    _Rules(age: age),
                     if (!year.isEmpty) ...[
                       const SizedBox(height: 22),
                       _YearStrip(year: year),
@@ -270,11 +270,19 @@ TextStyle _text(double size, {FontWeight weight = FontWeight.w500, Color color =
 
 /// Today's house rules, set like a printed ticket.
 class _Rules extends StatelessWidget {
-  static const _lines = [
-    'Rest day is allowed. So is a heavy single, your call.',
-    'Cake counts as carbs. We checked.',
-    'Kyno is not judging the macros today.',
-  ];
+  const _Rules({required this.age});
+  final int age;
+
+  List<String> get _lines => [
+        'Rest day is allowed. So is a heavy single, your call.',
+        'Cake counts as carbs. We checked.',
+        if (age == 18)
+          'Teen mode is done. Kyno, our AI, is yours from today.'
+        else if (age < 18)
+          'Growing is a full-time job. Eat like it.'
+        else
+          'Kyno is not judging the macros today.',
+      ];
 
   @override
   Widget build(BuildContext context) {

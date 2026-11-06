@@ -24,6 +24,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/birthday_field.dart';
 import '../models/user_profile.dart';
 import '../services/analytics_service.dart';
+import '../services/guardian_service.dart';
+import '../services/teen_mode.dart';
+import 'parent_check_screen.dart';
 
 export '../models/user_profile.dart';
 
@@ -226,6 +229,19 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   /// The privacy step is behind us (or was never needed).
   late bool _consentDone = widget.onConsent == null;
+
+  /// Teen mode: waiting for a parent's OK before any question is asked.
+  bool _parentPending = false;
+
+  bool get _teen => TeenMode.isMinorDob(_dob);
+
+  String get _uid {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
 
   /// The opening story has played (or was skipped / not asked for).
   late bool _prologueDone = !widget.showPrologue;
@@ -475,7 +491,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     }
 
     if (!saved || !mounted) return;
-    // Saved: on to the optional last chapter.
+    // Saved: on to the optional last chapter. Teens skip it (no AI under 18).
+    if (_teen) {
+      _finishAiChapter();
+      return;
+    }
     _goTo(_aiChapter);
   }
 
@@ -508,6 +528,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       formKey: _step1Key,
       nameCtrl: _nameCtrl,
       dob: _dob,
+      // The birthday given with consent is final here (teen mode hangs on it).
+      dobLocked: widget.onConsent != null && _dob != null,
       onDob: (d) => setState(() => _dob = d),
       gender: _gender,
       onGender: (v) => setState(() => _gender = v),
@@ -524,6 +546,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     2 => _StepLifestyle(
       workoutIdx: _workoutIdx,
       goal: _goal,
+      teen: _teen,
       onWorkout: (i) => setState(() => _workoutIdx = i),
       onGoal: (v) => setState(() => _goal = v),
     ),
@@ -543,10 +566,38 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     final record = widget.onConsent;
     if (record != null) await record(ageConfirmedAdult: ageConfirmedAdult);
     if (!mounted) return;
+    final uid = _uid;
     setState(() {
       _dob = dateOfBirth;
       _consentDone = true;
+      // 13 to 17: a parent says yes before anything else is collected.
+      _parentPending = TeenMode.isMinorDob(dateOfBirth) &&
+          GuardianService.instance.peek(uid) != GuardianStatus.approved;
     });
+  }
+
+  Widget _buildParentStep(double lead) {
+    return Column(
+      key: const ValueKey('onboarding-parent'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(height: lead),
+        ParentCheckHeader(
+          dateOfBirth: _dob!,
+          padding: const EdgeInsets.fromLTRB(KSpacing.xxl, KSpacing.lg, KSpacing.xxl, KSpacing.lg),
+        ),
+        Expanded(
+          child: ParentCheckPanel(
+            userId: _uid,
+            dateOfBirth: _dob!,
+            onSignOut: widget.onSignOut,
+            onApproved: () {
+              if (mounted) setState(() => _parentPending = false);
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildConsentStep(double lead) {
@@ -617,6 +668,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               switchOutCurve: KMotion.accelerate,
               child: !_consentDone
                   ? _buildConsentStep(lead)
+                  : _parentPending
+                  ? _buildParentStep(lead)
                   : Column(
                       key: const ValueKey('onboarding-chapters'),
                       children: [
@@ -713,7 +766,7 @@ class _ConsentHeader extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: KSpacing.xs),
             child: Text(
-              'Here is what Kynetix keeps and why. Kynetix is for adults 18 and over.',
+              'Here is what Kynetix keeps and why. Kynetix is for 13 and up; under 18 runs in teen mode.',
               style: KText.body.copyWith(
                 color: KColor.textSecondary,
                 fontSize: 15,
@@ -972,6 +1025,7 @@ class _StepPersonal extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final TextEditingController nameCtrl;
   final DateTime? dob;
+  final bool dobLocked;
   final ValueChanged<DateTime> onDob;
   final String gender;
   final ValueChanged<String> onGender;
@@ -980,6 +1034,7 @@ class _StepPersonal extends StatelessWidget {
     required this.formKey,
     required this.nameCtrl,
     required this.dob,
+    this.dobLocked = false,
     required this.onDob,
     required this.gender,
     required this.onGender,
@@ -1011,12 +1066,13 @@ class _StepPersonal extends StatelessWidget {
             const SizedBox(height: KSpacing.sm),
             FormField<DateTime>(
               initialValue: dob,
-              validator: (d) => birthdayStatus(d) == BirthdayStatus.ok ? null : '',
+              validator: (d) => birthdayAccepted(birthdayStatus(d)) ? null : '',
               builder: (field) => Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   BirthdayField(
                     value: field.value,
+                    enabled: !dobLocked,
                     onChanged: (d) {
                       field.didChange(d);
                       onDob(d);
@@ -1324,12 +1380,14 @@ class _OnboardingTextFieldState extends State<OnboardingTextField> {
 class _StepLifestyle extends StatelessWidget {
   final int workoutIdx;
   final String goal;
+  final bool teen;
   final ValueChanged<int> onWorkout;
   final ValueChanged<String> onGoal;
 
   const _StepLifestyle({
     required this.workoutIdx,
     required this.goal,
+    this.teen = false,
     required this.onWorkout,
     required this.onGoal,
   });
@@ -1367,6 +1425,17 @@ class _StepLifestyle extends StatelessWidget {
               onTap: () => onGoal(opt.value),
             ),
           ),
+          if (teen) ...[
+            const SizedBox(height: KSpacing.sm),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                'Teen mode: your food target never drops below what a growing body needs. '
+                'Pick fat loss and we keep you at maintenance; training does the recomp.',
+                style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 13, height: 1.45),
+              ),
+            ),
+          ],
           const SizedBox(height: KSpacing.xxl),
         ],
       ),

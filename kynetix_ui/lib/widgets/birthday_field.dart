@@ -3,21 +3,27 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../config/app_theme.dart';
 import '../models/user_profile.dart';
+import '../services/teen_mode.dart';
 
-/// Kynetix is for 18 and up (India's DPDP Act asks for a parent's consent
-/// below that). The age comes from the birthday, never from a tick box.
-const kMinimumAge = 18;
+/// Kynetix is for 13 and up. From 13 to 17 it runs in teen mode, which
+/// starts with a parent's OK (India's DPDP Act, s.9). The age always comes
+/// from the birthday, never from a tick box.
+const kMinimumAge = TeenMode.minimumAge;
 
 /// Where a picked birthday stands.
-enum BirthdayStatus { missing, ok, tooYoung, implausible }
+enum BirthdayStatus { missing, ok, teen, tooYoung, implausible }
 
 BirthdayStatus birthdayStatus(DateTime? dob, {DateTime? now}) {
   if (dob == null) return BirthdayStatus.missing;
   final age = UserProfile.ageOn(dob, now ?? DateTime.now());
   if (age < kMinimumAge) return BirthdayStatus.tooYoung;
+  if (age < TeenMode.adultAge) return BirthdayStatus.teen;
   if (age > 100) return BirthdayStatus.implausible;
   return BirthdayStatus.ok;
 }
+
+/// A birthday Kynetix can go ahead with (adult, or teen mode).
+bool birthdayAccepted(BirthdayStatus s) => s == BirthdayStatus.ok || s == BirthdayStatus.teen;
 
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -71,8 +77,10 @@ class BirthdayField extends StatelessWidget {
       BirthdayStatus.missing =>
         'The real one. No fake ages here, this isn\'t that kind of app. We do the maths, and we might show up on the day.',
       BirthdayStatus.ok => 'That makes you $age. Noted, and the date is saved for later.',
+      BirthdayStatus.teen =>
+        'That makes you $age. Teen mode it is: same app, tuned for a body that is still growing. A parent just has to say yes.',
       BirthdayStatus.tooYoung =>
-        'Kynetix is built for $kMinimumAge and up for now. Come back on your ${kMinimumAge}th, we\'ll keep the lights on.',
+        'Kynetix is for $kMinimumAge and up. Come back on your ${kMinimumAge}th, we\'ll keep the lights on.',
       BirthdayStatus.implausible => 'That\'s a legendary birthday. Double check the year?',
     };
     final bad = status == BirthdayStatus.tooYoung || status == BirthdayStatus.implausible;
@@ -109,7 +117,7 @@ class BirthdayField extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (age != null && status == BirthdayStatus.ok)
+                  if (age != null && birthdayAccepted(status))
                     Text('$age', style: KText.numSmall.copyWith(fontSize: 16, color: KColor.textSecondary)),
                   const SizedBox(width: KSpacing.xs),
                   Icon(Icons.expand_more_rounded, size: 20, color: KColor.textMuted),

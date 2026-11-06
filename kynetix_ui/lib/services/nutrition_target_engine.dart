@@ -7,6 +7,7 @@ import 'adaptive_expenditure_service.dart';
 import 'profile_service.dart';
 import 'workout_service.dart';
 import 'persistence_service.dart';
+import 'teen_mode.dart';
 
 // Logging in this file is debug-only: release builds skip the console I/O.
 void _debugLog(String? message, {int? wrapWidth}) {
@@ -231,7 +232,7 @@ class NutritionTargetEngine {
     HealthSyncResult? health,
   }) {
     final tdee      = _tdee(profile, health);
-    final goalDelta = _goalAdjustment(profile.goal, tdee);
+    final goalDelta = _goalAdjustmentFor(profile, tdee);
     final rawAvg    = tdee + goalDelta;
     final floor     = _calFloor(profile);
     final avgCal    = _r(rawAvg.clamp(floor, double.infinity));
@@ -337,7 +338,7 @@ class NutritionTargetEngine {
       _debugLog('[NutritionTargetEngine]   - TDEE: ${plan.maintenanceCalories} kcal (from NutritionTargetEngine._tdee)');
       _debugLog('[NutritionTargetEngine] Modifiers applied:');
       final tdee = plan.maintenanceCalories;
-      final goalDelta = _goalAdjustment(profile.goal, tdee);
+      final goalDelta = _goalAdjustmentFor(profile, tdee);
       _debugLog('[NutritionTargetEngine]   - Goal Adjustment (${profile.goal}): $goalDelta kcal (from NutritionTargetEngine._goalAdjustment)');
       final cycle = _calorieCycle(profile);
       _debugLog('[NutritionTargetEngine]   - Calorie Cycling (Training/Rest split): ${actuallyTraining ? '+' : '-'}$cycle kcal (from NutritionTargetEngine._calorieCycle)');
@@ -547,15 +548,40 @@ class NutritionTargetEngine {
     return rawOffset.clamp(-400.0, 400.0).round();
   }
 
-  /// Maintenance from the formula alone: BMR × activity + steps.
-  double formulaTdee(UserProfile p, HealthSyncResult? health) =>
-      _r(_bmr(p) * _activityMultiplier(p) + _stepCorrectionKcal(p, health));
+  /// Maintenance from the formula alone: BMR × activity + steps. In teen
+  /// mode, the IOM estimated energy requirement for 9 to 18 year olds
+  /// instead (Mifflin-St Jeor is an adult equation; EER includes growth).
+  double formulaTdee(UserProfile p, HealthSyncResult? health) {
+    if (TeenMode.isMinor(p)) {
+      return _r(TeenMode.estimatedEnergyRequirement(
+        male: p.gender.trim().toLowerCase() == 'male',
+        age: p.age.clamp(TeenMode.minimumAge, TeenMode.adultAge - 1),
+        weightKg: p.weight,
+        heightCm: p.height,
+        workoutDays: _trainingDaysPerWeek(p),
+      ));
+    }
+    return _r(_bmr(p) * _activityMultiplier(p) + _stepCorrectionKcal(p, health));
+  }
 
   /// Maintenance the targets are built on: the user's own measured
   /// expenditure when adaptive targets are on and there is enough data
   /// (AdaptiveExpenditureService), else the formula.
-  double _tdee(UserProfile p, HealthSyncResult? health) =>
-      AdaptiveExpenditureService.instance.appliedKcal ?? formulaTdee(p, health);
+  double _tdee(UserProfile p, HealthSyncResult? health) => TeenMode.isMinor(p)
+      // Teen mode: adaptive targets would chase a weight trend that is
+      // supposed to go up while growing; the growth equation stands.
+      ? formulaTdee(p, health)
+      : AdaptiveExpenditureService.instance.appliedKcal ?? formulaTdee(p, health);
+
+  /// [_goalAdjustment], except in teen mode: never below maintenance (fat
+  /// loss and recomp hold at maintenance) and gains capped at a lean bulk.
+  double _goalAdjustmentFor(UserProfile p, double tdee) {
+    if (!TeenMode.isMinor(p)) return _goalAdjustment(p.goal, tdee);
+    return switch (_goalKey(p.goal)) {
+      kLeanBulk || kBulk => _bounded(tdee * 0.08, 150, 250),
+      _ => 0,
+    };
+  }
 
   /// Goal-based calorie adjustment applied to TDEE.
   ///

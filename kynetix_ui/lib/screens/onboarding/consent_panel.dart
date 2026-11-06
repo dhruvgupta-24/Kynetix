@@ -8,8 +8,8 @@ import '../../widgets/birthday_field.dart';
 /// (new users) and [ConsentScreen] (existing users who haven't agreed yet).
 ///
 /// Two required answers: "I agree to the Privacy Policy" and the user's
-/// birthday (the age, and the 18+ check, are worked out from it; nobody is
-/// asked to tick "I'm 18"). The primary action stays disabled until both
+/// birthday (the age is worked out from it; nobody is asked to tick an age
+/// box). 13 to 17 continues into teen mode's parent check. The primary action stays disabled until both
 /// are in. "I don't
 /// agree" switches to a plain explanation with Read policy and Sign out;
 /// nothing is recorded in that case.
@@ -46,7 +46,7 @@ class _ConsentPanelState extends State<ConsentPanel> {
   bool _signingOut = false;
   String? _error;
 
-  bool get _ready => _agreed && birthdayStatus(_dob) == BirthdayStatus.ok && !_saving;
+  bool get _ready => _agreed && birthdayAccepted(birthdayStatus(_dob)) && !_saving;
 
   void _openPolicy() {
     Navigator.of(context).push(
@@ -61,7 +61,7 @@ class _ConsentPanelState extends State<ConsentPanel> {
       _error = null;
     });
     try {
-      await widget.onAgree(ageConfirmedAdult: true, dateOfBirth: _dob!);
+      await widget.onAgree(ageConfirmedAdult: birthdayStatus(_dob) == BirthdayStatus.ok, dateOfBirth: _dob!);
       KHaptics.success();
     } catch (_) {
       if (!mounted) return;
@@ -185,7 +185,7 @@ class _ConsentPanelState extends State<ConsentPanel> {
           ],
           const SizedBox(height: KSpacing.lg),
           KButton(
-            label: widget.agreeLabel,
+            label: birthdayStatus(_dob) == BirthdayStatus.teen ? 'Continue to the parent check' : widget.agreeLabel,
             width: double.infinity,
             loading: _saving,
             onTap: _ready ? _agree : null,

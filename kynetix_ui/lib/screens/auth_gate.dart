@@ -17,6 +17,9 @@ import 'onboarding_screen.dart';
 import 'consent_screen.dart';
 import 'privacy_policy_screen.dart';
 import '../services/consent_service.dart';
+import '../services/guardian_service.dart';
+import '../services/teen_mode.dart';
+import 'parent_check_screen.dart';
 import '../services/insights_report_service.dart';
 import '../services/user_session_coordinator.dart';
 
@@ -35,6 +38,7 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     // Loads prefs early so the consent check below can answer synchronously.
     ConsentService.instance.warmUp().ignore();
+    GuardianService.instance.warmUp().ignore();
     // Health Connect's "privacy policy" link launches the app; show it.
     PrivacyPolicyLaunch.attach(this, () => mounted ? Navigator.maybeOf(context) : null);
   }
@@ -346,6 +350,27 @@ class _LoggedInGateState extends State<_LoggedInGate> {
     setState(() => _consented = true);
   }
 
+  /// Teen mode: the parent's OK as last seen. Null until checked.
+  GuardianStatus? _guardian;
+  bool _guardianChecked = false;
+
+  bool get _isTeen => TeenMode.isMinor(currentUserProfile);
+
+  /// Teens only: the parent's OK from this phone, then the server (which
+  /// also catches a parent switching it off). Offline, the last known
+  /// answer stands.
+  Future<void> _checkGuardian() async {
+    final uid = _userId;
+    if (uid == null || _guardianChecked || !_isTeen) return;
+    _guardianChecked = true;
+    await GuardianService.instance.warmUp();
+    if (!mounted) return;
+    setState(() => _guardian = GuardianService.instance.peek(uid));
+    final fresh = await GuardianService.instance.refresh(uid);
+    if (!mounted || fresh == null) return;
+    setState(() => _guardian = fresh);
+  }
+
   Future<void> _recordOnboardingConsent({required bool ageConfirmedAdult}) async {
     final uid = _userId;
     if (uid == null) throw StateError('No signed-in user');
@@ -575,7 +600,29 @@ class _LoggedInGateState extends State<_LoggedInGate> {
       );
     } else if (_hasProfile!) {
       final uid = _userId;
-      child = (_consented == true || uid == null)
+      final profile = currentUserProfile;
+      if (_consented == true && uid != null && _isTeen) _checkGuardian();
+      final teenBlocked = _consented == true &&
+          uid != null &&
+          _isTeen &&
+          _guardian != GuardianStatus.approved;
+      child = teenBlocked
+          ? _guardian != null
+              ? ParentCheckScreen(
+                  key: const ValueKey('gate-parent'),
+                  userId: uid,
+                  dateOfBirth: profile?.dateOfBirth ?? DateTime(DateTime.now().year - 16),
+                  initialFirstName: profile?.name ?? '',
+                  onApproved: () {
+                    if (mounted) setState(() => _guardian = GuardianStatus.approved);
+                  },
+                )
+              : const _BrandLoader(
+                  key: ValueKey('gate-loading'),
+                  semanticLabel: 'Loading your profile',
+                  messages: ['Getting your plan ready…'],
+                )
+          : (_consented == true || uid == null)
           ? const AppShell(key: ValueKey('gate-app'))
           // Existing user who hasn't agreed to the current policy: once,
           // before the app. Declining keeps them here.

@@ -31,6 +31,9 @@ import '../widgets/k_typing_dots.dart';
 import 'add_meal_screen.dart';
 import 'day_detail_screen.dart';
 import '../services/analytics_service.dart';
+import '../services/teen_mode.dart';
+import '../models/user_profile.dart' show UserProfile;
+import '../services/profile_service.dart' show ProfileService;
 
 // ─── Chat message model ───────────────────────────────────────────────────────
 
@@ -657,16 +660,20 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     // On the tab: depend on TickerMode so coming back to Kyno rebuilds it
     // (the shell keeps the same widget instance), refreshing today's numbers.
     if (widget.embedded) TickerMode.valuesOf(context);
+    // Teen mode: Kyno is off until the 18th birthday (no input bar at all).
+    final teen = TeenMode.active;
     final body = Column(
       children: [
         if (widget.embedded) _buildTabHeader(),
         Expanded(
-          child: (_messages.isEmpty && !_isStreaming)
+          child: teen
+              ? const KynoTeenLock()
+              : (_messages.isEmpty && !_isStreaming)
               ? _buildEmptyState()
               : _buildMessageList(),
         ),
-        if (_pendingImages.isNotEmpty) _buildImagePreview(),
-        _buildInputBar(),
+        if (!teen && _pendingImages.isNotEmpty) _buildImagePreview(),
+        if (!teen) _buildInputBar(),
       ],
     );
     if (widget.embedded) {
@@ -2500,6 +2507,89 @@ class _FuelPlanCard extends StatelessWidget {
               meta: macro(p.food.kcal, p.food.protein),
               logText: p.food.logText,
               fromLog: p.food.fromHistory,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Kyno's tab in teen mode: what is on, what is waiting, and a countdown to
+/// the day it unlocks.
+class KynoTeenLock extends StatelessWidget {
+  const KynoTeenLock({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final dob = ProfileService.instance.currentUserProfile?.dateOfBirth;
+    final now = DateTime.now();
+    int? days;
+    if (dob != null) {
+      final unlock = DateTime(dob.year + TeenMode.adultAge, dob.month, dob.day);
+      days = DateTime(unlock.year, unlock.month, unlock.day)
+          .difference(DateTime(now.year, now.month, now.day))
+          .inDays;
+      if (days < 0) days = null;
+    }
+    final age = dob == null ? null : UserProfile.ageOn(dob, now);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(KSpacing.xxl, KSpacing.xl, KSpacing.xxl, KSpacing.xxxl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(KSpacing.xl),
+            decoration: KShade.surface(KRadius.lg, border: Border.all(color: KColor.hairline)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('KYNO UNLOCKS IN',
+                    style: KText.label.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+                const SizedBox(height: KSpacing.sm),
+                Semantics(
+                  label: days == null ? 'Kyno unlocks on your 18th birthday' : 'Kyno unlocks in $days days',
+                  excludeSemantics: true,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(days == null ? '18' : '$days', style: KText.numDisplay.copyWith(color: KColor.ember)),
+                      const SizedBox(width: KSpacing.sm),
+                      Flexible(
+                        child: Text(days == null ? 'is the magic number' : (days == 1 ? 'day' : 'days'),
+                            style: KText.h3.copyWith(color: KColor.textSecondary)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: KSpacing.md),
+                Text(
+                  "You're ${age ?? 'under 18'}, so Kyno, our AI coach, sits this one out for now. "
+                  'The AI we use is built for adults only, and we would rather wait than fudge it.',
+                  style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: KSpacing.xl),
+          Text('ALL YOURS RIGHT NOW', style: KText.label.copyWith(color: KColor.textSecondary, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+          const SizedBox(height: KSpacing.sm),
+          for (final (icon, line) in const [
+            (Icons.fitness_center_rounded, 'Workouts, PRs, rest timers and progress'),
+            (Icons.restaurant_rounded, 'Food logging with the built-in food library and barcodes'),
+            (Icons.insights_rounded, 'Targets made for a growing body, never a crash diet'),
+            (Icons.local_fire_department_rounded, 'Streaks, share cards and your birthday party'),
+          ])
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: KSpacing.sm),
+              child: Row(
+                children: [
+                  ExcludeSemantics(child: Icon(icon, size: 20, color: KColor.ember)),
+                  const SizedBox(width: KSpacing.md),
+                  Expanded(child: Text(line, style: KText.bodyMedium.copyWith(color: KColor.textPrimary))),
+                ],
+              ),
             ),
         ],
       ),

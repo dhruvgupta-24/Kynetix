@@ -5,7 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// One user's agreement to the privacy policy (and the 18+ confirmation).
+/// One user's agreement to the privacy policy, and whether the birthday
+/// given with it made them an adult (false for teen mode).
 @immutable
 class ConsentRecord {
   const ConsentRecord({
@@ -22,9 +23,9 @@ class ConsentRecord {
   /// Written to the `profiles` row as well (best effort).
   final bool synced;
 
-  /// Valid for the current policy: right version and 18+ confirmed.
-  bool get isCurrent =>
-      version == ConsentService.policyVersion && ageConfirmedAdult;
+  /// Valid for the current policy. Teens (ageConfirmedAdult false) agree
+  /// too; their parent's OK is a separate gate (GuardianService).
+  bool get isCurrent => version == ConsentService.policyVersion;
 
   ConsentRecord copyWith({bool? synced}) => ConsentRecord(
         version: version,

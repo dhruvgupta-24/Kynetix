@@ -106,11 +106,16 @@ void main() {
       await tapAgree();
       expect(agreed, 0, reason: 'no birthday yet');
 
-      // Too young: still blocked, with a calm note.
-      await pickBirthday(tester, DateTime(DateTime.now().year - 15, 1, 1));
-      expect(find.textContaining('built for 18 and up'), findsOneWidget);
+      // Under 13: still blocked, with a calm note.
+      await pickBirthday(tester, DateTime(DateTime.now().year - 11, 1, 1));
+      expect(find.textContaining('for 13 and up'), findsOneWidget);
       await tapAgree();
-      expect(agreed, 0, reason: 'under 18');
+      expect(agreed, 0, reason: 'under 13');
+
+      // 13 to 17: teen mode, on to the parent check.
+      await pickBirthday(tester, DateTime(DateTime.now().year - 15, 1, 1));
+      expect(find.textContaining('Teen mode it is'), findsOneWidget);
+      expect(find.text('Continue to the parent check'), findsOneWidget);
 
       await pickBirthday(tester, DateTime(1999, 7, 4));
       expect(find.textContaining('That makes you'), findsOneWidget);
@@ -170,7 +175,7 @@ void main() {
       expect(find.text('4 Jul 1999'), findsOneWidget);
     });
 
-    testWidgets('an under-18 birthday is refused with calm copy', (tester) async {
+    testWidgets('an under-13 birthday is refused with calm copy; 13 to 17 is teen mode', (tester) async {
       tester.view.physicalSize = const Size(720, 1280);
       tester.view.devicePixelRatio = 2.0;
       addTearDown(tester.view.reset);
@@ -182,11 +187,14 @@ void main() {
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       final now = DateTime.now();
-      await pickBirthday(tester, DateTime(now.year - 17, now.month, 1));
+      await pickBirthday(tester, DateTime(now.year - 12, now.month, 1));
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('built for 18 and up'), findsOneWidget);
+      expect(find.textContaining('for 13 and up'), findsOneWidget);
       expect(find.text('Height and weight'), findsNothing);
+
+      await pickBirthday(tester, DateTime(now.year - 16, 1, 1));
+      expect(find.textContaining('Teen mode it is'), findsOneWidget);
 
       await pickBirthday(tester, DateTime(now.year - 18, 1, 1));
       await tester.tap(find.text('Continue'));

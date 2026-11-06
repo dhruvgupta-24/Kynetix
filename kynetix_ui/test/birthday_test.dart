@@ -38,10 +38,12 @@ void main() {
       expect(p.isBirthday(DateTime(2028, 2, 28)), isFalse);
     });
 
-    test('18 and up only, and no impossible years', () {
+    test('13 and up (teen mode to 17), and no impossible years', () {
       final now = DateTime(2026, 11, 6);
       expect(birthdayStatus(null, now: now), BirthdayStatus.missing);
-      expect(birthdayStatus(DateTime(2008, 11, 7), now: now), BirthdayStatus.tooYoung);
+      expect(birthdayStatus(DateTime(2013, 11, 7), now: now), BirthdayStatus.tooYoung);
+      expect(birthdayStatus(DateTime(2013, 11, 6), now: now), BirthdayStatus.teen);
+      expect(birthdayStatus(DateTime(2008, 11, 7), now: now), BirthdayStatus.teen);
       expect(birthdayStatus(DateTime(2008, 11, 6), now: now), BirthdayStatus.ok);
       expect(birthdayStatus(DateTime(1900, 1, 1), now: now), BirthdayStatus.implausible);
     });

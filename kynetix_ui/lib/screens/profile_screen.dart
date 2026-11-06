@@ -41,6 +41,7 @@ import '../ui/k_rolling.dart';
 import '../ui/k_shake.dart';
 import '../widgets/k_equal_height_row.dart';
 import '../services/analytics_service.dart';
+import '../services/teen_mode.dart';
 
 enum ProviderHealth { operational, degraded, setupRequired }
 
@@ -480,12 +481,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const SizedBox(height: KSpacing.lg),
                           Text('Birthday', style: KText.label),
                           const SizedBox(height: KSpacing.sm),
+                          // Teen mode locks the birthday (the parent agreed
+                          // to that age); adults can fix theirs but can't
+                          // set one under 18 here.
                           StatefulBuilder(
                             builder: (_, setInner) => BirthdayField(
                               value: dob,
+                              enabled: !TeenMode.isMinor(_profile),
                               onChanged: (d) => setInner(() => dob = d),
                             ),
                           ),
+                          if (TeenMode.isMinor(_profile)) ...[
+                            const SizedBox(height: KSpacing.xs),
+                            Text(
+                              'Locked in teen mode, since your parent said yes to this date. Wrong? Email us from Help and we will sort it.',
+                              style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 13),
+                            ),
+                          ],
                           const SizedBox(height: KSpacing.lg),
                           _buildFormInput(
                             controller: heightCtrl,
@@ -543,7 +555,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label: 'Save metrics',
                             width: double.infinity,
                             onTap: () {
-                              final dobOk = birthdayStatus(dob) == BirthdayStatus.ok;
+                              final dobOk = TeenMode.isMinor(_profile) || birthdayStatus(dob) == BirthdayStatus.ok;
                               if ((formKey.currentState?.validate() ?? false) && dobOk) {
                                 final height =
                                     double.tryParse(heightCtrl.text) ??
@@ -623,7 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _buildNutritionTargetsCard(),
       _buildLiftingMetricsCard(),
       _buildHealthCard(),
-      _buildAiCard(),
+      if (TeenMode.isMinor(_profile)) _buildTeenCard() else _buildAiCard(),
       _buildLibraryAndInsightsCard(),
       _buildFeedbackCard(),
       _buildAboutCard(),
@@ -1238,6 +1250,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return ActivityTier.veryActive;
   }
 
+  // ── Teen mode ────────────────────────────────────────────────────────────────
+
+  /// In place of the ChatGPT card for 13 to 17 year olds.
+  Widget _buildTeenCard() {
+    final dob = _profile.dateOfBirth;
+    final unlock = dob == null ? null : DateTime(dob.year + TeenMode.adultAge, dob.month, dob.day);
+    return _Group(
+      title: 'Teen mode',
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(KSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("On, with a parent's OK", style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: KSpacing.xs),
+              Text(
+                'Targets built for a growing body, no AI, no analytics. '
+                '${unlock == null ? 'It ends on your 18th birthday' : 'It ends on ${formatBirthday(unlock)}'}, '
+                'and Kyno unlocks the same day.',
+                style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 14, height: 1.45),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   // ── AI Engine Info ───────────────────────────────────────────────────────────
 
   Widget _buildAiCard() {
@@ -1813,7 +1854,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
 
         if (!profile.useCustomTargets) ...[
-          AdaptiveTargetsCard(
+          if (!TeenMode.isMinor(profile)) AdaptiveTargetsCard(
             formulaKcal: NutritionTargetEngine().formulaTdee(profile, _planHealth),
             onChanged: () async {
               await NutritionTargetEngine().refreshTargetForDate(DateTime.now(), force: true);

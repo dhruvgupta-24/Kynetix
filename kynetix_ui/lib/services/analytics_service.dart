@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'feedback_service.dart';
+import 'teen_mode.dart';
 
 // ─── AnalyticsService ─────────────────────────────────────────────────────────
 // In-house product analytics: small usage events into `app_events`, no
@@ -122,6 +123,8 @@ class AnalyticsService {
         return;
       }
       if (!_signedIn()) return;
+      // Teen mode: no behavioural tracking of anyone under 18 (DPDP s.9(3)).
+      if (TeenMode.active) return;
       _queue.add({
         'name':        name,
         'props':       sanitizeProps(props),

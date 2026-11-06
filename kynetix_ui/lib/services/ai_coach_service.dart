@@ -9,6 +9,7 @@ import 'profile_service.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart' show WeightContext;
 import 'internal/net_timeouts.dart';
+import 'teen_mode.dart';
 
 // ─── AiCoachResponse ──────────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ class AiCoachService {
     List<Uint8List>? imagesBytes,
     String?         dateKey,  // YYYYMMDD, defaults to today on backend if null
   }) async {
+    if (TeenMode.active) throw AiRouterException.teen;
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
 
@@ -183,6 +185,7 @@ class AiCoachService {
     WeightContext?   weightContext, // compact weight summary for Kyno coaching
     Map<String, dynamic>? appContext, // KynoBriefService brief: targets, trends, food options
   }) async* {
+    if (TeenMode.active) throw AiRouterException.teen;
     final session = Supabase.instance.client.auth.currentSession;
     if (session == null) throw Exception('Not authenticated');
 

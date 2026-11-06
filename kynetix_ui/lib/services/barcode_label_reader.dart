@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'ai_router_error.dart';
+import 'teen_mode.dart';
 
 /// What Kyno read off a nutrition table. Every value is a suggestion until
 /// the person confirms it in the form; nothing here is logged or saved as-is.
@@ -157,6 +158,10 @@ class BarcodeLabelReader {
       };
 
   Future<LabelReading> read(Uint8List jpeg) async {
+    // Teen mode: no AI under 18. "Enter it yourself" is the way through.
+    if (TeenMode.active && invokeOverride == null) {
+      throw const LabelReadException(LabelReadFailure.unreadable);
+    }
     final body = buildRequestBody(jpeg);
     Object? data;
     try {
