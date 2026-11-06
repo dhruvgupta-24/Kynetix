@@ -253,7 +253,7 @@ dict(slug="cutting-and-bulking-on-indian-food", date="2026-10-20",
   ("Training days and rest days", [
    "Kynetix gives training days a little more food than rest days (140 to 220 kcal apart), weighted so your weekly average still matches the goal. It means more fuel when you lift without overshooting the week."]),
   ("Check the trend, not the day", [
-   "Weigh yourself a few mornings a week and watch the weekly average. Aim for 0.5 to 1% of body weight a week on a cut, and a slow climb on a bulk. Kynetix reads weight from Health Connect if you allow it."]),
+   "Weigh yourself a few mornings a week and watch the weekly average. Aim for 0.5 to 1% of body weight a week on a cut, and a slow climb on a bulk. Kynetix reads weight from Health Connect if you allow it. Switch on Adapt to my weight trend in Settings and it also learns your real maintenance from what you log and weigh, then nudges your target at most once a week and tells you why."]),
  ],
  faq=[("How many calories should I cut to lose fat?", "Kynetix uses about 22% below maintenance, between 350 and 550 kcal a day, which usually means losing 0.5 to 1% of body weight a week."),
       ("How do I bulk on Indian food?", "Eat about 8 to 10% above maintenance: add roti or rice, milk, peanuts and an extra protein source, and keep training with progressive overload."),

@@ -11,10 +11,11 @@
 - Price: free during early access. No ads.
 - Made by: Dhruv Gupta, an independent developer in India.
 - Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
-- Age: 18 and over.
-- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Account and data deletion inside the app.
+- Age: 18 and over. The app asks your date of birth, not a tick box.
+- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Export all your data any time (Settings > Export my data). Account and data deletion inside the app.
 - Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.
-- AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked). Estimates, not medical advice.
+- AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked), only when an AI feature is used. Kynetix does not train models on user data. Some free tiers (the Gemini API free tier, some free OpenRouter models) may keep requests to improve their products; connecting your own ChatGPT or not using AI avoids that. Estimates, not medical advice.
+- Your data: export everything as one JSON file plus CSVs for meals, workouts and weight. Import workouts from Strong or Hevy CSV exports.
 - Source code: https://github.com/dhruvgupta-24/Kynetix
 
 ## Pages

@@ -5,8 +5,10 @@ from page import render, register, crumbs_html, faq_html, faq_ld, breadcrumb_ld,
 AS_OF = "October 2026"
 KYNETIX = [("Platforms", "Android (beta). iPhone is on the roadmap."), ("Focus", "Food and training in one app, built around Indian food."),
            ("Food logging", "Type meals in plain words (\"2 roti, dal\"); katori and roti portions; barcode scanning."),
-           ("Workout logging", "Sets, reps, rest timer, splits, personal records and next-weight suggestions."),
+           ("Workout logging", "Sets, reps, supersets, warm-ups, plate calculator, rest timer, splits, personal records and next-weight suggestions."),
+           ("Targets", "Calorie and protein targets that follow your training days. Optionally adapts to your weight trend, learning your real maintenance from what you log and weigh."),
            ("Coach", "Kyno, an AI coach that reads your meals, lifts, steps and weight."),
+           ("Your data", "Export everything as JSON and CSV. Import workouts from Strong or Hevy CSV exports. Saves on your phone first, backs up to the cloud."),
            ("Price", "Free during early access, no ads.")]
 
 APPS = [
@@ -21,11 +23,11 @@ APPS = [
     dict(slug="kynetix-vs-hevy", name="Hevy", kind="workout tracker",
          known=["A popular workout logger with routines and progress charts.", "A social feed to follow friends' workouts.", "Available on Android and iPhone."],
          pick_them="You only want to log workouts, like a social feed, or need an iPhone app today.",
-         pick_us="You want your food and your training in one place, with targets that follow your training days."),
+         pick_us="You want your food and your training in one place, with targets that follow your training days.", imports=True),
     dict(slug="kynetix-vs-strong", name="Strong", kind="workout tracker",
          known=["A clean, simple workout logger with routines and history.", "Available on Android and iPhone."],
          pick_them="You only want a minimal set logger, or need an iPhone app today.",
-         pick_us="You also want to count Indian food and get coaching that connects what you eat with how you lift."),
+         pick_us="You also want to count Indian food and get coaching that connects what you eat with how you lift.", imports=True),
 ]
 
 
@@ -44,6 +46,8 @@ def build():
         known = "".join(f"<li>{e(k)}</li>" for k in a["known"])
         qas = [(f"Is Kynetix better than {a['name']}?", f"It depends on what you need. Pick {a['name']} if: {a['pick_them']} Pick Kynetix if: {a['pick_us']}"),
                (f"Can I use Kynetix and {a['name']} together?", "Yes. Many people try a new app alongside the one they use. Kynetix reads steps, weight and sleep from Health Connect, so it can sit next to other apps that write there.")]
+        if a.get("imports"):
+            qas.append((f"Can I move my {a['name']} workouts to Kynetix?", f"Yes. Export your workouts from {a['name']} as a CSV, then import that file in Kynetix. Pounds are converted to kilos, exercises Kynetix doesn't know become your own custom exercises, and importing the same file twice doesn't duplicate anything."))
         body = (crumbs_html(trail, "en") + '<article class="c-art">' +
                 f'<header class="c-head"><p class="kicker">Compare</p><h1 class="c-h1">{e(h1)}</h1>'
                 f'<p class="answer">{e(a["name"])} is a {e(a["kind"])}. Kynetix tracks Indian food and gym training together, with an AI coach that reads both. '

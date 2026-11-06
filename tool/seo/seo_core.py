@@ -6,7 +6,7 @@ LANG_HREF = globals().get("LANG_HREF", {})
 SITE = pathlib.Path(r"C:/Users/Dhruv/Desktop/Kynetix/site")
 URL = "https://dhruvgupta-24.github.io/Kynetix/"
 VERSION = json.loads((SITE / "version.json").read_text(encoding="utf-8"))
-TODAY = "2026-10-20"
+TODAY = "2026-11-06"
 EMAIL = "kynetix.app@gmail.com"
 REPO = "https://github.com/dhruvgupta-24/Kynetix"
 
@@ -28,11 +28,17 @@ FAQ = [
     ("Can I scan barcodes on packaged food?",
      "Yes. Scan the barcode and Kynetix looks the product up on Open Food Facts, so you log the exact pack. You can also save your own products and quick-add meals you eat often."),
     ("Does Kynetix track workouts and personal records?",
-     "Yes. Log sets, reps and weight with rest timers, follow a split like push pull legs, and Kynetix spots personal records as you lift. Kyno suggests the next weight from your own history."),
+     "Yes. Log sets, reps and weight with rest timers, supersets, warm-up sets and a plate calculator, follow a split like push pull legs, and Kynetix spots personal records as you lift. Exercises you create stay in your library. Kyno suggests the next weight from your own history."),
+    ("Do my calorie targets adjust to my weight?",
+     "If you want them to. Switch on Adapt to my weight trend in Settings and Kynetix learns your real maintenance calories from what you log and your weigh-ins. It blends that with the formula by how much data you have, keeps it within 30% of the formula, moves at most once a week and tells you why in plain words."),
+    ("Can I export my data, or bring my workouts from Strong or Hevy?",
+     "Yes. Settings > Export my data gives you one JSON file with everything, plus CSV files for meals, workouts and weight. You can also import workouts from a Strong or Hevy CSV export: pounds are converted, exercises Kynetix doesn't know become your own custom exercises, and importing the same file twice doesn't duplicate anything."),
+    ("Does Kynetix work offline?",
+     "Yes. Everything saves on your phone first, so logging works without a signal. When you are back online it backs up to the cloud, and workouts that haven't synced yet keep retrying until they land."),
     ("Does Kynetix have home screen widgets?",
      "Yes. There are four Android home screen widgets, 2x2, 4x2, 2x4 and 4x4, showing the calories and protein you have left, with macros and a Log meal button on the larger sizes."),
     ("Is my data private, and can I delete my account?",
-     "Yes. There are no ads, no data selling and no third-party trackers or analytics; simple usage stats stay in Kynetix's own database. You can delete your account and all of its data from inside the app at any time, or by email using the delete account page."),
+     "Yes. There are no ads, no data selling and no third-party trackers or analytics; simple usage stats stay in Kynetix's own database. You can export everything from Settings > Export my data, and delete your account and all of its data from inside the app at any time, or by email using the delete account page."),
     ("Is Kynetix available on iPhone?",
      "Not yet. Kynetix is Android first, and an iPhone version is on the roadmap with no date yet."),
     ("Can I download Kynetix now?",
@@ -101,12 +107,15 @@ APP = {"@type": "MobileApplication", "@id": URL + "#app", "name": "Kynetix", "ur
        "image": URL + "assets/img/og-home.png",
        "screenshot": [URL + "assets/press/kynetix-" + n + ".jpg" for n in ["home", "meal", "workout", "kyno-answer", "train", "done"]],
        "featureList": ["Log Indian meals in plain words", "Barcode scanning with Open Food Facts", "Calorie and protein targets that follow training days",
-                       "Workout logging with sets, reps, rest timers and personal records", "Kyno, an AI coach that reads meals and workouts",
-                       "Health Connect: steps, weight, sleep and HRV, read only", "Home screen widgets in four sizes", "Share cards for finished sessions"],
+                       "Adaptive targets that learn your real maintenance from your weight trend (opt in)",
+                       "Workout logging with sets, reps, supersets, warm-ups, a plate calculator, rest timers and personal records",
+                       "Kyno, an AI coach that reads meals and workouts", "Fasting timer, micronutrients and a smoothed weight trend",
+                       "Health Connect: steps, weight, sleep and HRV, read only", "Home screen widgets in four sizes", "Share cards for finished sessions",
+                       "Export all your data as JSON and CSV", "Import workouts from Strong or Hevy", "Works offline, backs up to the cloud"],
        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "INR", "availability": "https://schema.org/InStock",
                   "description": "Free during early access. Android beta available to download now; Google Play coming soon."},
        "downloadUrl": VERSION["apk"], "installUrl": URL + "download/", "softwareVersion": VERSION["versionName"],
-       "fileSize": VERSION["size"]["arm64"], "datePublished": VERSION["released"], "releaseNotes": " ".join(VERSION["notes"]),
+       "fileSize": VERSION["size"]["arm64"], "datePublished": VERSION["released"], "releaseNotes": re.sub(r"\s*[\u2013\u2014]\s*", ", ", " ".join(VERSION["notes"])),
        "author": {"@id": URL + "#founder"}, "publisher": {"@id": URL + "#org"}, "countriesSupported": "IN"}
 
 
@@ -253,10 +262,11 @@ facts = [
     "Price: free during early access. No ads.",
     "Made by: Dhruv Gupta, an independent developer in India.",
     "Contact: " + EMAIL + ", or in the app under Profile > Talk to us.",
-    "Age: 18 and over.",
-    "Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Account and data deletion inside the app.",
+    "Age: 18 and over. The app asks your date of birth, not a tick box.",
+    "Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Export all your data any time (Settings > Export my data). Account and data deletion inside the app.",
     "Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.",
-    "AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked). Estimates, not medical advice.",
+    "AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked), only when an AI feature is used. Kynetix does not train models on user data. Some free tiers (the Gemini API free tier, some free OpenRouter models) may keep requests to improve their products; connecting your own ChatGPT or not using AI avoids that. Estimates, not medical advice.",
+    "Your data: export everything as one JSON file plus CSVs for meals, workouts and weight. Import workouts from Strong or Hevy CSV exports.",
     "Source code: " + REPO,
 ]
 links = [
@@ -277,11 +287,16 @@ full = ["# Kynetix: full reference for AI systems", "", "> " + DEFINITION, "", f
         "- Food: log meals in your own words (\"2 roti, 1 katori dal, aloo sabzi\"). Indian portions like katori, roti, bowl and plate are understood. Corrections are remembered.",
         "- Barcode scanning for packaged food via Open Food Facts, plus saved products and quick-adds.",
         "- Targets: calorie and protein targets from body, goal and training; slightly higher on training days.",
-        "- Training: splits, sets, reps, rest timers, supersets, warm-ups, automatic personal record detection, progression charts and a muscle map.",
+        "- Adaptive targets (opt in, Settings > Adapt to my weight trend): learns your real maintenance calories from logged food and weigh-ins, blended with the formula by how much data there is, kept within 30% of the formula, moves at most once a week, and explains why in plain words.",
+        "- Body: fasting timer, micronutrients and a smoothed weight trend.",
+        "- Training: splits, sets, reps, rest timers, supersets, warm-ups, a plate calculator, automatic personal record detection, progression charts and a muscle map. Custom exercises stay in your library (the picker shows Your exercises first).",
         "- Kyno: an AI coach that reads the last two weeks of meals, lifts, steps and weight. Accepts photos of a plate or menu. Photos are not stored. Not a doctor.",
         "- Health Connect: steps, weight, sleep and HRV, read only.",
         "- Home screen widgets: 2x2 (rings), 4x2 (rings plus carbs, fat, fiber), 2x4 (every macro plus Log meal), 4x4 (the whole day).",
-        "- Share cards: Poster, Receipt, Skyline, In real terms, Sticker; story or post size; graphite, paper or your own photo.",
+        "- Share cards: Poster, Receipt, Skyline, In real terms, Sticker; story or post size; graphite, paper or your own photo. Receipt and Skyline list every exercise of the session.",
+        "- Your data: Settings > Export my data gives one JSON with everything plus CSVs for meals, workouts (Hevy-style columns) and weight. Import workouts from a Strong or Hevy CSV export; pounds are converted, unknown exercises become custom exercises, and re-importing skips workouts already there.",
+        "- Offline first: everything saves on the phone first and backs up to the cloud; unsynced workouts are retried until they land.",
+        "- Birthday: setup asks your date of birth, and the app throws you a small party when you open it on your birthday.",
         "- Feedback: from anywhere in the app (Profile > Talk to us).",
         "", "## Frequently asked questions", ""]
 for q, a in FAQ:

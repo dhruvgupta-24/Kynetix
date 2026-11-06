@@ -5,6 +5,14 @@ from page import SITE, URL
 
 e = html.escape
 V = json.loads((SITE / "version.json").read_text(encoding="utf-8"))
+
+
+def undash(t):
+    """Em and en dashes become a comma (or a hyphen between numbers), so release notes never break the no-dash rule."""
+    t = re.sub(r"(\d)[\u2013\u2014](\d)", r"\1-\2", t)
+    return re.sub(r"\s*[\u2013\u2014]\s*", ", ", t)
+
+
 LATEST = "https://github.com/dhruvgupta-24/Kynetix/releases/latest"
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
@@ -29,7 +37,8 @@ def main_html():
     v = V
     sha = v["sha256"]
     size = v["size"]
-    notes = "".join(f"<li>{e(n)}</li>" for n in v["notes"])
+    # The site bans em and en dashes in visible text; release notes are written by hand, so soften any here.
+    notes = "".join(f"<li>{e(undash(n))}</li>" for n in v["notes"])
     return f'''<main id="main">
 <div class="wrap">
 <header class="legal-head dl-head">
