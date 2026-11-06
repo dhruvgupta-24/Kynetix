@@ -195,6 +195,60 @@ class LearnedPatternEntry {
       };
 }
 
+// ─── PatternReset ─────────────────────────────────────────────────────────────
+
+/// A "forget" the user asked for on the Nutrition Intelligence screen: every
+/// correction recorded up to [at] for one pattern ([targetRole] with
+/// [contextRole]), or, when [targetRole] is null, every correction and meal
+/// context. Kept on disk so cloud rows from before it never come back (even
+/// when its cloud delete has not landed yet); [cloudConfirmed] once the
+/// matching cloud rows are gone.
+@immutable
+class PatternReset {
+  const PatternReset({
+    required this.at,
+    this.targetRole,
+    this.contextRole,
+    this.cloudConfirmed = false,
+  });
+
+  final DateTime at;
+  final FoodRole? targetRole;
+  final FoodRole? contextRole;
+  final bool cloudConfirmed;
+
+  bool get isAll => targetRole == null;
+
+  /// One reset per pattern (a later one replaces it); '*' for "Clear all".
+  String get id =>
+      isAll ? '*' : '${targetRole!.name}|${contextRole?.name ?? ''}';
+
+  bool covers(PatternKey key) =>
+      isAll || (key.targetRole == targetRole && key.contextRole == contextRole);
+
+  PatternReset confirmed() => PatternReset(
+      at: at, targetRole: targetRole, contextRole: contextRole,
+      cloudConfirmed: true);
+
+  Map<String, dynamic> toJson() => {
+        'at': at.toUtc().toIso8601String(),
+        if (targetRole != null) 'targetRole': targetRole!.name,
+        if (contextRole != null) 'contextRole': contextRole!.name,
+        'cloudConfirmed': cloudConfirmed,
+      };
+
+  factory PatternReset.fromJson(Map<String, dynamic> j) => PatternReset(
+        at: DateTime.parse(j['at'] as String),
+        targetRole: j['targetRole'] == null
+            ? null
+            : FoodRole.values.byName(j['targetRole'] as String),
+        contextRole: j['contextRole'] == null
+            ? null
+            : FoodRole.values.byName(j['contextRole'] as String),
+        cloudConfirmed: j['cloudConfirmed'] as bool? ?? false,
+      );
+}
+
 // ─── EatingPatternService ─────────────────────────────────────────────────────
 
 class EatingPatternService {
@@ -204,6 +258,7 @@ class EatingPatternService {
   static const _kPatterns = 'eating_patterns_v1';
   static const _kContext  = 'meal_context_v1';
   static const _kSeeded  = 'eating_pattern_seeded_anchor_v1';
+  static const _kResets  = 'eating_pattern_resets_v1';
   static const _halfLifeDays = 14.0;
   static const _dropAfterDays = 90;
   static const _minSamples = 3;
@@ -216,6 +271,7 @@ class EatingPatternService {
 
   final Map<PatternKey, List<_CorrectionRecord>> _records = {};
   final List<_MealContextRecord> _contextRecords = [];
+  final Map<String, PatternReset> _resets = {};
   bool _dirty = false;
   PortionAnchor? _seededAnchor; // tracks which anchor was last seeded
 
@@ -224,13 +280,18 @@ class EatingPatternService {
     _currentUserId = userId;
     _records.clear();
     _contextRecords.clear();
+    _resets.clear();
     await load(prefsOverride: prefsOverride);
   }
+
+  /// The user whose patterns are loaded (null when signed out).
+  String? get currentUserId => _currentUserId;
 
   /// Flush in-memory state without deleting persisted disk stores
   void clearMemory() {
     _records.clear();
     _contextRecords.clear();
+    _resets.clear();
     _seededAnchor = null;
     _dirty = false;
     _currentUserId = null;
@@ -535,16 +596,94 @@ class EatingPatternService {
   void resetAll() {
     _records.clear();
     _contextRecords.clear();
+    _resets.clear();
     _seededAnchor = null;
     _dirty = true;
     _debugLog('[EatingPatternService] 🗑️  Reset ALL patterns');
+  }
+
+  // ── User "forget" (Nutrition Intelligence screen) ───────────────────────────
+  //
+  // Unlike [resetPattern] / [resetAll] (plain memory wipes), these record a
+  // [PatternReset] so the clear sticks: [mergeFromCloud] skips cloud rows from
+  // before it, and CloudSyncService deletes those rows (retrying until it
+  // lands). Use CloudSyncService.resetEatingPattern / resetAllEatingPatterns.
+
+  /// Forgets one pattern and saves.
+  Future<void> forgetPattern(FoodRole targetRole,
+      {FoodRole? contextRole, DateTime? at}) async {
+    resetPattern(targetRole, contextRole: contextRole);
+    final reset = PatternReset(
+        at: (at ?? DateTime.now()).toUtc(),
+        targetRole: targetRole,
+        contextRole: contextRole);
+    _resets[reset.id] = reset;
+    _dirty = true;
+    await save();
+  }
+
+  /// Forgets every pattern and meal context and saves.
+  Future<void> forgetAll({DateTime? at}) async {
+    resetAll();
+    final reset = PatternReset(at: (at ?? DateTime.now()).toUtc());
+    _resets[reset.id] = reset; // covers every older per-pattern reset
+    _dirty = true;
+    await save();
+  }
+
+  /// Resets whose cloud rows are not confirmed deleted yet.
+  List<PatternReset> get pendingCloudResets =>
+      _resets.values.where((r) => !r.cloudConfirmed).toList();
+
+  /// Every recorded reset (for tests and diagnostics).
+  List<PatternReset> get resets => List.unmodifiable(_resets.values);
+
+  /// The cloud rows [reset] covers are gone. Ignored if [userId] is no
+  /// longer loaded or a newer reset replaced it meanwhile.
+  Future<void> confirmCloudReset(PatternReset reset,
+      {required String userId}) async {
+    if (_currentUserId != userId) return;
+    final current = _resets[reset.id];
+    if (current == null || current.at != reset.at || current.cloudConfirmed) {
+      return;
+    }
+    _resets[reset.id] = current.confirmed();
+    _dirty = true;
+    await save();
+  }
+
+  /// [t] as read back from the cloud. Builds before UTC uploads sent a local
+  /// wall-clock time without offset, which the server stored as UTC; such
+  /// a value read as local time again gives the instant it meant.
+  static DateTime _legacyReading(DateTime t) => t.isUtc
+      ? DateTime(t.year, t.month, t.day, t.hour, t.minute, t.second,
+          t.millisecond, t.microsecond)
+      : t;
+
+  /// True when [a] and [b] are the same recording: the same instant to the
+  /// second, also when one of them came back from an older build's upload.
+  static bool _sameRecording(DateTime a, DateTime b) {
+    bool near(DateTime x, DateTime y) =>
+        x.difference(y).inMilliseconds.abs() < 1000;
+    return near(a, b) || near(_legacyReading(a), b) || near(a, _legacyReading(b));
+  }
+
+  /// True when a reset the user made covers a cloud row for [key] recorded
+  /// at [t] (null [key]: a meal-context row, covered only by "Clear all").
+  bool _resetCovers(PatternKey? key, DateTime t) {
+    for (final r in _resets.values) {
+      if (key == null ? !r.isAll : !r.covers(key)) continue;
+      if (!t.isAfter(r.at) || !_legacyReading(t).isAfter(r.at)) return true;
+    }
+    return false;
   }
 
   // ── Cloud Sync ───────────────────────────────────────────────────────────────
 
   /// Returns all correction records as a flat list for upload to Supabase.
   /// Each map has: targetRole, contextRole?, pipelineEstimate,
-  ///   userCorrectedCal, ratio, recordedAt (ISO8601 string).
+  ///   userCorrectedCal, ratio, recordedAt (ISO8601 string, UTC: without an
+  ///   offset the server would read a local time as UTC).
   List<Map<String, dynamic>> exportForCloudSync() {
     final result = <Map<String, dynamic>>[];
     for (final records in _records.values) {
@@ -555,7 +694,7 @@ class EatingPatternService {
           'pipeline_estimate': r.pipelineEstimate,
           'user_corrected_cal': r.userCorrectedCal,
           'ratio': r.ratio,
-          'recorded_at': r.timestamp.toIso8601String(),
+          'recorded_at': r.timestamp.toUtc().toIso8601String(),
         });
       }
     }
@@ -569,13 +708,14 @@ class EatingPatternService {
               'primary_food_names': r.primaryFoodNames,
               'primary_total_qty': r.primaryTotalQty,
               'primary_dominant': r.primaryDominant,
-              'recorded_at': r.timestamp.toIso8601String(),
+              'recorded_at': r.timestamp.toUtc().toIso8601String(),
             })
         .toList();
   }
 
   /// Merge correction records received from Supabase cloud sync.
-  /// Skips records that are duplicates of existing ones (same timestamp + ratio).
+  /// Skips records that are duplicates of existing ones (the same recording
+  /// instant, see [_sameRecording]) and records a user reset covers.
   void mergeFromCloud(List<Map<String, dynamic>> rows) {
     int added = 0;
     for (final row in rows) {
@@ -604,11 +744,13 @@ class EatingPatternService {
         final userCorrectedCal =
             (row['user_corrected_cal'] as num?)?.toDouble() ?? 0.0;
 
-        // Skip duplicate (same timestamp within 1 second)
+        // Forgotten by the user (Reset pattern / Clear all).
+        if (_resetCovers(key, timestamp)) continue;
+        // Skip duplicate (same instant within 1 second)
         final existing = _records[key];
-        final isDuplicate = existing?.any((r) =>
-                r.timestamp.difference(timestamp).inSeconds.abs() < 1) ??
-            false;
+        final isDuplicate =
+            existing?.any((r) => _sameRecording(r.timestamp, timestamp)) ??
+                false;
         if (isDuplicate) continue;
 
         _records.putIfAbsent(key, () => []).add(_CorrectionRecord(
@@ -637,9 +779,10 @@ class EatingPatternService {
         final timestamp = DateTime.tryParse(
                 (row['recorded_at'] ?? row['created_at'] ?? '') as String) ??
             DateTime.now();
-        // Skip duplicates (same timestamp within 1 second)
-        final isDuplicate = _contextRecords.any(
-            (r) => r.timestamp.difference(timestamp).inSeconds.abs() < 1);
+        if (_resetCovers(null, timestamp)) continue;
+        // Skip duplicates (same instant within 1 second)
+        final isDuplicate = _contextRecords
+            .any((r) => _sameRecording(r.timestamp, timestamp));
         if (isDuplicate) continue;
         _contextRecords.add(_MealContextRecord(
           primaryFoodNames: (row['primary_food_names'] as List<dynamic>?)
@@ -688,6 +831,19 @@ class EatingPatternService {
         }
       }
 
+      // Restore the user's resets (each read on its own: a bad one is dropped)
+      final resetsRaw = ScopedPrefs.getString(prefs, _kResets, _currentUserId);
+      if (resetsRaw != null) {
+        for (final item in jsonDecode(resetsRaw) as List<dynamic>) {
+          try {
+            final r = PatternReset.fromJson(item as Map<String, dynamic>);
+            _resets[r.id] = r;
+          } catch (e) {
+            _debugLog('[EatingPatternService] ⚠️  Bad reset record: $e');
+          }
+        }
+      }
+
       // Restore seeded anchor sentinel
       final seededRaw = ScopedPrefs.getString(prefs, _kSeeded, _currentUserId);
       if (seededRaw != null) {
@@ -728,6 +884,11 @@ class EatingPatternService {
       if (_currentUserId == null) {
         await prefs.setString(_kContext, ctxJson);
       }
+
+      // Persist the user's resets
+      final resetsJson =
+          jsonEncode(_resets.values.map((r) => r.toJson()).toList());
+      await prefs.setString(ScopedPrefs.key(_kResets, _currentUserId), resetsJson);
 
       // Persist seeded anchor sentinel
       if (_seededAnchor != null) {

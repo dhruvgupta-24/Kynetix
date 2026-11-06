@@ -18,6 +18,8 @@ import '../models/insights_models.dart';
 import '../services/insights_report_service.dart';
 import '../services/user_session_coordinator.dart';
 import '../services/internal/net_timeouts.dart';
+import '../services/error_reporter.dart';
+import '../services/food_role_classifier.dart' show FoodRole;
 
 // Logging in this file is debug-only: release builds skip the console I/O.
 void _debugLog(String? message, {int? wrapWidth}) {
@@ -49,15 +51,32 @@ class CloudHydrationSource {
 
   SupabaseClient get _db => Supabase.instance.client;
 
+  /// Every row of [table] (RLS limits it to the caller's own), read page by
+  /// page in a stable order: [orderBy] ascending, then `id` as tie-break.
+  Future<List<dynamic>> _all(String table, String orderBy) =>
+      CloudSyncService.fetchAllPages(
+        (from, to) => _db
+            .from(table)
+            .select()
+            .order(orderBy, ascending: true)
+            .order('id', ascending: true)
+            .range(from, to),
+        what: table,
+      );
+
   Future<CloudHydrationCore> fetchCore() async {
+    // Paged (PostgREST returns at most 1000 rows per request), each page
+    // with its own timeout, so a long-lived account is neither truncated
+    // nor cut off by one limit over the whole batch.
     final results = await Future.wait([
-      _db.from('day_logs').select(),
-      _db.from('workout_sessions').select(),
-      _db.from('user_nutrition_memory').select(),
-      _db.from('user_eating_patterns').select().order('recorded_at', ascending: true),
-      _db.from('user_meal_contexts').select().order('recorded_at', ascending: true),
-      _db.from('workout_splits').select().maybeSingle(),
-    ]).within(NetTimeouts.sync, 'cloud hydration');
+      _all('day_logs', 'date_key'),
+      _all('workout_sessions', 'date'),
+      _all('user_nutrition_memory', 'canonical_meal'),
+      _all('user_eating_patterns', 'recorded_at'),
+      _all('user_meal_contexts', 'recorded_at'),
+      _db.from('workout_splits').select().maybeSingle()
+          .within(NetTimeouts.sync, 'split fetch'),
+    ]);
     return CloudHydrationCore(
       dayLogs: results[0] as List<dynamic>,
       workouts: results[1] as List<dynamic>,
@@ -68,9 +87,7 @@ class CloudHydrationSource {
     );
   }
 
-  Future<List<dynamic>> fetchAchievements() async =>
-      await _db.from('user_achievements').select()
-          .within(NetTimeouts.sync, 'achievements fetch');
+  Future<List<dynamic>> fetchAchievements() => _all('user_achievements', 'id');
 
   Future<Map<String, dynamic>?> fetchInsightsCache() =>
       _db.from('user_insights_cache').select().maybeSingle()
@@ -90,11 +107,122 @@ class CloudHydrationSource {
           .deleteWorkoutSessions(ids, expectedUserId: userId);
 }
 
+/// Remote writes the background sync performs (uploads, deletes, the signed
+/// in user). The default talks to Supabase; tests substitute a fake so the
+/// retry paths run offline. Every call throws on failure.
+class CloudSyncRemote {
+  const CloudSyncRemote();
+
+  SupabaseClient get _db => Supabase.instance.client;
+
+  String? get currentUserId => _db.auth.currentUser?.id;
+
+  Future<void> upsertWorkouts(List<Map<String, dynamic>> rows) => _db
+      .from('workout_sessions')
+      .upsert(rows, onConflict: 'user_id,id')
+      .within(NetTimeouts.sync, 'workout upload');
+
+  Future<void> deleteWorkouts(String userId, List<String> ids) => _db
+      .from('workout_sessions')
+      .delete()
+      .eq('user_id', userId)
+      .inFilter('id', ids)
+      .within(NetTimeouts.sync, 'workout delete');
+
+  Future<void> mergeDayLog(Map<String, dynamic> params) => _db
+      .rpc('merge_day_log', params: params)
+      .within(NetTimeouts.sync, 'day log upload');
+
+  /// Deletes [userId]'s correction rows recorded at or before [before]: all
+  /// of them when [targetRole] is null, else one pattern (a null
+  /// [contextRole] meaning "eaten alone").
+  Future<void> deleteEatingPatterns(
+    String userId, {
+    required DateTime before,
+    String? targetRole,
+    String? contextRole,
+  }) {
+    var q = _db
+        .from('user_eating_patterns')
+        .delete()
+        .eq('user_id', userId)
+        .lte('recorded_at', before.toUtc().toIso8601String());
+    if (targetRole != null) {
+      q = q.eq('target_role', targetRole);
+      q = contextRole == null
+          ? q.isFilter('context_role', null)
+          : q.eq('context_role', contextRole);
+    }
+    return q.within(NetTimeouts.sync, 'eating pattern delete');
+  }
+
+  /// Deletes [userId]'s meal-context rows recorded at or before [before].
+  Future<void> deleteMealContexts(String userId, {required DateTime before}) =>
+      _db
+          .from('user_meal_contexts')
+          .delete()
+          .eq('user_id', userId)
+          .lte('recorded_at', before.toUtc().toIso8601String())
+          .within(NetTimeouts.sync, 'meal context delete');
+}
+
 class CloudSyncService {
   CloudSyncService._();
   static final CloudSyncService instance = CloudSyncService._();
 
   SupabaseClient get _supabase => Supabase.instance.client;
+
+  /// Where uploads and deletes go. Tests replace it with a fake.
+  @visibleForTesting
+  CloudSyncRemote remote = const CloudSyncRemote();
+
+  /// Rows PostgREST returns per request at most (its default `max-rows`).
+  static const pageSize = 1000;
+
+  /// Hard stop for [fetchAllPages] (a million rows), so a misbehaving
+  /// server can never keep it looping.
+  static const _maxPages = 1000;
+
+  /// Reads every row of a query, [size] rows per request, until a short
+  /// page. [page] fetches rows [from]..[to] (inclusive) of a stable order, so
+  /// pages neither skip nor repeat rows. Each page gets its own [perPage]
+  /// timeout: a large account is slow, not cut off.
+  @visibleForTesting
+  static Future<List<dynamic>> fetchAllPages(
+    Future<List<dynamic>> Function(int from, int to) page, {
+    required String what,
+    int size = pageSize,
+    Duration perPage = NetTimeouts.sync,
+  }) async {
+    final rows = <dynamic>[];
+    for (var i = 0; i < _maxPages; i++) {
+      final from = i * size;
+      final batch =
+          await page(from, from + size - 1).within(perPage, '$what page $i');
+      rows.addAll(batch);
+      if (batch.length < size) return rows;
+    }
+    _debugLog('[CloudSyncService] $what: stopped after $_maxPages pages');
+    return rows;
+  }
+
+  /// Reports a cloud row hydration had to skip (it could not be read), with
+  /// no row content, so one bad row is visible without blocking the rest.
+  static void _reportBadRow(String table, Object error, StackTrace stack) {
+    _debugLog('[CloudSyncService] Skipped unreadable $table row: $error');
+    ErrorReporter.instance.report(
+        StateError('Skipped unreadable $table row (${error.runtimeType})'),
+        stack,
+        type: 'cloud_hydration');
+  }
+
+  /// A `timestamptz` that older builds uploaded as a local wall-clock time
+  /// without offset (so the server stored it as UTC) comes back with its
+  /// wall-clock fields intact: read it as that local time again.
+  static DateTime _wallClock(DateTime parsed) => parsed.isUtc
+      ? DateTime(parsed.year, parsed.month, parsed.day, parsed.hour,
+          parsed.minute, parsed.second, parsed.millisecond, parsed.microsecond)
+      : parsed;
 
   /// True while [userId]'s session, as it was at [epoch], is still the loaded
   /// one. Every cloud merge re-checks this after each await: a sign-out or
@@ -131,9 +259,6 @@ class CloudSyncService {
 
     NutritionHydrationGuard.instance.beginHydration(isBackgroundUpdate: true);
     _debugLog('[CloudSyncService] Starting cloud hydration for user: $userId');
-    // Remote rows may now differ from what this session uploaded: forget the
-    // upload fingerprints so the next sync re-uploads every day.
-    _uploadedDayJson.clear();
 
     try {
       // Hydrate all components concurrently
@@ -141,17 +266,30 @@ class CloudSyncService {
       if (dropped('fetch')) return;
 
       // 1. Process Day Logs (the merge and the save's key capture both run
-      //    synchronously right after the check above)
-      for (final row in core.dayLogs) {
-        final dateKey = row['date_key'] as String;
-        dayLogStore[dateKey] = mergeCloudDayRow(
-          dateKey,
-          row as Map<String, dynamic>,
-          dayLogStore[dateKey],
-        );
+      //    synchronously right after the check above). One unreadable row is
+      //    skipped and reported; it never costs the rest.
+      final matchingCloud = <String, String>{};
+      for (final raw in core.dayLogs) {
+        try {
+          final row = raw as Map<String, dynamic>;
+          final dateKey = row['date_key'] as String;
+          final merged = mergeCloudDayRow(dateKey, row, dayLogStore[dateKey]);
+          dayLogStore[dateKey] = merged;
+          // Nothing local to add to the cloud copy: the day needs no upload.
+          final mergedJson = jsonEncode(merged.toJson());
+          if (MealTombstones.instance.deletionsFor(dateKey).isEmpty &&
+              jsonEncode(mergeCloudDayRow(dateKey, row, null).toJson()) ==
+                  mergedJson) {
+            matchingCloud[dateKey] = mergedJson;
+          }
+        } catch (e, st) {
+          _reportBadRow('day_logs', e, st);
+        }
       }
       // Re-save locally
       await PersistenceService.saveDayLogs();
+      if (dropped('day logs')) return;
+      await PersistenceService.markDaysInSyncWithCloud(userId, matchingCloud);
       if (dropped('day logs')) return;
       PersistenceService.lastDayLogsHydratedAt = DateTime.now();
       _debugLog('[CloudSyncService] Day logs hydration complete at: ${PersistenceService.lastDayLogsHydratedAt}');
@@ -161,30 +299,36 @@ class CloudSyncService {
       // Historical sessions are immutable — never overwrite existing local entries.
       final importedSessions = <WorkoutSession>[];
       final stillDeleted = <String>{};
+      final localIds = {for (final s in WorkoutService.instance.sessions) s.id};
       for (final row in core.workouts) {
-        final id = row['id'] as String;
-        // Deleted on this device: never re-add it, and retry the cloud delete
-        // that evidently did not land (e.g. it ran offline).
-        if (WorkoutService.instance.isSessionDeleted(id)) {
-          stillDeleted.add(id);
-          continue;
-        }
-        // Avoid overwriting local history if it exists, or just accept cloud as truth
-        final exists = WorkoutService.instance.sessions.any((s) => s.id == id);
-        if (!exists) {
-          // Sessions are write-once and immutable. We only add sessions that
-          // are not already in local storage. WorkoutService owns ordering.
-          final session = WorkoutSession(
-            id: row['id'],
-            date: DateTime.parse(row['date'] as String),
+        try {
+          final id = row['id'] as String;
+          // Deleted on this device: never re-add it, and retry the cloud
+          // delete that evidently did not land (e.g. it ran offline).
+          if (WorkoutService.instance.isSessionDeleted(id)) {
+            stillDeleted.add(id);
+            continue;
+          }
+          // A session already stored here is kept as is. Taking a newer cloud
+          // copy (edited on another device) would need a per-session
+          // updated_at on WorkoutSession; it has none, and the row's
+          // updated_at is only the upload time, so it cannot say which copy
+          // is newer.
+          if (localIds.contains(id)) continue;
+          // WorkoutService owns ordering (it sorts by date on import).
+          importedSessions.add(WorkoutSession(
+            id: id,
+            // Stored as a local wall-clock time (see [workoutRow]).
+            date: _wallClock(DateTime.parse(row['date'] as String)),
             splitDayName: row['split_day_name'] as String,
             splitDayWeekday: row['split_day_weekday'] as int?,
             wasManuallySelected: row['was_manually_selected'] as bool? ?? false,
             notes: row['notes'] as String?,
             durationMinutes: row['duration_minutes'] as int?,
             entries: (row['entries_json'] as List<dynamic>?)?.map((e) => ExerciseEntry.fromJson(e)).toList() ?? [],
-          );
-          importedSessions.add(session);
+          ));
+        } catch (e, st) {
+          _reportBadRow('workout_sessions', e, st);
         }
       }
       if (importedSessions.isNotEmpty) {
@@ -193,7 +337,17 @@ class CloudSyncService {
         if (dropped('workouts')) return;
       }
       if (stillDeleted.isNotEmpty) {
-        source.deleteWorkouts(stillDeleted, userId).ignore();
+        // Still in the cloud, so not confirmed deleted (whatever an earlier
+        // run believed): kept until a delete is confirmed.
+        await WorkoutService.instance.markCloudDeletesPending(stillDeleted);
+        if (dropped('workouts')) return;
+        source.deleteWorkouts(stillDeleted, userId).then((ok) {
+          if (ok) {
+            WorkoutService.instance
+                .confirmCloudDeletes(stillDeleted, userId: userId)
+                .ignore();
+          }
+        }).ignore();
       }
       WorkoutService.lastWorkoutsHydratedAt = DateTime.now();
       _debugLog('[CloudSyncService] Workout sessions hydration complete at: ${WorkoutService.lastWorkoutsHydratedAt}');
@@ -289,9 +443,11 @@ class CloudSyncService {
           }
         }
 
+        // Compared as instants in UTC (the split's updated_at is uploaded in
+        // UTC, see [syncWorkoutSplitBackground]).
         final isLocalNewer = WorkoutService.instance.isSetupDone &&
             cloudUpdatedAt != null &&
-            localUpdatedAt.isAfter(cloudUpdatedAt);
+            localUpdatedAt.toUtc().isAfter(cloudUpdatedAt.toUtc());
 
         if (isLocalNewer) {
           _debugLog('[CloudSyncService] Local workout split is newer than cloud. Backing up split to cloud...');
@@ -326,19 +482,22 @@ class CloudSyncService {
       try {
         final cloudAchievements = await source.fetchAchievements();
         if (dropped('achievements')) return;
-        final restored = cloudAchievements.map((row) {
-          final earnedAtStr = row['earned_at'] as String;
-          final id = row['id'] as String;
-          return Achievement(
-            id: id,
-            title: '',
-            description: '',
-            emoji: '',
-            category: AchievementCategory.consistency,
-            earnedAt: DateTime.parse(earnedAtStr),
-            isNew: false,
-          );
-        }).toList();
+        final restored = <Achievement>[];
+        for (final row in cloudAchievements) {
+          try {
+            restored.add(Achievement(
+              id: row['id'] as String,
+              title: '',
+              description: '',
+              emoji: '',
+              category: AchievementCategory.consistency,
+              earnedAt: DateTime.parse(row['earned_at'] as String),
+              isNew: false,
+            ));
+          } catch (e, st) {
+            _reportBadRow('user_achievements', e, st);
+          }
+        }
         await InsightsReportService.instance
             .mergeAchievementsFromCloud(restored, stillCurrent: stillCurrent);
         _debugLog('[CloudSyncService] 🔄 Restored ${restored.length} achievements from cloud');
@@ -394,6 +553,9 @@ class CloudSyncService {
       if (dropped('finish')) return;
       _debugLog('[CloudSyncService] Hydration completed.');
       NutritionHydrationGuard.instance.markComplete(userId);
+      // Local changes the cloud still lacks (a failed upload, an offline
+      // delete) go up now.
+      drainPendingUploads();
     } catch (e) {
       _debugLog('[CloudSyncService] Error during hydration: $e');
     }
@@ -494,15 +656,16 @@ class CloudSyncService {
   // ── Day-log upload ──────────────────────────────────────────────────────
   //
   // Each day is merge-uploaded through `merge_day_log` (see
-  // [dayMergeParams]); the stored row keeps the same format. To avoid
-  // re-uploading the whole history on every save, a day is skipped only when
-  // its persisted JSON (from PersistenceService's last write) is identical to
-  // the JSON it had when this session last uploaded it successfully. Anything
-  // unknown, changed, or previously failed is uploaded. Runs are serialized
+  // [dayMergeParams]); the stored row keeps the same format. Only the days
+  // PersistenceService has recorded as changed and not yet confirmed
+  // uploaded (its persisted dirty set, which survives restarts) go up, plus
+  // days carrying pending meal deletions. A day leaves the set only after
+  // its upload succeeded and only if it did not change in the meantime.
+  // At most [_dayUploadConcurrency] uploads run at once. Runs are serialized
   // and coalesced: a request during a run triggers exactly one more run.
 
-  final Map<String, String> _uploadedDayJson = {};
-  String? _uploadedDayJsonOwner;
+  static const _dayUploadConcurrency = 4;
+
   Future<void>? _dayLogSyncRun;
   bool _dayLogSyncAgain = false;
 
@@ -529,67 +692,86 @@ class CloudSyncService {
     }
   }
 
-  Future<void> _syncChangedDayLogsOnce() async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return;
-    // The in-memory store belongs to the session user; never upload it under
-    // a different auth identity.
+  /// True while [userId] is both the signed-in user and the owner of the
+  /// in-memory stores (a sign-out or switch stops any upload loop).
+  bool _ownsLocalData(String userId) {
+    if (remote.currentUserId != userId) return false;
     final sessionUser = UserSessionCoordinator.instance.currentUserId;
-    if (sessionUser != null && sessionUser != userId) return;
+    return sessionUser == null || sessionUser == userId;
+  }
 
-    if (_uploadedDayJsonOwner != userId) {
-      _uploadedDayJson.clear();
-      _uploadedDayJsonOwner = userId;
+  Future<void> _syncChangedDayLogsOnce() async {
+    final userId = remote.currentUserId;
+    if (userId == null || !_ownsLocalData(userId)) return;
+
+    // Newest days first: they are the ones the user is looking at.
+    final queue = PersistenceService.daysNeedingUpload(userId).toList()
+      ..sort((a, b) => b.compareTo(a));
+    if (queue.isEmpty) return;
+    var next = 0;
+    var uploaded = 0;
+
+    Future<void> worker() async {
+      while (next < queue.length) {
+        if (!_ownsLocalData(userId)) return;
+        final dateKey = queue[next++];
+        final log = dayLogStore[dateKey];
+        if (log == null) continue;
+        // What this upload carries, taken before it is sent: a change or a
+        // deletion recorded while it is in flight is not in it and must
+        // survive.
+        final sentJson = jsonEncode(log.toJson());
+        final params = dayMergeParams(
+            dateKey, log, MealTombstones.instance.deletionsFor(dateKey));
+        final tombstoneSnapshot = MealTombstones.instance.snapshotFor(dateKey);
+        try {
+          await remote.mergeDayLog(params);
+        } catch (e) {
+          _debugLog('[CloudSyncService] Failed to sync day log $dateKey: $e');
+          continue; // stays dirty: retried on the next run
+        }
+        PersistenceService.markDayUploaded(userId, dateKey, sentJson);
+        MealTombstones.instance
+            .clearUploaded(dateKey, tombstoneSnapshot, userId: userId);
+        uploaded++;
+      }
     }
-    final written = PersistenceService.lastWrittenDayJsonFor(userId);
-    final snapshot = Map<String, DayLog>.of(dayLogStore);
 
     try {
-      final futures = <Future>[];
-      for (final entry in snapshot.entries) {
-        final dateKey = entry.key;
-        final log = entry.value;
-        final fingerprint = written?[dateKey];
-        if (fingerprint != null && _uploadedDayJson[dateKey] == fingerprint) {
-          continue; // Unchanged since this session's last successful upload.
-        }
-        // Deletions this upload carries to the cloud; ones recorded while it
-        // is in flight are not in it and must survive.
-        final tombstoneSnapshot = MealTombstones.instance.snapshotFor(dateKey);
-
-        futures.add(
-          _supabase
-              .rpc('merge_day_log', params: dayMergeParams(
-                dateKey,
-                log,
-                MealTombstones.instance.deletionsFor(dateKey),
-              ))
-              .within(NetTimeouts.sync, 'day log upload')
-              .then((value) {
-            if (fingerprint != null && _uploadedDayJsonOwner == userId) {
-              _uploadedDayJson[dateKey] = fingerprint;
-            }
-            MealTombstones.instance.clearUploaded(dateKey, tombstoneSnapshot, userId: userId);
-            return value;
-          }).catchError((e) {
-            _debugLog('[CloudSyncService] Failed to sync day log $dateKey: $e');
-            return {};
-          })
-        );
-      }
-      await Future.wait(futures);
+      await Future.wait([
+        for (var i = 0; i < _dayUploadConcurrency; i++) worker(),
+      ]);
     } catch (e) {
       _debugLog('[CloudSyncService] Background day log sync failed: $e');
     }
+    if (uploaded > 0) await PersistenceService.persistDirtyDays(userId);
   }
 
-  /// Fire-and-forget sync for a single completed workout
-  Future<void> syncWorkoutBackground(WorkoutSession session) async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return;
+  // ── Workout upload / delete ─────────────────────────────────────────────
+  //
+  // WorkoutService keeps, per user and on disk, the sessions saved here but
+  // not yet confirmed uploaded and the deletions not yet confirmed in the
+  // cloud. Each id leaves its set only after the cloud call succeeded, so a
+  // workout finished offline (or whose upload failed) is retried on the
+  // next drain: app start (after hydration), resume, and every save.
 
-    try {
-      await _supabase.from('workout_sessions').upsert({
+  /// Sessions per upsert request.
+  static const _workoutUploadBatch = 25;
+
+  /// Ids per delete request (they travel in the URL).
+  static const _workoutDeleteBatch = 100;
+
+  Future<void>? _workoutSyncRun;
+  bool _workoutSyncAgain = false;
+
+  /// One `workout_sessions` row. `date` stays the session's local
+  /// wall-clock time without offset, as every build has stored it (the
+  /// reader relies on its fields, see [hydrateForUser]); `updated_at` is a
+  /// real instant, in UTC.
+  @visibleForTesting
+  static Map<String, dynamic> workoutRow(WorkoutSession session, String userId,
+          {DateTime? now}) =>
+      {
         'id': session.id,
         'user_id': userId,
         'date': session.date.toIso8601String(),
@@ -599,11 +781,77 @@ class CloudSyncService {
         'entries_json': session.entries.map((e) => e.toJson()).toList(),
         'notes': session.notes,
         'duration_minutes': session.durationMinutes,
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'id').within(NetTimeouts.sync, 'workout upload');
-    } catch (e) {
-      _debugLog('[CloudSyncService] Background workout sync failed: $e');
+        'updated_at': (now ?? DateTime.now()).toUtc().toIso8601String(),
+      };
+
+  /// Uploads a just-saved workout. [WorkoutService.saveSession] has already
+  /// queued it, so this drains the queue: on failure it stays queued.
+  Future<void> syncWorkoutBackground(WorkoutSession session) =>
+      syncPendingWorkouts();
+
+  /// Sends every pending workout upload and delete (see above). Coalesced
+  /// like the day-log sync. Never throws.
+  Future<void> syncPendingWorkouts() {
+    final running = _workoutSyncRun;
+    if (running != null) {
+      _workoutSyncAgain = true;
+      return running;
     }
+    final run = _runWorkoutSyncLoop();
+    _workoutSyncRun = run;
+    return run;
+  }
+
+  Future<void> _runWorkoutSyncLoop() async {
+    try {
+      do {
+        _workoutSyncAgain = false;
+        await _syncPendingWorkoutsOnce();
+      } while (_workoutSyncAgain);
+    } catch (e) {
+      _debugLog('[CloudSyncService] Workout sync failed: $e');
+    } finally {
+      _workoutSyncRun = null;
+    }
+  }
+
+  Future<void> _syncPendingWorkoutsOnce() async {
+    final userId = remote.currentUserId;
+    final ws = WorkoutService.instance;
+    if (userId == null || ws.currentUserId != userId) return;
+
+    // Deletes first, so a deleted session is never uploaded again.
+    final deletes = ws.unconfirmedDeleteIds.toList();
+    for (var i = 0; i < deletes.length; i += _workoutDeleteBatch) {
+      final chunk = deletes
+          .sublist(i, (i + _workoutDeleteBatch).clamp(0, deletes.length))
+          .toSet();
+      if (!await deleteWorkoutSessions(chunk, expectedUserId: userId)) break;
+      await ws.confirmCloudDeletes(chunk, userId: userId);
+    }
+
+    final pending = ws.pendingUploadSessions();
+    for (var i = 0; i < pending.length; i += _workoutUploadBatch) {
+      if (ws.currentUserId != userId || remote.currentUserId != userId) return;
+      final chunk = pending.sublist(
+          i, (i + _workoutUploadBatch).clamp(0, pending.length));
+      try {
+        await remote.upsertWorkouts([for (final s in chunk) workoutRow(s, userId)]);
+      } catch (e) {
+        _debugLog('[CloudSyncService] Workout upload failed (kept queued): $e');
+        return;
+      }
+      await ws.markSessionsSynced(chunk, userId: userId);
+    }
+  }
+
+  /// Retries everything the cloud is still missing from this device: workout
+  /// uploads and deletes, changed days, pending pattern resets. Called after
+  /// hydration and when the app comes back to the foreground. Never throws.
+  void drainPendingUploads() {
+    syncPendingWorkouts().ignore();
+    syncDayLogsBackground().catchError((_) {}).ignore();
+    syncPendingPatternResets().ignore();
   }
 
   /// Deletes the signed-in user's own `workout_sessions` rows [ids] (RLS
@@ -613,19 +861,96 @@ class CloudSyncService {
       {required String expectedUserId}) async {
     if (ids.isEmpty) return true;
     try {
-      final userId = _supabase.auth.currentUser?.id;
+      final userId = remote.currentUserId;
       if (userId == null || userId != expectedUserId) return false;
-      await _supabase
-          .from('workout_sessions')
-          .delete()
-          .eq('user_id', userId)
-          .inFilter('id', ids.toList())
-          .within(NetTimeouts.sync, 'workout delete');
+      await remote.deleteWorkouts(userId, ids.toList());
       return true;
     } catch (e) {
       _debugLog('[CloudSyncService] Workout delete failed: $e');
       return false;
     }
+  }
+
+  // ── Eating-pattern resets ───────────────────────────────────────────────
+  //
+  // "Reset pattern" / "Clear all" on the Nutrition Intelligence screen. The
+  // local clear sticks on its own (EatingPatternService keeps a reset marker
+  // that filters older cloud rows, even offline); deleting the cloud rows
+  // as well keeps other devices from learning them back. A reset whose
+  // cloud delete failed is retried on the next drain.
+
+  Future<void>? _patternResetRun;
+
+  /// Sends every reset not yet confirmed in the cloud. Never throws.
+  Future<void> syncPendingPatternResets() {
+    final running = _patternResetRun;
+    if (running != null) return running;
+    final run = _sendPatternResets();
+    _patternResetRun = run;
+    return run;
+  }
+
+  Future<void> _sendPatternResets() async {
+    try {
+      // Awaited first, so the finally below never runs before the caller
+      // has stored this run.
+      await _sendPatternResetsOnce();
+    } catch (e) {
+      _debugLog('[CloudSyncService] Pattern reset sync failed: $e');
+    } finally {
+      _patternResetRun = null;
+    }
+  }
+
+  Future<void> _sendPatternResetsOnce() async {
+    final userId = remote.currentUserId;
+    final eps = EatingPatternService.instance;
+    if (userId == null || eps.currentUserId != userId) return;
+    for (final reset in eps.pendingCloudResets) {
+      if (!await deletePatternRowsFor(reset, expectedUserId: userId)) return;
+      await eps.confirmCloudReset(reset, userId: userId);
+    }
+  }
+
+  /// Deletes the cloud rows [reset] covers. True only when it went through.
+  @visibleForTesting
+  Future<bool> deletePatternRowsFor(PatternReset reset,
+      {required String expectedUserId}) async {
+    try {
+      final userId = remote.currentUserId;
+      if (userId == null || userId != expectedUserId) return false;
+      final role = reset.targetRole;
+      if (role == null) {
+        await remote.deleteEatingPatterns(userId, before: reset.at);
+        await remote.deleteMealContexts(userId, before: reset.at);
+      } else {
+        await remote.deleteEatingPatterns(
+          userId,
+          before: reset.at,
+          targetRole: role.name,
+          contextRole: reset.contextRole?.name,
+        );
+      }
+      return true;
+    } catch (e) {
+      _debugLog('[CloudSyncService] Pattern delete failed: $e');
+      return false;
+    }
+  }
+
+  /// Forgets one learned pattern here and in the cloud. The local clear is
+  /// saved before this returns; the cloud delete is retried until it lands.
+  Future<void> resetEatingPattern(FoodRole targetRole,
+      {FoodRole? contextRole}) async {
+    await EatingPatternService.instance
+        .forgetPattern(targetRole, contextRole: contextRole);
+    syncPendingPatternResets().ignore();
+  }
+
+  /// Forgets every learned pattern and meal context, here and in the cloud.
+  Future<void> resetAllEatingPatterns() async {
+    await EatingPatternService.instance.forgetAll();
+    syncPendingPatternResets().ignore();
   }
 
   /// Fire-and-forget sync for the workout split and custom exercises
@@ -638,7 +963,7 @@ class CloudSyncService {
         'user_id': userId,
         'split_json': split.toJson(),
         'custom_exercises_json': customExercises.map((e) => e.toJson()).toList(),
-        'updated_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id').within(NetTimeouts.sync, 'split upload');
       _debugLog('[CloudSyncService] 🔄 Workout split and custom exercises synced successfully.');
     } catch (e) {
@@ -773,7 +1098,7 @@ class CloudSyncService {
         'monthly_json': service.monthlyCache.map((k, v) => MapEntry(k, v.toJson())),
         'yearly_json': service.yearlyCache.map((k, v) => MapEntry(k, v.toJson())),
         'personal_bests_json': service.personalBests?.toJson(),
-        'updated_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id').within(NetTimeouts.sync, 'insights upload');
       _debugLog('[CloudSyncService] 🔄 Insights cache synced to cloud successfully.');
     } catch (e) {
@@ -794,6 +1119,9 @@ class CloudSyncService {
         await _supabase.from('user_achievements').upsert({
           'user_id': userId,
           'id': a.id,
+          // Local wall-clock time without offset, as every build has sent it:
+          // hydration reads its fields back as is (DateTime.parse), so sending
+          // UTC here would shift every achievement already stored.
           'earned_at': a.earnedAt.toIso8601String(),
         }, onConflict: 'user_id, id').within(NetTimeouts.sync, 'achievement upload');
       }

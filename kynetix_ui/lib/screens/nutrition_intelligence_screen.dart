@@ -3,6 +3,7 @@ import '../config/app_theme.dart';
 import '../ui/k_toast.dart';
 import '../ui/k_segmented.dart';
 import '../services/eating_pattern_service.dart';
+import '../services/cloud_sync_service.dart';
 import '../services/user_nutrition_memory.dart';
 import '../services/food_role_classifier.dart';
 import '../services/food_link_service.dart';
@@ -125,14 +126,16 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     );
 
     if (confirmed == true) {
-      EatingPatternService.instance.resetPattern(
+      // Clears here (with a marker that keeps older cloud rows from coming
+      // back, even offline) and deletes the cloud rows too.
+      final reset = CloudSyncService.instance.resetEatingPattern(
         entry.key.targetRole,
         contextRole: entry.key.contextRole,
       );
       // Optimistic: the in-memory store is already updated, so the row goes
       // away this frame; the disk write follows.
       if (mounted) setState(() {});
-      await EatingPatternService.instance.save();
+      await reset;
     }
   }
 
@@ -247,7 +250,9 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
     );
 
     if (confirmed == true) {
-      EatingPatternService.instance.resetAll();
+      // Clears here, keeps older cloud rows from coming back (even offline)
+      // and deletes them from the cloud too.
+      final patternsCleared = CloudSyncService.instance.resetAllEatingPatterns();
       // One write for every custom food instead of one write per food.
       final cleared = UserNutritionMemory.instance.deleteOverrides(
         UserNutritionMemory.instance.allOverrides
@@ -255,7 +260,7 @@ class _NutritionIntelligenceScreenState extends State<NutritionIntelligenceScree
             .toList(),
       );
       if (mounted) setState(() {});
-      await Future.wait([EatingPatternService.instance.save(), cleared]);
+      await Future.wait([patternsCleared, cleared]);
       if (mounted) {
         setState(() {});
         showKToast(context, 'Food library cleared. Fresh start.', kind: KToastKind.success);

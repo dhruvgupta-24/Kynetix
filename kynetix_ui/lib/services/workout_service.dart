@@ -101,7 +101,8 @@ class ProgressionRecommendation {
 //   • Custom exercises live alongside built-in ones; same Exercise model.
 //   • Progression is typed — different increment per ExerciseType.
 //   • progressionHint() only analyses isMainWorkingSet sets (excludes warm-ups).
-//   • Sessions are pruned at 200 entries (oldest first).
+//   • Sessions are kept sorted by date and pruned at 200 entries (oldest by
+//     date first; a session not yet uploaded is never pruned).
 
 /// Where a day's training plan came from, strongest first.
 enum DayPlanSource {
@@ -214,16 +215,39 @@ class WorkoutService extends ChangeNotifier {
   // ── Deleted-session tombstones ────────────────────────────────────────────
   // Ids the user deleted on this device. Cloud hydration never re-adds them,
   // and re-sends the cloud delete for any that are still in the cloud (e.g.
-  // the first delete ran offline). Kept per user, newest last.
+  // the first delete ran offline). Kept per user, newest last. The list is
+  // capped, but only tombstones whose cloud delete was confirmed are ever
+  // dropped for room: an unconfirmed one is what keeps the session from
+  // coming back.
   static const _kDeletedSessionIds = 'workout_deleted_session_ids_v1';
   static const _maxDeletedSessionIds = 500;
   final List<String> _deletedSessionIds = [];
+
+  /// Tombstones whose cloud delete has not been confirmed yet.
+  static const _kUnconfirmedDeleteIds = 'workout_unconfirmed_delete_ids_v1';
+  final Set<String> _unconfirmedDeleteIds = {};
+
+  // ── Unsynced sessions ─────────────────────────────────────────────────────
+  // Ids of sessions saved here whose cloud upload has not been confirmed.
+  // Added on save, removed only after a successful upsert, kept per user on
+  // disk, so a workout finished offline is uploaded on a later drain.
+  static const _kUnsyncedSessionIds = 'workout_unsynced_session_ids_v1';
+  final Set<String> _unsyncedSessionIds = {};
 
   /// True if the user deleted session [id] on this device.
   bool isSessionDeleted(String id) => _deletedSessionIds.contains(id);
 
   /// Ids the user deleted on this device (oldest first).
   List<String> get deletedSessionIds => List.unmodifiable(_deletedSessionIds);
+
+  /// Deleted ids whose cloud delete is not confirmed yet.
+  Set<String> get unconfirmedDeleteIds => Set.unmodifiable(_unconfirmedDeleteIds);
+
+  /// Ids of saved sessions whose upload is not confirmed yet.
+  Set<String> get unsyncedSessionIds => Set.unmodifiable(_unsyncedSessionIds);
+
+  /// The user whose workouts are loaded (null when signed out).
+  String? get currentUserId => _currentUserId;
 
   // ── Public read API ──────────────────────────────────────────────────────
 
@@ -1545,26 +1569,50 @@ class WorkoutService extends ChangeNotifier {
     final ids = {for (final s in dupes) s.id};
     debugPrint('[WorkoutService] Dropping ${ids.length} duplicate session(s)');
     _sessions.removeWhere((s) => ids.contains(s.id));
+    _tombstone(ids);
+    await _persistSyncSets();
+    await _persist();
+    notifyListeners();
+    _sendCloudDelete(ids);
+  }
+
+  /// Records [ids] as deleted here, with their cloud delete still to come.
+  void _tombstone(Iterable<String> ids) {
     for (final id in ids) {
       _deletedSessionIds
         ..remove(id)
         ..add(id);
+      _unconfirmedDeleteIds.add(id);
+      _unsyncedSessionIds.remove(id);
     }
-    if (_deletedSessionIds.length > _maxDeletedSessionIds) {
-      _deletedSessionIds.removeRange(0, _deletedSessionIds.length - _maxDeletedSessionIds);
+    _trimDeletedIds();
+  }
+
+  /// Caps the tombstone list, dropping the oldest confirmed ones only.
+  void _trimDeletedIds() {
+    var excess = _deletedSessionIds.length - _maxDeletedSessionIds;
+    for (var i = 0; excess > 0 && i < _deletedSessionIds.length;) {
+      if (_unconfirmedDeleteIds.contains(_deletedSessionIds[i])) {
+        i++;
+      } else {
+        _deletedSessionIds.removeAt(i);
+        excess--;
+      }
     }
-    await _persistDeletedIds();
-    await _persist();
-    notifyListeners();
+  }
+
+  /// Deletes [ids] from the cloud now; marks them confirmed if it lands.
+  /// If not (offline), the next drain retries.
+  void _sendCloudDelete(Set<String> ids) {
     final uid = _currentUserId;
-    if (uid != null) {
-      try {
-        CloudSyncService.instance
-            .deleteWorkoutSessions(ids, expectedUserId: uid)
-            .catchError((_) => false)
-            .ignore();
-      } catch (_) {}
-    }
+    if (uid == null) return;
+    try {
+      CloudSyncService.instance
+          .deleteWorkoutSessions(ids, expectedUserId: uid)
+          .then((ok) => ok ? confirmCloudDeletes(ids, userId: uid) : null)
+          .catchError((_) {})
+          .ignore();
+    } catch (_) {}
   }
 
   Future<void> saveSession(WorkoutSession session) async {
@@ -1572,16 +1620,13 @@ class WorkoutService extends ChangeNotifier {
     _sessions.add(session);
     if (_adoptLoggedCustomExercises([session])) _publishCustomExercises();
     // Saving a session again (e.g. Undo) brings it back for good.
-    if (_deletedSessionIds.remove(session.id)) _persistDeletedIds().ignore();
+    _deletedSessionIds.remove(session.id);
+    _unconfirmedDeleteIds.remove(session.id);
+    // Queued for upload until the cloud confirms it (see
+    // CloudSyncService.syncPendingWorkouts).
+    _unsyncedSessionIds.add(session.id);
+    _sortAndTrimSessions();
 
-    if (_sessions.length > _maxSessions) {
-      _sessions = _sessions.reversed
-          .take(_maxSessions)
-          .toList()
-          .reversed
-          .toList();
-    }
-    
     // Once explicitly saved to active history, dispose of any matching draft.
     if (_draftSession?.splitDayName == session.splitDayName ||
         (_draftSession != null && finishedIdFor(_draftSession!.id) == session.id)) {
@@ -1589,9 +1634,13 @@ class WorkoutService extends ChangeNotifier {
       _draftStartedAt = null;
     }
 
+    // The upload queue's write starts with the session's, so a crash right
+    // after the save cannot lose the retry.
+    final queued = _persistSyncSets();
     // The caller only drops its draft / recovery copy once this landed on
     // disk, so a failed write must reach it.
     await _persist(rethrowErrors: true);
+    await queued;
     if (!session.isEmpty && _recordSessionOnDay(session.date, session.splitDayName)) {
       await PersistenceService.saveDayLogsAndSync(session.date);
     }
@@ -1610,14 +1659,8 @@ class WorkoutService extends ChangeNotifier {
     if (matches.isEmpty) return;
     final sessionDate = matches.first.date;
     _sessions.removeWhere((s) => s.id == id);
-    _deletedSessionIds
-      ..remove(id)
-      ..add(id);
-    if (_deletedSessionIds.length > _maxDeletedSessionIds) {
-      _deletedSessionIds.removeRange(
-          0, _deletedSessionIds.length - _maxDeletedSessionIds);
-    }
-    await _persistDeletedIds();
+    _tombstone({id});
+    await _persistSyncSets();
     await _persist();
     if (_clearSessionFromDay(sessionDate, matches.first.splitDayName)) {
       await PersistenceService.saveDayLogsAndSync(sessionDate);
@@ -1626,28 +1669,121 @@ class WorkoutService extends ChangeNotifier {
     notifyListeners();
 
     // Delete the cloud copy too, or hydration would bring it back. If this
-    // fails (offline), the tombstone keeps it hidden and the next hydration
-    // retries the delete.
+    // fails (offline), the tombstone keeps it hidden and stays unconfirmed
+    // until a later drain (or hydration) gets the delete through.
+    _sendCloudDelete({id});
+  }
+
+  // ── Cloud sync bookkeeping (see CloudSyncService.syncPendingWorkouts) ────
+
+  WorkoutSession? _sessionById(String id) {
+    for (final s in _sessions) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  /// Saved sessions still to upload, oldest first. Ids whose session is
+  /// gone (deleted, or replaced as a duplicate) leave the queue.
+  List<WorkoutSession> pendingUploadSessions() {
+    if (!_ready) return const [];
+    final out = <WorkoutSession>[];
+    final gone = <String>[];
+    for (final id in _unsyncedSessionIds) {
+      final s = _sessionById(id);
+      if (s == null || isSessionDeleted(id)) {
+        gone.add(id);
+      } else {
+        out.add(s);
+      }
+    }
+    if (gone.isNotEmpty) {
+      _unsyncedSessionIds.removeAll(gone);
+      _persistSyncSets().ignore();
+    }
+    return out..sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  /// [uploaded] reached the cloud for [userId]. A session saved again while
+  /// its upload ran stays queued: the newer copy still has to go up.
+  Future<void> markSessionsSynced(Iterable<WorkoutSession> uploaded,
+      {required String userId}) async {
+    if (_currentUserId != userId) return;
+    var changed = false;
+    for (final s in uploaded) {
+      final current = _sessionById(s.id);
+      if (current != null && !identical(current, s)) continue;
+      changed |= _unsyncedSessionIds.remove(s.id);
+    }
+    if (changed) await _persistSyncSets();
+  }
+
+  /// The cloud delete of [ids] went through for [userId]: their tombstones
+  /// may now make room under the cap (they still hide the sessions).
+  Future<void> confirmCloudDeletes(Iterable<String> ids,
+      {required String userId}) async {
+    if (_currentUserId != userId) return;
+    var changed = false;
+    for (final id in ids) {
+      changed |= _unconfirmedDeleteIds.remove(id);
+    }
+    if (!changed) return;
+    _trimDeletedIds();
+    await _persistSyncSets();
+  }
+
+  /// Hydration found these deleted sessions still in the cloud: their delete
+  /// is not done, whatever an earlier run believed.
+  Future<void> markCloudDeletesPending(Iterable<String> ids) async {
+    var changed = false;
+    for (final id in ids) {
+      if (isSessionDeleted(id)) changed |= _unconfirmedDeleteIds.add(id);
+    }
+    if (changed) await _persistSyncSets();
+  }
+
+  /// Writes the tombstones and both sync queues for the loaded user. The key
+  /// and contents are taken now, so a later sign-out cannot redirect them.
+  Future<void> _persistSyncSets() async {
+    if (!_ready) return;
     final uid = _currentUserId;
-    if (uid != null) {
-      try {
-        CloudSyncService.instance
-            .deleteWorkoutSessions({id}, expectedUserId: uid)
-            .catchError((_) => false)
-            .ignore();
-      } catch (_) {}
+    final deleted = List<String>.of(_deletedSessionIds);
+    final unconfirmed = _unconfirmedDeleteIds.toList();
+    final unsynced = _unsyncedSessionIds.toList();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(ScopedPrefs.key(_kDeletedSessionIds, uid), deleted);
+      await prefs.setStringList(
+          ScopedPrefs.key(_kUnconfirmedDeleteIds, uid), unconfirmed);
+      await prefs.setStringList(
+          ScopedPrefs.key(_kUnsyncedSessionIds, uid), unsynced);
+    } catch (e) {
+      debugPrint('[WorkoutService] sync-state persist error: $e');
     }
   }
 
-  Future<void> _persistDeletedIds() async {
-    final key = ScopedPrefs.key(_kDeletedSessionIds, _currentUserId);
-    final ids = List<String>.of(_deletedSessionIds);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(key, ids);
-    } catch (e) {
-      debugPrint('[WorkoutService] deleted-id persist error: $e');
+  /// Keeps [_sessions] sorted by date, oldest first (sessions with the same
+  /// date keep their order), and at most [_maxSessions] long by dropping the
+  /// oldest by date. A session not yet uploaded is never dropped: this
+  /// device holds its only copy.
+  void _sortAndTrimSessions() {
+    final indexed = _sessions.indexed.toList()
+      ..sort((a, b) {
+        final byDate = a.$2.date.compareTo(b.$2.date);
+        return byDate != 0 ? byDate : a.$1.compareTo(b.$1);
+      });
+    _sessions = [for (final e in indexed) e.$2];
+    var excess = _sessions.length - _maxSessions;
+    if (excess <= 0) return;
+    final kept = <WorkoutSession>[];
+    for (final s in _sessions) {
+      if (excess > 0 && !_unsyncedSessionIds.contains(s.id)) {
+        excess--;
+        continue;
+      }
+      kept.add(s);
     }
+    _sessions = kept;
   }
 
   /// The day screen shows what was actually trained: a saved session sets the
@@ -1686,19 +1822,22 @@ class WorkoutService extends ChangeNotifier {
     bool Function()? stillCurrent,
   }) async {
     if (stillCurrent != null && !stillCurrent()) return;
+    // At the cap, a cloud session older than every session kept here is one
+    // this device already trimmed: importing it would only trim it again.
+    final oldestKept = _sessions.length >= _maxSessions && _sessions.isNotEmpty
+        ? _sessions.first.date
+        : null;
+    var added = false;
     for (final session in importedSessions) {
       if (isSessionDeleted(session.id)) continue;
+      if (oldestKept != null && session.date.isBefore(oldestKept)) continue;
       _sessions.removeWhere((s) => s.id == session.id);
       _sessions.add(session);
+      added = true;
     }
-
-    if (_sessions.length > _maxSessions) {
-      _sessions = _sessions.reversed
-          .take(_maxSessions)
-          .toList()
-          .reversed
-          .toList();
-    }
+    if (!added) return;
+    // Cloud rows arrive in any order: re-sort, then trim the oldest by date.
+    _sortAndTrimSessions();
 
     await _persist();
     notifyListeners();
@@ -1787,6 +1926,8 @@ class WorkoutService extends ChangeNotifier {
     // (and its key), not the empty state below.
     _materializeQueuedWrite();
     _deletedSessionIds.clear();
+    _unconfirmedDeleteIds.clear();
+    _unsyncedSessionIds.clear();
     _split = null;
     _sessions = [];
     _customExercises = [];
@@ -1816,6 +1957,18 @@ class WorkoutService extends ChangeNotifier {
         ..addAll(prefs.getStringList(
                 ScopedPrefs.key(_kDeletedSessionIds, _currentUserId)) ??
             const []);
+      // Builds before this list existed never confirmed a delete: treat
+      // every tombstone as unconfirmed (the next drain confirms them).
+      final unconfirmed = prefs.getStringList(
+          ScopedPrefs.key(_kUnconfirmedDeleteIds, _currentUserId));
+      _unconfirmedDeleteIds
+        ..clear()
+        ..addAll(unconfirmed ?? _deletedSessionIds);
+      final unsynced = prefs.getStringList(
+          ScopedPrefs.key(_kUnsyncedSessionIds, _currentUserId));
+      _unsyncedSessionIds
+        ..clear()
+        ..addAll(unsynced ?? const []);
       final raw = ScopedPrefs.getString(prefs, _kData, _currentUserId);
       if (raw != null) {
         final data = jsonDecode(raw) as Map<String, dynamic>;
@@ -1840,6 +1993,14 @@ class WorkoutService extends ChangeNotifier {
           _sessions = (data['sessions'] as List<dynamic>? ?? [])
               .map((s) => WorkoutSession.fromJson(s as Map<String, dynamic>))
               .toList();
+          // Builds before the upload queue existed dropped a failed upload
+          // for good: queue every stored session once (upserts are
+          // idempotent), so none is missing from the cloud.
+          if (unsynced == null) {
+            _unsyncedSessionIds.addAll(_sessions.map((s) => s.id));
+          }
+          // Older builds appended cloud sessions unsorted.
+          _sortAndTrimSessions();
           debugPrint('[WorkoutService] Loaded ${_sessions.length} sessions for user: $_currentUserId (key: $_currentPrefKey)');
         } catch (e) {
           debugPrint('[WorkoutService] sessions parse error: $e, starting with empty list');
@@ -1988,6 +2149,8 @@ class WorkoutService extends ChangeNotifier {
     await flushPendingWrites();
     _lastWorkoutsChangedAt = DateTime.now();
     _deletedSessionIds.clear();
+    _unconfirmedDeleteIds.clear();
+    _unsyncedSessionIds.clear();
     _split = null;
     _sessions = [];
     _customExercises = [];

@@ -154,6 +154,9 @@ class MealTombstones {
 
   bool get isEmpty => _byDay.isEmpty;
 
+  /// Days holding any tombstone (see [deletionsFor] for the uploadable ones).
+  Iterable<String> get days => _byDay.keys;
+
   /// Id tombstones of [dayKey] as `{id: deletedAt ISO-8601 UTC}` (the upload's
   /// `deleted_meal_ids`). Legacy tombstones are not included: their id is
   /// unknown until hydration upgrades them.

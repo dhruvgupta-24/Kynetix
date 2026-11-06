@@ -19,6 +19,8 @@ import 'insights_report_service.dart';
 import 'nutrition_target_engine.dart';
 import 'user_session_coordinator.dart';
 import 'kyno_context_service.dart';
+import 'error_reporter.dart';
+import 'meal_tombstones.dart';
 import 'internal/test_environment.dart';
 
 // Logging in this file is debug-only: release builds skip the console I/O.
@@ -37,44 +39,75 @@ class _PendingDayLogsWrite {
 }
 
 /// Result of encoding the day-log store: the exact blob that is persisted plus
-/// each day's JSON (used as a cheap change fingerprint by cloud sync).
+/// each day's JSON (the change fingerprint behind the dirty-day set).
 typedef _EncodedDayLogs = ({String blob, Map<String, String> days});
 
+/// What one write encodes: the store's days ([logs]) plus days kept verbatim
+/// because they could not be read at load ([raw], `{dateKey: json}`), so an
+/// unreadable day is never dropped from disk by a later save.
+typedef _DayLogsWriteInput = ({Map<String, DayLog> logs, Map<String, String> raw});
+
 /// Encodes the store exactly like `jsonEncode({key: log.toJson(), ...})`:
-/// `{"k1":<day1>,"k2":<day2>}` with entries in map order. Top-level so it can
-/// run in a background isolate.
-_EncodedDayLogs _encodeDayLogs(Map<String, DayLog> snapshot) {
+/// `{"k1":<day1>,"k2":<day2>}` with entries in map order, then any raw day
+/// the store does not hold. Top-level so it can run in a background isolate.
+_EncodedDayLogs _encodeDayLogs(_DayLogsWriteInput input) {
   final days = <String, String>{};
   final buf = StringBuffer('{');
   var first = true;
-  for (final e in snapshot.entries) {
-    final dayJson = jsonEncode(e.value.toJson());
-    days[e.key] = dayJson;
+  void put(String key, String json) {
     if (!first) buf.write(',');
     first = false;
     buf
-      ..write(jsonEncode(e.key))
+      ..write(jsonEncode(key))
       ..write(':')
-      ..write(dayJson);
+      ..write(json);
+  }
+  for (final e in input.logs.entries) {
+    final dayJson = jsonEncode(e.value.toJson());
+    days[e.key] = dayJson;
+    put(e.key, dayJson);
+  }
+  for (final e in input.raw.entries) {
+    if (!input.logs.containsKey(e.key)) put(e.key, e.value);
   }
   buf.write('}');
   return (blob: buf.toString(), days: days);
 }
 
-/// Decodes a persisted day-log blob. Top-level so it can run in a background
-/// isolate.
-Map<String, DayLog> _decodeDayLogs(String raw) {
+/// A decoded day-log blob: the days that could be read ([logs]), each one's
+/// JSON as it will be written again ([days], the baseline later writes are
+/// compared with), and the raw JSON of each day that could not be read
+/// ([bad]).
+typedef _DecodedDayLogs = ({
+  Map<String, DayLog> logs,
+  Map<String, String> days,
+  Map<String, String> bad,
+});
+
+/// Decodes a persisted day-log blob, each day on its own: one unreadable day
+/// is set aside, never the rest. Throws only when the blob itself is not a
+/// JSON object. Top-level so it can run in a background isolate.
+_DecodedDayLogs _decodeDayLogs(String raw) {
   final map = jsonDecode(raw) as Map<String, dynamic>;
-  return {
-    for (final e in map.entries)
-      e.key: DayLog.fromJson(e.value as Map<String, dynamic>),
-  };
+  final logs = <String, DayLog>{};
+  final days = <String, String>{};
+  final bad = <String, String>{};
+  for (final e in map.entries) {
+    try {
+      final log = DayLog.fromJson(e.value as Map<String, dynamic>);
+      days[e.key] = jsonEncode(log.toJson());
+      logs[e.key] = log;
+    } catch (_) {
+      bad[e.key] = jsonEncode(e.value);
+    }
+  }
+  return (logs: logs, days: days, bad: bad);
 }
 
 /// Exposed for tests: the encoder used for every day-log write.
 @visibleForTesting
 String encodeDayLogsForTest(Map<String, DayLog> snapshot) =>
-    _encodeDayLogs(snapshot).blob;
+    _encodeDayLogs((logs: snapshot, raw: const <String, String>{})).blob;
 
 class _PersistenceLifecycleObserver with WidgetsBindingObserver {
   @override
@@ -85,6 +118,11 @@ class _PersistenceLifecycleObserver with WidgetsBindingObserver {
       // Back in front (maybe on a new day): keep the home-screen widget's
       // numbers current.
       WidgetService.updateWidgetData().catchError((_) {}).ignore();
+      // Retry whatever the cloud is still missing (failed or offline
+      // uploads and deletes).
+      try {
+        CloudSyncService.instance.drainPendingUploads();
+      } catch (_) {}
     }
   }
 }
@@ -198,32 +236,158 @@ class PersistenceService {
         setCachedOwnerId(id).ignore();
       };
 
+      // Profile and day logs load independently: an unreadable profile must
+      // not cost the meal logs, nor the reverse.
       final profileKey = '${_kProfile}_$userId';
       final profileRaw = prefs.getString(profileKey) ??
           (ownsLegacy ? prefs.getString(_kProfile) : null);
       // A brand-new account has no profile yet: never keep a previous one.
-      ProfileService.instance.currentUserProfile = profileRaw == null
-          ? null
-          : UserProfile.fromJson(jsonDecode(profileRaw) as Map<String, dynamic>);
+      try {
+        ProfileService.instance.currentUserProfile = profileRaw == null
+            ? null
+            : UserProfile.fromJson(jsonDecode(profileRaw) as Map<String, dynamic>);
+      } catch (e, st) {
+        ProfileService.instance.currentUserProfile = null;
+        _reportError('profile could not be read', e, st);
+        await _backUpUnreadable(prefs, _kProfile, userId, profileRaw!);
+      }
 
       final dayLogsKey = '${_kDayLogs}_$userId';
-      final logsRaw = prefs.getString(dayLogsKey) ??
-          (ownsLegacy ? prefs.getString(_kDayLogs) : null);
-      final decoded = logsRaw == null
-          ? const <String, DayLog>{}
-          : await _decodeDayLogsForLoad(logsRaw);
+      final ownRaw = prefs.getString(dayLogsKey);
+      final logsRaw = ownRaw ?? (ownsLegacy ? prefs.getString(_kDayLogs) : null);
+      var decoded = _noDayLogs;
+      var failedOutright = false;
+      if (logsRaw != null) {
+        try {
+          decoded = await _decodeDayLogsForLoad(logsRaw);
+        } catch (e, st) {
+          failedOutright = true;
+          _reportError('day logs could not be read', e, st);
+        }
+      }
       // A sign-out / account switch during the background decode must never
       // let this user's logs land in the next session.
       if (epoch != _sessionEpoch || _cachedOwnerId != userId) {
         _debugLog('[PersistenceService] Owner changed during load, dropping $userId logs');
         return;
       }
+      await _setAsideUnreadable(prefs, dayLogsKey, userId, logsRaw, decoded,
+          failedOutright: failedOutright, ownsKey: ownRaw != null);
+      if (epoch != _sessionEpoch || _cachedOwnerId != userId) return;
+      // Days changed here and not yet confirmed in the cloud. None stored
+      // (first run with this list): every day counts as changed until
+      // hydration finds it matching the cloud.
+      final dirty = prefs.getStringList(_dirtyKeyFor(dayLogsKey));
+      _dirtyDays
+        ..clear()
+        ..[dayLogsKey] = dirty?.toSet() ?? decoded.logs.keys.toSet();
+      _dirtyUnsaved.clear();
+      _writtenDayJson
+        ..clear()
+        ..[dayLogsKey] = decoded.days;
       dayLogStore.clear();
-      dayLogStore.addAll(decoded);
+      dayLogStore.addAll(decoded.logs);
       _debugLog('[PersistenceService] Loaded ${dayLogStore.length} day logs for user: $userId');
     } catch (e) {
       _debugLog('[PersistenceService] Error loading user-scoped data: $e');
     }
+  }
+
+  static const _DecodedDayLogs _noDayLogs = (
+    logs: <String, DayLog>{},
+    days: <String, String>{},
+    bad: <String, String>{},
+  );
+
+  /// After loading [key]: keeps a copy of whatever could not be read before
+  /// anything can overwrite it, and decides whether [key] may be written.
+  ///  * Some days unreadable: they are copied aside, and every later write of
+  ///    [key] carries them verbatim (see [_DayLogsWriteInput]).
+  ///  * Nothing readable: the whole blob is copied aside. Until a verified
+  ///    copy exists, [key] is never written (a save would replace it with
+  ///    what is in memory); that lifts once the copy lands or [key] loads.
+  static Future<void> _setAsideUnreadable(
+    SharedPreferences prefs,
+    String key,
+    String? userId,
+    String? raw,
+    _DecodedDayLogs decoded, {
+    required bool failedOutright,
+    required bool ownsKey,
+  }) async {
+    _unreadableDays.remove(key);
+    _writeBlocked.remove(key);
+    if (raw == null) return;
+    if (failedOutright) {
+      final saved = await _backUpUnreadable(prefs, _kDayLogs, userId, raw);
+      // A legacy blob is only read; writes go to the user's own key.
+      if (!saved && ownsKey) _writeBlocked.add(key);
+      return;
+    }
+    if (decoded.bad.isEmpty) return;
+    _reportError('${decoded.bad.length} stored day(s) could not be read',
+        StateError('unreadable day logs'), null);
+    _unreadableDays[key] = decoded.bad;
+    // Only the unreadable days: the rest stay readable in [key] itself.
+    await _backUpUnreadable(prefs, _kDayLogs, userId,
+        _encodeDayLogs((logs: const <String, DayLog>{}, raw: decoded.bad)).blob);
+  }
+
+  /// Copies an unreadable stored value aside as
+  /// `<base>_corrupt_<millis>_<userId>` (the user suffix keeps it within
+  /// account deletion's reach). Skipped when an identical copy exists, so a
+  /// value that stays unreadable is not copied again on every launch. True
+  /// once a verified copy exists. Never throws.
+  static Future<bool> _backUpUnreadable(
+      SharedPreferences prefs, String base, String? userId, String payload) async {
+    final prefix = '${base}_corrupt_';
+    final suffix = userId == null || userId.isEmpty ? '' : '_$userId';
+    try {
+      for (final k in prefs.getKeys()) {
+        if (!k.startsWith(prefix) || !k.endsWith(suffix)) continue;
+        final existing = prefs.get(k);
+        if (existing is String && existing == payload) return true;
+      }
+      final key = '$prefix${DateTime.now().millisecondsSinceEpoch}$suffix';
+      final ok = await _setString(prefs, key, payload);
+      final verified = ok && prefs.getString(key) == payload;
+      if (!verified) {
+        _reportError('backup of unreadable $base failed',
+            StateError('backup not stored'), null);
+      }
+      return verified;
+    } catch (e, st) {
+      _reportError('backup of unreadable $base failed', e, st);
+      return false;
+    }
+  }
+
+  /// Test seam: replaces SharedPreferences.setString for persistence writes
+  /// (day logs and backups), to simulate a full or failing disk.
+  @visibleForTesting
+  static Future<bool> Function(String key, String value)? debugSetStringOverride;
+
+  /// Test seam: receives every error report instead of [ErrorReporter].
+  @visibleForTesting
+  static void Function(String what, Object error)? debugErrorSink;
+
+  static Future<bool> _setString(
+      SharedPreferences prefs, String key, String value) {
+    final override = debugSetStringOverride;
+    return override != null ? override(key, value) : prefs.setString(key, value);
+  }
+
+  /// Reports a local storage problem (no user data in the message).
+  static void _reportError(String what, Object error, StackTrace? stack) {
+    _debugLog('[PersistenceService] $what: $error');
+    final sink = debugErrorSink;
+    if (sink != null) {
+      sink(what, error);
+      return;
+    }
+    ErrorReporter.instance.report(
+        StateError('Persistence: $what (${error.runtimeType})'), stack,
+        type: 'persistence');
   }
 
   /// Restore all persisted state. Must be awaited before runApp().
@@ -260,11 +424,22 @@ class PersistenceService {
 
       final logsRaw = prefs.getString(_kDayLogs);
       if (logsRaw != null) {
-        final map = jsonDecode(logsRaw) as Map<String, dynamic>;
-        for (final e in map.entries) {
-          dayLogStore[e.key] =
-              DayLog.fromJson(e.value as Map<String, dynamic>);
+        // Each day on its own; nothing unreadable is ever written over.
+        var decoded = _noDayLogs;
+        var failedOutright = false;
+        try {
+          decoded = _decodeDayLogs(logsRaw);
+        } catch (e, st) {
+          failedOutright = true;
+          _reportError('day logs could not be read', e, st);
         }
+        await _setAsideUnreadable(prefs, _kDayLogs, null, logsRaw, decoded,
+            failedOutright: failedOutright, ownsKey: true);
+        dayLogStore.addAll(decoded.logs);
+        _writtenDayJson[_kDayLogs] = {
+          ...?_writtenDayJson[_kDayLogs],
+          ...decoded.days,
+        };
       }
     } catch (_) {
       // Corrupt prefs — start fresh (user re-onboards once).
@@ -388,8 +563,113 @@ class PersistenceService {
   static Future<void> _writeTail = Future<void>.value();
   static bool _writeBusy = false;
   static _PendingDayLogsWrite? _queuedWrite;
-  static String? _lastWrittenKey;
-  static Map<String, String> _lastWrittenDayJson = const {};
+
+  /// Per storage key, each day's JSON as of the last write (or the load):
+  /// what the next write is compared with to find changed days.
+  static final Map<String, Map<String, String>> _writtenDayJson = {};
+
+  /// Per storage key, the raw JSON of days that could not be read at load.
+  static final Map<String, Map<String, String>> _unreadableDays = {};
+
+  /// Storage keys that must not be written (see [_setAsideUnreadable]).
+  static final Set<String> _writeBlocked = {};
+
+  /// Storage keys whose last write failed: the next flush writes again.
+  static final Set<String> _rewriteNeeded = {};
+
+  /// True when [userId]'s stored day logs could not be read and are being
+  /// left untouched (no verified copy could be made).
+  static bool dayLogsWriteBlockedFor(String userId) =>
+      _writeBlocked.contains('${_kDayLogs}_$userId');
+
+  // ── Dirty days (cloud upload queue) ───────────────────────────────────────
+  //
+  // Per storage key, the days that changed here and are not yet confirmed
+  // uploaded. A write adds every day whose JSON differs from the previous
+  // write; CloudSyncService removes a day only after its upload succeeded
+  // (and only if it did not change meanwhile); hydration removes days that
+  // already match the cloud. Persisted next to the store
+  // (`day_logs_dirty_v1_<userId>`), so a restart neither forgets a pending
+  // upload nor re-uploads the whole history.
+
+  static const _kDirtyDays = 'day_logs_dirty_v1';
+  static final Map<String, Set<String>> _dirtyDays = {};
+  static final Set<String> _dirtyUnsaved = {};
+
+  static String _dirtyKeyFor(String dayLogsKey) =>
+      dayLogsKey.replaceFirst(_kDayLogs, _kDirtyDays);
+
+  static String _keyForUser(String userId) => '${_kDayLogs}_$userId';
+
+  /// Days of [userId] to upload: changed and unconfirmed, or carrying a meal
+  /// deletion not yet uploaded. Empty unless [userId]'s store is loaded.
+  static Set<String> daysNeedingUpload(String userId) {
+    final key = _keyForUser(userId);
+    if (_currentDayLogsKey() != key) return const {};
+    final tombstones = MealTombstones.instance;
+    return {
+      for (final d in _dirtyDays[key] ?? const <String>{})
+        if (dayLogStore.containsKey(d)) d,
+      if (tombstones.ownerUserId == userId)
+        for (final d in tombstones.days)
+          if (dayLogStore.containsKey(d) && tombstones.deletionsFor(d).isNotEmpty) d,
+    };
+  }
+
+  /// [dateKey] of [userId] reached the cloud as [sentJson]. It stays queued
+  /// if it changed while the upload ran. Call [persistDirtyDays] after.
+  static void markDayUploaded(String userId, String dateKey, String sentJson) {
+    final key = _keyForUser(userId);
+    if (_currentDayLogsKey() != key) return;
+    final log = dayLogStore[dateKey];
+    if (log == null || jsonEncode(log.toJson()) != sentJson) return;
+    if (_dirtyDays[key]?.remove(dateKey) ?? false) _dirtyUnsaved.add(key);
+  }
+
+  /// Hydration found these days of [userId] identical to the cloud (`{day:
+  /// JSON}` after the merge): nothing to upload, unless they changed since.
+  static Future<void> markDaysInSyncWithCloud(
+      String userId, Map<String, String> matching) async {
+    final key = _keyForUser(userId);
+    if (_currentDayLogsKey() != key || matching.isEmpty) return;
+    final dirty = _dirtyDays[key];
+    final written = _writtenDayJson[key];
+    if (dirty == null || written == null) return;
+    matching.forEach((day, json) {
+      if (written[day] == json && dirty.remove(day)) _dirtyUnsaved.add(key);
+    });
+    await persistDirtyDays(userId);
+  }
+
+  /// Saves [userId]'s dirty-day set if it changed. Never throws.
+  static Future<void> persistDirtyDays(String userId) async {
+    try {
+      await _persistDirty(await SharedPreferences.getInstance(),
+          _keyForUser(userId));
+    } catch (e) {
+      _debugLog('[PersistenceService] dirty-day persist error: $e');
+    }
+  }
+
+  static Future<void> _persistDirty(SharedPreferences prefs, String key) async {
+    final dirty = _dirtyDays[key];
+    // The unscoped (pre-auth) store is never uploaded.
+    if (dirty == null || key == _kDayLogs || !_dirtyUnsaved.remove(key)) return;
+    await prefs.setStringList(_dirtyKeyFor(key), dirty.toList()..sort());
+  }
+
+  /// Marks every day of [days] whose JSON changed since the last write of
+  /// [key] as dirty, and makes [days] the new baseline.
+  static void _markChangedDays(String key, Map<String, String> days) {
+    final before = _writtenDayJson[key];
+    final dirty = _dirtyDays.putIfAbsent(key, () => <String>{});
+    for (final e in days.entries) {
+      if (before == null || before[e.key] != e.value) {
+        if (dirty.add(e.key)) _dirtyUnsaved.add(key);
+      }
+    }
+    _writtenDayJson[key] = days;
+  }
 
   /// Stores at least this many days are encoded in a background isolate so
   /// the UI isolate never stalls on a multi-megabyte jsonEncode.
@@ -407,7 +687,7 @@ class PersistenceService {
   /// memory only once the hydration guard is open; during sign-in the guard is
   /// closed, so a background isolate (which has its own, closed guard) yields
   /// exactly the same logs. If the guard is open, decode here instead.
-  static Future<Map<String, DayLog>> _decodeDayLogsForLoad(String raw) async {
+  static Future<_DecodedDayLogs> _decodeDayLogsForLoad(String raw) async {
     final guard = NutritionHydrationGuard.instance;
     final guardOpen = guard.isReadyForUser(guard.hydratedUserId);
     if (raw.length >= isolateDecodeThresholdChars && !guardOpen) {
@@ -424,11 +704,6 @@ class PersistenceService {
     final userId = UserSessionCoordinator.instance.currentUserId ?? _cachedOwnerId;
     return userId != null ? '${_kDayLogs}_$userId' : _kDayLogs;
   }
-
-  /// Per-day JSON of the most recent successful write for [userId], or null if
-  /// the last write belonged to another storage key.
-  static Map<String, String>? lastWrittenDayJsonFor(String userId) =>
-      _lastWrittenKey == '${_kDayLogs}_$userId' ? _lastWrittenDayJson : null;
 
   static Future<void> saveDayLogs() {
     lastLogsChangedAt = DateTime.now();
@@ -473,22 +748,53 @@ class PersistenceService {
   static Future<void> _performDayLogsWrite(
       String key, Map<String, DayLog> snapshot) async {
     try {
+      final _DayLogsWriteInput input = (
+        logs: snapshot,
+        raw: _unreadableDays[key] ?? const <String, String>{},
+      );
       _EncodedDayLogs encoded;
       if (snapshot.length >= isolateEncodeThreshold) {
         try {
-          encoded = await compute(_encodeDayLogs, snapshot,
+          encoded = await compute(_encodeDayLogs, input,
               debugLabel: 'encodeDayLogs');
         } catch (_) {
-          encoded = _encodeDayLogs(snapshot);
+          encoded = _encodeDayLogs(input);
         }
       } else {
-        encoded = _encodeDayLogs(snapshot);
+        encoded = _encodeDayLogs(input);
       }
+      // Changed days need uploading whether or not the disk write lands
+      // (the upload reads memory).
+      _markChangedDays(key, encoded.days);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, encoded.blob);
-      _lastWrittenKey = key;
-      _lastWrittenDayJson = encoded.days;
-    } catch (_) {}
+      if (_writeBlocked.contains(key)) {
+        _reportError('day logs not saved: the stored copy is unreadable '
+            'and could not be backed up', StateError('write refused'), null);
+      } else {
+        var ok = false;
+        try {
+          ok = await _setString(prefs, key, encoded.blob);
+          if (!ok) {
+            _reportError('day logs write was rejected',
+                StateError('setString returned false'), null);
+          }
+        } catch (e, st) {
+          _reportError('day logs write failed', e, st);
+        }
+        // Not on disk: the next flush (app pause, sign-out) or save writes
+        // again; memory still holds every change.
+        ok ? _rewriteNeeded.remove(key) : _rewriteNeeded.add(key);
+      }
+      await _persistDirty(prefs, key);
+    } catch (e, st) {
+      _rewriteNeeded.add(key);
+      _reportError('day logs write failed', e, st);
+    }
+  }
+
+  /// Writes the store again if its last write failed.
+  static void _retryFailedWrite() {
+    if (_rewriteNeeded.contains(_currentDayLogsKey())) saveDayLogs().ignore();
   }
 
   /// Completes once every day-log write requested so far has hit disk.
@@ -554,6 +860,7 @@ class PersistenceService {
   static Future<void> flushAll() async {
     _runPostSaveEffects();
     await InsightsReportService.instance.flushPendingRecompute();
+    _retryFailedWrite();
     await flushPendingWrites();
   }
 
@@ -564,6 +871,7 @@ class PersistenceService {
   static Future<void> flushForSessionEnd() async {
     InsightsReportService.instance.cancelPendingRecompute();
     _runPostSaveEffects(includeInsights: false);
+    _retryFailedWrite();
     await flushPendingWrites();
   }
 
