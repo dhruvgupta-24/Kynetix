@@ -3,6 +3,7 @@ import '../models/workout_session.dart';
 import '../models/user_profile.dart';
 import '../services/health_service.dart';
 import '../models/day_log.dart';
+import 'adaptive_expenditure_service.dart';
 import 'profile_service.dart';
 import 'workout_service.dart';
 import 'persistence_service.dart';
@@ -546,8 +547,15 @@ class NutritionTargetEngine {
     return rawOffset.clamp(-400.0, 400.0).round();
   }
 
-  double _tdee(UserProfile p, HealthSyncResult? health) =>
+  /// Maintenance from the formula alone: BMR × activity + steps.
+  double formulaTdee(UserProfile p, HealthSyncResult? health) =>
       _r(_bmr(p) * _activityMultiplier(p) + _stepCorrectionKcal(p, health));
+
+  /// Maintenance the targets are built on: the user's own measured
+  /// expenditure when adaptive targets are on and there is enough data
+  /// (AdaptiveExpenditureService), else the formula.
+  double _tdee(UserProfile p, HealthSyncResult? health) =>
+      AdaptiveExpenditureService.instance.appliedKcal ?? formulaTdee(p, health);
 
   /// Goal-based calorie adjustment applied to TDEE.
   ///

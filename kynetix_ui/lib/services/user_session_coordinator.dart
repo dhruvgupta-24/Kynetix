@@ -19,7 +19,10 @@ import 'quick_add_service.dart';
 import 'user_nutrition_memory.dart';
 import 'workout_service.dart';
 import 'barcode_food_service.dart';
+import 'adaptive_expenditure_service.dart';
 import 'body_metrics_service.dart';
+import 'health_service.dart';
+import 'nutrition_target_engine.dart';
 import 'fasting_service.dart';
 import 'food_link_service.dart';
 import 'kyno_notes_service.dart';
@@ -266,7 +269,9 @@ class UserSessionCoordinator {
     await FastingService.instance.initForUser(userId, prefsOverride: prefs);
     await FoodLinkService.instance.initForUser(userId, prefsOverride: prefs);
     await AvatarService.instance.initForUser(userId, prefsOverride: prefs);
+    await AdaptiveExpenditureService.instance.initForUser(userId, prefsOverride: prefs);
     BodyMetricsService.instance.hydrateFromCloud().ignore();
+    _refreshAdaptiveTargets();
 
     // 4. Reset KynoContext cache so no stale data from any prior session leaks
     KynoContextService.instance.reset();
@@ -276,6 +281,21 @@ class UserSessionCoordinator {
     _readyUserId = userId;
 
     debugPrint('[UserSessionCoordinator] ✅ All services successfully initialized for user: $userId');
+  }
+
+  /// Weekly: if adaptive targets are on and a week has passed, re-read what
+  /// the user really burns and refresh today's target when it moved.
+  void _refreshAdaptiveTargets() {
+    final prof = ProfileService.instance.currentUserProfile;
+    if (prof == null) return;
+    final engine = NutritionTargetEngine.instance;
+    AdaptiveExpenditureService.instance
+        .refresh(engine.formulaTdee(prof, HealthService().lastSyncResult))
+        .then((moved) {
+      if (moved) engine.refreshTargetForDate(DateTime.now()).ignore();
+    }).catchError((Object e) {
+      debugPrint('[UserSessionCoordinator] Adaptive target refresh skipped: $e');
+    }).ignore();
   }
 
   /// Hard boundary flush for logout or account switching.
@@ -303,6 +323,7 @@ class UserSessionCoordinator {
     QuickAddService.instance.clearMemory();
     InsightsReportService.instance.clearMemory();
     BodyMetricsService.instance.clearMemory();
+    AdaptiveExpenditureService.instance.clearMemory();
     KynoNotesService.instance.clearMemory();
     FastingService.instance.clearMemory();
     FoodLinkService.instance.clearMemory();

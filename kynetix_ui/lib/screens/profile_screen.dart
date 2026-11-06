@@ -23,6 +23,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/insights_report_service.dart';
 import '../services/feedback_service.dart';
 import '../widgets/feedback_sheet.dart';
+import '../widgets/adaptive_targets_card.dart';
+import '../services/data_export_service.dart';
+import '../services/workout_import_service.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:convert' show utf8;
 import 'feedback_inbox_screen.dart';
 import 'analytics_screen.dart';
 import '../config/distribution.dart';
@@ -60,9 +65,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Null-safe for the frame or two after sign-out or account deletion
   // clears the profile while this screen is still mounted.
   UserProfile get _profile => currentUserProfile ?? kFallbackUserProfile;
-  WeeklyTargetPlan get _plan => NutritionTargetEngine().weeklyPlan(
-    _profile,
-    health: _profile.healthSyncEnabled && _profile.averageDailySteps != null
+  WeeklyTargetPlan get _plan => NutritionTargetEngine().weeklyPlan(_profile, health: _planHealth);
+
+  /// The step data the plan was built on, from the saved profile.
+  HealthSyncResult? get _planHealth =>
+    _profile.healthSyncEnabled && _profile.averageDailySteps != null
         ? HealthSyncResult(
             effectiveAverageSteps: _profile.averageDailySteps!.toDouble(),
             averageDailySteps14d: _profile.averageDailySteps!.toDouble(),
@@ -70,8 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             syncedAt: _profile.lastHealthSyncAt ?? DateTime.now(),
             activityTier: _tierFromPersistedSteps(_profile.averageDailySteps!),
           )
-        : null,
-  );
+        : null;
 
   bool _syncing = false;
   String? _syncMessage;
@@ -898,6 +904,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         _SettingRow(
+          icon: Icons.download_rounded,
+          tint: KColor.textSecondary,
+          label: 'Export my data',
+          subtitle: 'Meals, workouts and weight as JSON and CSV files',
+          onTap: _exportData,
+        ),
+        _SettingRow(
+          icon: Icons.upload_file_rounded,
+          tint: KColor.textSecondary,
+          label: 'Import workouts',
+          subtitle: 'From a Strong or Hevy CSV export. Safe to run twice.',
+          onTap: _importWorkouts,
+        ),
+        _SettingRow(
           icon: Icons.description_outlined,
           tint: KColor.textSecondary,
           label: 'Open-source licences',
@@ -907,6 +927,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ],
     );
   }
+
+  Future<void> _exportData() async {
+    try {
+      await DataExportService.instance.share();
+    } catch (e) {
+      if (mounted) showKToast(context, 'Could not build the export. Try again.', kind: KToastKind.error);
+    }
+  }
+
+  Future<void> _importWorkouts() async {
+    final file = await FilePicker.pickFile(
+      dialogTitle: 'Pick a Strong or Hevy CSV',
+      type: FileType.custom,
+      allowedExtensions: const ['csv', 'txt'],
+    );
+    if (file == null || !mounted) return;
+    try {
+      final text = utf8.decode(await file.readAsBytes(), allowMalformed: true);
+      final parse = WorkoutImportService.parse(text);
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Import ${parse.workouts.length} ${parse.workouts.length == 1 ? 'workout' : 'workouts'}?'),
+          content: Text(
+            'From ${parse.source}, ${_day(parse.workouts.first.start)} to ${_day(parse.workouts.last.start)}. '
+            'Workouts you already have are skipped. Exercises Kynetix does not know become custom exercises.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Import')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      final report = await WorkoutImportService.instance.import(parse);
+      if (mounted) showKToast(context, report.summary, kind: KToastKind.success);
+    } on FormatException catch (e) {
+      if (mounted) showKToast(context, e.message, kind: KToastKind.error);
+    } catch (e) {
+      if (mounted) showKToast(context, 'Could not import that file. Try exporting it again.', kind: KToastKind.error);
+    }
+  }
+
+  static String _day(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
   // ── Body Metrics ───────────────────────────────────────────────────────────
 
@@ -1761,6 +1826,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
 
         if (!profile.useCustomTargets) ...[
+          AdaptiveTargetsCard(
+            formulaKcal: NutritionTargetEngine().formulaTdee(profile, _planHealth),
+            onChanged: () async {
+              await NutritionTargetEngine().refreshTargetForDate(DateTime.now(), force: true);
+              if (mounted) setState(() {});
+            },
+          ),
           _SettingRow(
             icon: Icons.local_fire_department_rounded,
             tint: KColor.ember,
