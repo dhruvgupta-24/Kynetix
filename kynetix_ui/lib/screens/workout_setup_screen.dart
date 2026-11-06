@@ -622,7 +622,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: KColor.card,
+                gradient: KShade.raised(KColor.card),
                 borderRadius: KRadius.md,
                 border: Border.all(color: _hairline),
                 boxShadow: KShadow.card,
@@ -855,7 +855,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
         padding: const EdgeInsets.all(KSpacing.xl),
         decoration: BoxDecoration(
           borderRadius: KRadius.xl,
-          color: KColor.card,
+          gradient: KShade.raised(KColor.card),
           border: Border.all(color: _hairline),
           boxShadow: KShadow.card,
         ),

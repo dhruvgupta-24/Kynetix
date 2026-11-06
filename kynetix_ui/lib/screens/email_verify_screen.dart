@@ -286,7 +286,7 @@ class _CodeBoxes extends StatelessWidget {
                               duration: KMotion.of(context, KMotion.quick),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: KColor.card,
+                                gradient: KShade.raised(KColor.card),
                                 borderRadius: KRadius.md,
                                 border: Border.all(
                                   width: (focusNode.hasFocus && i == text.length.clamp(0, length - 1)) ? 1.6 : 1,

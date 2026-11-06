@@ -482,7 +482,7 @@ BoxDecoration _trainSurface({
   // colour lives in the content, not the surface.
   return BoxDecoration(
     borderRadius: radius,
-    color: KColor.card,
+    gradient: KShade.raised(KColor.card),
     border: Border.all(color: borderColor ?? KColor.hairline),
     boxShadow: shadow,
   );
@@ -1202,7 +1202,14 @@ class _WeeklyRingCard extends StatelessWidget {
             const SizedBox(height: KSpacing.md),
             // One body, front and back, with this week's muscles lit, then
             // their names as plain words.
-            Row(
+            Container(
+              padding: const EdgeInsets.all(KSpacing.md),
+              decoration: BoxDecoration(
+                gradient: KShade.sunken(KColor.card),
+                borderRadius: KRadius.md,
+                border: Border.all(color: KColor.hairline),
+              ),
+              child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 if (viewModel.musclesThisWeek.any(MuscleThumb.canShow)) ...[
@@ -1233,6 +1240,7 @@ class _WeeklyRingCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
             ),
           ],
         ],
@@ -1321,54 +1329,37 @@ class _QuickStatsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final vol = viewModel.totalVolumeThisWeek;
     final big = vol >= 1000;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: _rule()),
-          bottom: BorderSide(color: _rule()),
-        ),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _QuickStatCard(
-              label: 'kg lifted',
-              value: big ? vol / 1000 : vol,
-              decimals: big ? 1 : 0,
-              suffix: big ? 'k' : '',
-            ),
-            const _StatRule(),
-            _QuickStatCard(
-              label: viewModel.totalSetsThisWeek == 1 ? 'set' : 'sets',
-              value: viewModel.totalSetsThisWeek,
-            ),
-            const _StatRule(),
-            _QuickStatCard(
-              label: 'day streak',
-              value: viewModel.currentStreak,
-            ),
-            const _StatRule(),
-            _QuickStatCard(
-              label: viewModel.totalPrsAllTime == 1 ? 'PR, all time' : 'PRs, all time',
-              value: viewModel.totalPrsAllTime,
-            ),
-          ],
-        ),
+    // Four recessed wells in one tray: shade, not colour, separates them.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _QuickStatCard(
+            label: 'kg lifted',
+            value: big ? vol / 1000 : vol,
+            decimals: big ? 1 : 0,
+            suffix: big ? 'k' : '',
+          ),
+          const SizedBox(width: KSpacing.sm),
+          _QuickStatCard(
+            label: viewModel.totalSetsThisWeek == 1 ? 'set' : 'sets',
+            value: viewModel.totalSetsThisWeek,
+          ),
+          const SizedBox(width: KSpacing.sm),
+          _QuickStatCard(
+            label: 'day streak',
+            value: viewModel.currentStreak,
+          ),
+          const SizedBox(width: KSpacing.sm),
+          _QuickStatCard(
+            label: viewModel.totalPrsAllTime == 1 ? 'PR, all time' : 'PRs, all time',
+            value: viewModel.totalPrsAllTime,
+            hot: viewModel.totalPrsAllTime > 0,
+          ),
+        ],
       ),
     );
   }
-}
-
-class _StatRule extends StatelessWidget {
-  const _StatRule();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: KSpacing.sm),
-        child: VerticalDivider(width: 1, thickness: 1, color: _rule()),
-      );
 }
 
 class _QuickStatCard extends StatelessWidget {
@@ -1377,31 +1368,47 @@ class _QuickStatCard extends StatelessWidget {
   final int decimals;
   final String suffix;
 
+  /// Records: the one number that wears the accent.
+  final bool hot;
+
   const _QuickStatCard({
     required this.label,
     required this.value,
     this.decimals = 0,
     this.suffix = '',
+    this.hot = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          KAnimatedCount(
-            value: value,
-            decimalPlaces: decimals,
-            suffix: suffix,
-            style: KText.numMedium.copyWith(fontSize: 22),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 12),
-          ),
-        ],
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+        decoration: BoxDecoration(
+          gradient: KShade.raised(KColor.card),
+          borderRadius: KRadius.sm,
+          border: Border.all(color: KColor.hairline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: KAnimatedCount(
+                value: value,
+                decimalPlaces: decimals,
+                suffix: suffix,
+                style: KText.numMedium.copyWith(fontSize: 20, color: hot ? KColor.ember : null),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: KText.caption.copyWith(color: KColor.textSecondary, fontSize: 11.5, height: 1.2),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1462,9 +1469,7 @@ class _RecentWorkoutCard extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: KColor.fg.withValues(
-                    alpha: KColor.isDark ? 0.06 : 0.05,
-                  ),
+                  color: KShade.chip,
                   borderRadius: KRadius.pill,
                 ),
                 child: Text(
@@ -1579,7 +1584,10 @@ class _RecoveryInsightsCard extends StatelessWidget {
     return _Section(
       title: 'Recovery',
       trailing: 'Last workout $daysStr',
-      child: Column(
+      child: KCard(
+        borderRadius: KRadius.xl,
+        padding: const EdgeInsets.all(18),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -1613,9 +1621,10 @@ class _RecoveryInsightsCard extends StatelessWidget {
           ),
           const SizedBox(height: KSpacing.lg),
 
-          // Recovery metrics: plain figures under small labels.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // Recovery metrics: three recessed wells in the card.
+          IntrinsicHeight(
+            child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: _MetricTile(
@@ -1623,6 +1632,7 @@ class _RecoveryInsightsCard extends StatelessWidget {
                   value: recovery.muscles.isEmpty ? 'Fresh' : 'Recovering',
                 ),
               ),
+              const SizedBox(width: KSpacing.sm),
               Expanded(
                 child: _MetricTile(
                   label: 'Sleep',
@@ -1631,6 +1641,7 @@ class _RecoveryInsightsCard extends StatelessWidget {
                       : 'Not synced',
                 ),
               ),
+              const SizedBox(width: KSpacing.sm),
               Expanded(
                 child: _MetricTile(
                   label: 'HRV (RMSSD)',
@@ -1640,6 +1651,7 @@ class _RecoveryInsightsCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
 
           if (recovery.muscles.isNotEmpty) ...[
@@ -1728,6 +1740,7 @@ class _RecoveryInsightsCard extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 }
@@ -1740,8 +1753,13 @@ class _MetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsetsDirectional.only(end: KSpacing.sm),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
+      decoration: BoxDecoration(
+        gradient: KShade.sunken(KColor.card),
+        borderRadius: KRadius.sm,
+        border: Border.all(color: KColor.hairline),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1770,7 +1788,10 @@ class _AnalyticsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _Section(
       title: 'Training trends',
-      child: Column(
+      child: KCard(
+        borderRadius: KRadius.xl,
+        padding: const EdgeInsets.all(18),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (viewModel.latestPr != null) ...[
@@ -1794,6 +1815,7 @@ class _AnalyticsCard extends StatelessWidget {
             valueFormatter: (v) => plural(v.round(), 'workout'),
           ),
         ],
+      ),
       ),
     );
   }

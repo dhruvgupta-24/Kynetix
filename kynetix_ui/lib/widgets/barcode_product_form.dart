@@ -452,7 +452,7 @@ class _UnitToggle extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.pill,
         border: Border.all(color: KColor.border),
       ),

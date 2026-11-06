@@ -783,7 +783,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
           ),
           decoration: BoxDecoration(
             borderRadius: KRadius.xl,
-            color: KColor.card,
+            gradient: KShade.raised(KColor.card),
             border: Border.all(
               color: KColor.fg.withValues(alpha: KColor.isDark ? 0.12 : 0.1),
             ),
@@ -848,7 +848,7 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
             horizontal: KSpacing.lg,
           ),
           decoration: BoxDecoration(
-            color: KColor.card,
+            gradient: KShade.raised(KColor.card),
             borderRadius: KRadius.md,
             border: Border.all(color: KColor.fg.withValues(alpha: 0.08)),
           ),

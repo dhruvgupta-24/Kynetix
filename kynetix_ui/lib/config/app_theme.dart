@@ -524,12 +524,84 @@ abstract class KRadius {
   static const pill = BorderRadius.all(Radius.circular(100));
 }
 
+// ─── KShade ───────────────────────────────────────────────────────────────────
+// Depth without new colours. Every surface is lit from one light above the
+// screen: raised things are a touch brighter at the top and settle into a
+// soft shadow, recessed trays are shaded under their top lip. Shades of the
+// palette's own tones tell surfaces apart; hue stays reserved for data.
+
+abstract final class KShade {
+  /// [base] lifted toward the foreground by [t] (0 to 1).
+  static Color lift(Color base, double t) => Color.alphaBlend(KColor.fg.withValues(alpha: t), base);
+
+  /// [base] pressed into shadow by [t] (0 to 1).
+  static Color sink(Color base, double t) =>
+      Color.alphaBlend(KColor.palette.shadow.withValues(alpha: t), base);
+
+  /// A raised surface: catches the light along its top, settles into [base].
+  static LinearGradient raised(Color base) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: KColor.isDark
+            ? [lift(base, 0.05), base, sink(base, 0.14)]
+            : [base, base, sink(base, 0.025)],
+        stops: const [0, 0.45, 1],
+      );
+
+  /// A recessed tray inside a card: shaded under the top lip, lighter where
+  /// the light reaches the floor.
+  static LinearGradient sunken(Color base) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: KColor.isDark
+            ? [sink(base, 0.32), sink(base, 0.12)]
+            : [sink(base, 0.045), sink(base, 0.015)],
+      );
+
+  /// A world's lead card: a breath of its accent from the top-left corner,
+  /// fading to nothing. Laid over a raised surface; a tint, never a glow.
+  static Gradient wash(Color accent) => RadialGradient(
+        center: const Alignment(-1.05, -1.1),
+        radius: 1.35,
+        colors: [
+          accent.withValues(alpha: KColor.isDark ? 0.12 : 0.07),
+          accent.withValues(alpha: KColor.isDark ? 0.03 : 0.018),
+          accent.withValues(alpha: 0),
+        ],
+        stops: const [0, 0.5, 1],
+      );
+
+  /// The whole raised-card look as one decoration, for surfaces that can't
+  /// be a [KCard] (a sized tile, an InkWell target): lit from above, a
+  /// hairline and the contact shadow.
+  static BoxDecoration surface(BorderRadius radius, {Color? base, Border? border}) => BoxDecoration(
+        gradient: raised(base ?? KColor.card),
+        borderRadius: radius,
+        border: border ?? Border.all(color: KColor.hairline),
+        boxShadow: KShadow.card,
+      );
+
+  /// The fill of a recessed well, flat (for small pills and chips).
+  static Color get well => KColor.isDark ? sink(KColor.card, 0.28) : sink(KColor.card, 0.035);
+
+  /// A small surface sitting proud of a card (badges, date chips).
+  static Color get chip => KColor.isDark ? lift(KColor.card, 0.06) : sink(KColor.card, 0.045);
+}
+
 // ─── KShadow ──────────────────────────────────────────────────────────────────
 
 abstract class KShadow {
-  /// Depth comes from surface steps and hairlines in both themes, never from
-  /// shadows.
-  static List<BoxShadow> get card => const [];
+  /// Cards sit on the page: a tight contact shade and a wide soft one, both
+  /// pure shadow (black, offset down), never a coloured glow.
+  static List<BoxShadow> get card => KColor.isDark
+      ? const [
+          BoxShadow(color: Color(0x8C000000), blurRadius: 22, offset: Offset(0, 10), spreadRadius: -8),
+          BoxShadow(color: Color(0x66000000), blurRadius: 3, offset: Offset(0, 1)),
+        ]
+      : const [
+          BoxShadow(color: Color(0x12000000), blurRadius: 20, offset: Offset(0, 8), spreadRadius: -6),
+          BoxShadow(color: Color(0x0D000000), blurRadius: 2, offset: Offset(0, 1)),
+        ];
   /// Retired: the owner's rule is no glow anywhere. Kept so callers compile;
   /// it draws nothing.
   static List<BoxShadow> glow(Color c, {double strength = 1}) => const [];
@@ -660,8 +732,8 @@ class _PressScale extends Animation<double>
 }
 
 // ─── KCard ────────────────────────────────────────────────────────────────────
-// Standard app card. Carbon: a lifted surface step plus a hairline (no shadow).
-// Paper: an off-white sheet with a warm hairline and a soft, low shadow.
+// Standard app card: a raised surface (KShade.raised), a hairline, a soft
+// contact shadow, and on Carbon a machined rim of light along the top.
 
 class KCard extends StatelessWidget {
   final Widget child;
@@ -683,16 +755,21 @@ class KCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Flat: one surface step above the page and a 1px hairline.
+    // One surface step above the page, lit from above (KShade.raised), a 1px
+    // hairline and a soft contact shadow under it.
     final radius = borderRadius ?? KRadius.lg;
     final edge = border ?? Border.all(color: KColor.hairline, width: 1);
+    final base = color ?? KColor.card;
     final card = Container(
       padding: padding ?? const EdgeInsets.all(KSpacing.lg),
       decoration: BoxDecoration(
-        color: color ?? KColor.card,
+        // A translucent fill (a tinted alert, say) stays flat: a gradient of
+        // it would show the page through unevenly.
+        color: base.a < 1 ? base : null,
+        gradient: base.a < 1 ? null : KShade.raised(base),
         borderRadius: radius,
         border: edge,
-        boxShadow: boxShadow,
+        boxShadow: boxShadow ?? KShadow.card,
       ),
       child: child,
     );

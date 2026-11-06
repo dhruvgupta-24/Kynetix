@@ -169,6 +169,21 @@ class _AuroraPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = palette.bg);
+    // Overhead light: the top of the page a shade brighter, falling off by
+    // mid-screen, so the room has a ceiling and the cards sit under a lamp.
+    // Neutral, no hue, no motion.
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset.zero,
+          Offset(0, size.height * 0.55),
+          [
+            (palette.isDark ? palette.fg : const Color(0xFFFFFFFF)).withValues(alpha: palette.isDark ? 0.04 : 0.55),
+            (palette.isDark ? palette.fg : const Color(0xFFFFFFFF)).withValues(alpha: 0),
+          ],
+        ),
+    );
     // Grain: a fixed per-pixel speckle on the ground only (cards and text
     // sit above this layer), so flat fills read as a material instead of a
     // screen. One tiled image shader, static, a few percent strong.

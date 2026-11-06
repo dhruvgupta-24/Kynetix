@@ -3138,7 +3138,7 @@ class _SheetOption extends StatelessWidget {
               vertical: KSpacing.md,
             ),
             decoration: BoxDecoration(
-              color: KColor.card,
+              gradient: KShade.raised(KColor.card),
               borderRadius: KRadius.md,
               border: Border.all(
                 color: selected

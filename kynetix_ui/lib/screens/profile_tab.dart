@@ -285,7 +285,7 @@ class _GearButtonState extends State<_GearButton> {
           height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: KColor.card,
+            gradient: KShade.raised(KColor.card),
             border: Border.all(color: KColor.hairline),
           ),
           child: AnimatedRotation(

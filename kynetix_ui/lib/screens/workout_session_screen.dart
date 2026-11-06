@@ -2996,7 +2996,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.lg,
         border: Border.all(color: _hairline(), width: 1),
         boxShadow: KShadow.card,
@@ -3161,7 +3161,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.lg,
         border: Border.all(color: _hairline(), width: 1),
         boxShadow: KShadow.card,
@@ -3696,7 +3696,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.md,
         border: Border.all(color: _hairline(), width: 1.0),
         boxShadow: KShadow.card,
@@ -5939,7 +5939,7 @@ class _HistoryRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.sm,
         border: Border.all(color: _hairline(), width: 1),
       ),
@@ -6579,7 +6579,7 @@ class _CoachPlanCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.md,
         border: Border.all(color: hair),
       ),

@@ -207,7 +207,7 @@ class _KynoStageSlotState extends State<KynoStageSlot> {
       height: height,
       padding: const EdgeInsets.fromLTRB(14, 0, 4, 0),
       decoration: BoxDecoration(
-        color: KColor.card,
+        gradient: KShade.raised(KColor.card),
         borderRadius: KRadius.md,
         border: Border.all(
           color: isDeloadOrSafety

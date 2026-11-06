@@ -2592,7 +2592,7 @@ class _ExerciseAnalyticsList extends StatelessWidget {
                             horizontal: KSpacing.lg,
                           ),
                           decoration: BoxDecoration(
-                            color: KColor.card,
+                            gradient: KShade.raised(KColor.card),
                             borderRadius: KRadius.md,
                             border: Border.all(color: _hairline),
                           ),

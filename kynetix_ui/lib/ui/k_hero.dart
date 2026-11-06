@@ -32,9 +32,10 @@ abstract final class KHeroInk {
   static Color get rule => KColor.divider;
 }
 
-/// A world's lead card. Graphite keeps it flat: the card surface, a
-/// hairline, and the bigger radius that marks it as the page's anchor. The
-/// tone is accepted so call sites can say which world they belong to.
+/// A world's lead card: the page's anchor. A breath of the world's accent
+/// washes in from the top-left corner over a raised surface, with a hairline,
+/// a soft contact shadow and the machined rim on Carbon. The accent tints the
+/// fill only; nothing glows.
 class KHeroSurface extends StatelessWidget {
   const KHeroSurface({
     super.key,
@@ -49,15 +50,37 @@ class KHeroSurface extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final BorderRadius radius;
 
+  Color get _accent => switch (tone) {
+        KTone.fuel => KColor.fuel,
+        KTone.train => KColor.train,
+        KTone.kyno => KColor.kyno,
+        KTone.neutral => KColor.ink,
+      };
+
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    final surface = DecoratedBox(
       decoration: BoxDecoration(
-        color: KColor.card,
         borderRadius: radius,
         border: Border.all(color: KColor.hairline),
+        boxShadow: KShadow.card,
       ),
-      child: Padding(padding: padding, child: child),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          gradient: KShade.raised(KColor.card),
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(borderRadius: radius, gradient: KShade.wash(_accent)),
+          position: DecorationPosition.background,
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
+    if (!KColor.isDark) return surface;
+    return CustomPaint(
+      foregroundPainter: KRimPainter(radius: radius, alpha: 0.07),
+      child: surface,
     );
   }
 }

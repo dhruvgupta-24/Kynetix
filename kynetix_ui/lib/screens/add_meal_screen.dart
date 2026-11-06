@@ -1220,7 +1220,7 @@ class _AddMealScreenState extends State<AddMealScreen>
             margin: const EdgeInsets.only(bottom: KSpacing.sm),
             padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
             decoration: BoxDecoration(
-              color: KColor.card,
+              gradient: KShade.raised(KColor.card),
               borderRadius: KRadius.md,
               border: Border.all(
                 color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border,
@@ -1671,7 +1671,7 @@ class _AddMealScreenState extends State<AddMealScreen>
         margin: const EdgeInsets.only(bottom: KSpacing.lg),
         padding: const EdgeInsets.fromLTRB(KSpacing.lg, 10, 6, 10),
         decoration: BoxDecoration(
-          color: KColor.card,
+          gradient: KShade.raised(KColor.card),
           borderRadius: KRadius.lg,
           border: Border.all(color: KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border),
           boxShadow: KShadow.card,
@@ -2271,7 +2271,7 @@ class _ScanPill extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: KColor.card,
+              gradient: KShade.raised(KColor.card),
               borderRadius: KRadius.pill,
               border: Border.all(
                 color: KColor.isDark ? KColor.fg.withValues(alpha: 0.12) : KColor.border,

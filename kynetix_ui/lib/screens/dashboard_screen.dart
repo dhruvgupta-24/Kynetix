@@ -3678,11 +3678,7 @@ class _BentoTile extends StatelessWidget {
     final body = Container(
       constraints: const BoxConstraints(minHeight: minHeight),
       padding: const EdgeInsets.fromLTRB(KSpacing.lg, 14, KSpacing.md, KSpacing.lg),
-      decoration: BoxDecoration(
-        color: KColor.card,
-        borderRadius: KRadius.lg,
-        border: Border.all(color: KColor.hairline),
-      ),
+      decoration: KShade.surface(KRadius.lg),
       // spaceBetween rather than a Spacer: the row measures each tile at its
       // natural height first, then stretches the shorter one.
       child: Column(
@@ -3691,8 +3687,19 @@ class _BentoTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 6),
+              // The icon sits in a small recessed well, so a tile reads by
+              // shape and shade before its colour.
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  gradient: KShade.sunken(KColor.card),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: KColor.hairline),
+                ),
+                child: Icon(icon, size: 14, color: accent),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   label,

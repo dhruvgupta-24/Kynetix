@@ -296,7 +296,7 @@ class _KynoAssistantScreenState extends State<KynoAssistantScreen> {
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
-          color: KColor.card,
+          gradient: KShade.raised(KColor.card),
           borderRadius: KRadius.md,
           border: Border.all(color: _hairline()),
         ),

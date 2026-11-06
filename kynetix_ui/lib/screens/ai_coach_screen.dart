@@ -781,7 +781,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: KColor.card,
+                gradient: KShade.raised(KColor.card),
                 borderRadius: KRadius.pill,
                 border: Border.all(color: KColor.border),
               ),
@@ -2231,7 +2231,7 @@ class _PlanNotice extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(KSpacing.md, KSpacing.xs, KSpacing.xs, KSpacing.xs),
         decoration: BoxDecoration(
-          color: KColor.card,
+          gradient: KShade.raised(KColor.card),
           borderRadius: KRadius.md,
           border: Border.all(color: _hairline()),
           boxShadow: KShadow.card,
