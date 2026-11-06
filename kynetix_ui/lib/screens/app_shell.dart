@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'birthday_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_theme.dart';
@@ -58,7 +59,23 @@ class AppShellState extends State<AppShell> {
       AppShell.currentTab.value = _tab;
       _checkAndShowResumeDialog();
     });
+    _celebrateAfterIntro();
     if (kSideload) _promptUpdateAfterIntro();
+  }
+
+  /// Birthday party (once a year), after the intro has lifted so it isn't
+  /// hidden behind the logo animation.
+  void _celebrateAfterIntro() {
+    void go() {
+      if (!introRevealed.value) return;
+      introRevealed.removeListener(go);
+      Future<void>.delayed(const Duration(milliseconds: 700), () {
+        if (mounted) BirthdayService.maybeCelebrate(context).ignore();
+      });
+    }
+
+    introRevealed.addListener(go);
+    go();
   }
 
   /// Sideload builds: once the intro has lifted and the app has settled, ask

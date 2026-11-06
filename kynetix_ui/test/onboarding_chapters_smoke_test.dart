@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/screens/onboarding_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'consent_test.dart' show pickBirthday;
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -25,9 +27,9 @@ void main() {
 
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), 'Dhruv Gupta');
-    await tester.enterText(fields.at(1), '24');
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pumpAndSettle();
+    await pickBirthday(tester, DateTime(2002, 3, 14));
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 

@@ -149,6 +149,7 @@ class ProfileService {
           targetChangeHistory: backup.targetChangeHistory,
           carryForwardEnabled: data['carry_forward_enabled'] as bool? ?? backup.carryForwardEnabled,
           carryForwardThreshold: toI(data['carry_forward_threshold']) ?? backup.carryForwardThreshold,
+          dateOfBirth: backup.dateOfBirth,
         ),
         isFullBackup: true,
       );
@@ -176,6 +177,7 @@ class ProfileService {
         healthSyncEnabled: false,
         carryForwardEnabled: data['carry_forward_enabled'] as bool? ?? false,
         carryForwardThreshold: toI(data['carry_forward_threshold']) ?? 100,
+        dateOfBirth: local?.dateOfBirth,
       ),
       isFullBackup: false,
     );
@@ -241,6 +243,8 @@ class ProfileService {
       targetChangeHistory: base.targetChangeHistory,
       carryForwardEnabled: base.carryForwardEnabled,
       carryForwardThreshold: base.carryForwardThreshold,
+      // A birthday is set once; whichever copy has it wins.
+      dateOfBirth: base.dateOfBirth ?? r.dateOfBirth ?? local.dateOfBirth,
     );
   }
 

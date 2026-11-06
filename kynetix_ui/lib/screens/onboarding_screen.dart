@@ -21,6 +21,7 @@ import '../ui/k_shake.dart';
 import '../ui/k_toast.dart';
 import '../widgets/kyno_avatar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/birthday_field.dart';
 import '../models/user_profile.dart';
 import '../services/analytics_service.dart';
 
@@ -184,7 +185,7 @@ class OnboardingScreen extends StatefulWidget {
   final VoidCallback? onFinished;
 
   /// When set, onboarding opens with the privacy step (short notice, "I agree
-  /// to the Privacy Policy" and "I'm 18 or older", both required) before the
+  /// to the Privacy Policy" and the user's birthday, both required) before the
   /// first question chapter. Called on agreement to record consent; AuthGate
   /// passes it for users who haven't agreed to the current policy yet. The
   /// step isn't counted in "Step x of 6".
@@ -298,7 +299,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   // Step 1 — Personal
   final _nameCtrl = TextEditingController();
-  final _ageCtrl = TextEditingController();
+  /// Birthday: from the privacy step, or picked on the first question.
+  DateTime? _dob;
+  int get _age => _dob == null ? 25 : UserProfile.ageOn(_dob!, DateTime.now());
   String _gender = 'Male';
 
   // Step 2 — Body
@@ -322,7 +325,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     final opt = _workoutOptions[_workoutIdx];
     return UserProfile(
       name: _nameCtrl.text.trim(),
-      age: int.tryParse(_ageCtrl.text.trim()) ?? 25,
+      age: _age,
+      dateOfBirth: _dob,
       gender: _gender,
       height: _resolvedHeightCm(),
       weight: double.tryParse(_weightCtrl.text.trim()) ?? 70.0,
@@ -342,7 +346,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   void dispose() {
     _navLock.dispose();
     _nameCtrl.dispose();
-    _ageCtrl.dispose();
     _heightCmCtrl.dispose();
     _heightFtCtrl.dispose();
     _heightInCtrl.dispose();
@@ -419,7 +422,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     final opt = _workoutOptions[_workoutIdx];
     currentUserProfile = UserProfile(
       name: _nameCtrl.text.trim(),
-      age: int.tryParse(_ageCtrl.text.trim()) ?? 25,
+      age: _age,
+      dateOfBirth: _dob,
       gender: _gender,
       height: _resolvedHeightCm(),
       weight: double.tryParse(_weightCtrl.text.trim()) ?? 70.0,
@@ -503,7 +507,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     0 => _StepPersonal(
       formKey: _step1Key,
       nameCtrl: _nameCtrl,
-      ageCtrl: _ageCtrl,
+      dob: _dob,
+      onDob: (d) => setState(() => _dob = d),
       gender: _gender,
       onGender: (v) => setState(() => _gender = v),
     ),
@@ -534,11 +539,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _ => _StepConnectAi(onFinished: _finishAiChapter),
   };
 
-  Future<void> _agreeToPrivacy({required bool ageConfirmedAdult}) async {
+  Future<void> _agreeToPrivacy({required bool ageConfirmedAdult, required DateTime dateOfBirth}) async {
     final record = widget.onConsent;
     if (record != null) await record(ageConfirmedAdult: ageConfirmedAdult);
     if (!mounted) return;
-    setState(() => _consentDone = true);
+    setState(() {
+      _dob = dateOfBirth;
+      _consentDone = true;
+    });
   }
 
   Widget _buildConsentStep(double lead) {
@@ -963,14 +971,16 @@ class _StepConnectAi extends StatelessWidget {
 class _StepPersonal extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final TextEditingController nameCtrl;
-  final TextEditingController ageCtrl;
+  final DateTime? dob;
+  final ValueChanged<DateTime> onDob;
   final String gender;
   final ValueChanged<String> onGender;
 
   const _StepPersonal({
     required this.formKey,
     required this.nameCtrl,
-    required this.ageCtrl,
+    required this.dob,
+    required this.onDob,
     required this.gender,
     required this.onGender,
   });
@@ -997,20 +1007,30 @@ class _StepPersonal extends StatelessWidget {
                   : null,
             ),
             const SizedBox(height: KSpacing.xl),
-            const _FieldLabel('Age'),
+            const _FieldLabel('Birthday'),
             const SizedBox(height: KSpacing.sm),
-            OnboardingTextField(
-              controller: ageCtrl,
-              hint: 'e.g. 20',
-              suffix: 'years',
-              keyboardType: TextInputType.number,
-              formatters: [FilteringTextInputFormatter.digitsOnly],
-              validator: (v) {
-                final n = int.tryParse(v ?? '');
-                if (n == null || n > 100) return 'Enter an age from 18 to 100.';
-                if (n < 18) return 'Kynetix is for adults 18 and over.';
-                return null;
-              },
+            FormField<DateTime>(
+              initialValue: dob,
+              validator: (d) => birthdayStatus(d) == BirthdayStatus.ok ? null : '',
+              builder: (field) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  BirthdayField(
+                    value: field.value,
+                    onChanged: (d) {
+                      field.didChange(d);
+                      onDob(d);
+                    },
+                  ),
+                  if (field.hasError && field.value == null) ...[
+                    const SizedBox(height: KSpacing.xs),
+                    Text(
+                      'Pop your birthday in so we can work out the rest.',
+                      style: KText.caption.copyWith(color: KColor.danger, fontSize: 13),
+                    ),
+                  ],
+                ],
+              ),
             ),
             const SizedBox(height: KSpacing.xl),
             const _FieldLabel('Gender'),

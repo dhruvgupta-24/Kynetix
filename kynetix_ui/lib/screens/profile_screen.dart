@@ -24,6 +24,7 @@ import '../services/insights_report_service.dart';
 import '../services/feedback_service.dart';
 import '../widgets/feedback_sheet.dart';
 import '../widgets/adaptive_targets_card.dart';
+import '../widgets/birthday_field.dart';
 import '../services/data_export_service.dart';
 import '../services/workout_import_service.dart';
 import 'package:file_picker/file_picker.dart';
@@ -438,7 +439,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _editBodyMetrics() {
-    final ageCtrl = TextEditingController(text: _profile.age.toString());
+    var dob = _profile.dateOfBirth;
     final heightCtrl = TextEditingController(
       text: _profile.height.toStringAsFixed(1),
     );
@@ -477,26 +478,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const SizedBox(height: KSpacing.lg),
-                          _buildFormInput(
-                            controller: ageCtrl,
-                            label: 'Age',
-                            suffix: 'years',
-                            keyboardType: TextInputType.number,
-                            formatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            validator: (val) {
-                              if (val == null || val.isEmpty) {
-                                return 'Add your age';
-                              }
-                              final numVal = int.tryParse(val);
-                              if (numVal == null ||
-                                  numVal < 1 ||
-                                  numVal > 120) {
-                                return 'Age should be between 1 and 120';
-                              }
-                              return null;
-                            },
+                          Text('Birthday', style: KText.label),
+                          const SizedBox(height: KSpacing.sm),
+                          StatefulBuilder(
+                            builder: (_, setInner) => BirthdayField(
+                              value: dob,
+                              onChanged: (d) => setInner(() => dob = d),
+                            ),
                           ),
                           const SizedBox(height: KSpacing.lg),
                           _buildFormInput(
@@ -555,9 +543,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             label: 'Save metrics',
                             width: double.infinity,
                             onTap: () {
-                              if (formKey.currentState?.validate() ?? false) {
-                                final age =
-                                    int.tryParse(ageCtrl.text) ?? _profile.age;
+                              final dobOk = birthdayStatus(dob) == BirthdayStatus.ok;
+                              if ((formKey.currentState?.validate() ?? false) && dobOk) {
                                 final height =
                                     double.tryParse(heightCtrl.text) ??
                                     _profile.height;
@@ -567,10 +554,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 _saveProfile(
                                   _profile.copyWith(
-                                    age: age,
+                                    dateOfBirth: dob,
                                     height: height,
                                     weight: weight,
-                                  ),
+                                  ).withCurrentAge(),
                                 );
                                 Navigator.pop(ctx);
                                 _showToast('Metrics saved.', success: true);

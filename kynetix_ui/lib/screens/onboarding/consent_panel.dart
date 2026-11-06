@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_theme.dart';
 import '../privacy_policy_screen.dart';
+import '../../widgets/birthday_field.dart';
 
 /// The privacy notice and consent controls, shared by onboarding's first step
 /// (new users) and [ConsentScreen] (existing users who haven't agreed yet).
 ///
-/// Two required controls: "I agree to the Privacy Policy" and "I'm 18 or
-/// older". The primary action stays disabled until both are on. "I don't
+/// Two required answers: "I agree to the Privacy Policy" and the user's
+/// birthday (the age, and the 18+ check, are worked out from it; nobody is
+/// asked to tick "I'm 18"). The primary action stays disabled until both
+/// are in. "I don't
 /// agree" switches to a plain explanation with Read policy and Sign out;
 /// nothing is recorded in that case.
 class ConsentPanel extends StatefulWidget {
@@ -17,11 +20,15 @@ class ConsentPanel extends StatefulWidget {
     required this.onSignOut,
     this.agreeLabel = 'Agree and continue',
     this.padding = const EdgeInsets.symmetric(horizontal: KSpacing.xxl),
+    this.initialDateOfBirth,
   });
+
+  /// A birthday already on the profile; the field starts filled.
+  final DateTime? initialDateOfBirth;
 
   /// Records consent. The panel shows a loader until it completes; if it
   /// throws, the panel shows a calm error and stays put.
-  final Future<void> Function({required bool ageConfirmedAdult}) onAgree;
+  final Future<void> Function({required bool ageConfirmedAdult, required DateTime dateOfBirth}) onAgree;
 
   final Future<void> Function() onSignOut;
   final String agreeLabel;
@@ -33,13 +40,13 @@ class ConsentPanel extends StatefulWidget {
 
 class _ConsentPanelState extends State<ConsentPanel> {
   bool _agreed = false;
-  bool _adult = false;
+  late DateTime? _dob = widget.initialDateOfBirth;
   bool _saving = false;
   bool _declined = false;
   bool _signingOut = false;
   String? _error;
 
-  bool get _ready => _agreed && _adult && !_saving;
+  bool get _ready => _agreed && birthdayStatus(_dob) == BirthdayStatus.ok && !_saving;
 
   void _openPolicy() {
     Navigator.of(context).push(
@@ -54,7 +61,7 @@ class _ConsentPanelState extends State<ConsentPanel> {
       _error = null;
     });
     try {
-      await widget.onAgree(ageConfirmedAdult: _adult);
+      await widget.onAgree(ageConfirmedAdult: true, dateOfBirth: _dob!);
       KHaptics.success();
     } catch (_) {
       if (!mounted) return;
@@ -155,11 +162,16 @@ class _ConsentPanelState extends State<ConsentPanel> {
             label: 'I agree to the Privacy Policy',
             onChanged: _saving ? null : (v) => setState(() => _agreed = v),
           ),
-          _ConsentCheck(
-            key: const ValueKey('consent-age-18'),
-            value: _adult,
-            label: "I'm 18 or older",
-            onChanged: _saving ? null : (v) => setState(() => _adult = v),
+          const SizedBox(height: KSpacing.md),
+          Text(
+            "When's your birthday?",
+            style: KText.bodyMedium.copyWith(color: KColor.textPrimary, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: KSpacing.sm),
+          BirthdayField(
+            value: _dob,
+            enabled: !_saving,
+            onChanged: (d) => setState(() => _dob = d),
           ),
           if (_error != null) ...[
             const SizedBox(height: KSpacing.sm),
@@ -213,7 +225,7 @@ class _ConsentPanelState extends State<ConsentPanel> {
                 const SizedBox(height: KSpacing.sm),
                 Text(
                   'Kynetix needs your agreement to the Privacy Policy to store '
-                  'and sync your data, and Kynetix is for adults 18 and over. '
+                  'and sync your data. '
                   "Nothing was saved. You can read the policy, change your "
                   'mind, or sign out.',
                   style: KText.body.copyWith(color: KColor.textSecondary, height: 1.5),

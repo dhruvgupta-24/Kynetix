@@ -104,6 +104,10 @@ class UserProfile {
   final bool carryForwardEnabled;
   final int carryForwardThreshold; // defaults to 100 kcal
 
+  /// The user's birthday, date only. When set, [age] is worked out from it
+  /// (see [withCurrentAge]); older profiles only have the typed-in age.
+  final DateTime? dateOfBirth;
+
   const UserProfile({
     required this.name,
     required this.age,
@@ -125,7 +129,34 @@ class UserProfile {
     this.targetChangeHistory = const [],
     this.carryForwardEnabled = false,
     this.carryForwardThreshold = 100,
+    this.dateOfBirth,
   });
+
+  /// Whole years from [dob] to [day].
+  static int ageOn(DateTime dob, DateTime day) {
+    var years = day.year - dob.year;
+    if (day.month < dob.month || (day.month == dob.month && day.day < dob.day)) years--;
+    return years;
+  }
+
+  /// Whether [day] is this user's birthday (29 Feb birthdays land on 28 Feb
+  /// in other years).
+  bool isBirthday(DateTime day) {
+    final dob = dateOfBirth;
+    if (dob == null) return false;
+    final leapless = dob.month == 2 && dob.day == 29 && !_isLeap(day.year);
+    return day.month == dob.month && day.day == (leapless ? 28 : dob.day);
+  }
+
+  static bool _isLeap(int y) => (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+
+  /// This profile with [age] brought up to date from [dateOfBirth].
+  UserProfile withCurrentAge([DateTime? now]) {
+    final dob = dateOfBirth;
+    if (dob == null) return this;
+    final a = ageOn(dob, now ?? DateTime.now());
+    return a == age ? this : copyWith(age: a);
+  }
 
   UserProfile copyWithHealth({
     required int      averageDailySteps,
@@ -151,6 +182,7 @@ class UserProfile {
     targetChangeHistory: targetChangeHistory,
     carryForwardEnabled: carryForwardEnabled,
     carryForwardThreshold: carryForwardThreshold,
+    dateOfBirth: dateOfBirth,
   );
 
   UserProfile copyWith({
@@ -174,6 +206,7 @@ class UserProfile {
     List<TargetChangeRecord>? targetChangeHistory,
     bool? carryForwardEnabled,
     int? carryForwardThreshold,
+    DateTime? dateOfBirth,
     // Null can't mean "clear" above; this resets the eating style to
     // "Not specified" and keeps every other field.
     bool clearPortionAnchor = false,
@@ -198,6 +231,7 @@ class UserProfile {
     targetChangeHistory: targetChangeHistory ?? this.targetChangeHistory,
     carryForwardEnabled: carryForwardEnabled ?? this.carryForwardEnabled,
     carryForwardThreshold: carryForwardThreshold ?? this.carryForwardThreshold,
+    dateOfBirth: dateOfBirth ?? this.dateOfBirth,
   );
 
   Map<String, dynamic> toJson() => {
@@ -221,7 +255,17 @@ class UserProfile {
     'targetChangeHistory': targetChangeHistory.map((e) => e.toJson()).toList(),
     'carryForwardEnabled': carryForwardEnabled,
     'carryForwardThreshold': carryForwardThreshold,
+    if (dateOfBirth != null) 'dateOfBirth': dobKey(dateOfBirth!),
   };
+
+  /// "1999-07-04": a birthday has no time and no time zone.
+  static String dobKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static DateTime? _dob(dynamic v) {
+    final d = v is String ? DateTime.tryParse(v) : null;
+    return d == null ? null : DateTime(d.year, d.month, d.day);
+  }
 
   factory UserProfile.fromJson(Map<String, dynamic> j) {
     double _d(dynamic v, double fallback) {
@@ -261,6 +305,7 @@ class UserProfile {
           const [],
       carryForwardEnabled: j['carryForwardEnabled'] as bool? ?? false,
       carryForwardThreshold: _i(j['carryForwardThreshold'], 100),
+      dateOfBirth: _dob(j['dateOfBirth']),
     );
   }
 

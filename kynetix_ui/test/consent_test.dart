@@ -9,6 +9,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _uid = '11111111-aaaa-4aaa-8aaa-111111111111';
 
+/// Opens the birthday picker, types [d] in its text mode and confirms.
+Future<void> pickBirthday(WidgetTester tester, DateTime d) async {
+  await tester.ensureVisible(find.byKey(const ValueKey('birthday-field')));
+  await tester.tap(find.byKey(const ValueKey('birthday-field')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byIcon(Icons.edit_outlined));
+  await tester.pumpAndSettle();
+  final mm = d.month.toString().padLeft(2, '0'), dd = d.day.toString().padLeft(2, '0');
+  // The picker reads day first (Indian English).
+  await tester.enterText(find.byType(TextField).last, '$dd/$mm/${d.year}');
+  await tester.tap(find.text("That's the one"));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('ConsentService', () {
     setUp(() async {
@@ -27,7 +41,7 @@ void main() {
 
       final prefs = await SharedPreferences.getInstance();
       final raw = jsonDecode(prefs.getString('privacy_consent_v1_$_uid')!) as Map;
-      expect(raw['version'], '2026-10-20b');
+      expect(raw['version'], ConsentService.policyVersion);
       expect(raw['at'], '2026-10-16T09:00:00.000Z');
       expect(raw['adult'], isTrue);
       expect(await svc.hasConsented(_uid), isTrue);
@@ -63,12 +77,14 @@ void main() {
       var agreed = 0;
       var signedOut = 0;
       bool? adult;
+      DateTime? dob;
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: ConsentPanel(
-            onAgree: ({required bool ageConfirmedAdult}) async {
+            onAgree: ({required bool ageConfirmedAdult, required DateTime dateOfBirth}) async {
               agreed++;
               adult = ageConfirmedAdult;
+              dob = dateOfBirth;
             },
             onSignOut: () async => signedOut++,
           ),
@@ -88,13 +104,20 @@ void main() {
       await tester.tap(find.text('I agree to the Privacy Policy'));
       await tester.pumpAndSettle();
       await tapAgree();
-      expect(agreed, 0, reason: '18+ still unchecked');
+      expect(agreed, 0, reason: 'no birthday yet');
 
-      await tester.tap(find.text("I'm 18 or older"));
-      await tester.pumpAndSettle();
+      // Too young: still blocked, with a calm note.
+      await pickBirthday(tester, DateTime(DateTime.now().year - 15, 1, 1));
+      expect(find.textContaining('built for 18 and up'), findsOneWidget);
+      await tapAgree();
+      expect(agreed, 0, reason: 'under 18');
+
+      await pickBirthday(tester, DateTime(1999, 7, 4));
+      expect(find.textContaining('That makes you'), findsOneWidget);
       await tapAgree();
       expect(agreed, 1);
       expect(adult, isTrue);
+      expect(dob, DateTime(1999, 7, 4));
 
       await tester.ensureVisible(find.text("I don't agree"));
       await tester.tap(find.text("I don't agree"));
@@ -131,12 +154,11 @@ void main() {
       expect(find.text('Your data, your call'), findsOneWidget);
       expect(find.text('Step 1 of 6'), findsNothing);
 
-      for (final label in ['I agree to the Privacy Policy', "I'm 18 or older"]) {
-        await tester.ensureVisible(find.text(label));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(label));
-        await tester.pumpAndSettle();
-      }
+      await tester.ensureVisible(find.text('I agree to the Privacy Policy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('I agree to the Privacy Policy'));
+      await tester.pumpAndSettle();
+      await pickBirthday(tester, DateTime(1999, 7, 4));
       await tester.ensureVisible(find.text('Agree and continue'));
       await tester.tap(find.text('Agree and continue'));
       await tester.pumpAndSettle();
@@ -144,9 +166,11 @@ void main() {
       expect(recorded, isTrue);
       expect(find.text('A bit about you'), findsOneWidget);
       expect(find.text('Step 1 of 6'), findsOneWidget);
+      // The birthday from the privacy step carries into the first chapter.
+      expect(find.text('4 Jul 1999'), findsOneWidget);
     });
 
-    testWidgets('under-18 ages are refused with calm copy', (tester) async {
+    testWidgets('an under-18 birthday is refused with calm copy', (tester) async {
       tester.view.physicalSize = const Size(720, 1280);
       tester.view.devicePixelRatio = 2.0;
       addTearDown(tester.view.reset);
@@ -154,19 +178,17 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: OnboardingScreen(onFinished: () {})));
       await tester.pumpAndSettle();
 
-      final fields = find.byType(TextFormField);
-      await tester.enterText(fields.at(0), 'Dhruv');
-      await tester.enterText(fields.at(1), '17');
+      await tester.enterText(find.byType(TextFormField).first, 'Dhruv');
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
+      final now = DateTime.now();
+      await pickBirthday(tester, DateTime(now.year - 17, now.month, 1));
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
-      expect(find.text('Kynetix is for adults 18 and over.'), findsOneWidget);
+      expect(find.textContaining('built for 18 and up'), findsOneWidget);
       expect(find.text('Height and weight'), findsNothing);
 
-      await tester.enterText(fields.at(1), '18');
-      FocusManager.instance.primaryFocus?.unfocus();
-      await tester.pumpAndSettle();
+      await pickBirthday(tester, DateTime(now.year - 18, 1, 1));
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(find.text('Height and weight'), findsOneWidget);

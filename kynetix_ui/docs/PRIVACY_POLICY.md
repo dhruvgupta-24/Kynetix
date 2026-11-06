@@ -1,6 +1,6 @@
 # Kynetix Privacy Policy
 
-**Effective date:** 20 October 2026
+**Effective date:** 6 November 2026
 
 Kynetix is a fitness and nutrition app for Android. It helps you log meals and workouts, estimate calories and protein, and get coaching from Kyno, the app's AI coach. This policy explains what we collect, why, who it goes to, how long we keep it, and the choices you have.
 
@@ -16,7 +16,7 @@ Kynetix is made and run by **Dhruv Gupta**, an individual developer based in Ind
 - AI answers are estimates, not medical advice.
 - We do not sell your data. We do not show ads. We do not use third-party analytics, advertising or tracking tools.
 - You can delete your account and everything in it from inside the app, at any time. It happens straight away.
-- Kynetix is for people aged 18 and over.
+- Kynetix is for people aged 18 and over. We work your age out from the date of birth you give us; you never tick an "I'm 18" box.
 
 ---
 
@@ -25,11 +25,11 @@ Kynetix is made and run by **Dhruv Gupta**, an individual developer based in Ind
 ### 2.1 Account details
 
 - Your email address and password, or your Google account if you choose "Continue with Google". Google shares your name, email address and a sign-in token with us. If your sign-in uses a phone number, we keep that number with your account.
-- A record that you agreed to this policy: the policy version, the time you agreed, and your confirmation that you are 18 or older.
+- A record that you agreed to this policy: the policy version, the time you agreed, and that the date of birth you gave makes you 18 or older.
 
 ### 2.2 Your profile
 
-- Name, age, gender, height, weight, fitness goal, training days per week and portion-size preferences.
+- Name, date of birth, gender, height, weight, fitness goal, training days per week and portion-size preferences. We use your date of birth to work out your age (for your calorie and protein targets), to check that you are 18 or older, and to wish you a happy birthday in the app. Your age, not your date of birth, is what goes to AI providers (Section 4).
 - Your calorie and protein targets, any custom targets you set, and the history of changes to them.
 - Your average daily step count, if you connect Health Connect, so we can size your calorie target.
 - A profile photo, only if you add one. It is kept in private storage that only your account can read.
@@ -38,7 +38,7 @@ Kynetix is made and run by **Dhruv Gupta**, an individual developer based in Ind
 
 - What you eat, as you type or scan it: the foods we recognise, calories and macros, meal times, saved meals and quick-adds.
 - Corrections you make to food values, so the app remembers your usual portions.
-- Water and weight entries you log.
+- Weight entries you log. Water entries made by older versions of the app are kept with your data until you delete it; the app no longer tracks water.
 
 ### 2.4 Training logs
 
@@ -126,7 +126,9 @@ These providers are based outside India, mainly in the United States.
 
 **Our commitments**
 
-- We do not use your data to train AI models. Each provider handles requests under its own terms. Depending on the provider, it may keep request data for a limited time, for example to prevent abuse.
+- We do not train AI models on your data, and we never sell it.
+- Each AI provider handles requests under its own terms, and those terms differ. Kyno runs mostly on providers' free tiers. On some of them, including Google's Gemini API free tier and some free models on OpenRouter, the provider may keep requests and use them to improve its own products and models. Others keep request data only for a short time, for example to prevent abuse.
+- If you'd rather your requests stayed out of that, connect your own ChatGPT account (your requests then follow your ChatGPT settings, and we ask OpenAI not to store them), or don't use the AI features. Everything else in Kynetix works without them.
 - AI numbers are estimates and can be wrong. You can always edit them, and your edits are what Kynetix saves.
 - Kyno does not give medical advice, diagnosis or treatment. Talk to a qualified doctor or dietitian before major changes to your diet or training, especially if you have a medical condition, are pregnant, or have a history of disordered eating.
 
@@ -177,7 +179,7 @@ Some of these services process data outside India, in particular the AI provider
 
 Under the DPDP Act you can:
 
-- **Access** a summary of the personal data we hold about you and who we have shared it with.
+- **Access** a summary of the personal data we hold about you and who we have shared it with. You can also take a full copy yourself, any time: Settings > Export my data gives you everything you have logged as JSON and CSV files.
 - **Correct or update** inaccurate or incomplete data. Most of it you can edit directly in the app.
 - **Erase** your data, or delete your account (see below).
 - **Withdraw consent,** for example by turning off Health Connect access or disconnecting ChatGPT. This stops future processing for that purpose.
@@ -196,7 +198,7 @@ No longer have the app? Email **kynetix.app@gmail.com** from your account's emai
 
 ## 9. Children
 
-Kynetix is only for people aged 18 and over. During setup you confirm that you are 18 or older, and the app will not create a profile for anyone younger. If we learn that someone under 18 has an account, we will delete it and its data. If you believe a minor is using Kynetix, email **kynetix.app@gmail.com**.
+Kynetix is only for people aged 18 and over. During setup you give your date of birth, and the app will not create a profile for anyone it shows to be younger. If we learn that someone under 18 has an account, we will delete it and its data. If you believe a minor is using Kynetix, email **kynetix.app@gmail.com**.
 
 ---
 
