@@ -51,14 +51,10 @@ verify_jwt = false
 
 [functions.openai-link-start]
 enabled = true
-# UNCONFIRMED: the file header says "verify_jwt=false", the hardening notes
-# say on. Left unset so a deploy keeps whatever production has. Set it once
-# confirmed in the dashboard.
-# verify_jwt = true
+verify_jwt = true
+# Confirmed on production 2026-11-06: verify_jwt is on.
 
 [functions.delete-account]
 enabled = true
-# UNCONFIRMED: the file header says "verify_jwt = false (like the other
-# functions)", the hardening notes say on. Left unset so a deploy keeps
-# whatever production has. Set it once confirmed in the dashboard.
-# verify_jwt = true
+verify_jwt = true
+# Confirmed on production 2026-11-06: verify_jwt is on.
