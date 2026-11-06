@@ -46,6 +46,20 @@ export function aiBlockedForMinor(
   return typeof profileAge === 'number' && profileAge > 0 && profileAge < ADULT_AGE && parseDate(profileDob) === null;
 }
 
+/** Who an AI request is for: an adult, a teen whose parent said yes, or a
+ *  teen without that yes (no AI until there is one). */
+export type AiAudience = 'adult' | 'teen' | 'teen_no_consent';
+
+export function aiAudience(
+  consent: { child_dob?: unknown; status?: unknown } | null | undefined,
+  profileDob: unknown,
+  profileAge: unknown,
+  now: Date = new Date(),
+): AiAudience {
+  if (!aiBlockedForMinor(consent?.child_dob, profileDob, profileAge, now)) return 'adult';
+  return consent?.status === 'approved' && isMinorDob(consent.child_dob, now) ? 'teen' : 'teen_no_consent';
+}
+
 export class GuardianError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);

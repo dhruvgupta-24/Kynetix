@@ -94,3 +94,16 @@ Deno.test('pending links expire', () => {
   assertEquals(effectiveStatus({ status: 'pending', expires_at: '2026-11-01T00:00:00Z' }, NOW), 'expired');
   assertEquals(effectiveStatus({ status: 'approved', expires_at: '2026-11-01T00:00:00Z' }, NOW), 'approved');
 });
+
+Deno.test('AI audience: adults, approved teens, teens without a yes', async () => {
+  const { aiAudience } = await import('./guardian.ts');
+  assertEquals(aiAudience(null, '1999-01-01', 27, NOW), 'adult');
+  assertEquals(aiAudience(null, null, null, NOW), 'adult');
+  assertEquals(aiAudience({ child_dob: '2011-05-05', status: 'approved' }, '2011-05-05', 15, NOW), 'teen');
+  assertEquals(aiAudience({ child_dob: '2011-05-05', status: 'pending' }, '2011-05-05', 15, NOW), 'teen_no_consent');
+  assertEquals(aiAudience({ child_dob: '2011-05-05', status: 'revoked' }, '1990-01-01', 36, NOW), 'teen_no_consent');
+  // A minor with no consent row at all (should never get this far).
+  assertEquals(aiAudience(null, '2011-05-05', 15, NOW), 'teen_no_consent');
+  // Turned 18: an adult, whatever the old row says.
+  assertEquals(aiAudience({ child_dob: '2008-11-07', status: 'revoked' }, '2008-11-07', 18, NOW), 'adult');
+});

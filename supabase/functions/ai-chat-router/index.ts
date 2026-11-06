@@ -44,6 +44,7 @@ import {
   internalSecret,
   isTrustedInternal,
   jsonError,
+  JSON_ONLY_PURPOSES,
   planTier,
   quotaError,
   rateLimitedError,
@@ -52,10 +53,10 @@ import {
   type GuardedRequest,
   type QuotaResult,
 } from "../shared/ai_guard.ts";
-import { assertAdultForAi } from "../shared/minor_guard.ts";
+import { lastUserText, moderationFlagsRisk, resolveAiAudience, teenAiOffError, withTeenSafety } from "../shared/minor_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
-import { buildFallbackChain, chatBody, type ProviderAttempt } from "../shared/free_providers.ts";
+import { buildFallbackChain, buildTeenChain, chatBody, type ProviderAttempt } from "../shared/free_providers.ts";
 
 declare const Deno: any;
 
@@ -689,7 +690,7 @@ Deno.serve(async (req: Request) => {
       }
       throw e;
     }
-    const messages = guarded.messages;
+    let messages = guarded.messages;
     // JSON-only purposes (label_read) are validated whole, so never streamed.
     const streamMode: boolean = body?.stream === true && allowsStreaming(guarded.purpose);
     // The text a client receives: validated canonical JSON for label_read, or
@@ -718,15 +719,24 @@ Deno.serve(async (req: Request) => {
     );
 
 
-    // ── Teen mode: no AI under 18 (checked before any provider or quota) ─────
+    // ── Teen mode (13 to 17): a parent's OK, teen-safe providers only, and
+    // teen safety rules in the prompt (shared/minor_guard.ts) ─────────────────
+    let audience: 'adult' | 'teen';
     try {
-      await assertAdultForAi(supabaseAdmin, user.id);
+      audience = await resolveAiAudience(supabaseAdmin, user.id);
     } catch (e) {
       if (e instanceof AiGuardError) {
         console.warn(`[AI ROUTER] rejected user=${user.id} code=${e.code}`);
         return jsonError(e, corsHeaders);
       }
       throw e;
+    }
+    if (audience === 'teen' && !JSON_ONLY_PURPOSES.includes(guarded.purpose)) {
+      const flagged = guarded.purpose === 'coach'
+        ? await moderationFlagsRisk(lastUserText(messages), Deno.env.get('OPENAI_API_KEY'))
+        : false;
+      if (flagged) console.warn(`[AI ROUTER] teen message flagged user=${user.id}`);
+      messages = withTeenSafety(messages, flagged);
     }
 
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
@@ -737,7 +747,13 @@ Deno.serve(async (req: Request) => {
     const ownPlanFirst = isSiwc || useCodexForThisRequest;
     // Fallback chain after the user's plan: Gemini → Groq → OpenRouter free,
     // each present only when its key is set.
-    const fallbackChain = buildFallbackChain((k: string) => Deno.env.get(k), imageRequest);
+    // Teens: OpenAI then Groq only; Gemini and OpenRouter are 18+.
+    const fallbackChain = audience === 'teen'
+      ? buildTeenChain((k: string) => Deno.env.get(k), imageRequest)
+      : buildFallbackChain((k: string) => Deno.env.get(k), imageRequest);
+    if (audience === 'teen' && fallbackChain.length === 0 && !userProvider) {
+      return jsonError(teenAiOffError(), corsHeaders);
+    }
     const providerLabel = ownPlanFirst ? 'user_chatgpt' : (fallbackChain[0]?.provider ?? 'none');
     const activeFallbackModel = fallbackChain[0]?.model ?? 'none';
 

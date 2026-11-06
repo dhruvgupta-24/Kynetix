@@ -13,7 +13,7 @@
 // GROQ_VISION_MODELS, OPENROUTER_TEXT_MODELS, OPENROUTER_VISION_MODELS.
 // OpenRouter paid models are only tried when OPENROUTER_ALLOW_PAID=true.
 
-export type ProviderName = 'gemini' | 'groq' | 'openrouter';
+export type ProviderName = 'gemini' | 'groq' | 'openrouter' | 'openai';
 
 export interface ProviderAttempt {
   provider: ProviderName;
@@ -30,6 +30,14 @@ export interface ProviderAttempt {
 export const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+export const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+
+// Teen mode (13 to 17) only. OpenAI's API allows apps that serve under-18
+// users with safeguards (its "Under-18 guidance"); Gemini and OpenRouter
+// require users to be 18, so teens never reach them. Override with
+// OPENAI_TEEN_MODELS / OPENAI_TEEN_VISION_MODELS. TEEN_AI=off turns it off.
+export const OPENAI_TEEN_MODELS = ['gpt-5-mini', 'gpt-4.1-mini'];
+export const OPENAI_TEEN_VISION_MODELS = ['gpt-5-mini', 'gpt-4.1-mini'];
 
 // Gemini free tier (stable models, Oct 2026). Flash-Lite is fastest and has
 // the largest free daily quota; Flash is the stronger backup. Both take images.
@@ -75,6 +83,7 @@ export function extraBodyFor(provider: ProviderName, model: string): Record<stri
     if (model.startsWith('openai/gpt-oss')) return { reasoning_effort: 'low', include_reasoning: false };
     if (model.startsWith('qwen/')) return { reasoning_effort: 'none' };
   }
+  if (provider === 'openai' && isOpenAiReasoningModel(model)) return { reasoning_effort: 'low' };
   return {};
 }
 
@@ -82,7 +91,33 @@ export function extraBodyFor(provider: ProviderName, model: string): Record<stri
 export function reasoningHeadroomFor(provider: ProviderName, model: string): number {
   if (provider === 'gemini' && !model.startsWith('gemini-2.5')) return 1024;
   if (provider === 'groq' && model.startsWith('openai/gpt-oss')) return 1024;
+  if (provider === 'openai' && isOpenAiReasoningModel(model)) return 1024;
   return 0;
+}
+
+/** gpt-5.x and o-series: fixed temperature, max_completion_tokens, reasoning. */
+export function isOpenAiReasoningModel(model: string): boolean {
+  return /^(gpt-5|o\d)/.test(model);
+}
+
+/** The chain for a teen account: OpenAI (Kynetix's key), then Groq, whose
+ *  services agreement covers apps used by minors. Never Gemini or OpenRouter. */
+export function buildTeenChain(env: EnvGet, imageRequest: boolean): ProviderAttempt[] {
+  if ((env('TEEN_AI') ?? '').trim().toLowerCase() === 'off') return [];
+  const out: ProviderAttempt[] = [];
+  const add = (provider: ProviderName, endpoint: string, apiKey: string, models: string[]) => {
+    if (!apiKey) return;
+    for (const model of models) {
+      out.push({ provider, model, endpoint, apiKey, headers: {}, extraBody: extraBodyFor(provider, model), reasoningHeadroom: reasoningHeadroomFor(provider, model) });
+    }
+  };
+  add('openai', OPENAI_URL, (env('OPENAI_API_KEY') ?? '').trim(), imageRequest
+    ? modelList(env, 'OPENAI_TEEN_VISION_MODELS', OPENAI_TEEN_VISION_MODELS)
+    : modelList(env, 'OPENAI_TEEN_MODELS', OPENAI_TEEN_MODELS));
+  add('groq', GROQ_URL, (env('GROQ_API_KEY') ?? '').trim(), imageRequest
+    ? modelList(env, 'GROQ_VISION_MODELS', GROQ_VISION_MODELS)
+    : modelList(env, 'GROQ_TEXT_MODELS', GROQ_TEXT_MODELS));
+  return out;
 }
 
 /** Ordered list of (provider, model) attempts, skipping providers with no key. */
@@ -128,7 +163,7 @@ export function isFreeOpenRouterModel(model: string): boolean {
  *  documents response_format only with a JSON schema, so it is left out and
  *  relies on the prompt (the router validates the JSON either way). */
 export function supportsJsonObjectMode(provider: ProviderName | undefined): boolean {
-  return provider === 'groq' || provider === 'openrouter';
+  return provider === 'groq' || provider === 'openrouter' || provider === 'openai';
 }
 
 /** Body for a Chat Completions request to [a]. [jsonMode] asks for a single
@@ -141,11 +176,17 @@ export function chatBody(
   jsonMode = false,
 ): Record<string, unknown> {
   const json = jsonMode && !stream && supportsJsonObjectMode(a.provider);
+  const openai = a.provider === 'openai';
+  const reasoning = openai && isOpenAiReasoningModel(a.model);
   return {
     model: a.model,
     messages,
-    temperature: 0.25,
-    max_tokens: maxTokens + a.reasoningHeadroom,
+    // OpenAI reasoning models only take the default temperature, and every
+    // current OpenAI model wants max_completion_tokens.
+    ...(reasoning ? {} : { temperature: 0.25 }),
+    ...(openai
+      ? { max_completion_tokens: maxTokens + a.reasoningHeadroom }
+      : { max_tokens: maxTokens + a.reasoningHeadroom }),
     ...a.extraBody,
     ...(json ? { response_format: { type: 'json_object' } } : {}),
     ...(stream ? { stream: true } : {}),
