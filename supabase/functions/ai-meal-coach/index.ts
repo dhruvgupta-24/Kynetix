@@ -1057,14 +1057,16 @@ Deno.serve(async (req: Request) => {
     // Router may try several upstreams, each with its own 45s deadline.
     const ROUTER_HEADERS_TIMEOUT_MS = 100_000;
     const ROUTER_TOTAL_TIMEOUT_MS   = 150_000;
-    /** Router 4xx (cap, rate limit) passes through so the app can show it. */
+    /** Router 4xx (cap, rate limit) passes through so the app can show it,
+     *  and so do the router's friendly 503s (ai_paused = kill switch,
+     *  ai_busy = global free-tier budget used up). */
     const passThrough = (status: number, raw: string): Response | null => {
-      if (status < 400 || status >= 500) return null;
+      let j: any = null;
+      try { j = JSON.parse(raw); } catch { /* non-JSON */ }
+      const friendly503 = status === 503 && (j?.error === 'ai_paused' || j?.error === 'ai_busy');
+      if (!friendly503 && (status < 400 || status >= 500)) return null;
       const headers: Record<string, string> = { ...corsHeaders, 'Content-Type': 'application/json' };
-      try {
-        const j = JSON.parse(raw);
-        if (typeof j?.retry_after === 'number') headers['Retry-After'] = String(j.retry_after);
-      } catch { /* non-JSON */ }
+      if (typeof j?.retry_after === 'number') headers['Retry-After'] = String(j.retry_after);
       return new Response(raw, { status, headers });
     };
     console.log(`[ai-meal-coach] calling ai-chat-router stream=${streamMode}`);

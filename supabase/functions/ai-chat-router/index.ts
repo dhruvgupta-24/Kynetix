@@ -33,9 +33,11 @@ import {
 import {
   AiGuardError,
   allowsStreaming,
+  coachImagesPerDay,
+  consumeGlobalBudget,
   consumeQuota,
-  enforceDailyImageCap,
   finalizeResponseText,
+  globalBudget,
   guardRequest,
   INTERNAL_HEADER,
   INTERNAL_SECRET_ENV,
@@ -43,10 +45,12 @@ import {
   isTrustedInternal,
   jsonError,
   planTier,
+  quotaError,
   rateLimitedError,
   secondsUntilUtcMidnight,
   standardTier,
   type GuardedRequest,
+  type QuotaResult,
 } from "../shared/ai_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
@@ -725,43 +729,60 @@ Deno.serve(async (req: Request) => {
     const providerLabel = ownPlanFirst ? 'user_chatgpt' : (fallbackChain[0]?.provider ?? 'none');
     const activeFallbackModel = fallbackChain[0]?.model ?? 'none';
 
-    // ── Rate limit (per user, per minute + per day) ──────────────────────────
-    // Requests that will run on the user's own ChatGPT plan get a higher (still
-    // bounded) cap. A fallback onto Kynetix's OpenRouter key is re-checked
-    // against the standard cap below.
-    // Daily photo cap for coach (vision is the costly path). Checked before
-    // consumeQuota so a rejected request is not counted.
-    if (guarded.purpose === 'coach' && guarded.imageCount > 0) {
-      try {
-        await enforceDailyImageCap(supabaseAdmin, user.id, guarded.imageCount);
-      } catch (e) {
-        if (e instanceof AiGuardError) {
-          console.warn(`[AI ROUTER] rejected user=${user.id} code=${e.code} scope=${String(e.extra['scope'] ?? '-')}`);
-          return jsonError(e, corsHeaders);
-        }
-        throw e;
-      }
-    }
-
+    // ── Quota: kill switch, per user, daily photos, global budget ────────────
+    // One atomic RPC (ai_usage_consume_v2). Requests that will run on the
+    // user's own ChatGPT plan get a higher (still bounded) per-user cap and do
+    // not touch the global budget; requests for the shared free-tier chain
+    // (Gemini / Groq / OpenRouter free) are also charged to the global
+    // per-minute / per-day budget. The coach photo cap is checked and counted
+    // in the same transaction, so concurrent requests cannot both slip under it.
+    // A plan-tier request that falls back to the free chain is re-checked
+    // against the standard per-user cap and charged to the global budget below.
     const stdTier = standardTier();
-    const quota = await consumeQuota(
-      supabaseAdmin, user.id, ownPlanFirst ? planTier() : stdTier,
-      guarded.textChars, guarded.imageCount,
-    );
-    if (!quota.allowed) {
-      const scope = quota.scope ?? 'minute';
-      const retry = quota.retryAfter ?? (scope === 'day' ? secondsUntilUtcMidnight() : 60);
-      console.warn(`[AI ROUTER] rate_limited user=${user.id} scope=${scope}`);
-      return jsonError(rateLimitedError(scope, retry), corsHeaders);
+    const global = globalBudget();
+    let quota: QuotaResult;
+    try {
+      quota = await consumeQuota(
+        supabaseAdmin, user.id, ownPlanFirst ? planTier() : stdTier,
+        guarded.textChars, guarded.imageCount,
+        {
+          imageCap:    guarded.purpose === 'coach' && guarded.imageCount > 0 ? coachImagesPerDay() : null,
+          countGlobal: !ownPlanFirst,
+          global,
+        },
+      );
+    } catch (e) {
+      if (e instanceof AiGuardError) {
+        console.warn(`[AI ROUTER] rejected user=${user.id} code=${e.code} scope=${String(e.extra['scope'] ?? '-')}`);
+        return jsonError(e, corsHeaders);
+      }
+      throw e;
     }
-    /** null when the OpenRouter fallback is allowed for a plan-tier request. */
-    const fallbackBlocked = (): Response | null => {
+    if (!quota.allowed) {
+      const err = quotaError(quota);
+      console.warn(`[AI ROUTER] refused user=${user.id} code=${err.code} scope=${quota.scope ?? 'minute'}`);
+      return jsonError(err, corsHeaders);
+    }
+    /** null when the free-chain fallback is allowed for a plan-tier request. */
+    const fallbackBlocked = async (): Promise<Response | null> => {
       if (!ownPlanFirst || !quota.enforced) return null;
       if (quota.dayRequests > stdTier.perDay) {
         return jsonError(rateLimitedError('day', secondsUntilUtcMidnight()), corsHeaders);
       }
       if (quota.minuteRequests > stdTier.perMinute) {
         return jsonError(rateLimitedError('minute', 60 - new Date().getUTCSeconds()), corsHeaders);
+      }
+      if (fallbackChain.length === 0) return null; // nothing shared to spend
+      try {
+        const g = await consumeGlobalBudget(supabaseAdmin, guarded.imageCount, global);
+        if (!g.allowed) {
+          const err = quotaError(g);
+          console.warn(`[AI ROUTER] fallback refused user=${user.id} code=${err.code} scope=${g.scope ?? '-'}`);
+          return jsonError(err, corsHeaders);
+        }
+      } catch (e) {
+        if (e instanceof AiGuardError) return jsonError(e, corsHeaders);
+        throw e;
       }
       return null;
     };
@@ -826,7 +847,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // ── Attempt 2: free fallback chain (Gemini → Groq → OpenRouter free) ──
-      const blockedS = fallbackBlocked();
+      const blockedS = await fallbackBlocked();
       if (blockedS) return blockedS;
       for (const a of fallbackChain) {
         try {
@@ -915,7 +936,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Attempt 2: free fallback chain (Gemini → Groq → OpenRouter free) ────
-    const blocked = fallbackBlocked();
+    const blocked = await fallbackBlocked();
     if (blocked) return blocked;
     if (fallbackChain.length === 0) {
       return new Response(JSON.stringify({

@@ -1,8 +1,15 @@
 // openai-link-disconnect — Clears the user's ChatGPT connection
 // Sets is_connected=false and nulls all token fields.
+//
+// Sign in with ChatGPT links are first revoked at OpenAI (best effort, per
+// the SIWC sign-out docs; see shared/siwc.ts). The local tokens are cleared
+// either way; the response says whether remote revocation was confirmed
+// (`remote_revoked`: true / false, or null when nothing was revocable, e.g.
+// legacy device-code links, which have no documented revocation).
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { revokeSiwcLink } from "../shared/siwc.ts";
 
 declare const Deno: any;
 
@@ -35,6 +42,19 @@ Deno.serve(async (req: Request) => {
     );
 
     console.log(`[openai-link-disconnect] user=${user.id} — disconnecting`);
+
+    // Revoke at OpenAI before the tokens are cleared (best effort).
+    let revoke: 'revoked' | 'failed' | 'skipped' = 'skipped';
+    {
+      const { data: link, error: linkErr } = await supabaseAdmin
+        .from('user_openai_links')
+        .select('auth_method, refresh_token, oauth_client_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (linkErr) console.warn(`[openai-link-disconnect] link read failed: ${linkErr.code ?? ''}`);
+      else revoke = await revokeSiwcLink(link);
+      console.log(`[openai-link-disconnect] user=${user.id} remote revoke=${revoke}`);
+    }
 
     const { error } = await supabaseAdmin
       .from('user_openai_links')
@@ -74,7 +94,7 @@ Deno.serve(async (req: Request) => {
       .eq('user_id', user.id);
 
     console.log(`[openai-link-disconnect] ✅ user=${user.id} disconnected`);
-    return json({ success: true });
+    return json({ success: true, remote_revoked: revoke === 'skipped' ? null : revoke === 'revoked' });
 
   } catch (err: any) {
     console.error(`[openai-link-disconnect] Unhandled: ${err?.message ?? err}`);

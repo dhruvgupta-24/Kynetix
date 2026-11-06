@@ -20,6 +20,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // @ts-ignore
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@5.9.6";
 import { AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS, timedFetch } from "../shared/timed_fetch.ts";
+import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
 import {
   hasPlanScope,
   selectSiwcModel,
@@ -34,6 +35,9 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+/** A token set (access + refresh + ID token) is a few KB. */
+const MAX_BODY_BYTES = 64 * 1024;
 
 const DISCOVERY_URL = `${SIWC_ISSUER}/.well-known/openid-configuration`;
 const JWKS_FALLBACK = `${SIWC_ISSUER}/.well-known/jwks.json`;
@@ -75,7 +79,14 @@ Deno.serve(async (req: Request) => {
     if (userErr || !user) return json({ error: 'unauthorized' }, 401);
 
     // ── 2. Payload ──────────────────────────────────────────────────────────
-    const body = await req.json().catch(() => ({}));
+    let body: any;
+    try {
+      body = await readJsonLimited(req, {}, MAX_BODY_BYTES);
+    } catch (e) {
+      if (e instanceof BodyTooLargeError) return json({ error: 'payload_too_large' }, 413);
+      throw e;
+    }
+    if (!body || typeof body !== 'object') body = {};
     const accessToken  = str(body.access_token);
     const refreshToken = str(body.refresh_token);
     const idToken      = str(body.id_token);

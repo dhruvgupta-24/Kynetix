@@ -1,0 +1,59 @@
+# Every push and pull request: the app must analyze clean and pass its tests,
+# the edge functions must type-check and pass theirs, and no secret may slip in.
+name: CI
+
+on:
+  push:
+    branches: [main, ui-overhaul]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: kynetix_ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.6
+          channel: stable
+          cache: true
+      # The real keys are git-ignored; the examples compile and tests mock
+      # the network.
+      - name: Placeholder config
+        run: |
+          cp lib/config/secrets.example.dart lib/config/secrets.dart
+          cp lib/config/supabase_secrets.example.dart lib/config/supabase_secrets.dart
+      - run: flutter pub get
+      - run: flutter analyze lib --no-fatal-infos
+      - run: flutter test
+
+  functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno test --allow-env --allow-net --allow-read
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -32,6 +32,7 @@ export const USER_TABLES: readonly UserTable[] = [
   { table: 'kyno_reports',                column: 'user_id' },
   { table: 'feedback',                    column: 'user_id' },
   { table: 'app_events',                  column: 'user_id' },
+  { table: 'user_insert_rate',            column: 'user_id' }, // hourly insert counters (20261106120000_hardening.sql)
   { table: 'profiles_backup_pre_rollback', column: 'id' },     // old profile snapshot keyed by user id
   { table: 'profiles',                    column: 'id' },
 ];

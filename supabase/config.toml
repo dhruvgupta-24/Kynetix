@@ -1,0 +1,64 @@
+# Supabase CLI config for Kynetix (linked project ref: see supabase/.temp).
+#
+# Purpose: pin the Edge Function settings in git so deploys stop drifting.
+# Only the [functions.*] tables are intended. Every other section falls back to
+# CLI defaults, which are NOT the live project's settings: do not run
+# `supabase config push` with this file (it would overwrite remote auth / API
+# settings with defaults). No secrets belong here; they live in the project's
+# function secrets (supabase/functions/.env is git-ignored).
+#
+# verify_jwt: when true, the platform gateway rejects requests without a valid
+# JWT before the function runs. Every function below also verifies the caller
+# itself with auth.getUser(), so the gateway check is defence in depth.
+# Source of truth used here: the 2026-10-16 production-hardening notes
+# ("verify_jwt is kept ON except for openai-link-verify"; openai-link-siwc has
+# it on). Where the code comments disagree, the key is left out on purpose:
+# with no verify_jwt key, `supabase functions deploy` keeps the remote value
+# (CLI resolveFunctionConfigs). Confirm those in the dashboard (Edge Functions
+# > function > Details > "Enforce JWT verification") and then set them here.
+
+project_id = "kynetix"
+
+[functions.ai-chat-router]
+enabled = true
+verify_jwt = true
+
+[functions.ai-meal-coach]
+enabled = true
+verify_jwt = true
+
+[functions.openai-link-siwc]
+enabled = true
+verify_jwt = true
+
+[functions.openai-link-status]
+enabled = true
+verify_jwt = true
+
+[functions.openai-link-poll]
+enabled = true
+verify_jwt = true
+
+[functions.openai-link-disconnect]
+enabled = true
+verify_jwt = true
+
+[functions.openai-link-verify]
+enabled = true
+# Off on production per the hardening notes; the function verifies the
+# caller's JWT itself with auth.getUser().
+verify_jwt = false
+
+[functions.openai-link-start]
+enabled = true
+# UNCONFIRMED: the file header says "verify_jwt=false", the hardening notes
+# say on. Left unset so a deploy keeps whatever production has. Set it once
+# confirmed in the dashboard.
+# verify_jwt = true
+
+[functions.delete-account]
+enabled = true
+# UNCONFIRMED: the file header says "verify_jwt = false (like the other
+# functions)", the hardening notes say on. Left unset so a deploy keeps
+# whatever production has. Set it once confirmed in the dashboard.
+# verify_jwt = true

@@ -398,9 +398,15 @@ function envInt(name: string, fallback: number): number {
 
 export interface RateTier { perMinute: number; perDay: number; }
 
-/** Requests that run on Kynetix's OpenRouter key. */
+/** Requests that run on Kynetix's shared free-tier keys (Gemini / Groq /
+ *  OpenRouter free). Kept low: those keys have per-project RPM/RPD limits
+ *  shared by every user. Env overrides: AI_RATE_PER_MINUTE, AI_RATE_PER_DAY. */
+export const STANDARD_TIER_DEFAULT: RateTier = { perMinute: 10, perDay: 60 };
 export function standardTier(): RateTier {
-  return { perMinute: envInt('AI_RATE_PER_MINUTE', 20), perDay: envInt('AI_RATE_PER_DAY', 300) };
+  return {
+    perMinute: envInt('AI_RATE_PER_MINUTE', STANDARD_TIER_DEFAULT.perMinute),
+    perDay: envInt('AI_RATE_PER_DAY', STANDARD_TIER_DEFAULT.perDay),
+  };
 }
 
 /** Requests that run on the user's own ChatGPT plan. Higher, still bounded. */
@@ -408,40 +414,53 @@ export function planTier(): RateTier {
   return { perMinute: envInt('AI_PLAN_RATE_PER_MINUTE', 40), perDay: envInt('AI_PLAN_RATE_PER_DAY', 1000) };
 }
 
+/** Global budget across all users for the shared free-tier keys. Env:
+ *  AI_GLOBAL_PER_MINUTE, AI_GLOBAL_PER_DAY; a number in system_flags
+ *  (ai_global_per_minute / ai_global_per_day) overrides both at runtime. */
+export const GLOBAL_BUDGET_DEFAULT: RateTier = { perMinute: 30, perDay: 1500 };
+export function globalBudget(): RateTier {
+  return {
+    perMinute: envInt('AI_GLOBAL_PER_MINUTE', GLOBAL_BUDGET_DEFAULT.perMinute),
+    perDay: envInt('AI_GLOBAL_PER_DAY', GLOBAL_BUDGET_DEFAULT.perDay),
+  };
+}
+
+export type QuotaScope = 'minute' | 'day' | 'images' | 'global_minute' | 'global_day' | 'disabled';
+const QUOTA_SCOPES: readonly QuotaScope[] = ['minute', 'day', 'images', 'global_minute', 'global_day', 'disabled'];
+
 export interface QuotaResult {
   allowed: boolean;
-  scope?: 'minute' | 'day';
+  scope?: QuotaScope;
   retryAfter?: number;
   dayRequests: number;
   minuteRequests: number;
   enforced: boolean; // false when the ai_usage migration is not applied yet
 }
 
-/** Atomically checks + records one request via public.ai_usage_consume. */
-export async function consumeQuota(
-  admin: any, userId: string, tier: RateTier, chars: number, images: number,
-): Promise<QuotaResult> {
-  const { data, error } = await admin.rpc('ai_usage_consume', {
-    p_user_id: userId,
-    p_chars: Math.max(0, Math.floor(chars)),
-    p_images: Math.max(0, Math.floor(images)),
-    p_per_minute: tier.perMinute,
-    p_per_day: tier.perDay,
-  });
-  if (error) {
-    // Function missing = migration not applied yet. Fail open so AI keeps
-    // working during the deploy window; caps above still apply.
-    const code = String(error.code ?? '');
-    if (code === 'PGRST202' || code === '42883') {
-      console.warn('[ai_guard] ai_usage_consume missing; rate limit not enforced');
-      return { allowed: true, dayRequests: 0, minuteRequests: 0, enforced: false };
-    }
-    throw new AiGuardError(503, 'rate_limit_unavailable', 'Kyno is busy right now. Try again in a minute.', { retry_after: 30 });
-  }
-  const d = (Array.isArray(data) ? data[0] : data) ?? {};
+export interface QuotaOptions {
+  /** Daily photo cap for this request, or null for none (only coach has one). */
+  imageCap: number | null;
+  /** True when the request will run on the shared free-tier keys. */
+  countGlobal: boolean;
+  global: RateTier;
+}
+
+function isMissingFunction(error: any): boolean {
+  const code = String(error?.code ?? '');
+  return code === 'PGRST202' || code === '42883';
+}
+
+function busyError(): AiGuardError {
+  return new AiGuardError(503, 'rate_limit_unavailable', 'Kyno is busy right now. Try again in a minute.', { retry_after: 30 });
+}
+
+/** Pure: an RPC result (object or one-row array) as a QuotaResult. */
+export function parseQuotaResult(data: unknown): QuotaResult {
+  const d: any = (Array.isArray(data) ? data[0] : data) ?? {};
+  const scope = QUOTA_SCOPES.includes(d.scope) ? d.scope as QuotaScope : undefined;
   return {
     allowed: d.allowed === true,
-    scope: d.scope === 'day' ? 'day' : d.scope === 'minute' ? 'minute' : undefined,
+    scope,
     retryAfter: typeof d.retry_after === 'number' ? Math.max(1, d.retry_after) : undefined,
     dayRequests: Number(d.day_requests ?? 0),
     minuteRequests: Number(d.minute_requests ?? 0),
@@ -449,12 +468,115 @@ export async function consumeQuota(
   };
 }
 
+/** Atomically checks + records one request via public.ai_usage_consume_v2:
+ *  kill switch, per-user minute/day limits, the daily photo cap and (when
+ *  [opts.countGlobal]) the global free-tier budget, all in one transaction.
+ *  Before that migration is applied it falls back to the legacy path
+ *  (separate photo-cap read + ai_usage_consume). */
+export async function consumeQuota(
+  admin: any, userId: string, tier: RateTier, chars: number, images: number,
+  opts: QuotaOptions = { imageCap: null, countGlobal: false, global: GLOBAL_BUDGET_DEFAULT },
+): Promise<QuotaResult> {
+  const p_chars = Math.max(0, Math.floor(chars));
+  const p_images = Math.max(0, Math.floor(images));
+  const { data, error } = await admin.rpc('ai_usage_consume_v2', {
+    p_user_id: userId,
+    p_chars,
+    p_images,
+    p_per_minute: tier.perMinute,
+    p_per_day: tier.perDay,
+    p_image_cap: opts.imageCap,
+    p_count_global: opts.countGlobal,
+    p_global_per_minute: opts.global.perMinute,
+    p_global_per_day: opts.global.perDay,
+  });
+  if (!error) return parseQuotaResult(data);
+  if (!isMissingFunction(error)) throw busyError();
+
+  // Legacy path (20261106120000_hardening.sql not applied yet).
+  console.warn('[ai_guard] ai_usage_consume_v2 missing; using legacy quota (no global budget)');
+  if (opts.imageCap !== null && p_images > 0) {
+    await enforceDailyImageCap(admin, userId, p_images, opts.imageCap);
+  }
+  const legacy = await admin.rpc('ai_usage_consume', {
+    p_user_id: userId,
+    p_chars,
+    p_images,
+    p_per_minute: tier.perMinute,
+    p_per_day: tier.perDay,
+  });
+  if (legacy.error) {
+    // Function missing = migration not applied yet. Fail open so AI keeps
+    // working during the deploy window; caps above still apply.
+    if (isMissingFunction(legacy.error)) {
+      console.warn('[ai_guard] ai_usage_consume missing; rate limit not enforced');
+      return { allowed: true, dayRequests: 0, minuteRequests: 0, enforced: false };
+    }
+    throw busyError();
+  }
+  return parseQuotaResult(legacy.data);
+}
+
+/** Charges the global free-tier budget alone, for a plan-tier request (already
+ *  counted per user) that falls back to the shared chain. Fails open only
+ *  when the function does not exist yet. */
+export async function consumeGlobalBudget(admin: any, images: number, global: RateTier): Promise<QuotaResult> {
+  const { data, error } = await admin.rpc('ai_global_consume', {
+    p_images: Math.max(0, Math.floor(images)),
+    p_global_per_minute: global.perMinute,
+    p_global_per_day: global.perDay,
+  });
+  if (error) {
+    if (isMissingFunction(error)) {
+      return { allowed: true, dayRequests: 0, minuteRequests: 0, enforced: false };
+    }
+    throw busyError();
+  }
+  return parseQuotaResult(data);
+}
+
+/** Pure: the client-facing error for a refused quota result. */
+export function quotaError(q: QuotaResult, now = new Date()): AiGuardError {
+  const scope = q.scope ?? 'minute';
+  switch (scope) {
+    case 'disabled':
+      return aiPausedError(q.retryAfter ?? 300);
+    case 'global_minute':
+    case 'global_day':
+      return aiBusyError(scope, q.retryAfter ?? (scope === 'global_day' ? secondsUntilUtcMidnight(now) : 60));
+    case 'images':
+      return imageCapError(q.retryAfter ?? secondsUntilUtcMidnight(now));
+    case 'day':
+      return rateLimitedError('day', q.retryAfter ?? secondsUntilUtcMidnight(now));
+    default:
+      return rateLimitedError('minute', q.retryAfter ?? 60);
+  }
+}
+
+/** Kill switch (system_flags.ai_disabled = true). */
+export function aiPausedError(retryAfter = 300): AiGuardError {
+  return new AiGuardError(503, 'ai_paused',
+    'Kyno is taking a short break. Try again a bit later; you can still log meals yourself.',
+    { retry_after: Math.max(1, Math.ceil(retryAfter)), scope: 'disabled' });
+}
+
+/** The shared free-tier budget for everyone is used up for now. */
+export function aiBusyError(scope: 'global_minute' | 'global_day', retryAfter: number): AiGuardError {
+  return new AiGuardError(503, 'ai_busy',
+    scope === 'global_day'
+      ? 'Kyno is very busy today and has reached its limit. It resets tomorrow; you can still log meals yourself.'
+      : 'Kyno is very busy right now. Try again in a minute.',
+    { retry_after: Math.max(1, Math.ceil(retryAfter)), scope });
+}
+
 // ── Daily image cap (coach) ─────────────────────────────────────────────────
 //
 // Vision calls are the expensive ones. The coach path may carry up to 6 photos
 // per request; this caps photos per user per UTC day using the `images`
-// counter that ai_usage_consume already maintains. (The counter includes
-// label_read photos too: one per scan.)
+// counter in public.ai_usage. (The counter includes label_read photos too:
+// one per scan.) The cap is enforced inside ai_usage_consume_v2, atomically
+// with the increment; enforceDailyImageCap below is only the legacy
+// pre-migration path.
 //
 // Model choice is unchanged. Trying a cheaper vision model first (e.g. Flash
 // before Pro in OPENROUTER_VISION_MODELS) is an owner decision, not made here.
@@ -474,10 +596,11 @@ export function imageCapError(retryAfter: number): AiGuardError {
     { retry_after: Math.max(1, Math.ceil(retryAfter)), scope: 'images' });
 }
 
-/** Throws a 429 { error:'rate_limited', scope:'images', retry_after } when
- *  this request's photos would take the user over today's cap. Checked
- *  before ai_usage_consume, so a rejected request is not counted. Fails open
- *  only when the ai_usage table is missing (migration not applied). */
+/** Legacy (pre ai_usage_consume_v2) photo cap: a read before the separate
+ *  increment, so two concurrent requests could both pass. Throws a 429
+ *  { error:'rate_limited', scope:'images', retry_after } when this request's
+ *  photos would take the user over today's cap. Fails open only when the
+ *  ai_usage table is missing (migration not applied). */
 export async function enforceDailyImageCap(
   admin: any, userId: string, requested: number, cap = coachImagesPerDay(), now = new Date(),
 ): Promise<void> {
@@ -496,7 +619,7 @@ export async function enforceDailyImageCap(
       console.warn('[ai_guard] ai_usage missing; image cap not enforced');
       return;
     }
-    throw new AiGuardError(503, 'rate_limit_unavailable', 'Kyno is busy right now. Try again in a minute.', { retry_after: 30 });
+    throw busyError();
   }
   const used = Number(data?.images ?? 0);
   if (imageCapExceeded(Number.isFinite(used) ? used : 0, requested, cap)) {

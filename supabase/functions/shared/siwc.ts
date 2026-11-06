@@ -241,6 +241,72 @@ export async function drainSiwcStream(res: Response): Promise<string> {
   throw new SiwcApiError(0, 'stream_ended_early', 'unknown');
 }
 
+// ── Revocation (sign out / disconnect / account deletion) ────────────────────
+//
+// Docs (profiles-and-sessions): "Send a form-encoded POST with
+// token=<REFRESH_TOKEN>, token_type_hint=refresh_token, and the issued
+// client_id" to the revocation_endpoint in
+// https://auth.openai.com/.well-known/openid-configuration (checked
+// 2026-11-06: https://auth.openai.com/api/accounts/oauth/revoke). An empty
+// 200 is success, also for an already-invalid token. Revoking the session
+// does not delete the registered client, so oauth_client_id is kept.
+//
+// Only Sign in with ChatGPT links are revoked. Legacy device-code links
+// (auth_method 'codex_device') use the Codex CLI's client id and the
+// https://auth.openai.com/oauth/token endpoint; there is no documented
+// revocation for that flow, so they are skipped (cleared locally only).
+
+export const SIWC_REVOKE_URL = 'https://auth.openai.com/api/accounts/oauth/revoke';
+export const REVOKE_HEADERS_TIMEOUT_MS = 8_000;
+export const REVOKE_TOTAL_TIMEOUT_MS   = 10_000;
+
+export type RevokeOutcome = 'revoked' | 'failed' | 'skipped';
+
+/** Pure: what to revoke for a stored link, or null when nothing is
+ *  revocable (not siwc, or no refresh token / client id). */
+export function siwcRevocationTarget(link: unknown): { refreshToken: string; clientId: string } | null {
+  if (!link || typeof link !== 'object') return null;
+  const l = link as Record<string, unknown>;
+  if (l.auth_method !== 'siwc') return null;
+  const refreshToken = typeof l.refresh_token === 'string' ? l.refresh_token.trim() : '';
+  const clientId = typeof l.oauth_client_id === 'string' ? l.oauth_client_id.trim() : '';
+  return refreshToken && clientId ? { refreshToken, clientId } : null;
+}
+
+/** Pure: the form body for the revocation request. */
+export function siwcRevokeBody(refreshToken: string, clientId: string): string {
+  return new URLSearchParams({
+    token:           refreshToken,
+    token_type_hint: 'refresh_token',
+    client_id:       clientId,
+  }).toString();
+}
+
+/** Best effort, one attempt with a short deadline: never throws, never logs
+ *  the token or the response body. */
+export async function revokeSiwcLink(
+  link: unknown,
+  fetcher: (url: string, init: RequestInit) => Promise<Response> =
+    (url, init) => timedFetch(url, init, REVOKE_HEADERS_TIMEOUT_MS, REVOKE_TOTAL_TIMEOUT_MS),
+): Promise<RevokeOutcome> {
+  const target = siwcRevocationTarget(link);
+  if (!target) return 'skipped';
+  try {
+    const res = await fetcher(SIWC_REVOKE_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    siwcRevokeBody(target.refreshToken, target.clientId),
+    });
+    try { await res.body?.cancel(); } catch { /* ignore */ }
+    if (res.ok) return 'revoked';
+    console.warn(`[siwc] revoke failed status=${res.status}`);
+    return 'failed';
+  } catch (err: any) {
+    console.warn(`[siwc] revoke failed ${err?.name ?? 'Error'}`);
+    return 'failed';
+  }
+}
+
 // ── Model selection (used at link time and by openai-link-verify) ───────────
 
 export interface SiwcSelection {

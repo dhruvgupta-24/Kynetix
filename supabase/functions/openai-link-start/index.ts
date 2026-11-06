@@ -13,6 +13,7 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { AUTH_HEADERS_TIMEOUT_MS, AUTH_TOTAL_TIMEOUT_MS, timedFetch } from "../shared/timed_fetch.ts";
+import { LEGACY_DEVICE_LINK_GONE, legacyDeviceLinkAllowed } from "../shared/legacy_link.ts";
 
 declare const Deno: any;
 
@@ -36,6 +37,13 @@ const SESSION_TTL_MINUTES = 15;
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+
+  // ── 0. Retired unless explicitly re-enabled (shared/legacy_link.ts) ───────
+  // Existing device-code links keep working; only NEW links are refused.
+  if (!legacyDeviceLinkAllowed((k: string) => Deno.env.get(k))) {
+    console.log('[openai-link-start] refused: legacy device-code linking is retired');
+    return json(LEGACY_DEVICE_LINK_GONE, 410);
   }
 
   try {
