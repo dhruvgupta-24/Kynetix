@@ -5,8 +5,9 @@ import 'profile_service.dart';
 ///
 /// Same app, with four differences, all keyed off the birthday:
 ///  * a parent or guardian says yes first (GuardianService, DPDP Act s.9);
-///  * no AI (Kyno, AI meal estimates, label reading). Google's Gemini terms
-///    do not allow under-18 users, and the server enforces the same rule;
+///  * AI only on providers whose terms allow teens (OpenAI, Groq, or their own
+///    ChatGPT), never Gemini or OpenRouter, with teen safety rules added and
+///    risky messages moderated. All of that is enforced on the server;
 ///  * no product analytics (no behavioural tracking of children, s.9(3));
 ///  * energy targets sized for a growing body (IOM estimated energy
 ///    requirement for 9 to 18 year olds) and never set below maintenance.

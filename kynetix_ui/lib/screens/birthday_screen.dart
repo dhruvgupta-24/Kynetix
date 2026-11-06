@@ -277,7 +277,7 @@ class _Rules extends StatelessWidget {
         'Rest day is allowed. So is a heavy single, your call.',
         'Cake counts as carbs. We checked.',
         if (age == 18)
-          'Teen mode is done. Kyno, our AI, is yours from today.'
+          'Teen mode is done. Full Kyno, no training wheels.'
         else if (age < 18)
           'Growing is a full-time job. Eat like it.'
         else

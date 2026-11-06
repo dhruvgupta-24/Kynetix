@@ -10,7 +10,6 @@ import 'personal_nutrition_memory.dart';
 import 'meal_memory.dart';
 import 'ai_router_error.dart';
 import 'internal/net_timeouts.dart';
-import 'teen_mode.dart';
 
 class AiEscalationContext {
   final String localInterpretation;
@@ -46,9 +45,9 @@ class AiNutritionService {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /// Routing is handled by the backend ai-chat-router. Off in teen mode
-  /// (no AI under 18), so the pipeline estimates on the phone instead.
-  bool get isConfigured => !TeenMode.active;
+  /// Always configured; routing is handled by the backend ai-chat-router
+  /// (which sends teen accounts to teen-safe providers only).
+  bool get isConfigured => true;
 
   static String get modelName => 'ai-chat-router';
 
@@ -63,7 +62,6 @@ class AiNutritionService {
     if (mockEstimate != null) {
       return mockEstimate!(rawInput, context: context);
     }
-    if (TeenMode.active) throw AiRouterException.teen;
     debugPrint('[AI] estimating: "$rawInput"');
 
     // ── Route through backend ai-chat-router ─────────────────────────────────

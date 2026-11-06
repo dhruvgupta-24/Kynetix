@@ -16,8 +16,8 @@ enum AiRouterErrorKind {
   /// 413: message too long, too many messages, or too many / too large photos.
   tooLarge,
 
-  /// 403 'teen_mode': the account is under 18, so AI is off until the 18th
-  /// birthday (Gemini's terms; the server enforces it too).
+  /// 403 'parent_consent_required': a teen account whose parent has not
+  /// said yes (or switched it off). Kyno waits for that OK.
   teenMode,
 
   /// Anything else (400 unknown_purpose, 5xx, network, malformed body).
@@ -54,10 +54,9 @@ class AiRouterException implements Exception {
   static const tooLargeMessage =
       "That's a bit too long. Try a shorter message or fewer photos.";
   static const genericMessage = "Kyno couldn't answer just now. Try again.";
-  static const teenModeMessage = 'Kyno unlocks when you turn 18. Everything else is all yours.';
+  static const teenModeMessage = 'Kyno needs a parent to say yes first. Send them the link from the app.';
 
-  /// Thrown before any request leaves a teen's phone.
-  static const teen = AiRouterException(AiRouterErrorKind.teenMode, status: 403, code: 'teen_mode');
+  static const teen = AiRouterException(AiRouterErrorKind.teenMode, status: 403, code: 'parent_consent_required');
 
   /// Copy safe to show as-is.
   String get userMessage => switch (kind) {
@@ -102,7 +101,7 @@ class AiRouterException implements Exception {
         retryAfterSeconds: retryAfter,
       );
     }
-    if (status == 403 && code == 'teen_mode') return AiRouterException.teen;
+    if (status == 403 && (code == 'parent_consent_required' || code == 'teen_mode')) return AiRouterException.teen;
     if (status == 413) {
       return AiRouterException(AiRouterErrorKind.tooLarge,
           status: status, code: code);

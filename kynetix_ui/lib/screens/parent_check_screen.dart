@@ -179,9 +179,9 @@ class _ParentCheckPanelState extends State<ParentCheckPanel> {
             ),
             const _Perk(
               icon: Icons.auto_awesome_outlined,
-              title: 'Kyno sits this one out',
-              body: 'Our AI unlocks on your 18th. Logging, workouts, PRs, streaks, '
-                  'all of that is yours right now.',
+              title: 'Kyno, with teen rules',
+              body: 'Our AI coach is on, running on AI built to allow teens, with extra '
+                  'safety rules: no diet talk, no supplements, real help if things get heavy.',
             ),
             const _Perk(
               icon: Icons.visibility_off_outlined,

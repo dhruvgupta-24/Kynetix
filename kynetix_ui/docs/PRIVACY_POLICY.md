@@ -16,7 +16,7 @@ Kynetix is made and run by **Dhruv Gupta**, an individual developer based in Ind
 - AI answers are estimates, not medical advice.
 - We do not sell your data. We do not show ads. We do not use third-party analytics, advertising or tracking tools.
 - You can delete your account and everything in it from inside the app, at any time. It happens straight away.
-- Kynetix is for people aged 13 and over. From 13 to 17 it runs in teen mode: a parent or guardian agrees first, AI and analytics stay off, and food targets never drop below what a growing body needs. We work your age out from the date of birth you give us; you never tick an age box.
+- Kynetix is for people aged 13 and over. From 13 to 17 it runs in teen mode: a parent or guardian agrees first, AI runs only on teen-safe providers with extra safety rules, analytics stay off, and food targets never drop below what a growing body needs. We work your age out from the date of birth you give us; you never tick an age box.
 
 ---
 
@@ -120,6 +120,7 @@ Kynetix uses third-party AI models to estimate nutrition and to power Kyno. AI f
 **Who processes it**
 
 - **Google (Gemini API), Groq and OpenRouter.** Our servers send each request to one of these. OpenRouter passes requests on to the company that makes the chosen model, for example Google, NVIDIA or DeepSeek.
+- **OpenAI's API, for teen accounts only.** Requests from teen mode (ages 13 to 17) go to OpenAI's API using Kynetix's own key, plus OpenAI's moderation check on messages to Kyno. OpenAI does not use API data to train its models by default and keeps it for up to 30 days for abuse monitoring.
 - **OpenAI, only if you choose "Connect ChatGPT".** Your requests then go to OpenAI using your own ChatGPT account, and OpenAI's handling follows your ChatGPT settings and OpenAI's privacy policy. We ask OpenAI not to store these conversations. We store the sign-in tokens needed to make requests for you on our servers and delete them when you disconnect.
 
 These providers are based outside India, mainly in the United States.
@@ -204,7 +205,7 @@ Kynetix is for people aged 13 and over. The app will not create a profile for an
 
 - The app asks the teen to share a link with a parent or guardian. Until the parent says yes, the app stays locked, and we hold only what we need to ask: the teen's sign-in details, date of birth and first name.
 - The parent opens the link, reads what Kynetix keeps, and agrees or refuses. As a record of consent we keep their name, their relation to the teen, their birth year and the time. The link itself is stored only as a one-way hash.
-- AI features are off: no Kyno, no AI meal estimates and no label reading. Nothing from a teen's account goes to an AI provider. Google's Gemini API, one of our providers, is for adults only.
+- AI features work, with limits. A teen's requests go only to providers whose terms allow teens: OpenAI's API (using Kynetix's key), Groq, or the teen's own ChatGPT account if they connect one. They never go to Google Gemini or OpenRouter, which are for adults only. Kyno follows extra teen safety rules (no dieting, fasting or supplement advice, and real help with a helpline if something sounds serious), and free-text messages to Kyno are first checked by OpenAI's moderation service for signs of self-harm or other risks.
 - Product analytics (Section 2.10) are off. We never track a teen's behaviour or target them with ads.
 - Calorie targets use an energy equation made for teenagers and are never set below maintenance, whatever goal is picked.
 - The parent can withdraw consent at any time by opening the same link. The teen's app locks straight away. Their data stays until the teen or parent deletes the account, in the app or by email, and we delete it as described in Section 8.

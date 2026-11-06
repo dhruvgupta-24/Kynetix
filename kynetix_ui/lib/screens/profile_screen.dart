@@ -635,7 +635,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _buildNutritionTargetsCard(),
       _buildLiftingMetricsCard(),
       _buildHealthCard(),
-      if (TeenMode.isMinor(_profile)) _buildTeenCard() else _buildAiCard(),
+      if (TeenMode.isMinor(_profile)) _buildTeenCard(),
+      _buildAiCard(),
       _buildLibraryAndInsightsCard(),
       _buildFeedbackCard(),
       _buildAboutCard(),
@@ -1267,9 +1268,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text("On, with a parent's OK", style: KText.bodyMedium.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: KSpacing.xs),
               Text(
-                'Targets built for a growing body, no AI, no analytics. '
-                '${unlock == null ? 'It ends on your 18th birthday' : 'It ends on ${formatBirthday(unlock)}'}, '
-                'and Kyno unlocks the same day.',
+                'Targets built for a growing body, Kyno with teen safety rules, and no analytics. '
+                '${unlock == null ? 'It ends on your 18th birthday' : 'It ends on ${formatBirthday(unlock)}'}.',
                 style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 14, height: 1.45),
               ),
             ],

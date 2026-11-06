@@ -81,22 +81,16 @@ void main() {
     });
   });
 
-  group('no AI and no analytics in teen mode', () {
-    test('meal estimates stay on the phone', () async {
+  group('AI on with teen rules, analytics off', () {
+    test('meal estimates still go to the server for teens (it picks teen-safe providers)', () {
       TeenMode.debugOverride = true;
-      expect(AiNutritionService.instance.isConfigured, isFalse);
-      await expectLater(
-        AiNutritionService.instance.estimateWithContext('2 roti'),
-        throwsA(isA<AiRouterException>().having((e) => e.kind, 'kind', AiRouterErrorKind.teenMode)),
-      );
-      TeenMode.debugOverride = false;
       expect(AiNutritionService.instance.isConfigured, isTrue);
     });
 
-    test("the server's 403 teen_mode reads as teen mode, with calm copy", () {
-      final e = AiRouterException.fromResponse(403, {'error': 'teen_mode'});
+    test("the server's 403 parent_consent_required reads as teen mode, with calm copy", () {
+      final e = AiRouterException.fromResponse(403, {'error': 'parent_consent_required'});
       expect(e.kind, AiRouterErrorKind.teenMode);
-      expect(e.userMessage, contains('18'));
+      expect(e.userMessage, contains('parent'));
       expect(AiRouterException.fromResponse(403, {'error': 'forbidden'}).kind, AiRouterErrorKind.generic);
     });
 
@@ -172,7 +166,7 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      expect(find.text('Kyno sits this one out'), findsOneWidget);
+      expect(find.text('Kyno, with teen rules'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('parent-send-link')));
       // The waiting card spins, so pump instead of settling.
       await tester.pump();

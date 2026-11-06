@@ -491,11 +491,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     }
 
     if (!saved || !mounted) return;
-    // Saved: on to the optional last chapter. Teens skip it (no AI under 18).
-    if (_teen) {
-      _finishAiChapter();
-      return;
-    }
+    // Saved: on to the optional last chapter.
     _goTo(_aiChapter);
   }
 
