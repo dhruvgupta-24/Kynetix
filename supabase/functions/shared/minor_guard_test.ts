@@ -1,5 +1,5 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { lastUserText, TEEN_FLAGGED_NOTE, TEEN_SAFETY_RULES, withTeenSafety } from './minor_guard.ts';
+import { keywordRisk, lastUserText, sseOf, TEEN_CRISIS_REPLY, TEEN_FLAGGED_NOTE, TEEN_SAFETY_RULES, withTeenSafety } from './minor_guard.ts';
 import { buildTeenChain, chatBody } from './free_providers.ts';
 
 Deno.test('teen rules fold into the first system message (the Codex path reads only that one)', () => {
@@ -20,12 +20,13 @@ Deno.test('last user text reads strings and text parts', () => {
   assertEquals(lastUserText([]), '');
 });
 
-Deno.test('teen chain: OpenAI then Groq, never Gemini or OpenRouter; TEEN_AI=off empties it', () => {
+Deno.test('teen chain: Groq then OpenAI, never Gemini or OpenRouter; TEEN_AI=off empties it', () => {
   const env: Record<string, string> = { GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o', OPENAI_API_KEY: 'k', GROQ_API_KEY: 'q' };
   const chain = buildTeenChain((k) => env[k], false);
   assert(chain.length > 0);
   assert(chain.every((a) => a.provider === 'openai' || a.provider === 'groq'));
-  assertEquals(chain[0].provider, 'openai');
+  assertEquals(chain[0].provider, 'groq');
+  assertEquals(chain.filter((a) => a.provider === 'groq').length, 3);
   assertEquals(buildTeenChain((k) => ({ ...env, TEEN_AI: 'off' } as Record<string, string>)[k], false), []);
   assertEquals(buildTeenChain((k) => ({ GEMINI_API_KEY: 'g' } as Record<string, string>)[k], true), []);
 });
@@ -41,4 +42,22 @@ Deno.test('OpenAI bodies use max_completion_tokens; reasoning models drop temper
   const m = chatBody(mini, [], 500, true);
   assertEquals(m.temperature, 0.25);
   assertEquals(m.max_completion_tokens, 500);
+});
+
+Deno.test('keyword risk catches self-harm and eating-disorder phrases, not gym talk', () => {
+  for (const t of ['i keep thinking about hurting myself', 'I want to kill myself', 'thinking about suicide',
+    'i throw up after eating', "I don't want to live anymore", 'i have been starving myself', 'self-harm']) {
+    assert(keywordRisk(t), t);
+  }
+  for (const t of ['this workout is killing me', 'cut phase macros?', 'my legs hurt after squats', 'is 2 roti ok']) {
+    assert(!keywordRisk(t), t);
+  }
+});
+
+Deno.test('the crisis reply has the helpline and streams as one SSE message', () => {
+  assert(TEEN_CRISIS_REPLY.includes('14416') && TEEN_CRISIS_REPLY.includes('112'));
+  assert(!/[\u2013\u2014]/.test(TEEN_CRISIS_REPLY));
+  const sse = sseOf('hi');
+  assert(sse.startsWith('data: {') && sse.trimEnd().endsWith('data: [DONE]'));
+  assertEquals(JSON.parse(sse.split('\n\n')[0].slice(6)).choices[0].delta.content, 'hi');
 });

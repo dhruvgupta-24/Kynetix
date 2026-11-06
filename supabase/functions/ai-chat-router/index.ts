@@ -53,7 +53,7 @@ import {
   type GuardedRequest,
   type QuotaResult,
 } from "../shared/ai_guard.ts";
-import { lastUserText, moderationFlagsRisk, resolveAiAudience, teenAiOffError, withTeenSafety } from "../shared/minor_guard.ts";
+import { keywordRisk, lastUserText, moderationFlagsRisk, resolveAiAudience, sseOf, TEEN_CRISIS_REPLY, teenAiOffError, withTeenSafety } from "../shared/minor_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
 import { buildFallbackChain, buildTeenChain, chatBody, type ProviderAttempt } from "../shared/free_providers.ts";
@@ -722,6 +722,7 @@ Deno.serve(async (req: Request) => {
     // ── Teen mode (13 to 17): a parent's OK, teen-safe providers only, and
     // teen safety rules in the prompt (shared/minor_guard.ts) ─────────────────
     let audience: 'adult' | 'teen';
+    let teenFlagged = false;
     try {
       audience = await resolveAiAudience(supabaseAdmin, user.id);
     } catch (e) {
@@ -732,11 +733,12 @@ Deno.serve(async (req: Request) => {
       throw e;
     }
     if (audience === 'teen' && !JSON_ONLY_PURPOSES.includes(guarded.purpose)) {
-      const flagged = guarded.purpose === 'coach'
-        ? await moderationFlagsRisk(lastUserText(messages), Deno.env.get('OPENAI_API_KEY'))
-        : false;
-      if (flagged) console.warn(`[AI ROUTER] teen message flagged user=${user.id}`);
-      messages = withTeenSafety(messages, flagged);
+      if (guarded.purpose === 'coach') {
+        const said = lastUserText(messages);
+        teenFlagged = keywordRisk(said) || await moderationFlagsRisk(said, Deno.env.get('OPENAI_API_KEY'));
+      }
+      if (teenFlagged) console.warn(`[AI ROUTER] teen message flagged user=${user.id}`);
+      messages = withTeenSafety(messages, teenFlagged);
     }
 
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
@@ -898,6 +900,12 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      if (teenFlagged) {
+        // A teen's risky message always gets the helpline, AI or not.
+        return new Response(sseOf(TEEN_CRISIS_REPLY), {
+          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Provider-Used': 'safety' },
+        });
+      }
       return new Response(JSON.stringify({ success: false, error: 'All providers failed for streaming' }), {
         status: 503, headers: JSON_HEADERS,
       });
@@ -998,6 +1006,12 @@ Deno.serve(async (req: Request) => {
       }
     }
     console.error(`[AI ROUTER] all providers failed. lastErr=${lastErr.slice(0, 120)}`);
+    if (teenFlagged) {
+      // A teen's risky message always gets the helpline, AI or not.
+      return new Response(JSON.stringify({
+        success: true, provider_used: 'safety', model_used: 'none', response: TEEN_CRISIS_REPLY, fallback_used: true,
+      }), { status: 200, headers: JSON_HEADERS });
+    }
     // Only the upstream HTTP status (no bodies): 401 = bad key, 402 = out of
     // credits, 429 = rate limited. Lets the app and ops tell these apart.
     const upstream = /HTTP (\d{3})/.exec(lastErr)?.[1];

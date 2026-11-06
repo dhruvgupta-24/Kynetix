@@ -45,7 +45,11 @@ export const GEMINI_TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 export const GEMINI_VISION_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 
 // Groq free plan. qwen3.8-27b is Groq's generally-available vision model.
-export const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
+// llama-3.3-70b-versatile returned 404 model_not_found on this account
+// (2026-11-07), so the second slot is gpt-oss-20b.
+export const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+// Teen chain: three models with separate free-tier rate limits.
+export const GROQ_TEEN_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'];
 export const GROQ_VISION_MODELS = ['qwen/qwen3.8-27b'];
 
 // OpenRouter: free models only by default (the account has no credit).
@@ -100,8 +104,9 @@ export function isOpenAiReasoningModel(model: string): boolean {
   return /^(gpt-5|o\d)/.test(model);
 }
 
-/** The chain for a teen account: OpenAI (Kynetix's key), then Groq, whose
- *  services agreement covers apps used by minors. Never Gemini or OpenRouter. */
+/** The chain for a teen account: Groq, whose services agreement covers apps
+ *  used by minors, then OpenAI's API (allowed for under-18 users with
+ *  safeguards). Never Gemini or OpenRouter. */
 export function buildTeenChain(env: EnvGet, imageRequest: boolean): ProviderAttempt[] {
   if ((env('TEEN_AI') ?? '').trim().toLowerCase() === 'off') return [];
   const out: ProviderAttempt[] = [];
@@ -111,12 +116,12 @@ export function buildTeenChain(env: EnvGet, imageRequest: boolean): ProviderAtte
       out.push({ provider, model, endpoint, apiKey, headers: {}, extraBody: extraBodyFor(provider, model), reasoningHeadroom: reasoningHeadroomFor(provider, model) });
     }
   };
+  add('groq', GROQ_URL, (env('GROQ_API_KEY') ?? '').trim(), imageRequest
+    ? modelList(env, 'GROQ_VISION_MODELS', GROQ_VISION_MODELS)
+    : modelList(env, 'GROQ_TEEN_TEXT_MODELS', GROQ_TEEN_TEXT_MODELS));
   add('openai', OPENAI_URL, (env('OPENAI_API_KEY') ?? '').trim(), imageRequest
     ? modelList(env, 'OPENAI_TEEN_VISION_MODELS', OPENAI_TEEN_VISION_MODELS)
     : modelList(env, 'OPENAI_TEEN_MODELS', OPENAI_TEEN_MODELS));
-  add('groq', GROQ_URL, (env('GROQ_API_KEY') ?? '').trim(), imageRequest
-    ? modelList(env, 'GROQ_VISION_MODELS', GROQ_VISION_MODELS)
-    : modelList(env, 'GROQ_TEXT_MODELS', GROQ_TEXT_MODELS));
   return out;
 }
 

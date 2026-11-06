@@ -104,3 +104,39 @@ export async function moderationFlagsRisk(text: string, apiKey: string | undefin
     return false;
   }
 }
+
+// Words that point to self-harm or an eating disorder. A backup for (and in
+// addition to) OpenAI moderation, which needs a working OpenAI key.
+const RISK_PATTERNS: RegExp[] = [
+  /\b(kill|hurt|hurting|harm|harming|cut|cutting|starve|starving)\s+(myself|my\s*self)\b/i,
+  /\bsuicid/i,
+  /\bself[\s-]?harm/i,
+  /\bend\s+(my|it)\s+(life|all)\b/i,
+  /\b(don'?t|do not)\s+want\s+to\s+(live|be\s+alive|exist)\b/i,
+  /\bwant\s+to\s+die\b/i,
+  /\b(throw(ing)?\s+up|vomit(ing)?|purg(e|ing))\s+(after|my\s+food|on\s+purpose)/i,
+  /\b(anorexi|bulimi)/i,
+  /\bnot\s+eat(ing)?\s+(at\s+all|for\s+days)\b/i,
+];
+
+export function keywordRisk(text: string): boolean {
+  return RISK_PATTERNS.some((r) => r.test(text));
+}
+
+/** The fixed answer when a teen's risky message can't get an AI reply. */
+export const TEEN_CRISIS_REPLY = [
+  "I'm really glad you told me. What you're feeling matters, and you don't have to deal with it alone.",
+  '',
+  'Please talk to a parent or another adult you trust today, even if it feels hard to start. You can also call Tele-MANAS, '
+    + "India's free mental health helpline, any time, day or night: 14416 or 1-800-891-4416. If you might act on these "
+    + 'thoughts right now, call 112.',
+  '',
+  "Food and training can wait. I'm here whenever you want to talk.",
+].join('\n');
+
+/** [text] as a Chat Completions SSE stream (what the app reads when streaming). */
+export function sseOf(text: string): string {
+  const chunk = { choices: [{ index: 0, delta: { content: text }, finish_reason: null }] };
+  const end = { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  return `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(end)}\n\ndata: [DONE]\n\n`;
+}
