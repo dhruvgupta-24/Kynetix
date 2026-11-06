@@ -52,6 +52,7 @@ import {
   type GuardedRequest,
   type QuotaResult,
 } from "../shared/ai_guard.ts";
+import { assertAdultForAi } from "../shared/minor_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
 import { buildFallbackChain, chatBody, type ProviderAttempt } from "../shared/free_providers.ts";
@@ -716,6 +717,17 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
+
+    // ── Teen mode: no AI under 18 (checked before any provider or quota) ─────
+    try {
+      await assertAdultForAi(supabaseAdmin, user.id);
+    } catch (e) {
+      if (e instanceof AiGuardError) {
+        console.warn(`[AI ROUTER] rejected user=${user.id} code=${e.code}`);
+        return jsonError(e, corsHeaders);
+      }
+      throw e;
+    }
 
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────
     const userProvider = await getUserChatGptProvider(supabaseAdmin, user.id);

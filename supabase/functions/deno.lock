@@ -1,7 +1,9 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/encoding@*": "1.0.10",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@supabase/functions-js@*": "2.101.1",
     "npm:@supabase/supabase-js@2": "2.44.2",
     "npm:@supabase/supabase-js@2.44.2": "2.44.2",
@@ -9,8 +11,17 @@
     "npm:openai@^4.52.5": "4.104.0"
   },
   "jsr": {
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
     "@std/encoding@1.0.10": {
       "integrity": "8783c6384a2d13abd5e9e87a7ae0520a30e9f56aeeaa3bdf910a3eaaf5c811a1"
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
     },
     "@supabase/functions-js@2.101.1": {
       "integrity": "ebcb65273c71ba26ba7c6f65eeac5c60deed7825ac27d799c18a1e94146b1fe7",

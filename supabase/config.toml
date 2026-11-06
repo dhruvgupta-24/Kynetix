@@ -58,3 +58,9 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 # Confirmed on production 2026-11-06: verify_jwt is on.
+
+[functions.guardian-consent]
+enabled = true
+verify_jwt = false
+# Public on purpose: a parent opens the consent link without an account.
+# The teen's actions check the JWT inside; the parent's use a 256-bit token.

@@ -11,7 +11,8 @@
 
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { INTERNAL_HEADER, INTERNAL_SECRET_ENV, internalSecret } from "../shared/ai_guard.ts";
+import { AiGuardError, INTERNAL_HEADER, INTERNAL_SECRET_ENV, internalSecret } from "../shared/ai_guard.ts";
+import { assertAdultForAi } from "../shared/minor_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
 import { coachInputError, coachPortionHint, MAX_COACH_HISTORY, MAX_COACH_HISTORY_ITEM_CHARS } from "./limits.ts";
@@ -796,6 +797,19 @@ Deno.serve(async (req: Request) => {
       SUPABASE_URL(),
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    // Teen mode: no AI under 18.
+    try {
+      await assertAdultForAi(supabaseAdmin, user.id);
+    } catch (e) {
+      if (e instanceof AiGuardError) {
+        console.warn(`[ai-meal-coach] rejected user=${user.id} code=${e.code}`);
+        return new Response(JSON.stringify({ success: false, error: e.code, message: e.userMessage, ...e.extra }), {
+          status: e.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      throw e;
+    }
 
     // ── Parse request (bounded; never buffers more than 10 MiB) ──────────────
     let body: any;
