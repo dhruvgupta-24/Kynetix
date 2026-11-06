@@ -63,7 +63,7 @@ PAGES = {
     "terms/index.html": dict(
         path="terms/", p="../", crumb="Terms of use",
         title="Terms of Use | Kynetix Calorie and Workout Tracker App",
-        desc="The terms for using Kynetix, the Android calorie and workout tracker: 18 and over, not medical advice, AI can be wrong, fair use and Indian law.",
+        desc="The terms for using Kynetix, the Android calorie and workout tracker: 13 and over, teen mode under 18, not medical advice, AI can be wrong, Indian law.",
         og="og-terms.png", og_alt="Kynetix terms of use: short, plain-language rules for using the app."),
     "delete-account/index.html": dict(
         path="delete-account/", p="../", crumb="Delete your account",
@@ -262,7 +262,7 @@ facts = [
     "Price: free during early access. No ads.",
     "Made by: Dhruv Gupta, an independent developer in India.",
     "Contact: " + EMAIL + ", or in the app under Profile > Talk to us.",
-    "Age: 18 and over. The app asks your date of birth, not a tick box.",
+    "Age: 13 and over. 13 to 17 runs in teen mode: a parent or guardian agrees first, no AI, no analytics, and food targets never below maintenance. The app asks your date of birth, not a tick box.",
     "Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Export all your data any time (Settings > Export my data). Account and data deletion inside the app.",
     "Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.",
     "AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked), only when an AI feature is used. Kynetix does not train models on user data. Some free tiers (the Gemini API free tier, some free OpenRouter models) may keep requests to improve their products; connecting your own ChatGPT or not using AI avoids that. Estimates, not medical advice.",
@@ -273,7 +273,7 @@ links = [
     ("Home", "", "What Kynetix does: food logging in plain words, training, Kyno, widgets, share cards, FAQ."),
     ("About and press kit", "about/", "Key facts, founder, brand files, screenshots and contact."),
     ("Privacy policy", "privacy/", "What is collected, why, AI providers, retention, deletion and rights under India's DPDP Act."),
-    ("Terms of use", "terms/", "Rules for using Kynetix: 18 and over, not medical advice, AI can be wrong."),
+    ("Terms of use", "terms/", "Rules for using Kynetix: 13 and over (teen mode under 18), not medical advice, AI can be wrong."),
     ("Delete your account", "delete-account/", "How to delete a Kynetix account and its data, in the app or by email."),
 ]
 llms = ["# Kynetix", "", "> " + DEFINITION, "", "## Key facts", ""] + ["- " + x for x in facts] + ["", "## Pages", ""] + \

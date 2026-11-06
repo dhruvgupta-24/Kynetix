@@ -71,7 +71,7 @@
 <div class="wrap">
 <header class="legal-head">
 <h1 class="shear">Privacy policy</h1>
-<p>What Kynetix collects, why, who it goes to, and how to get it deleted. Plain words, no fine print tricks.</p><div class="meta"><span>Effective 6 November 2026</span><span>Last updated: 6 November 2026</span><span>Applies to the Kynetix Android app</span></div>
+<p>What Kynetix collects, why, who it goes to, and how to get it deleted. Plain words, no fine print tricks.</p><div class="meta"><span>Effective 7 November 2026</span><span>Last updated: 7 November 2026</span><span>Applies to the Kynetix Android app</span></div>
 </header>
 <div class="legal-grid">
 <aside class="toc"><div class="inner"><details><summary><span class="t-label">On this page</span><span class="t-now" aria-hidden="true"></span></summary><ol><li><a href="#1-the-short-version">The short version</a></li><li><a href="#2-what-we-collect">What we collect</a></li><li><a href="#3-how-we-use-your-information">How we use your information</a></li><li><a href="#4-ai-features-and-your-data">AI features and your data</a></li><li><a href="#5-who-we-share-data-with">Who we share data with</a></li><li><a href="#6-transfers-outside-india">Transfers outside India</a></li><li><a href="#7-how-long-we-keep-data">How long we keep data</a></li><li><a href="#8-your-rights">Your rights</a></li><li><a href="#9-children">Children</a></li><li><a href="#10-security">Security</a></li><li><a href="#11-contact-and-grievance-officer">Contact and Grievance Officer</a></li><li><a href="#12-changes-to-this-policy">Changes to this policy</a></li><li><a href="#13-third-party-terms-and-open-source">Third-party terms and open source</a></li></ol></details></div></aside>
@@ -87,18 +87,18 @@
 <li>AI answers are estimates, not medical advice.</li>
 <li>We do not sell your data. We do not show ads. We do not use third-party analytics, advertising or tracking tools.</li>
 <li>You can delete your account and everything in it from inside the app, at any time. It happens straight away.</li>
-<li>Kynetix is for people aged 18 and over. We work your age out from the date of birth you give us; you never tick an "I'm 18" box.</li>
+<li>Kynetix is for people aged 13 and over. From 13 to 17 it runs in teen mode: a parent or guardian agrees first, AI and analytics stay off, and food targets never drop below what a growing body needs. We work your age out from the date of birth you give us; you never tick an age box.</li>
 </ul>
 
 <h2 id="2-what-we-collect">2. What we collect</h2>
 <h3 id="21-account-details">2.1 Account details</h3>
 <ul>
 <li>Your email address and password, or your Google account if you choose "Continue with Google". Google shares your name, email address and a sign-in token with us. If your sign-in uses a phone number, we keep that number with your account.</li>
-<li>A record that you agreed to this policy: the policy version, the time you agreed, and that the date of birth you gave makes you 18 or older.</li>
+<li>A record that you agreed to this policy: the policy version, the time you agreed, and whether the date of birth you gave makes you 18 or older.</li>
 </ul>
 <h3 id="22-your-profile">2.2 Your profile</h3>
 <ul>
-<li>Name, date of birth, gender, height, weight, fitness goal, training days per week and portion-size preferences. We use your date of birth to work out your age (for your calorie and protein targets), to check that you are 18 or older, and to wish you a happy birthday in the app. Your age, not your date of birth, is what goes to AI providers (Section 4).</li>
+<li>Name, date of birth, gender, height, weight, fitness goal, training days per week and portion-size preferences. We use your date of birth to work out your age (for your calorie and protein targets), to decide whether teen mode applies (ages 13 to 17), and to wish you a happy birthday in the app. Your age, not your date of birth, is what goes to AI providers (Section 4).</li>
 <li>Your calorie and protein targets, any custom targets you set, and the history of changes to them.</li>
 <li>Your average daily step count, if you connect Health Connect, so we can size your calorie target.</li>
 <li>A profile photo, only if you add one. It is kept in private storage that only your account can read.</li>
@@ -260,7 +260,18 @@
 <p>No longer have the app? Email <strong>kynetix.app@gmail.com</strong> from your account's email address with the subject "Delete my Kynetix account". We confirm it's you and delete the account within 30 days. Details: <a href="../delete-account/">https://dhruvgupta-24.github.io/Kynetix/delete-account/</a></p>
 
 <h2 id="9-children">9. Children</h2>
-<p>Kynetix is only for people aged 18 and over. During setup you give your date of birth, and the app will not create a profile for anyone it shows to be younger. If we learn that someone under 18 has an account, we will delete it and its data. If you believe a minor is using Kynetix, email <strong>kynetix.app@gmail.com</strong>.</p>
+<p>Kynetix is for people aged 13 and over. The app will not create a profile for anyone its date of birth shows to be younger than 13.</p>
+<p><strong>Teen mode (13 to 17).</strong> Under the DPDP Act, a parent or lawful guardian has to agree before we process the personal data of anyone under 18. When the date of birth shows someone is 13 to 17:</p>
+<ul>
+<li>The app asks the teen to share a link with a parent or guardian. Until the parent says yes, the app stays locked, and we hold only what we need to ask: the teen's sign-in details, date of birth and first name.</li>
+<li>The parent opens the link, reads what Kynetix keeps, and agrees or refuses. As a record of consent we keep their name, their relation to the teen, their birth year and the time. The link itself is stored only as a one-way hash.</li>
+<li>AI features are off: no Kyno, no AI meal estimates and no label reading. Nothing from a teen's account goes to an AI provider. Google's Gemini API, one of our providers, is for adults only.</li>
+<li>Product analytics (Section 2.10) are off. We never track a teen's behaviour or target them with ads.</li>
+<li>Calorie targets use an energy equation made for teenagers and are never set below maintenance, whatever goal is picked.</li>
+<li>The parent can withdraw consent at any time by opening the same link. The teen's app locks straight away. Their data stays until the teen or parent deletes the account, in the app or by email, and we delete it as described in Section 8.</li>
+<li>Teen mode ends on its own on the 18th birthday. The birthday is locked in the app while teen mode is on.</li>
+</ul>
+<p>If you believe a child under 13 is using Kynetix, or a teen is using it without a parent's consent, email <strong>kynetix.app@gmail.com</strong> and we will delete the account and its data.</p>
 
 <h2 id="10-security">10. Security</h2>
 <p>Data travels between the app and our servers over encrypted connections (HTTPS). Database access rules limit each account to its own data. AI provider keys and ChatGPT tokens stay on our servers and are never sent to the app. Your sign-in session is kept in encrypted storage on your phone. No system is perfectly secure. If a personal data breach affects you, we will tell you and the authorities as Indian law requires.</p>
