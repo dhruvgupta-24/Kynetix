@@ -1,21 +1,20 @@
 {
-  "versionCode": 7,
-  "versionName": "1.0.0-beta.7",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.7/kynetix-1.0.0-beta.7-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.7/kynetix-1.0.0-beta.7-armeabi-v7a.apk",
+  "versionCode": 8,
+  "versionName": "1.0.0-beta.8",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.8/kynetix-1.0.0-beta.8-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.8/kynetix-1.0.0-beta.8-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Kynetix is now open to everyone 13 and up, with teen mode for 13 to 17.",
-    "Teen mode: a parent says yes through a link, food targets sized for a growing body, no AI and no tracking until 18.",
-    "Turning 18 ends teen mode on its own, and the birthday party says so.",
-    "Updated privacy policy and terms (7 November 2026).",
+    "Kyno is on for teens: teen mode now includes the AI coach and AI food estimates.",
+    "Teen requests use only AI services that allow teens, with extra safety rules: no dieting, fasting or supplement advice.",
+    "Kynetix is open to everyone 13 and up; under 18, a parent says yes through a link first.",
     "Install right over your current app. No need to uninstall; your data stays put."
   ],
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "fcf1bd798fca613df97d3e1b7469ee718f7a17b4d12c0e4141f06a1f481277db",
-    "armv7": "a01d026813b58d6c73996b90c9769454b62084888d4673f12103ca2a3ee348e4"
+    "arm64": "3bcbd4523403341a38617f926ca720a2257f9d65dac2aeba7b94b20b6dccacc7",
+    "armv7": "b39289894eb052ce850836d2a205219501963c22d15abf18f39b067cbe5370f6"
   },
   "size": {
     "arm64": "40.4 MB",
