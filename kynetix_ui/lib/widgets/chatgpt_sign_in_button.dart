@@ -73,8 +73,9 @@ class ContinueWithChatGptButton extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
             decoration: BoxDecoration(
-              color: KColor.ink,
+              gradient: KShade.convex(KColor.ink),
               borderRadius: KRadius.pill,
+              boxShadow: KShadow.lifted,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,

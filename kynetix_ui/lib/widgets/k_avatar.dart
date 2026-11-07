@@ -54,7 +54,10 @@ class KAvatar extends StatelessWidget {
           padding: ring == null ? null : EdgeInsets.all(size * 0.06),
           decoration: ring == null ? null : BoxDecoration(shape: BoxShape.circle, border: Border.all(color: ring!, width: 1.6)),
           child: ClipOval(
-            child: ColoredBox(color: KColor.cardHigh, child: SizedBox.expand(child: child)),
+            child: DecoratedBox(
+              decoration: BoxDecoration(gradient: KShade.sunken(KColor.cardHigh)),
+              child: SizedBox.expand(child: child),
+            ),
           ),
         );
       },

@@ -581,6 +581,43 @@ abstract final class KShade {
         boxShadow: KShadow.card,
       );
 
+  /// A solid control (ink pill, ember button, selected thumb): convex, a
+  /// touch lighter where the light lands on top, a touch deeper underneath.
+  /// Lightens toward white and darkens toward black so it works on any fill
+  /// (ink is near-white on Graphite and near-black on Paper).
+  static LinearGradient convex(Color base, {double strength = 1}) {
+    final bright = base.computeLuminance() > 0.5;
+    final up = (bright ? 0.0 : 0.11) * strength;
+    final down = (bright ? 0.085 : 0.10) * strength;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      // Keep the base's alpha, so a fading control fades evenly.
+      colors: [
+        Color.lerp(base, const Color(0xFFFFFFFF), up)!.withValues(alpha: base.a),
+        base,
+        Color.lerp(base, const Color(0xFF000000), down)!.withValues(alpha: base.a),
+      ],
+      stops: const [0, 0.5, 1],
+    );
+  }
+
+  /// A groove: the unfilled part of a ring or bar, shaded under its top lip
+  /// and lighter where the light reaches the floor. [base] is the flat track.
+  static Shader groove(Rect rect, Color base) {
+    final top = Color.lerp(base, KColor.palette.shadow, KColor.isDark ? 0.0 : 0.04)!;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: KColor.isDark
+          ? [base.withValues(alpha: base.a * 0.55), base.withValues(alpha: math.min(1, base.a * 1.45))]
+          : [top.withValues(alpha: math.min(1, base.a * 1.5)), base.withValues(alpha: base.a * 0.7)],
+    ).createShader(rect);
+  }
+
+  /// The floor of a sunken field (text inputs, segmented tracks), flat.
+  static Color get field => KColor.isDark ? sink(KColor.card, 0.34) : sink(KColor.bg, 0.025);
+
   /// The fill of a recessed well, flat (for small pills and chips).
   static Color get well => KColor.isDark ? sink(KColor.card, 0.28) : sink(KColor.card, 0.035);
 
@@ -602,6 +639,30 @@ abstract class KShadow {
           BoxShadow(color: Color(0x12000000), blurRadius: 20, offset: Offset(0, 8), spreadRadius: -6),
           BoxShadow(color: Color(0x0D000000), blurRadius: 2, offset: Offset(0, 1)),
         ];
+
+  /// Floating chrome (the dock, toasts, the log button): higher than a
+  /// card, so a longer, softer fall plus a firm contact edge.
+  static List<BoxShadow> get float => KColor.isDark
+      ? const [
+          BoxShadow(color: Color(0xB3000000), blurRadius: 34, offset: Offset(0, 16), spreadRadius: -6),
+          BoxShadow(color: Color(0x80000000), blurRadius: 6, offset: Offset(0, 2)),
+        ]
+      : const [
+          BoxShadow(color: Color(0x24000000), blurRadius: 32, offset: Offset(0, 14), spreadRadius: -6),
+          BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1)),
+        ];
+
+  /// A small solid control resting on a surface (a button, a selected
+  /// segment): a tight shade right under it.
+  static List<BoxShadow> get lifted => KColor.isDark
+      ? const [
+          BoxShadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 4), spreadRadius: -2),
+        ]
+      : const [
+          BoxShadow(color: Color(0x2E000000), blurRadius: 10, offset: Offset(0, 4), spreadRadius: -4),
+          BoxShadow(color: Color(0x14000000), blurRadius: 2, offset: Offset(0, 1)),
+        ];
+
   /// Retired: the owner's rule is no glow anywhere. Kept so callers compile;
   /// it draws nothing.
   static List<BoxShadow> glow(Color c, {double strength = 1}) => const [];
@@ -1137,9 +1198,13 @@ class _KButtonState extends State<KButton> with SingleTickerProviderStateMixin {
           constraints: const BoxConstraints(minHeight: 56),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
           decoration: BoxDecoration(
+            // Filled: a convex pill resting on the page (lit on top, a tight
+            // shade under it). Dimmed or outlined: flat, nothing to press.
             color: w.outlined
                 ? Colors.transparent
-                : (dim ? bg.withValues(alpha: 0.4) : bg),
+                : (dim ? bg.withValues(alpha: 0.4) : null),
+            gradient: w.outlined || dim ? null : KShade.convex(bg),
+            boxShadow: w.outlined || dim ? null : KShadow.lifted,
             borderRadius: KRadius.pill,
             border: w.outlined
                 ? Border.all(
@@ -1219,9 +1284,12 @@ class KChip extends StatelessWidget {
     final fg = textColor ?? KColor.textSecondary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      // A small surface sitting proud of the card: lit on top, settling
+      // underneath, with a hairline so it holds its edge in both themes.
       decoration: BoxDecoration(
         borderRadius: KRadius.pill,
-        color: KColor.cardHigh,
+        gradient: KShade.raised(KShade.chip),
+        border: Border.all(color: KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.05)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -578,7 +578,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
                               height: 24,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: KColor.ink,
+                                gradient: KShade.convex(KColor.ink),
                               ),
                               child: Icon(Icons.add_rounded, color: KColor.onInk, size: 16),
                             ),
@@ -743,7 +743,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
             child: Ink(
               padding: const EdgeInsets.symmetric(horizontal: KSpacing.md, vertical: 14),
               decoration: BoxDecoration(
-                color: KColor.isDark ? KColor.card : KColor.cardHigh,
+                gradient: KShade.raised(KColor.isDark ? KColor.card : KColor.cardHigh),
                 borderRadius: KRadius.md,
                 border: Border.all(color: _hairline(), width: 1),
               ),
@@ -965,7 +965,7 @@ class _ExercisePickerSheetState extends State<ExercisePickerSheet> {
             height: 76,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: KColor.isDark ? KColor.card : KColor.cardHigh,
+              gradient: KShade.raised(KColor.isDark ? KColor.card : KColor.cardHigh),
               border: Border.all(color: _hairline(), width: 1),
             ),
             child: Icon(Icons.search_off_rounded, size: 32, color: KColor.textSecondary),

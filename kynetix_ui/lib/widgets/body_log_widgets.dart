@@ -152,8 +152,9 @@ class _StepButton extends StatelessWidget {
         height: 52,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: KColor.cardHigh,
+          gradient: KShade.raised(KColor.cardHigh),
           border: Border.all(color: KColor.border),
+          boxShadow: KShadow.lifted,
         ),
         child: Icon(icon, color: KColor.textPrimary),
       ),

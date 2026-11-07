@@ -299,11 +299,13 @@ class _RingsPainter extends CustomPainter {
       final radius = outer - w / 2;
       outer = radius - w / 2 - gap;
       if (radius <= w) break;
+      // The tin's groove: shaded under its top lip.
       base
         ..strokeWidth = w
         ..strokeCap = StrokeCap.butt
-        ..color = track;
+        ..shader = KShade.groove(Rect.fromCircle(center: c, radius: radius + w / 2), track);
       canvas.drawCircle(c, radius, base);
+      base.shader = null;
       final a = i < from.length ? from[i] : 0.0;
       final b = i < to.length ? to[i] : 0.0;
       final raw = a + (b - a) * k;

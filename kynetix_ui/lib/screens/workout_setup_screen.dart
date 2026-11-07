@@ -752,9 +752,7 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
     return Container(
       padding: const EdgeInsets.all(KSpacing.xs),
       decoration: BoxDecoration(
-        color: KColor.isDark
-            ? KColor.fg.withValues(alpha: 0.04)
-            : KColor.cardHigh.withValues(alpha: 0.7),
+        gradient: KShade.sunken(KShade.field),
         borderRadius: KRadius.md,
         border: Border.all(color: _hairline),
       ),
@@ -787,8 +785,10 @@ class _WorkoutSetupScreenState extends State<WorkoutSetupScreen> {
                   padding: const EdgeInsets.symmetric(vertical: KSpacing.sm),
                   // Selected = ink, like every other selected state.
                   decoration: BoxDecoration(
-                    color: isActive ? KColor.ink : Colors.transparent,
+                    color: isActive ? null : Colors.transparent,
+                    gradient: isActive ? KShade.convex(KColor.ink) : null,
                     borderRadius: KRadius.sm,
+                    boxShadow: isActive ? KShadow.lifted : null,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1272,12 +1272,12 @@ class _ChoiceCard extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: KRadius.lg,
               // Selected = ink outline + a whisper of ink tint; no glow.
-              color: selected
+              gradient: KShade.raised(selected
                   ? Color.alphaBlend(
                       KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.035),
                       KColor.card,
                     )
-                  : KColor.card,
+                  : KColor.card),
               border: Border.all(
                 color: selected ? KColor.ink : _hairline,
                 width: selected ? 1.5 : 1.0,
@@ -1364,12 +1364,12 @@ class _DaysTile extends StatelessWidget {
           curve: KMotion.emphasizedCurve,
           decoration: BoxDecoration(
             borderRadius: KRadius.xl,
-            color: selected
+            gradient: KShade.raised(selected
                 ? Color.alphaBlend(
                     KColor.fg.withValues(alpha: KColor.isDark ? 0.06 : 0.035),
                     KColor.card,
                   )
-                : KColor.card,
+                : KColor.card),
             border: Border.all(
               color: selected ? KColor.ink : _hairline,
               width: selected ? 1.5 : 1.0,
@@ -1854,10 +1854,12 @@ class _CreateCustomExerciseSheetState
                               ),
                               decoration: BoxDecoration(
                                 color: selected
-                                    ? KColor.ink
+                                    ? null
                                     : KColor.fg.withValues(
                                         alpha: KColor.isDark ? 0.05 : 0.04,
                                       ),
+                                gradient: selected ? KShade.convex(KColor.ink) : null,
+                                boxShadow: selected ? KShadow.lifted : null,
                                 borderRadius: KRadius.pill,
                                 border: Border.all(
                                   color: selected ? KColor.ink : _hairline,

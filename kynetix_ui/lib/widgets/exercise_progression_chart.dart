@@ -318,7 +318,9 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart>
       ),
       // A recessed well: the page tone sunk into the card, hairline edge.
       decoration: BoxDecoration(
-        color: KColor.isDark ? KColor.bg.withValues(alpha: 0.6) : KColor.bg,
+        gradient: KShade.sunken(
+          KColor.isDark ? Color.alphaBlend(KColor.bg.withValues(alpha: 0.6), KColor.card) : KColor.bg,
+        ),
         borderRadius: KRadius.md,
         border: Border.all(
           color: KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.08),
@@ -426,8 +428,10 @@ class _ExerciseProgressionChartState extends State<ExerciseProgressionChart>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? KColor.ink
+                    ? null
                     : KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+                gradient: isSelected ? KShade.convex(KColor.ink) : null,
+                boxShadow: isSelected ? KShadow.lifted : null,
                 borderRadius: KRadius.pill,
                 border: Border.all(
                   color: isSelected

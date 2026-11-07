@@ -90,13 +90,14 @@ class _RingPainter extends CustomPainter {
     final r = (size.shortestSide - stroke) / 2;
     final rect = Rect.fromCircle(center: c, radius: r);
 
+    // The track is a groove: shaded under its top lip (KShade.groove).
     canvas.drawCircle(
       c,
       r,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = stroke
-        ..color = track,
+        ..shader = KShade.groove(rect.inflate(stroke / 2), track),
     );
     if (progress <= 0.001) return;
 
@@ -203,12 +204,18 @@ class _BarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = Radius.circular(size.height);
-    final p = Paint()..color = track;
-    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, r), p);
+    // A groove, and a fill that sits in it lit from above.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Offset.zero & size, r),
+      Paint()..shader = KShade.groove(Offset.zero & size, track),
+    );
     final w = size.width * progress;
     if (w <= 0) return;
-    p.color = fill;
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, size.height), r), p);
+    final bar = Rect.fromLTWH(0, 0, w, size.height);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, r),
+      Paint()..shader = KShade.convex(fill, strength: 0.8).createShader(bar),
+    );
   }
 
   @override
@@ -595,8 +602,9 @@ class KAskKyno extends StatelessWidget {
         height: 52,
         padding: const EdgeInsets.fromLTRB(9, 0, 20, 0),
         decoration: BoxDecoration(
-          color: KColor.ink,
+          gradient: KShade.convex(KColor.ink),
           borderRadius: KRadius.pill,
+          boxShadow: KShadow.lifted,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

@@ -305,10 +305,12 @@ class _KToastViewState extends State<_KToastView>
               widget.actionLabel != null ? KSpacing.xs : KSpacing.lg,
               KSpacing.sm,
             ),
+            // Floats over the page like the dock: lit on top, long shadow.
             decoration: BoxDecoration(
-              color: dark ? KColor.cardHigh : KColor.card,
+              gradient: KShade.raised(dark ? KColor.cardHigh : KColor.card),
               borderRadius: KRadius.md,
               border: Border.all(color: KColor.border),
+              boxShadow: KShadow.float,
             ),
             child: Row(
               children: [

@@ -389,7 +389,7 @@ class _InsightsScreenState extends State<InsightsScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
           decoration: BoxDecoration(
-            color: KColor.fg.withValues(alpha: KColor.isDark ? 0.035 : 0.03),
+            gradient: KShade.raised(KShade.chip),
             borderRadius: KRadius.sm,
             border: Border.all(color: _hairlineColor(), width: 1),
           ),
@@ -953,9 +953,9 @@ class _InsightsScreenState extends State<InsightsScreen>
                         width: 34,
                         height: 34,
                         decoration: BoxDecoration(
-                          color: didGym
-                              ? KColor.ink
-                              : KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.03),
+                          // Trained sits proud; a rest day is an empty slot.
+                          gradient: didGym ? KShade.convex(KColor.ink) : KShade.sunken(KColor.card),
+                          boxShadow: didGym ? KShadow.lifted : null,
                           shape: BoxShape.circle,
                           border: didGym ? null : Border.all(color: _hairlineColor(), width: 1),
                         ),
@@ -2527,7 +2527,8 @@ class _Medallion extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: earned ? KColor.ink : null,
+          gradient: earned ? KShade.convex(KColor.ink) : null,
+          boxShadow: earned ? KShadow.lifted : null,
           border: earned
               ? null
               : Border.all(

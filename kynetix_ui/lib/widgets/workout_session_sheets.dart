@@ -72,7 +72,9 @@ class _RestChip extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 72, minHeight: 48),
             padding: const EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
-              color: selected ? KColor.ink : Colors.transparent,
+              color: selected ? null : Colors.transparent,
+              gradient: selected ? KShade.convex(KColor.ink) : null,
+              boxShadow: selected ? KShadow.lifted : null,
               borderRadius: KRadius.pill,
               border: Border.all(color: selected ? KColor.ink : KColor.fg.withValues(alpha: 0.16)),
             ),

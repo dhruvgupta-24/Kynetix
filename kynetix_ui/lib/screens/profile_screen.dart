@@ -752,7 +752,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       clipBehavior: Clip.antiAlias,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: KColor.cardHigh,
+                        gradient: KShade.sunken(KColor.cardHigh),
                         border: Border.all(
                           color: KColor.fg.withValues(
                             alpha: KColor.isDark ? 0.12 : 0.1,
@@ -1815,9 +1815,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: KColor.fg.withValues(
-                    alpha: KColor.isDark ? 0.04 : 0.035,
-                  ),
+                  gradient: KShade.sunken(KColor.card),
                   borderRadius: KRadius.md,
                   border: Border.all(
                     color: KColor.fg.withValues(
@@ -2048,8 +2046,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               horizontal: KSpacing.sm,
             ),
             decoration: BoxDecoration(
-              color: selected ? KColor.ink : Colors.transparent,
+              color: selected ? null : Colors.transparent,
+              gradient: selected ? KShade.convex(KColor.ink) : null,
               borderRadius: KRadius.sm,
+              boxShadow: selected ? KShadow.lifted : null,
             ),
             alignment: Alignment.center,
             child: Row(
@@ -2937,9 +2937,11 @@ class _PillAction extends StatelessWidget {
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: tone == null
-                    ? KColor.ink.withValues(alpha: busy ? 0.5 : 1)
-                    : tone.withValues(alpha: KColor.isDark ? 0.1 : 0.07),
+                color: tone?.withValues(alpha: KColor.isDark ? 0.1 : 0.07),
+                gradient: tone == null
+                    ? KShade.convex(KColor.ink.withValues(alpha: busy ? 0.5 : 1))
+                    : null,
+                boxShadow: tone == null && !busy ? KShadow.lifted : null,
                 borderRadius: KRadius.pill,
                 border: tone == null
                     ? null
@@ -3002,11 +3004,13 @@ class _ChoicePill extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
           decoration: BoxDecoration(
-            color: selected ? KColor.ink : Colors.transparent,
+            color: selected ? null : Colors.transparent,
+            gradient: selected ? KShade.convex(KColor.ink) : null,
             borderRadius: KRadius.pill,
             border: Border.all(
               color: selected ? KColor.ink : KColor.fg.withValues(alpha: 0.14),
             ),
+            boxShadow: selected ? KShadow.lifted : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

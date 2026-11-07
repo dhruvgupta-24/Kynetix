@@ -45,9 +45,12 @@ Kynetix is a coach for Indian gym-goers who track roti, dal, paneer and their li
   - **Sentence case.** No new ALL-CAPS labels, and no `letterSpacing` wider than 1.0. Keep existing uppercase strings that tests pin.
 - **Spacing:** `KSpacing.*`. Scrollable tab roots end with `KSpacing.dockClearance`.
 - **Radius follows hierarchy:** `KRadius.xs 6` tags, `sm 10` chips, inputs and the fuel label, `md 14` objects in a list, `lg 18` standalone objects (a meal card, a product), `xl 24` sheets and the dock, `pill` buttons. Don't give everything the same curve.
-- **Shadow:**
-  - `KShadow.card` is empty on Carbon and soft on Paper.
-  - `KShadow.glow(color)` is only for the single hero element. Prefer none on Carbon.
+- **Depth (`KShade`, `KShadow`):** one light above the screen, shades of the palette's own tones, pure black shadows, never a glow.
+  - Elevation ladder: page ground (overhead light, vignette, grain) < sunken (`KShade.sunken`, `KShade.field` for inputs and segmented tracks, `KShade.well`) < card (`KCard`, `KShade.surface`, `KShadow.card`) < lifted control (`KShade.convex` + `KShadow.lifted`: KButton, the open dock tab, selected segments and days, Ask Kyno) < floating chrome (`KShadow.float`: the dock, the log button, toasts, the sticky day bar shade).
+  - Solid fills that act as controls use `KShade.convex(colour)`, not a flat colour. Dimmed or disabled controls stay flat with no shadow.
+  - Ring and bar tracks are grooves (`KShade.groove`); bar fills are convex.
+  - Hue never carries depth: no coloured shadows. `KShadow.glow` is retired and draws nothing.
+  - Skip shadows on elements repeated by the dozen (heatmap cells, grids) and on translucent fills.
 
 ## Motion (`KMotion`)
 - **Durations:** `instant 90 · quick 160 · standard 280 · emphasized 460 · slow 720`. Things the user waits on stay at quick to standard.

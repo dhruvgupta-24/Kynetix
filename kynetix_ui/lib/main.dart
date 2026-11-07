@@ -346,9 +346,11 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
       modalElevation: 0,
       showDragHandle: false,
       clipBehavior: Clip.antiAlias,
+      // The sheet's lip catches the light on Graphite, so it reads as a
+      // layer above the dimmed page rather than a hole in it.
       shape: RoundedRectangleBorder(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-        side: BorderSide(color: hair),
+        side: BorderSide(color: dark ? p.fg.withValues(alpha: 0.11) : hair),
       ),
       modalBarrierColor: Colors.black.withValues(alpha: dark ? 0.6 : 0.32),
     ),
@@ -425,7 +427,8 @@ ThemeData buildKynetixTheme([KPalette? palette]) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: p.card,
+      // A sunken well: fields sit into the surface, a shade below it.
+      fillColor: KShade.field,
       border: field(Colors.transparent),
       enabledBorder: field(dark ? hair : p.border),
       focusedBorder: field(p.textPrimary, 1.4),

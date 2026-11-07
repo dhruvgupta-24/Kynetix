@@ -1108,7 +1108,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
                         child: Center(
                           child: Container(
                             decoration: BoxDecoration(
-                              color: KColor.ink,
+                              gradient: KShade.convex(KColor.ink),
                               shape: BoxShape.circle,
                               border: Border.all(color: KColor.bg, width: 1.5),
                             ),
@@ -1927,7 +1927,7 @@ class _SheetOption extends StatelessWidget {
       leading: Container(
         width: 40, height: 40,
         decoration: BoxDecoration(
-          color: KColor.cardHigh,
+          gradient: KShade.raised(KColor.cardHigh),
           borderRadius: KRadius.sm,
           border: Border.all(color: _hairline()),
         ),
@@ -1963,7 +1963,7 @@ class _IconBtn extends StatelessWidget {
       child: Container(
         width: 48, height: 48,
         decoration: BoxDecoration(
-          color: KColor.cardHigh,
+          gradient: KShade.raised(KColor.cardHigh),
           shape: BoxShape.circle,
         ),
         child: Icon(icon, color: color, size: 21),
@@ -2051,7 +2051,9 @@ class _SendBtnState extends State<_SendBtn> with SingleTickerProviderStateMixin 
               builder: (context, t, _) => DecoratedBox(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Color.lerp(KColor.cardHigh, KColor.ink, t),
+                  // Convex and lifted only as it turns ready; idle stays flat.
+                  gradient: KShade.convex(Color.lerp(KColor.cardHigh, KColor.ink, t)!, strength: t),
+                  boxShadow: BoxShadow.lerpList(const [], KShadow.lifted, t),
                 ),
                 child: SizedBox.square(
                   dimension: 48,
@@ -2352,7 +2354,7 @@ class _CheckInCard extends StatelessWidget {
     };
     return Container(
       decoration: BoxDecoration(
-        color: Color.alphaBlend(color.withValues(alpha: KColor.isDark ? 0.07 : 0.05), KColor.card),
+        gradient: KShade.raised(Color.alphaBlend(color.withValues(alpha: KColor.isDark ? 0.07 : 0.05), KColor.card)),
         borderRadius: KRadius.lg,
         border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
@@ -2447,8 +2449,9 @@ class _FuelPlanCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                 decoration: BoxDecoration(
-                  color: KColor.ink,
+                  gradient: KShade.convex(KColor.ink),
                   borderRadius: KRadius.pill,
+                  boxShadow: KShadow.lifted,
                 ),
                 child: Text('Log', style: KText.caption.copyWith(color: KColor.onInk, fontWeight: FontWeight.w700)),
               ),
@@ -2465,7 +2468,7 @@ class _FuelPlanCard extends StatelessWidget {
       margin: const EdgeInsets.only(top: KSpacing.md),
       padding: const EdgeInsets.fromLTRB(KSpacing.lg, KSpacing.md, KSpacing.lg, KSpacing.xs),
       decoration: BoxDecoration(
-        color: Color.alphaBlend(KColor.ink.withValues(alpha: KColor.isDark ? 0.05 : 0.04), KColor.card),
+        gradient: KShade.raised(Color.alphaBlend(KColor.ink.withValues(alpha: KColor.isDark ? 0.05 : 0.04), KColor.card)),
         borderRadius: KRadius.lg,
         border: Border.all(color: KColor.ink.withValues(alpha: 0.25)),
       ),

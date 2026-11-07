@@ -2387,8 +2387,10 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
             alignment: Alignment.center,
             // Skip is the ink action; the adjusters stay quiet.
             decoration: BoxDecoration(
-              color: emphasized ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.05),
+              color: emphasized ? null : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.05),
+              gradient: emphasized ? KShade.convex(KColor.ink) : null,
               borderRadius: KRadius.pill,
+              boxShadow: emphasized ? KShadow.lifted : null,
             ),
             child: Text(
               label,
@@ -2602,7 +2604,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
             Container(
               padding: const EdgeInsets.all(26),
               decoration: BoxDecoration(
-                color: KColor.isDark ? KColor.card : KColor.cardHigh,
+                gradient: KShade.raised(KColor.isDark ? KColor.card : KColor.cardHigh),
                 shape: BoxShape.circle,
                 border: Border.all(color: _hairline()),
               ),
@@ -3911,7 +3913,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
         decoration: BoxDecoration(
-          color: KColor.inset,
+          gradient: KShade.sunken(KColor.inset),
           borderRadius: KRadius.md,
           border: Border.all(color: KColor.border),
         ),
@@ -3967,7 +3969,7 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
     final console = Container(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
       decoration: BoxDecoration(
-        color: KColor.isDark ? KColor.surface : KColor.card,
+        gradient: KShade.raised(KColor.isDark ? KColor.surface : KColor.card),
         borderRadius: KRadius.xl,
         border: Border.all(color: _hairline(), width: 1),
         boxShadow: KShadow.card,
@@ -4236,7 +4238,9 @@ class _ExerciseWorkoutPageState extends State<_ExerciseWorkoutPage> {
                                   alignment: Alignment.center,
                                   padding: const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: isSel ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+                                    color: isSel ? null : KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+                                    gradient: isSel ? KShade.convex(KColor.ink) : null,
+                                    boxShadow: isSel ? KShadow.lifted : null,
                                     borderRadius: KRadius.sm,
                                     border: Border.all(
                                       color: isSel ? KColor.ink : _hairline(),
@@ -4440,8 +4444,10 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                 margin: const EdgeInsetsDirectional.only(end: 4),
                 decoration: BoxDecoration(
-                  color: isSelected ? KColor.ink : Colors.transparent,
+                  color: isSelected ? null : Colors.transparent,
+                  gradient: isSelected ? KShade.convex(KColor.ink) : null,
                   borderRadius: KRadius.pill,
+                  boxShadow: isSelected ? KShadow.lifted : null,
                 ),
                 child: Text(
                   type.label,
@@ -4481,7 +4487,7 @@ class _SetTypeSelectorState extends State<_SetTypeSelector> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: KColor.fg.withValues(alpha: KColor.isDark ? 0.05 : 0.04),
+        gradient: KShade.sunken(KShade.field),
         borderRadius: KRadius.pill,
         border: Border.all(color: _hairline(), width: 1),
       ),
@@ -5243,9 +5249,10 @@ class _LogSetButtonState extends State<_LogSetButton> with SingleTickerProviderS
         curve: KMotion.emphasizedCurve,
         height: 56,
         decoration: BoxDecoration(
-          color: fill,
+          color: skipped ? fill : null,
+          gradient: skipped ? null : KShade.convex(fill),
           borderRadius: KRadius.pill,
-          boxShadow: (skipped || KColor.isDark) ? null : KShadow.card,
+          boxShadow: skipped ? null : KShadow.lifted,
         ),
         child: ElevatedButton(
           onPressed: widget.onPressed,
@@ -5813,9 +5820,9 @@ class _FloatingTextWidgetState extends State<_FloatingTextWidget>
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: BoxDecoration(
-              color: KColor.ink,
+              gradient: KShade.convex(KColor.ink),
               borderRadius: KRadius.pill,
-              boxShadow: KColor.isDark ? null : KShadow.card,
+              boxShadow: KShadow.float,
             ),
             child: Text(
               widget.text,

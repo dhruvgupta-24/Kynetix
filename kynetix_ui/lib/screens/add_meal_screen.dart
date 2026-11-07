@@ -1278,8 +1278,9 @@ class _AddMealScreenState extends State<AddMealScreen>
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: KColor.ink,
+                          gradient: KShade.convex(KColor.ink),
                           borderRadius: KRadius.pill,
+                          boxShadow: KShadow.lifted,
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1323,7 +1324,7 @@ class _AddMealScreenState extends State<AddMealScreen>
           duration: KMotion.of(context, KMotion.standard),
           curve: KMotion.emphasizedCurve,
           decoration: BoxDecoration(
-            color: focused ? KColor.cardHigh : KColor.card,
+            gradient: KShade.raised(focused ? KColor.cardHigh : KColor.card),
             borderRadius: KRadius.lg,
             border: Border.all(
               color: focused

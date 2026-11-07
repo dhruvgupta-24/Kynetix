@@ -443,7 +443,7 @@ class _LinkPrompt extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(KSpacing.md, KSpacing.md, KSpacing.sm, KSpacing.xs),
         decoration: BoxDecoration(
-          color: KColor.cardHigh,
+          gradient: KShade.raised(KColor.cardHigh),
           borderRadius: KRadius.md,
         ),
         child: Column(
@@ -656,7 +656,8 @@ class _AmountChip extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(
-            color: selected ? KColor.ink : null,
+            gradient: selected ? KShade.convex(KColor.ink) : null,
+            boxShadow: selected ? KShadow.lifted : null,
             borderRadius: KRadius.sm,
             border: Border.all(
               color: selected ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.16 : 0.16),

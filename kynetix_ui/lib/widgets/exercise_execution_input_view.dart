@@ -449,7 +449,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           // Running = ink fill: the one live thing on the console.
                           decoration: BoxDecoration(
-                            color: running ? KColor.ink : _wellFill(),
+                            gradient: running ? KShade.convex(KColor.ink) : KShade.sunken(_wellFill()),
+                            boxShadow: running ? KShadow.lifted : null,
                             borderRadius: KRadius.md,
                             border: Border.all(
                               color: running ? KColor.ink : _hairline(),
@@ -861,7 +862,7 @@ class _StepButtonState extends State<_StepButton> {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: KColor.isDark ? KColor.cardHigh : KColor.card,
+            gradient: KShade.raised(KColor.isDark ? KColor.cardHigh : KColor.card),
             borderRadius: KRadius.sm,
             border: Border.all(color: _hairline(), width: 1),
           ),

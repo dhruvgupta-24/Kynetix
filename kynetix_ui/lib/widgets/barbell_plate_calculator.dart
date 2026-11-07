@@ -205,7 +205,7 @@ class BarbellPlateStackView extends StatelessWidget {
           child: Ink(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: KColor.isDark ? KColor.card : KColor.cardHigh,
+              gradient: KShade.raised(KColor.isDark ? KColor.card : KColor.cardHigh),
               borderRadius: KRadius.sm,
               border: Border.all(
                 color: KColor.isDark
@@ -471,7 +471,7 @@ class _PlateBreakdownSheet extends StatelessWidget {
                     vertical: KSpacing.sm,
                   ),
                   decoration: BoxDecoration(
-                    color: KColor.isDark ? KColor.card : KColor.cardHigh,
+                    gradient: KShade.raised(KColor.isDark ? KColor.card : KColor.cardHigh),
                     borderRadius: KRadius.sm,
                     border: Border.all(
                       color: KColor.isDark

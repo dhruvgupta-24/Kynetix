@@ -764,10 +764,12 @@ class _FilterChips extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? KColor.ink
+                        ? null
                         : (KColor.isDark
                               ? KColor.fg.withValues(alpha: 0.05)
                               : KColor.card),
+                    gradient: isSelected ? KShade.convex(KColor.ink) : null,
+                    boxShadow: isSelected ? KShadow.lifted : null,
                     borderRadius: KRadius.pill,
                     border: Border.all(
                       color: isSelected ? KColor.ink : _hairline,
@@ -2214,7 +2216,7 @@ class _AchievementsList extends StatelessWidget {
                 width: 172,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: item.achieved ? KColor.cardHigh : KColor.card,
+                  gradient: KShade.raised(item.achieved ? KColor.cardHigh : KColor.card),
                   borderRadius: KRadius.md,
                   border: Border.all(
                     color: item.achieved
@@ -2640,7 +2642,7 @@ class _DetailStatBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(KSpacing.md),
       decoration: BoxDecoration(
-        color: emphasis ? KColor.cardHigh : KColor.card,
+        gradient: KShade.raised(emphasis ? KColor.cardHigh : KColor.card),
         borderRadius: KRadius.md,
         border: Border.all(
           color: emphasis ? KColor.ink.withValues(alpha: 0.30) : _hairline,
@@ -2784,7 +2786,7 @@ class _InteractiveLineChartState extends State<_InteractiveLineChart>
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: KColor.cardHigh,
+                          gradient: KShade.raised(KColor.cardHigh),
                           borderRadius: KRadius.sm,
                           border: Border.all(color: _hairline),
                         ),

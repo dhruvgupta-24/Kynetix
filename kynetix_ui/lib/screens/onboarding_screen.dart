@@ -1635,8 +1635,10 @@ class _OptionCard extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: selected
-                  ? KColor.card
+                  ? null
                   : KColor.card.withValues(alpha: dark ? 0.5 : 0.6),
+              gradient: selected ? KShade.raised(KColor.card) : null,
+              boxShadow: selected ? KShadow.card : null,
               borderRadius: KRadius.md,
               border: Border.all(
                 color: selected

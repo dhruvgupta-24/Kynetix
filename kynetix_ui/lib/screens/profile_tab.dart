@@ -147,8 +147,9 @@ class _ProfileTabState extends State<ProfileTab> {
                         height: 32,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: KColor.ink,
+                          gradient: KShade.convex(KColor.ink),
                           border: Border.all(color: KColor.bg, width: 3),
+                          boxShadow: KShadow.lifted,
                         ),
                         child: Icon(Icons.photo_camera_rounded, size: 15, color: KColor.onInk),
                       ),
@@ -411,7 +412,7 @@ class _TalkToUsCard extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: KColor.ink),
+                decoration: BoxDecoration(shape: BoxShape.circle, gradient: KShade.convex(KColor.ink)),
                 child: Icon(Icons.chat_bubble_outline_rounded, size: 18, color: KColor.onInk),
               ),
               const SizedBox(width: KSpacing.lg),

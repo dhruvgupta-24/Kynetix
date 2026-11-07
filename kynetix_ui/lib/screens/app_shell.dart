@@ -197,10 +197,9 @@ class AppShellState extends State<AppShell> {
                 const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                  // A recessed tray in the dialog, shaded under its lip.
                   decoration: BoxDecoration(
-                    color: KColor.cardHigh.withValues(
-                      alpha: KColor.isDark ? 0.7 : 1,
-                    ),
+                    gradient: KShade.sunken(KShade.well),
                     borderRadius: KRadius.md,
                   ),
                   child: Column(
@@ -905,10 +904,13 @@ class _KDock extends StatelessWidget {
               // Carbon: the island's machined top rim, as on cards.
               foregroundPainter: dark ? KRimPainter(radius: KRadius.pill, alpha: 0.06) : null,
               child: DecoratedBox(
+              // The island floats above the page: lit along its top,
+              // settling into a long soft shadow.
               decoration: BoxDecoration(
                 borderRadius: KRadius.pill,
-                color: dark ? KColor.cardHigh : KColor.card,
+                gradient: KShade.raised(dark ? KColor.cardHigh : KColor.card),
                 border: Border.all(color: KColor.border),
+                boxShadow: KShadow.float,
               ),
               child: ClipRRect(
                 borderRadius: KRadius.pill,
@@ -920,7 +922,13 @@ class _KDock extends StatelessWidget {
                       bottom: _inset,
                       width: pillW,
                       child: DecoratedBox(
-                        decoration: BoxDecoration(borderRadius: KRadius.pill, color: KColor.ink),
+                        // The open tab: a convex ink pill pressed onto the
+                        // island, with a tight shade under it.
+                        decoration: BoxDecoration(
+                          borderRadius: KRadius.pill,
+                          gradient: KShade.convex(KColor.ink),
+                          boxShadow: KShadow.lifted,
+                        ),
                       ),
                     ),
                     for (var i = 0; i < n; i++)
@@ -986,9 +994,14 @@ class _DockAction extends StatelessWidget {
       semanticLabel: 'Log a meal',
       scale: 0.92,
       child: DecoratedBox(
+        // Convex, floating at the island's height. The fade is folded into
+        // the colours so the shadow leaves with the button.
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: KColor.ember.withValues(alpha: KColor.ember.a * fade),
+          gradient: KShade.convex(KColor.ember.withValues(alpha: KColor.ember.a * fade)),
+          boxShadow: [
+            for (final s in KShadow.float) s.copyWith(color: s.color.withValues(alpha: s.color.a * fade)),
+          ],
         ),
         child: SizedBox.square(
           dimension: 64,

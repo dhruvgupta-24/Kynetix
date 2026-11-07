@@ -809,8 +809,9 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: KColor.ink,
+                  gradient: KShade.convex(KColor.ink),
                   borderRadius: KRadius.pill,
+                  boxShadow: KShadow.lifted,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1220,8 +1221,9 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         height: 60,
         decoration: BoxDecoration(
           color: neutral
-              ? KColor.card
+              ? null
               : color.withValues(alpha: KColor.isDark ? 0.12 : 0.09),
+          gradient: neutral ? KShade.raised(KColor.card) : null,
           borderRadius: KRadius.lg,
           border: Border.all(
             color: neutral

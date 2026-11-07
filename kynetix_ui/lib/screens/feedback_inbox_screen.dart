@@ -306,7 +306,8 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: ink ? KColor.ink : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
+          color: ink ? null : KColor.fg.withValues(alpha: KColor.isDark ? 0.07 : 0.06),
+          gradient: ink ? KShade.convex(KColor.ink) : null,
           borderRadius: KRadius.pill,
         ),
         child: Text(

@@ -904,7 +904,8 @@ class _TrainCta extends StatelessWidget {
       // Train's one coloured action: the log action wears the accent.
       decoration: BoxDecoration(
         borderRadius: KRadius.pill,
-        color: KColor.ember,
+        gradient: KShade.convex(KColor.ember),
+        boxShadow: KShadow.lifted,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1288,7 +1289,7 @@ class _DayPip extends StatelessWidget {
             height: 24,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: done ? KColor.ink : null,
+              gradient: done ? KShade.convex(KColor.ink) : null,
               border: done
                   ? null
                   : Border.all(
@@ -1469,7 +1470,7 @@ class _RecentWorkoutCard extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: KShade.chip,
+                  gradient: KShade.raised(KShade.chip),
                   borderRadius: KRadius.pill,
                 ),
                 child: Text(

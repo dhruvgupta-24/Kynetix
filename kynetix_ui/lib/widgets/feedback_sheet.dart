@@ -134,7 +134,7 @@ class _FeedbackSheetState extends State<FeedbackSheet> {
                     hintText: _kind.hint,
                     hintStyle: KText.body.copyWith(color: KColor.textMuted),
                     filled: true,
-                    fillColor: KColor.card,
+                    fillColor: KShade.field,
                     contentPadding: const EdgeInsets.all(KSpacing.md),
                     border: _border(edge),
                     enabledBorder: _border(edge),

@@ -184,6 +184,23 @@ class _AuroraPainter extends CustomPainter {
           ],
         ),
     );
+    // Vignette: the room falls into shade toward its lower corners, away
+    // from the overhead light, so the middle of the page (where the cards
+    // are) reads as the lit stage. Pure shadow, static.
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(size.width / 2, size.height * 0.28),
+          size.longestSide * 0.95,
+          [
+            const Color(0x00000000),
+            const Color(0x00000000),
+            Color.fromRGBO(0, 0, 0, palette.isDark ? 0.42 : 0.045),
+          ],
+          const [0, 0.48, 1],
+        ),
+    );
     // Grain: a fixed per-pixel speckle on the ground only (cards and text
     // sit above this layer), so flat fills read as a material instead of a
     // screen. One tiled image shader, static, a few percent strong.
@@ -422,6 +439,8 @@ class KGlass extends StatelessWidget {
                 width: 1,
               )
             : null,
+        // Chrome rests just above the page.
+        boxShadow: frosted ? null : KShadow.lifted,
       ),
       child: padding == null ? child : Padding(padding: padding!, child: child),
     );

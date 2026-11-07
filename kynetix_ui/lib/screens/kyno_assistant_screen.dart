@@ -981,7 +981,9 @@ class _SendButtonState extends State<_SendButton> with SingleTickerProviderState
               height: 48,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: ready ? KColor.ink : KColor.cardHigh,
+                color: ready ? null : KColor.cardHigh,
+                gradient: ready ? KShade.convex(KColor.ink) : null,
+                boxShadow: ready ? KShadow.lifted : null,
               ),
               child: Icon(
                 Icons.arrow_upward_rounded,

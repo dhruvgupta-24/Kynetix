@@ -1027,9 +1027,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         behavior: HitTestBehavior.opaque,
         onTap: _scrollToTop,
         child: DecoratedBox(
+          // Solid, so the page never reads through it, and a soft shade
+          // under its edge: the content slides beneath a shelf.
           decoration: BoxDecoration(
-            color: KColor.bg.withValues(alpha: 0.92),
+            color: KColor.surface,
             border: Border(bottom: BorderSide(color: KColor.hairline, width: 0.5)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: KColor.isDark ? 0.55 : 0.07),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+                spreadRadius: -6,
+              ),
+            ],
           ),
           child: Padding(
             padding: EdgeInsets.fromLTRB(KSpacing.p, top, KSpacing.p, 0),
@@ -2187,7 +2197,8 @@ class _CalendarIconButton extends StatelessWidget {
             height: 36,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: highlighted ? KColor.ink : null,
+              gradient: highlighted ? KShade.convex(KColor.ink) : null,
+              boxShadow: highlighted ? KShadow.lifted : null,
             ),
             child: Icon(
               icon,
@@ -2382,8 +2393,11 @@ class _DayCell extends StatelessWidget {
           decoration: BoxDecoration(
             // Selected = a solid ink chip. Target met keeps a brass wash
             // (shape, not just the dot); today gets an ink outline.
+            // Selected is convex and lifted off the strip, like the dock pill.
+            gradient: isSelected ? KShade.convex(KColor.ink) : null,
+            boxShadow: isSelected ? KShadow.lifted : null,
             color: isSelected
-                ? KColor.ink
+                ? null
                 : isCompleted
                     ? KColor.goal.withValues(alpha: dark ? 0.18 : 0.16)
                     : Colors.transparent,
@@ -2713,7 +2727,7 @@ class _ActivitySyncCard extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: KSpacing.md, vertical: 10),
           decoration: BoxDecoration(
-            color: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+            gradient: KShade.raised(KShade.chip),
             borderRadius: KRadius.sm,
           ),
           child: Row(
@@ -2819,7 +2833,7 @@ class _StepStat extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: KSpacing.md, vertical: 10),
         decoration: BoxDecoration(
-          color: KColor.fg.withValues(alpha: KColor.isDark ? 0.04 : 0.035),
+          gradient: KShade.raised(KShade.chip),
           borderRadius: KRadius.sm,
         ),
         child: Column(
@@ -2858,13 +2872,8 @@ class _ActionButton extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: KSpacing.lg, vertical: KSpacing.sm),
           decoration: BoxDecoration(
-            gradient: filled
-                ? LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: KGradient.primary,
-                  )
-                : null,
+            gradient: filled ? KShade.convex(KColor.ink) : null,
+            boxShadow: filled ? KShadow.lifted : null,
             borderRadius: KRadius.pill,
             border: filled
                 ? null
@@ -3097,7 +3106,9 @@ class _RangeToggle extends StatelessWidget {
             duration: KMotion.of(context, KMotion.quick),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: on ? KColor.ink : Colors.transparent,
+              color: on ? null : Colors.transparent,
+              gradient: on ? KShade.convex(KColor.ink) : null,
+              boxShadow: on ? KShadow.lifted : null,
               borderRadius: KRadius.pill,
             ),
             child: Text(
@@ -3115,7 +3126,7 @@ class _RangeToggle extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(color: KColor.cardHigh, borderRadius: KRadius.pill),
+      decoration: BoxDecoration(gradient: KShade.sunken(KColor.cardHigh), borderRadius: KRadius.pill),
       child: Row(mainAxisSize: MainAxisSize.min, children: [opt(30, '30 days'), opt(90, '90 days')]),
     );
   }

@@ -389,7 +389,7 @@ class _Notice extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(KSpacing.md),
       decoration: BoxDecoration(
-        color: KColor.cardHigh,
+        gradient: KShade.raised(KColor.cardHigh),
         borderRadius: KRadius.sm,
         border: Border.all(color: KColor.border),
       ),
@@ -434,7 +434,9 @@ class _UnitToggle extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 52, minHeight: 48),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? KColor.ink : Colors.transparent,
+              color: selected ? null : Colors.transparent,
+              gradient: selected ? KShade.convex(KColor.ink) : null,
+              boxShadow: selected ? KShadow.lifted : null,
               borderRadius: KRadius.pill,
             ),
             child: Text(
@@ -452,7 +454,8 @@ class _UnitToggle extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        gradient: KShade.raised(KColor.card),
+        // A segmented track is a groove the selected thumb sits in.
+        gradient: KShade.sunken(KColor.card),
         borderRadius: KRadius.pill,
         border: Border.all(color: KColor.border),
       ),

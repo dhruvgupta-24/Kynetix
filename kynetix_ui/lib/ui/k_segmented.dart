@@ -136,8 +136,9 @@ class _KSegmentedState<T> extends State<KSegmented<T>>
   Widget build(BuildContext context) {
     final dark = KColor.isDark;
     final track = DecoratedBox(
+      // A sunken track: shaded under its top lip, the thumb riding in it.
       decoration: BoxDecoration(
-        color: KColor.fg.withValues(alpha: dark ? 0.04 : 0.035),
+        gradient: KShade.sunken(KShade.field),
         borderRadius: KRadius.md,
         border: Border.all(
           color: KColor.fg.withValues(alpha: dark ? 0.07 : 0.08),
@@ -177,8 +178,9 @@ class _KSegmentedState<T> extends State<KSegmented<T>>
                   bottom: 0,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: KColor.ink,
+                      gradient: KShade.convex(KColor.ink),
                       borderRadius: KRadius.sm,
+                      boxShadow: KShadow.lifted,
                     ),
                   ),
                 ),

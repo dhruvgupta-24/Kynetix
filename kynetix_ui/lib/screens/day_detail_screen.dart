@@ -1036,8 +1036,9 @@ class _SelectChip extends StatelessWidget {
               curve: KMotion.emphasizedCurve,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: selected ? KColor.ink : null,
+                gradient: selected ? KShade.convex(KColor.ink) : null,
                 borderRadius: KRadius.sm,
+                boxShadow: selected ? KShadow.lifted : null,
                 border: Border.all(
                   color: selected
                       ? KColor.ink
@@ -1622,7 +1623,7 @@ Widget _buildGridMacroCell(String name, String value, Color color, {bool locked 
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
-      color: KColor.fg.withValues(alpha: dark ? 0.04 : 0.035),
+      gradient: KShade.raised(KShade.chip),
       borderRadius: KRadius.sm,
       border: Border.all(
         color: locked
@@ -2218,14 +2219,9 @@ class _AddCustomQuickSheetState extends State<_AddCustomQuickSheet> {
                           alignment: Alignment.center,
                           padding: const EdgeInsets.symmetric(horizontal: 14),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: _loading
-                                  ? KGradient.primary.map((c) => c.withValues(alpha: 0.45)).toList()
-                                  : KGradient.primary,
-                            ),
+                            gradient: KShade.convex(KColor.ink.withValues(alpha: _loading ? 0.45 : 1)),
                             borderRadius: KRadius.pill,
+                            boxShadow: _loading ? null : KShadow.lifted,
                           ),
                           child: AnimatedSwitcher(
                             duration: KMotion.of(context, KMotion.quick),
