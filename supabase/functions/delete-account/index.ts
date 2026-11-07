@@ -135,6 +135,25 @@ Deno.serve(async (req: Request) => {
       if (error) console.error('[delete-account] avatar remove failed (continuing)');
     }
 
+    // Photos attached to feedback: everything in the user's folder.
+    {
+      const bucket = admin.storage.from('feedback-photos');
+      for (let round = 0; round < 20; round++) {
+        const { data, error } = await bucket.list(userId, { limit: 100 });
+        if (error) {
+          console.error('[delete-account] feedback photo list failed (continuing)');
+          break;
+        }
+        if (!data || data.length === 0) break;
+        const { error: rmErr } = await bucket.remove(data.map((f) => `${userId}/${f.name}`));
+        if (rmErr) {
+          console.error('[delete-account] feedback photo remove failed (continuing)');
+          break;
+        }
+        counts['feedback_photos_removed'] = (counts['feedback_photos_removed'] ?? 0) + data.length;
+      }
+    }
+
     const { error: delErr } = await admin.auth.admin.deleteUser(userId);
     if (delErr && !isUserNotFound(delErr)) {
       console.error(`[delete-account] auth delete failed status=${(delErr as any).status ?? '-'}`);

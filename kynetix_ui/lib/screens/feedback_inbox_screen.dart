@@ -250,6 +250,10 @@ class _InboxCard extends StatelessWidget {
             const SizedBox(height: 2),
             SelectableText(item.note!, style: KText.body.copyWith(fontSize: 14)),
           ],
+          if (item.photos.isNotEmpty) ...[
+            const SizedBox(height: KSpacing.md),
+            _InboxPhotos(paths: item.photos),
+          ],
           if (meta.isNotEmpty) ...[
             const SizedBox(height: KSpacing.sm),
             Text(meta, style: muted),
@@ -315,4 +319,79 @@ class _Chip extends StatelessWidget {
           style: KText.caption.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: ink ? KColor.onInk : KColor.textPrimary),
         ),
       );
+}
+
+/// Photos attached to one feedback item. Signed links are fetched once per
+/// card; a tap opens the photo full screen with pinch to zoom.
+class _InboxPhotos extends StatefulWidget {
+  const _InboxPhotos({required this.paths});
+  final List<String> paths;
+
+  @override
+  State<_InboxPhotos> createState() => _InboxPhotosState();
+}
+
+class _InboxPhotosState extends State<_InboxPhotos> {
+  late final Future<List<String>> _urls = FeedbackService.instance.photoUrls(widget.paths);
+
+  static const double _tile = 76;
+
+  void _open(String url) {
+    KHaptics.select();
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.88),
+      builder: (ctx) => GestureDetector(
+        onTap: () => Navigator.of(ctx).pop(),
+        child: InteractiveViewer(
+          maxScale: 5,
+          child: Center(child: Image.network(url, fit: BoxFit.contain)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final edge = KColor.isDark ? KColor.fg.withValues(alpha: 0.08) : KColor.border;
+    Widget slot(Widget child) => Container(
+          width: _tile,
+          height: _tile,
+          margin: const EdgeInsets.only(right: KSpacing.sm),
+          decoration: BoxDecoration(color: KShade.field, borderRadius: KRadius.sm, border: Border.all(color: edge)),
+          clipBehavior: Clip.antiAlias,
+          child: child,
+        );
+    return FutureBuilder<List<String>>(
+      future: _urls,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text("Photos didn't load. Pull to refresh.", style: KText.caption.copyWith(fontSize: 12, color: KColor.textMuted));
+        }
+        final urls = snap.data;
+        return Row(
+          children: [
+            if (urls == null)
+              for (final _ in widget.paths) slot(const SizedBox.shrink())
+            else
+              for (final (i, url) in urls.indexed)
+                Semantics(
+                  button: true,
+                  label: 'Open photo ${i + 1}',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    onTap: () => _open(url),
+                    child: slot(Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      cacheWidth: 228,
+                      errorBuilder: (_, _, _) => Icon(Icons.broken_image_outlined, color: KColor.textMuted),
+                    )),
+                  ),
+                ),
+          ],
+        );
+      },
+    );
+  }
 }

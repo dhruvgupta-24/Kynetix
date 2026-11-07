@@ -74,6 +74,7 @@ class InboxItem {
     this.platform,
     this.note,
     this.prompt,
+    this.photos = const [],
   });
 
   final String id;
@@ -92,6 +93,9 @@ class InboxItem {
   final String? note;
   final String? prompt;
 
+  /// Feedback only: storage paths of attached photos, at most three.
+  final List<String> photos;
+
   InboxItem withStatus(InboxStatus s) => InboxItem(
         id: id,
         source: source,
@@ -104,6 +108,7 @@ class InboxItem {
         platform: platform,
         note: note,
         prompt: prompt,
+        photos: photos,
       );
 
   /// A `feedback` row. Pure, for tests.
@@ -117,6 +122,10 @@ class InboxItem {
         replyTo: _blankToNull(row['reply_to']),
         appVersion: _blankToNull(row['app_version']),
         platform: _blankToNull(row['platform']),
+        photos: [
+          for (final p in (row['photos'] is List ? row['photos'] as List : const []))
+            if (p is String && p.trim().isNotEmpty) p.trim(),
+        ],
       );
 
   /// A `kyno_reports` row. Pure, for tests.
@@ -156,6 +165,11 @@ class FeedbackService {
   static const maxAppVersionLength = 40;
   static const maxPlatformLength   = 60;
 
+  /// Photos per feedback, and the largest file the bucket takes.
+  static const maxPhotos     = 3;
+  static const maxPhotoBytes = 3 * 1024 * 1024;
+  static const photoBucket   = 'feedback-photos';
+
   /// Newest rows the inbox loads per table.
   static const inboxLimit = 200;
 
@@ -175,6 +189,7 @@ class FeedbackService {
     String? replyTo,
     String? appVersion,
     String? platform,
+    List<String> photos = const [],
   }) {
     final text = message.trim();
     if (text.isEmpty) {
@@ -191,8 +206,31 @@ class FeedbackService {
       'reply_to':    opt(replyTo, maxReplyToLength),
       'app_version': opt(appVersion, maxAppVersionLength),
       'platform':    opt(platform, maxPlatformLength),
+      if (photos.isNotEmpty) 'photos': photos.take(maxPhotos).toList(),
     };
   }
+
+  /// The image type of [bytes] from its first bytes, or null when it is not
+  /// a JPEG, PNG or WebP (the bucket takes nothing else). Pure.
+  static ({String ext, String mime})? imageType(Uint8List bytes) {
+    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return (ext: 'jpg', mime: 'image/jpeg');
+    }
+    if (bytes.length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
+      return (ext: 'png', mime: 'image/png');
+    }
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+        bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
+      return (ext: 'webp', mime: 'image/webp');
+    }
+    return null;
+  }
+
+  /// Where photo [index] of one feedback goes: the user's own folder, a
+  /// name no other send can repeat. Pure.
+  static String photoPath(String uid, DateTime at, int index, String ext) =>
+      '$uid/${at.toUtc().microsecondsSinceEpoch}-$index.$ext';
 
   /// Cut to at most [max] UTF-16 units without splitting a surrogate pair.
   static String _clip(String s, int max) {
@@ -269,10 +307,26 @@ class FeedbackService {
     required FeedbackKind kind,
     required String message,
     String? replyTo,
+    List<Uint8List> photos = const [],
   }) async {
     final client = Supabase.instance.client;
-    if (client.auth.currentSession == null) {
+    final uid = client.auth.currentUser?.id;
+    if (client.auth.currentSession == null || uid == null) {
       throw StateError('not authenticated');
+    }
+    // Text must be sendable before any photo goes up.
+    buildRow(kind: kind, message: message);
+    final paths = <String>[];
+    final at = DateTime.now();
+    for (final (i, bytes) in photos.take(maxPhotos).indexed) {
+      final type = imageType(bytes);
+      if (type == null || bytes.length > maxPhotoBytes) continue;
+      final path = photoPath(uid, at, i, type.ext);
+      await client.storage
+          .from(photoBucket)
+          .uploadBinary(path, bytes, fileOptions: FileOptions(contentType: type.mime))
+          .timeout(const Duration(seconds: 30));
+      paths.add(path);
     }
     final row = buildRow(
       kind: kind,
@@ -280,6 +334,7 @@ class FeedbackService {
       replyTo: replyTo,
       appVersion: await (_versionLookup ??= _lookUpVersion()),
       platform: _platform(),
+      photos: paths,
     );
     await client.from('feedback').insert(row).timeout(_timeout);
   }
@@ -323,7 +378,7 @@ class FeedbackService {
   Future<List<InboxItem>> fetchFeedback() async {
     final rows = await Supabase.instance.client
         .from('feedback')
-        .select('id, created_at, kind, message, reply_to, app_version, platform, status')
+        .select('id, created_at, kind, message, reply_to, app_version, platform, status, photos')
         .order('created_at', ascending: false)
         .limit(inboxLimit)
         .timeout(_timeout);
@@ -338,6 +393,17 @@ class FeedbackService {
         .limit(inboxLimit)
         .timeout(_timeout);
     return [for (final r in rows) InboxItem.fromReportRow(r)];
+  }
+
+  /// Short-lived links to [paths] in the photo bucket, for curators. Paths
+  /// that fail to sign are left out.
+  Future<List<String>> photoUrls(List<String> paths) async {
+    if (paths.isEmpty) return const [];
+    final signed = await Supabase.instance.client.storage
+        .from(photoBucket)
+        .createSignedUrls(paths, 3600)
+        .timeout(_timeout);
+    return [for (final s in signed) if (s.signedUrl.isNotEmpty) s.signedUrl];
   }
 
   /// Both inbox lists, newest first. Also refreshes [newCount].

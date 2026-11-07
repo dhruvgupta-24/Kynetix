@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kynetix/services/feedback_service.dart';
@@ -58,6 +61,29 @@ void main() {
       expect(row['message'], 'a' * 1999);
     });
 
+    test('photos go in only when there are some, at most three', () {
+      expect(FeedbackService.buildRow(kind: FeedbackKind.bug, message: 'x').containsKey('photos'), isFalse);
+      final row = FeedbackService.buildRow(kind: FeedbackKind.bug, message: 'x', photos: ['u/1.jpg', 'u/2.jpg', 'u/3.jpg', 'u/4.jpg']);
+      expect(row['photos'], ['u/1.jpg', 'u/2.jpg', 'u/3.jpg']);
+      expect(FeedbackService.maxPhotos, 3);
+    });
+
+    test('imageType reads JPEG, PNG and WebP from the first bytes only', () {
+      expect(FeedbackService.imageType(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0]))?.mime, 'image/jpeg');
+      expect(FeedbackService.imageType(_png)?.ext, 'png');
+      final webp = Uint8List.fromList([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+      expect(FeedbackService.imageType(webp)?.mime, 'image/webp');
+      expect(FeedbackService.imageType(Uint8List.fromList(utf8.encode('ftypheic....'))), isNull);
+      expect(FeedbackService.imageType(Uint8List(0)), isNull);
+    });
+
+    test('photoPath sits in the user folder with a unique name', () {
+      final at = DateTime.utc(2026, 11, 8, 10);
+      final path = FeedbackService.photoPath('uid-1', at, 2, 'png');
+      expect(path, 'uid-1/${at.microsecondsSinceEpoch}-2.png');
+      expect(path.split('/').first, 'uid-1');
+    });
+
     test('rejects an empty message', () {
       expect(() => FeedbackService.buildRow(kind: FeedbackKind.idea, message: ' \n '), throwsArgumentError);
     });
@@ -103,6 +129,10 @@ void main() {
       expect(f.status, InboxStatus.read);
       expect(f.replyTo, 'me@example.com');
       expect(f.createdAt.toUtc(), DateTime.utc(2026, 10, 20, 9));
+      expect(f.photos, isEmpty);
+      final withPhotos = InboxItem.fromFeedbackRow({'id': 'a2', 'kind': 'bug', 'message': 'x', 'photos': ['u/1.jpg', ' ', 7]});
+      expect(withPhotos.photos, ['u/1.jpg']);
+      expect(withPhotos.withStatus(InboxStatus.done).photos, ['u/1.jpg']);
 
       final r = InboxItem.fromReportRow({
         'id': 'b2',
@@ -135,7 +165,7 @@ void main() {
       var sent = 0;
       await tester.pumpWidget(host(FeedbackSheet(
         email: 'me@example.com',
-        send: ({required kind, required message, replyTo}) async => sent++,
+        send: ({required kind, required message, replyTo, photos = const []}) async => sent++,
       )));
 
       expect(find.text('Say it straight'), findsOneWidget);
@@ -160,7 +190,7 @@ void main() {
       final calls = <(FeedbackKind, String, String?)>[];
       await tester.pumpWidget(host(FeedbackSheet(
         email: 'me@example.com',
-        send: ({required kind, required message, replyTo}) async => calls.add((kind, message, replyTo)),
+        send: ({required kind, required message, replyTo, photos = const []}) async => calls.add((kind, message, replyTo)),
       )));
 
       await tester.tap(find.text('Love it'));
@@ -175,7 +205,7 @@ void main() {
 
     testWidgets('a failed send keeps the text and says so calmly', (tester) async {
       await tester.pumpWidget(host(FeedbackSheet(
-        send: ({required kind, required message, replyTo}) async => throw Exception('offline'),
+        send: ({required kind, required message, replyTo, photos = const []}) async => throw Exception('offline'),
       )));
       expect(find.textContaining('You can reply to me at'), findsNothing);
 
@@ -185,5 +215,42 @@ void main() {
       expect(find.text("Didn't go through. Check your connection and try again."), findsOneWidget);
       expect(find.text('The rest timer froze'), findsOneWidget);
     });
+
+    testWidgets('attaches up to three photos, drops bad ones, and sends them', (tester) async {
+      final sent = <List<Uint8List>>[];
+      final junk = Uint8List.fromList(utf8.encode('not an image'));
+      var picks = 0;
+      await tester.pumpWidget(host(FeedbackSheet(
+        pickPhotos: (context, limit) async {
+          picks++;
+          return picks == 1 ? [_png, junk, _png] : List.filled(limit + 2, _png);
+        },
+        send: ({required kind, required message, replyTo, photos = const []}) async => sent.add(photos),
+      )));
+
+      expect(find.text('Add a screenshot or photo'), findsOneWidget);
+      await tester.tap(find.text('Add a screenshot or photo'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsNWidgets(2));
+
+      await tester.tap(find.text('Add another'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsNWidgets(3));
+      expect(find.text('Add another'), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.close_rounded).first);
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsNWidgets(2));
+
+      await tester.enterText(find.byType(TextField), 'Look at this');
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      expect(sent.single, hasLength(2));
+    });
   });
 }
+
+/// A real 1x1 PNG.
+final Uint8List _png = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+);

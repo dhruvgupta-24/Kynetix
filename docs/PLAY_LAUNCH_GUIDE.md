@@ -182,7 +182,7 @@ Data types to tick (for each: Collected = Yes, Shared = No, Processed ephemerall
 | Personal info > **Other info** (date of birth / age) | App functionality (age check, teen mode, targets) | Required |
 | Health and fitness > **Health info** (weight, sleep, HRV) | App functionality, Personalisation | Optional |
 | Health and fitness > **Fitness info** (workouts, steps) | App functionality, Personalisation | Optional |
-| Photos and videos > **Photos** (meal photos sent to Kyno) | App functionality. Tick **Processed ephemerally = Yes** (sent to the AI for one answer, not stored) | Optional |
+| Photos and videos > **Photos** (meal photos sent to Kyno; screenshots attached to feedback) | App functionality, Developer communications. **Processed ephemerally = No**: Kyno photos are not kept, but feedback photos are stored until the account is deleted | Optional |
 | App activity > **Other user-generated content** (meals you type, Kyno chat questions, feedback, reports) | App functionality, Analytics? **No**, just App functionality | Optional |
 | App info and performance > **Crash logs** (in-house error reports) | Analytics, App functionality | Required (automatic) |
 | Device or other IDs | **Don't tick**: the app doesn't use advertising ID or device IDs |  |
