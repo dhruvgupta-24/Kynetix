@@ -147,7 +147,7 @@ Google's reviewers need a login that works without Google sign-in.
 ### 13. Put all listing text in one Google Doc
 From [PLAY_LAUNCH_GUIDE.md](PLAY_LAUNCH_GUIDE.md):
 - [ ] Part 5: app name, short description (80 chars), full description (4000), category Health & Fitness, contact email, website
-- [ ] Part 6: App content answers (privacy URL, app access notes, ads: no, target audience 18+, account deletion URL)
+- [ ] Part 6: App content answers (privacy URL, app access notes, ads: no, target audience 13-15, 16-17 and 18+, account deletion URL)
 - [ ] Part 7: Data safety answers (collected yes, shared no; types and purposes table)
 - [ ] Part 8: Health Connect reasons for steps, weight, sleep, HRV
 - [ ] Read the full description out loud; change anything that doesn't sound like you (keep: no dashes, nothing the app can't do)

@@ -19,7 +19,7 @@ forms and testers, which only you can do.
 | Government photo ID | Aadhaar, PAN, passport or driving licence. Name must match the payment profile name exactly. |
 | A phone number | For OTP verification. |
 | An Android phone | Play Console asks you to install the Play Console app on a real Android device to prove access. |
-| The app bundle | `kynetix_ui/build/app/outputs/bundle/release/app-release.aab` (rebuild any time with `flutter build appbundle --release` in `kynetix_ui`; it is signed with the upload key automatically and refuses to build without it). |
+| The app bundle | `Desktop/Kynetix-play-upload/kynetix-1.0.0-8.aab` (built 7 Nov 2026 from 7d70a93, versionCode 8; rebuild any time with `flutter build appbundle --release` in `kynetix_ui`; it is signed with the upload key automatically and refuses to build without it). |
 | Upload key | `kynetix_ui/android/upload-keystore.jks` + `kynetix_ui/android/key.properties`. **Back both up now** (Google Drive + a USB stick). Lose them and updates need Google's key reset process. |
 | Store assets | `Desktop/Kynetix-logo-concepts/play-store/` (feature graphic, screenshots) and `Desktop/Kynetix-logo-concepts/shear-final/play-store-icon-512.png` (icon). |
 | Links | Website https://dhruvgupta-24.github.io/Kynetix/ · Privacy https://dhruvgupta-24.github.io/Kynetix/privacy/ · Delete account https://dhruvgupta-24.github.io/Kynetix/delete-account/ · Terms https://dhruvgupta-24.github.io/Kynetix/terms/ · Email kynetix.app@gmail.com |
@@ -61,11 +61,13 @@ Internal testing is instant (no review wait) and lets you upload the bundle once
 1. Left menu **Test and release > Testing > Internal testing > Create new release**.
 2. It asks about **Play App Signing**: choose **Use Google-generated key** (recommended). Google keeps the app signing key; your upload key stays yours.
 3. Upload `app-release.aab`.
-4. Release name: `1.0.0 (1)`. Release notes: `First build.`
+4. Release name: `1.0.0 (8)`. Release notes: `First build.`
 5. **Save > Review release > Start rollout to Internal testing**.
 6. **Testers** tab: create an email list with your own Gmail (the one on your phone) and copy the **opt-in link**. Open it on your phone, accept, and install from Play. This is the first time Kynetix installs from the Play Store.
 
-> Version numbers: every new upload needs a higher `versionCode`. Bump the `+N` in `kynetix_ui/pubspec.yaml` (`version: 1.0.0+1` becomes `1.0.0+2`) before each new bundle.
+> Version numbers: every new upload needs a higher `versionCode`. Bump the `+N` in `kynetix_ui/pubspec.yaml` (`version: 1.0.0+8` becomes `1.0.0+9`) before each new bundle.
+
+> Your own phone: the Kynetix on it is signed with the laptop debug key, so Play cannot install over it ("App not installed" / signature conflict). To test the Play build on your phone you must uninstall the sideloaded app first, which wipes data stored only on the phone. Check your meals and workouts show up after signing in on another device (or the emulator) before you do that. Your account and synced data live in Supabase and survive.
 
 ---
 
@@ -147,10 +149,11 @@ Questions or ideas? Profile > Talk to us, or kynetix.app@gmail.com
 2. **App access**: choose *All or some functionality is restricted*. Add instructions so the reviewer can log in:
    - Name: `Reviewer account`
    - Username and password: a dedicated reviewer account (sign up in the app with an email you control, finish onboarding, log a meal and a workout). Type the credentials only into this Play Console form, never into the repo (it's public). Reviewers sign in with email, so Google sign-in isn't needed.
-   - Notes: `Sign in with email. Onboarding is done; the account has meals and workouts logged.`
+   - Notes: `Sign in with email. Onboarding is done; the account has meals and workouts logged. Users aged 13 to 17 run in teen mode, which needs a parent's OK by email link; this reviewer account is an adult account.`
+   - The reviewer login is in `Documents/Kynetix-private/reviewer-account.txt`.
 3. **Ads**: *No, my app does not contain ads*.
-4. **Content rating**: start the IARC questionnaire. Category **Utility, Productivity, Communication or Other** (or Health). Answer honestly: no violence, no sexual content, no gambling. Users can chat with AI (answer *Yes* to user-generated / AI-generated content if asked; mention in-app reporting). Expect a rating like *Everyone* / *3+* (Google might set PEGI 3 or 12 depending on the AI chat answers; that's fine).
-5. **Target audience and content**: age group **18 and over** only (the app enforces 18+ at onboarding). Not designed for children.
+4. **Content rating**: start the IARC questionnaire. Category **Utility, Productivity, Communication or Other** (or Health). Answer honestly: no violence, no sexual content, no gambling. Users can chat with AI (answer *Yes* to AI-generated content if asked; mention long-press > *Report this reply*). Users cannot message each other: answer *No* to user-to-user interaction and sharing location. Expect a rating like *Everyone* / *3+* (Google might set PEGI 3 or 12 depending on the AI chat answers; that's fine).
+5. **Target audience and content**: tick **13-15**, **16-17** and **18 and over**. Do **not** tick any under-13 group (the app refuses under 13 at onboarding), so the Families policy does not apply. When asked *Could your store listing unintentionally appeal to children?* answer **No**. If Google flags the 16-17 group as "children in some regions", accept its prompt; nothing in the app changes. Keep listing images adult and gym-focused (they are).
 6. **News app**: No.
 7. **Data safety**: see Part 7.
 8. **Government app**: No. **Financial features**: none.
@@ -163,7 +166,7 @@ Questions or ideas? Profile > Talk to us, or kynetix.app@gmail.com
 
 ## Part 7. Data safety form (the exact answers)
 
-Important definition: data sent to a company that processes it **on your behalf** (a service provider: Supabase hosting, Gemini/Groq/OpenRouter answering Kyno) counts as **collected**, not **shared**. "Shared" means handing data to a third party for *their own* use. So for Kynetix: **collected = yes, shared = no**.
+Important definition: data sent to a company that processes it **on your behalf** (a service provider: Supabase hosting, Gemini/Groq/OpenRouter/OpenAI answering Kyno) counts as **collected**, not **shared**. "Shared" means handing data to a third party for *their own* use. So for Kynetix: **collected = yes, shared = no**.
 
 Top questions:
 - Does your app collect or share any required user data types? **Yes**
@@ -175,7 +178,8 @@ Data types to tick (for each: Collected = Yes, Shared = No, Processed ephemerall
 | Category > type | Why (purposes to tick) | Required? |
 |---|---|---|
 | Personal info > **Name** | App functionality, Account management | Required |
-| Personal info > **Email address** | App functionality, Account management, Developer communications (feedback replies) | Required |
+| Personal info > **Email address** | App functionality, Account management, Developer communications (feedback replies). Also covers a parent's email for teen consent | Required |
+| Personal info > **Other info** (date of birth / age) | App functionality (age check, teen mode, targets) | Required |
 | Health and fitness > **Health info** (weight, sleep, HRV) | App functionality, Personalisation | Optional |
 | Health and fitness > **Fitness info** (workouts, steps) | App functionality, Personalisation | Optional |
 | Photos and videos > **Photos** (meal photos sent to Kyno) | App functionality. Tick **Processed ephemerally = Yes** (sent to the AI for one answer, not stored) | Optional |
