@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
@@ -21,9 +19,10 @@ class KAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<Uint8List?>(
-      valueListenable: AvatarService.instance.photo,
-      builder: (context, bytes, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([AvatarService.instance.photo, ProfileService.instance.profile]),
+      builder: (context, _) {
+        final bytes = AvatarService.instance.photo.value;
         final dpr = MediaQuery.devicePixelRatioOf(context);
         final px = (size * dpr).round();
         final url = AvatarService.instance.accountPhotoUrl;

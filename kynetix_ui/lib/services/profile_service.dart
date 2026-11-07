@@ -18,8 +18,11 @@ class ProfileService {
   ProfileService._();
   static final instance = ProfileService._();
 
-  /// Global in-memory user profile store
-  UserProfile? currentUserProfile;
+  /// Global in-memory user profile store. Listen to [profile] to repaint
+  /// when it changes (the dock avatar's letter, for one).
+  final ValueNotifier<UserProfile?> profile = ValueNotifier(null);
+  UserProfile? get currentUserProfile => profile.value;
+  set currentUserProfile(UserProfile? p) => profile.value = p;
 
   /// Helper to get the active PortionAnchor
   PortionAnchor get activePortionAnchor => currentUserProfile?.portionAnchor ?? PortionAnchor.balanced;

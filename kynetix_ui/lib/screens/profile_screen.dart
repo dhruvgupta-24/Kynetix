@@ -439,6 +439,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// What Kynetix calls you: the greeting, Kyno and share cards.
+  void _editName() {
+    final ctrl = TextEditingController(text: _profile.name);
+    final formKey = GlobalKey<FormState>();
+    void save(BuildContext ctx) {
+      if (!(formKey.currentState?.validate() ?? false)) {
+        KHaptics.reject();
+        KShake.shakeInvalid(formKey.currentContext);
+        return;
+      }
+      final name = ctrl.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (name != _profile.name) {
+        setState(() => _saveProfile(_profile.copyWith(name: name)));
+      }
+      Navigator.pop(ctx);
+      _showToast('Name saved.', success: true);
+    }
+
+    showKSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SafeArea(
+          child: Form(
+            key: formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, KSpacing.xl),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const KSheetHeader('Your name', subtitle: 'What Kyno and the app call you.'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: KSpacing.p - 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: KSpacing.lg),
+                        KShake(
+                          child: TextFormField(
+                            controller: ctrl,
+                            autofocus: true,
+                            maxLength: 40,
+                            textCapitalization: TextCapitalization.words,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => save(ctx),
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'Add your name so we know what to call you.'
+                                : null,
+                            style: KText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
+                            decoration: _inputDecoration(),
+                          ),
+                        ),
+                        const SizedBox(height: KSpacing.lg),
+                        KButton(label: 'Save name', width: double.infinity, onTap: () => save(ctx)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _editBodyMetrics() {
     var dob = _profile.dateOfBirth;
     final heightCtrl = TextEditingController(
@@ -979,6 +1048,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _Group(
       title: 'Body metrics',
       children: [
+        _SettingRow(
+          icon: Icons.badge_outlined,
+          tint: KColor.textSecondary,
+          label: 'Name',
+          value: _profile.name,
+          isEditable: true,
+          onTap: _editName,
+        ),
         _SettingRow(
           icon: Icons.person_outline_rounded,
           tint: KColor.textSecondary,
