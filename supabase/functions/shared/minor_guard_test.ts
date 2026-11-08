@@ -1,5 +1,5 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { keywordRisk, lastUserText, sseOf, TEEN_CRISIS_REPLY, TEEN_FLAGGED_NOTE, TEEN_SAFETY_RULES, withTeenSafety } from './minor_guard.ts';
+import { keywordRisk, lastUserText, sseOf, TEEN_CRISIS_REPLY, TEEN_FLAGGED_NOTE, TEEN_MEAL_ESTIMATE_RULES, TEEN_SAFETY_RULES, withSystemNote, withTeenSafety } from './minor_guard.ts';
 import { buildTeenChain, chatBody } from './free_providers.ts';
 
 Deno.test('teen rules fold into the first system message (the Codex path reads only that one)', () => {
@@ -60,4 +60,13 @@ Deno.test('the crisis reply has the helpline and streams as one SSE message', ()
   const sse = sseOf('hi');
   assert(sse.startsWith('data: {') && sse.trimEnd().endsWith('data: [DONE]'));
   assertEquals(JSON.parse(sse.split('\n\n')[0].slice(6)).choices[0].delta.content, 'hi');
+});
+
+Deno.test('teen meal estimates get JSON-safe rules that drop fat-loss framing', () => {
+  const out = withSystemNote([{ role: 'system', content: 'Fat-loss coach. JSON only.' }, { role: 'user', content: '2 roti dal' }], TEEN_MEAL_ESTIMATE_RULES);
+  assertEquals(out.length, 2);
+  assert(out[0].content.startsWith('Fat-loss coach. JSON only.'));
+  assert(out[0].content.includes('never mention fat loss'));
+  assert(out[0].content.includes('Keep the JSON format'));
+  assert(!/[–—]/.test(TEEN_MEAL_ESTIMATE_RULES));
 });

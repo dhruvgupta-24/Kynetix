@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
     console.log(`[openai-link-verify] user=${user.id} — calling ${MODELS_URL}`);
     const discoveryResult = await discoverModels(accessToken);
     console.log(`[openai-link-verify] discovery: status=${discoveryResult.status} models_count=${discoveryResult.models.length}`);
-    console.log(`[openai-link-verify] raw discovery body (first 1000): ${discoveryResult.rawBody.slice(0, 1000)}`);
+    console.log(`[openai-link-verify] discovery body length=${discoveryResult.rawBody.length}`);
 
     // ── 4. Build ordered candidate list ──────────────────────────────────────
     //   Priority 1: models returned by the discovery endpoint (user's actual entitlement)
@@ -244,7 +244,7 @@ async function discoverModels(accessToken: string): Promise<{
     console.log(`[openai-link-verify] ${MODELS_URL} → status=${res.status}`);
 
     if (!res.ok) {
-      console.warn(`[openai-link-verify] model discovery failed: ${rawBody.slice(0, 400)}`);
+      console.warn(`[openai-link-verify] model discovery failed status=${res.status} length=${rawBody.length}`);
       return { status: res.status, models: [], rawBody };
     }
 

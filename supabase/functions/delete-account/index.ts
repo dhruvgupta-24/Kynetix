@@ -38,6 +38,34 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+/** Removes every object under `prefix/` in one bucket, sub-folders included
+ *  (folders come back from list() with a null id). Best effort: failures are
+ *  logged and the account deletion continues. Returns how many were removed. */
+async function purgeFolder(bucket: any, prefix: string, label: string, depth = 0): Promise<number> {
+  let removed = 0;
+  for (let round = 0; round < 20; round++) {
+    const { data, error } = await bucket.list(prefix, { limit: 100 });
+    if (error) {
+      console.error(`[delete-account] ${label} list failed (continuing)`);
+      return removed;
+    }
+    const entries: any[] = data ?? [];
+    const files = entries.filter((e) => e.id != null).map((e) => `${prefix}/${e.name}`);
+    const folders = entries.filter((e) => e.id == null).map((e) => `${prefix}/${e.name}`);
+    if (depth < 3) {
+      for (const f of folders) removed += await purgeFolder(bucket, f, label, depth + 1);
+    }
+    if (files.length === 0) return removed;
+    const { error: rmErr } = await bucket.remove(files);
+    if (rmErr) {
+      console.error(`[delete-account] ${label} remove failed (continuing)`);
+      return removed;
+    }
+    removed += files.length;
+  }
+  return removed;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -129,29 +157,10 @@ Deno.serve(async (req: Request) => {
       counts[`${table}.${column}_cleared`] = count ?? 0;
     }
 
-    // The profile picture lives in storage, not in a table.
-    {
-      const { error } = await admin.storage.from('avatars').remove([`${userId}/avatar.jpg`]);
-      if (error) console.error('[delete-account] avatar remove failed (continuing)');
-    }
-
-    // Photos attached to feedback: everything in the user's folder.
-    {
-      const bucket = admin.storage.from('feedback-photos');
-      for (let round = 0; round < 20; round++) {
-        const { data, error } = await bucket.list(userId, { limit: 100 });
-        if (error) {
-          console.error('[delete-account] feedback photo list failed (continuing)');
-          break;
-        }
-        if (!data || data.length === 0) break;
-        const { error: rmErr } = await bucket.remove(data.map((f) => `${userId}/${f.name}`));
-        if (rmErr) {
-          console.error('[delete-account] feedback photo remove failed (continuing)');
-          break;
-        }
-        counts['feedback_photos_removed'] = (counts['feedback_photos_removed'] ?? 0) + data.length;
-      }
+    // Storage: everything under the user's folder in every user bucket,
+    // nested paths included (profile picture, feedback photos).
+    for (const [bucketId, key] of [['avatars', 'avatar_files_removed'], ['feedback-photos', 'feedback_photos_removed']] as const) {
+      counts[key] = await purgeFolder(admin.storage.from(bucketId), userId, bucketId);
     }
 
     const { error: delErr } = await admin.auth.admin.deleteUser(userId);

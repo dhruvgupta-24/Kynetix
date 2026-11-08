@@ -53,7 +53,7 @@ import {
   type GuardedRequest,
   type QuotaResult,
 } from "../shared/ai_guard.ts";
-import { keywordRisk, lastUserText, moderationFlagsRisk, resolveAiAudience, sseOf, TEEN_CRISIS_REPLY, teenAiOffError, withTeenSafety } from "../shared/minor_guard.ts";
+import { keywordRisk, lastUserText, moderationFlagsRisk, resolveAiAudience, sseOf, TEEN_CRISIS_REPLY, TEEN_MEAL_ESTIMATE_RULES, teenAiOffError, withSystemNote, withTeenSafety } from "../shared/minor_guard.ts";
 import { timedFetch } from "../shared/timed_fetch.ts";
 import { BodyTooLargeError, readJsonLimited } from "../shared/body_limit.ts";
 import { buildFallbackChain, buildTeenChain, chatBody, type ProviderAttempt } from "../shared/free_providers.ts";
@@ -739,6 +739,10 @@ Deno.serve(async (req: Request) => {
       }
       if (teenFlagged) console.warn(`[AI ROUTER] teen message flagged user=${user.id}`);
       messages = withTeenSafety(messages, teenFlagged);
+    } else if (audience === 'teen' && guarded.purpose === 'meal_estimate') {
+      // JSON-only, but its coachSummary / warnings / bestNextFoods are shown
+      // to the teen, and the base prompt is written for fat loss.
+      messages = withSystemNote(messages, TEEN_MEAL_ESTIMATE_RULES);
     }
 
     // ── Resolve user's ChatGPT provider (if connected + verified) ────────────

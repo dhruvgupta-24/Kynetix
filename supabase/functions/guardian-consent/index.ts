@@ -88,6 +88,15 @@ async function handle(req: Request, body: any): Promise<Response> {
     if (existing?.status === 'approved' && ageOn(parseDate(existing.child_dob)!) < 18) {
       return json({ ...teenView(existing), link: null });
     }
+    // A parent's "no" (or a later revoke) is final: a fresh request must not
+    // reset it to pending with a new link the teen could answer themselves.
+    if (existing?.status === 'declined' || existing?.status === 'revoked') {
+      throw new GuardianError(
+        409,
+        'parent_said_no',
+        'A parent or guardian already said no. If they change their mind, they can email kynetix.app@gmail.com.',
+      );
+    }
     const token = newToken();
     const row = {
       user_id: user.id,

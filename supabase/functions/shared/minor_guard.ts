@@ -60,7 +60,17 @@ export const TEEN_FLAGGED_NOTE =
 /** [messages] with the teen rules folded into the first system message (the
  *  Codex path reads only the first one), or a new one at the front. */
 export function withTeenSafety(messages: any[], flagged: boolean): any[] {
-  const extra = flagged ? `${TEEN_SAFETY_RULES}\n\n${TEEN_FLAGGED_NOTE}` : TEEN_SAFETY_RULES;
+  return withSystemNote(messages, flagged ? `${TEEN_SAFETY_RULES}\n\n${TEEN_FLAGGED_NOTE}` : TEEN_SAFETY_RULES);
+}
+
+/** Meal estimates answer in strict JSON, so the full chat rules don't fit;
+ *  these keep the numbers honest and the user-visible text teen-safe. */
+export const TEEN_MEAL_ESTIMATE_RULES = `
+TEEN MODE: the user is 13 to 17. Keep every number exactly as accurate as usual. In all user-visible text fields (coachSummary, warnings, bestNextFoods, mealQuality fields) never mention fat loss, calorie deficits, cutting, skipping meals, fasting or weight-loss targets, and never comment on their body. Frame food as fuel for growing and training. Keep the JSON format exactly as specified.`.trim();
+
+/** [messages] with [extra] folded into the first system message (the Codex
+ *  path reads only the first one), or a new system message at the front. */
+export function withSystemNote(messages: any[], extra: string): any[] {
   const i = messages.findIndex((m) => m?.role === 'system' && typeof m.content === 'string');
   if (i >= 0) {
     const copy = messages.slice();
