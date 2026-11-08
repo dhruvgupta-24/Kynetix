@@ -191,5 +191,20 @@ void main() {
       await tester.pumpAndSettle();
       expect(opened.single.host, 'play.google.com');
     });
+
+    testWidgets('never opens a non-https link from the remote version file', (tester) async {
+      final opened = <Uri>[];
+      await tester.pumpWidget(host(UpdateSheet(
+        release: _release(play: 'intent://scan/#Intent;scheme=zxing;end'),
+        kind: UpdateKind.play,
+        open: (u) async {
+          opened.add(u);
+          return true;
+        },
+      )));
+      await tester.tap(find.text('Open Google Play'));
+      await tester.pumpAndSettle();
+      expect(opened, isEmpty);
+    });
   });
 }

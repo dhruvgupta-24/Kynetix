@@ -7,6 +7,7 @@
 <meta name="description" content="Your teen asked to use Kynetix, a gym and food tracker. Read what it keeps and give or refuse your consent.">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-cUkMa2vZ5iry0iBD9YXpQYGkURYD/5XaaHjz9R10vJk='; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src https://sjrcqvqhycxtwwbivizy.supabase.co; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <link rel="canonical" href="https://dhruvgupta-24.github.io/Kynetix/parent/">
 <meta name="theme-color" content="#0B0B0C">
 <meta name="color-scheme" content="dark">
@@ -113,6 +114,7 @@ footer { margin-top: 40px; color: var(--ash); font-size: 14px; }
   <footer>Questions? <a href="mailto:kynetix.app@gmail.com">kynetix.app@gmail.com</a>. Kynetix, made in India.</footer>
 </main>
 <script>
+if (window.top !== window.self) { try { window.top.location = window.self.location.href; } catch (e) { document.documentElement.style.display = 'none'; } }
 (function () {
   var FN = 'https://sjrcqvqhycxtwwbivizy.supabase.co/functions/v1/guardian-consent';
   var token = (location.hash.match(/[#&]t=([A-Za-z0-9_-]{43})/) || [])[1];

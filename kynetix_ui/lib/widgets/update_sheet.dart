@@ -47,7 +47,8 @@ class UpdateSheet extends StatelessWidget {
     AnalyticsService.instance.track('update_clicked', {'version_code': release.versionCode});
     final navigator = Navigator.of(context);
     final uri = Uri.tryParse(link);
-    if (uri == null) return;
+    // version.json is remote: only ever open a plain https page.
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) return;
     try {
       await (open ?? (u) => launchUrl(u, mode: LaunchMode.externalApplication))(uri);
     } catch (_) {}

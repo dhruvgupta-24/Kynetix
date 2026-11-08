@@ -1859,6 +1859,8 @@ MarkdownStyleSheet get _kMarkdownSheet => () {
   );
 }();
 
+Widget _noImage(Uri uri, String? title, String? alt) => const SizedBox.shrink();
+
 class _MarkdownText extends StatelessWidget {
   final String text;
   const _MarkdownText(this.text);
@@ -1868,6 +1870,10 @@ class _MarkdownText extends StatelessWidget {
     return MarkdownBody(
       data: noEmDash(text),
       styleSheet: _kMarkdownSheet,
+      // Never fetch images from model output: a planted instruction (e.g. in
+      // a crowd-sourced product name) could put the user's data in an image
+      // URL and leak it with zero taps. Links stay inert too (no onTapLink).
+      imageBuilder: _noImage,
     );
   }
 }
