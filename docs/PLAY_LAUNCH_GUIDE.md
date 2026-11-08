@@ -19,7 +19,7 @@ forms and testers, which only you can do.
 | Government photo ID | Aadhaar, PAN, passport or driving licence. Name must match the payment profile name exactly. |
 | A phone number | For OTP verification. |
 | An Android phone | Play Console asks you to install the Play Console app on a real Android device to prove access. |
-| The app bundle | `Desktop/Kynetix-play-upload/kynetix-1.0.0-8.aab` (built 7 Nov 2026 from 7d70a93, versionCode 8; rebuild any time with `flutter build appbundle --release` in `kynetix_ui`; it is signed with the upload key automatically and refuses to build without it). |
+| The app bundle | `Desktop/Kynetix-play-upload/kynetix-1.0.0-9.aab` (built 9 Nov 2026 from 205a032, versionCode 9; rebuild any time with `flutter build appbundle --release` in `kynetix_ui`; it is signed with the upload key automatically and refuses to build without it). |
 | Upload key | `kynetix_ui/android/upload-keystore.jks` + `kynetix_ui/android/key.properties`. **Back both up now** (Google Drive + a USB stick). Lose them and updates need Google's key reset process. |
 | Store assets | `Desktop/Kynetix-logo-concepts/play-store/` (feature graphic, screenshots) and `Desktop/Kynetix-logo-concepts/shear-final/play-store-icon-512.png` (icon). |
 | Links | Website https://dhruvgupta-24.github.io/Kynetix/ · Privacy https://dhruvgupta-24.github.io/Kynetix/privacy/ · Delete account https://dhruvgupta-24.github.io/Kynetix/delete-account/ · Terms https://dhruvgupta-24.github.io/Kynetix/terms/ · Email kynetix.app@gmail.com |
