@@ -1570,6 +1570,8 @@ class _RecoveryInsightsCard extends StatelessWidget {
         : '${plural(daysSinceLast, 'day')} ago';
 
     final (acwrColor, acwrIcon) = switch (acwrBand) {
+      AcwrBand.building => (KColor.textSecondary, Icons.hourglass_empty_rounded),
+      AcwrBand.low => (KColor.textSecondary, Icons.trending_down_rounded),
       AcwrBand.normal => (KColor.green, Icons.check_circle_outline_rounded),
       AcwrBand.elevated => (KColor.warning, Icons.trending_up_rounded),
       AcwrBand.high => (KColor.danger, Icons.warning_amber_rounded),
@@ -1630,7 +1632,15 @@ class _RecoveryInsightsCard extends StatelessWidget {
               Expanded(
                 child: _MetricTile(
                   label: 'Muscles',
-                  value: recovery.muscles.isEmpty ? 'Fresh' : 'Recovering',
+                  // The tile sums up the rows below it: "Recovering" only
+                  // while some muscle still is, not merely because a list exists.
+                  value: recovery.muscles.isEmpty
+                      ? 'Fresh'
+                      : recovery.muscles.any((m) => m.state == RecoveryState.recovering)
+                          ? 'Recovering'
+                          : recovery.muscles.any((m) => m.state == RecoveryState.ready)
+                              ? 'Ready'
+                              : 'Recovered',
                 ),
               ),
               const SizedBox(width: KSpacing.sm),
@@ -1722,6 +1732,7 @@ class _RecoveryInsightsCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (acwrBand.hasRatio)
                           Text(
                             'ACWR ${WorkoutService.instance.calculateAcwr().toStringAsFixed(2)}',
                             style: KText.numSmall.copyWith(

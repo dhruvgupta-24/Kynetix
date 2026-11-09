@@ -15,12 +15,19 @@ import 'internal/scoped_prefs.dart';
 // ─── ACWR / Fatigue Analytics ─────────────────────────────────────────────────
 
 enum AcwrBand {
+  /// Under three weeks of training: no baseline to compare against yet.
+  building,
+
+  /// This week well under the usual (ACWR below 0.8): a break or a taper.
+  low,
   normal,
   elevated,
   high,
   extreme;
 
   String get label => switch (this) {
+    AcwrBand.building => 'Building',
+    AcwrBand.low      => 'Light',
     AcwrBand.normal   => 'Normal',
     AcwrBand.elevated => 'Elevated',
     AcwrBand.high     => 'High',
@@ -28,11 +35,16 @@ enum AcwrBand {
   };
 
   String get coachingInsight => switch (this) {
-    AcwrBand.normal   => 'Training load is optimal. Keep up the consistent work!',
+    AcwrBand.building => 'About three weeks of training sets your baseline. Keep logging and this fills in.',
+    AcwrBand.low      => 'Lighter than your usual weeks. Fine after a break; ease back in rather than jumping to your heaviest sessions.',
+    AcwrBand.normal   => 'Training load is steady. Keep it consistent.',
     AcwrBand.elevated => 'Fatigue load is elevated. Prioritize recovery and sleep.',
     AcwrBand.high     => 'Training volume is high. Be mindful of fatigue; consider a deload if sore.',
-    AcwrBand.extreme  => 'Workload is extreme or highly irregular. Watch your pacing and rest.',
+    AcwrBand.extreme  => 'Workload jumped well above your usual weeks. Watch your pacing and rest.',
   };
+
+  /// Whether the ratio behind this band means anything to show.
+  bool get hasRatio => this != AcwrBand.building;
 }
 
 // ─── Progression Recommendation Structures ───────────────────────────────────
@@ -2351,8 +2363,8 @@ class WorkoutService extends ChangeNotifier {
   }
 
   /// Calculates the Acute-to-Chronic Workload Ratio (ACWR).
-  double calculateAcwr() {
-    final now = DateTime.now();
+  double calculateAcwr({DateTime? now}) {
+    now ??= DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
     
     // Acute window: last 7 days (including today)
@@ -2383,9 +2395,22 @@ class WorkoutService extends ChangeNotifier {
     return acuteDaily / chronicDaily;
   }
 
-  AcwrBand get acwrBand {
-    final acwr = calculateAcwr();
-    if (acwr >= 0.8 && acwr <= 1.3) return AcwrBand.normal;
+  AcwrBand get acwrBand => acwrBandAt(DateTime.now());
+
+  /// The band for [now]. A ratio needs a baseline: with no session three
+  /// weeks back, a first fortnight of training would read as a huge spike.
+  /// Below 0.8 is a lighter week than usual, not an extreme one.
+  AcwrBand acwrBandAt(DateTime now) {
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final baselineCutoff = todayStart.subtract(const Duration(days: 21));
+    final hasBaseline = _sessions.any((s) => !s.isEmpty && s.date.isBefore(baselineCutoff));
+    if (!hasBaseline) return AcwrBand.building;
+    final chronicCutoff = todayStart.subtract(const Duration(days: 28));
+    final recent = _sessions.any((s) => !s.isEmpty && !s.date.isBefore(chronicCutoff));
+    if (!recent) return AcwrBand.low;
+    final acwr = calculateAcwr(now: now);
+    if (acwr < 0.8) return AcwrBand.low;
+    if (acwr <= 1.3) return AcwrBand.normal;
     if (acwr > 1.3 && acwr <= 1.5) return AcwrBand.elevated;
     if (acwr > 1.5 && acwr <= 1.8) return AcwrBand.high;
     return AcwrBand.extreme;
