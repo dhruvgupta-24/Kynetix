@@ -1,24 +1,24 @@
 {
-  "versionCode": 10,
-  "versionName": "1.0.0-beta.10",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.10/kynetix-1.0.0-beta.10-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.10/kynetix-1.0.0-beta.10-armeabi-v7a.apk",
+  "versionCode": 12,
+  "versionName": "1.0.0-beta.11",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.11/kynetix-1.0.0-beta.11-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.11/kynetix-1.0.0-beta.11-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Snap a meal: point at your plate and Kyno names each food and sizes it. One tap to log.",
-    "Your logging streak and three weekly challenges, set from your own last week.",
-    "A calmer home: the day's detail opens from the rings.",
+    "Salt, fat and sugar now count in the meal score, each once, with one clear tip per meal.",
+    "Nutrients for 233 everyday foods, up from 89, and a salt watch when your week runs high.",
+    "A lighter week after a break reads Light, not Extreme.",
     "Install right over your current app. No need to uninstall; your data stays put."
   ],
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "08efbb29e516d6d28bebd56ef9c48034e168bd02f3836b31b9c23fdb8914ef88",
-    "armv7": "df9bfe95ad1a6677ed6143669b7733233220d8c18df3025a3f8e9eaf11a58fda"
+    "arm64": "1381c0e33a9d69defec2757ac8a0bdf3dcc84cb9f9715e191dbf471cfdecdfba",
+    "armv7": "5a06528ad96b073503d018d65eef3136cca1626afd2203fefdc269ea44abf462"
   },
   "size": {
-    "arm64": "41.2 MB",
+    "arm64": "41.3 MB",
     "armv7": "38.4 MB"
   },
-  "released": "2026-11-09"
+  "released": "2026-11-10"
 }
