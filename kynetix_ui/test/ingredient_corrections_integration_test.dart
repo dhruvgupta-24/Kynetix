@@ -176,4 +176,31 @@ void main() {
     expect(find.bySemanticsLabel('480 kcal'), findsOneWidget);
     semantics.dispose();
   });
+
+  testWidgets('3. Photo and Barcode sit on one line beside the label on a phone', (WidgetTester tester) async {
+    // A Motorola-sized phone (434dp wide) and a small one (360dp). The pills
+    // once stretched to the full line and stacked in a centred column.
+    final semantics = tester.ensureSemantics();
+    for (final width in [434.0, 360.0]) {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1.0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AddMealScreen(section: MealSection.dinner, date: DateTime.now()),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      // Test fonts draw every glyph as a wide square, so whether the label
+      // and pills fit one line here says nothing about a real phone. What
+      // matters: each pill hugs its content and the two share a line.
+      final photo = tester.getRect(find.text('Photo'));
+      final barcode = tester.getRect(find.text('Barcode'));
+      final photoPill = tester.getRect(find.bySemanticsLabel('Snap a photo of the meal'));
+      expect(photo.center.dy, moreOrLessEquals(barcode.center.dy, epsilon: 1), reason: 'pills share a line at $width');
+      expect(photoPill.width, lessThan(width / 2), reason: 'pill hugs its content at $width');
+      expect(barcode.right, lessThanOrEqualTo(width), reason: 'nothing runs off screen at $width');
+    }
+    semantics.dispose();
+    tester.view.reset();
+  });
 }

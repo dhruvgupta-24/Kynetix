@@ -230,4 +230,27 @@ void main() {
       expect(score, greaterThan(0));
     });
   });
+
+  group('Roti, chapati and egg are foods, not measures', () {
+    // These once shrank to "tandoori", "bhurji" and "whites", which priced
+    // the wrong food and showed "Tandoori, 1 roti" on the photo result.
+    const cases = {
+      '1 tandoori roti': (1.0, 'tandoori roti'),
+      '2 missi roti': (2.0, 'missi roti'),
+      'egg bhurji': (1.0, 'egg bhurji'),
+      '4 egg whites': (4.0, 'egg whites'),
+      '2 boiled eggs': (2.0, 'boiled eggs'),
+      '3 roti': (3.0, 'roti'),
+      '2 chapati': (2.0, 'chapati'),
+    };
+    cases.forEach((input, want) {
+      test(input, () {
+        final p = ItemParser.parse(input);
+        expect(p, hasLength(1));
+        expect(p.single.quantity, want.$1);
+        expect(p.single.normalizedName, want.$2);
+        expect(p.single.unit, 'serving');
+      });
+    });
+  });
 }

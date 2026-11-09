@@ -406,6 +406,9 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (parsed.quantity == 1.0 && parsed.unit == 'serving') return parsed.normalizedName;
     if (parsed.quantity == 1.0) return '${parsed.unit} ${parsed.normalizedName}'.trim();
     String formattedQty = parsed.quantity == parsed.quantity.toInt() ? '${parsed.quantity.round()}' : '${parsed.quantity}';
+    // "serving" is the parser's unit for countable foods: people say
+    // "3 roti", not "3 serving roti".
+    if (parsed.unit == 'serving') return '$formattedQty ${parsed.normalizedName}'.trim();
     return '$formattedQty ${parsed.unit} ${parsed.normalizedName}'.trim();
   }
 
@@ -2394,10 +2397,13 @@ class _ComposerPill extends StatelessWidget {
         semanticLabel: semanticLabel,
         borderRadius: KRadius.pill,
         scale: 0.96,
-        child: Container(
+        // 48dp tap height, but only as wide as the pill: a Container with
+        // alignment would stretch to the full line and stack the pills.
+        child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
-          alignment: Alignment.center,
-          child: Container(
+          child: Align(
+            widthFactor: 1,
+            child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               gradient: KShade.raised(KColor.card),
@@ -2423,6 +2429,7 @@ class _ComposerPill extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),

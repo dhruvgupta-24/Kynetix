@@ -82,6 +82,8 @@ class ItemParser {
     return parsedItems;
   }
 
+  static const Set<String> _foodNounUnits = {'roti', 'rotis', 'chapati', 'chapatis', 'egg', 'eggs'};
+
   static ParsedFoodItem _extractQuantityAndName(String chunk) {
     double qty = 1.0;
     String unit = 'serving';
@@ -118,6 +120,10 @@ class ItemParser {
     final sortedUnits = ParserLexicon.commonUnits.toList()..sort((a, b) => b.length.compareTo(a.length));
     
     for (final u in sortedUnits) {
+      // Roti, chapati and egg are the food itself, not a measure: "tandoori
+      // roti", "egg bhurji" and "4 egg whites" keep their whole name instead
+      // of shrinking to "tandoori", "bhurji" and "whites".
+      if (_foodNounUnits.contains(u)) continue;
       // Unit at start: "scoop whey"
       if (name.startsWith('$u ')) {
         unit = u;
