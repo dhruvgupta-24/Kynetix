@@ -1,7 +1,8 @@
 // Compact micronutrient summary for the dashboard: the three nutrients
 // furthest from target (sodium when it's over the limit), each with a thin
-// bar, plus how many of today's meals are tracked. Taps through to
-// [NutrientsScreen].
+// bar, plus how many of today's meals are tracked. When salt has clearly run
+// high over the week, one line says so and names the foods behind it. Taps
+// through to [NutrientsScreen].
 
 import 'package:flutter/material.dart';
 
@@ -37,6 +38,12 @@ class NutrientsSummaryCard extends StatelessWidget {
           profile: ProfileService.instance.currentUserProfile,
         );
         final rows = _pick(summary);
+        final watch = MicronutrientService.instance.sodiumWatch(
+          summary,
+          store: dayLogStore,
+          today: DateTime(t.year, t.month, t.day),
+        );
+        final watchLine = watch == null ? null : sodiumWatchLine(watch);
         final open = onOpen ??
             () => Navigator.of(context).push(NutrientsScreen.route(onLogFood: onLogFood));
         final coverage = summary.mealsToday == 0
@@ -48,7 +55,7 @@ class NutrientsSummaryCard extends StatelessWidget {
             KHaptics.select();
             open();
           },
-          semanticLabel: 'Nutrients. $coverage. Open details',
+          semanticLabel: 'Nutrients. $coverage.${watchLine == null ? '' : ' $watchLine'} Open details',
           borderRadius: KRadius.lg,
           scale: 0.985,
           child: KCard(
@@ -63,6 +70,10 @@ class NutrientsSummaryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(coverage, style: KText.caption),
+                if (watchLine != null) ...[
+                  const SizedBox(height: KSpacing.md),
+                  _WatchLine(watchLine),
+                ],
                 const SizedBox(height: KSpacing.md),
                 if (rows.isEmpty)
                   Text(
@@ -101,6 +112,41 @@ class NutrientsSummaryCard extends StatelessWidget {
       out.add((r.$1, r.$3));
     }
     return out;
+  }
+}
+
+/// "Salt ran high this week, about 2,650 mg a day against a 2,000 mg limit.
+/// Maggi and mango pickle carried the most."
+String sodiumWatchLine(SodiumWatch w) {
+  final avg = (w.avg / 50).round() * 50.0;
+  final head = 'Salt ran high this week, about ${formatMicro(avg, Micro.sodium)} a day '
+      'against a ${formatMicro(w.limit, Micro.sodium)} limit.';
+  if (w.sources.isEmpty) {
+    return '$head Packaged snacks, pickles and outside food usually carry most of it.';
+  }
+  final names = w.sources.join(' and ');
+  return '$head ${names[0].toUpperCase()}${names.substring(1)} carried the most.';
+}
+
+/// One calm line: an ember mark for attention, body text in the normal ink.
+class _WatchLine extends StatelessWidget {
+  const _WatchLine(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    // The card's own label already speaks this line.
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: KIcon(KIcons.info, size: KIcons.sm, color: KColor.ember),
+        ),
+        const SizedBox(width: KSpacing.sm),
+        Expanded(child: Text(text, style: KText.caption.copyWith(color: KColor.textPrimary))),
+      ],
+    );
   }
 }
 

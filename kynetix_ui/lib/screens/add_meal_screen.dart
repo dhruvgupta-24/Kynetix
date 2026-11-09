@@ -974,11 +974,11 @@ class _AddMealScreenState extends State<AddMealScreen>
     await EatingPatternService.instance.save();
     CloudSyncService.instance.syncEatingPatternsBackground().ignore();
     
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       totalCal,
       totalPro,
       text.isNotEmpty ? text : _result!.canonicalMeal,
-      carbs: totalCarb,
+      updatedItems,
       fat: totalFat,
       fiber: totalFib,
     );
@@ -995,10 +995,10 @@ class _AddMealScreenState extends State<AddMealScreen>
       carbohydrates: NutrientRange(min: totalCarb, max: totalCarb),
       fat: NutrientRange(min: totalFat, max: totalFat),
       fiber: NutrientRange(min: totalFib, max: totalFib),
-      mealQualityScore: score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, text.isNotEmpty ? text : _result!.canonicalMeal),
-      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, text.isNotEmpty ? text : _result!.canonicalMeal),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, text.isNotEmpty ? text : _result!.canonicalMeal),
+      mealQualityScore: quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
       macrosLockedByUser: true,
       userCorrected: true,
     );

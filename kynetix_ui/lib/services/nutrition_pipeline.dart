@@ -422,11 +422,11 @@ class NutritionPipeline {
 
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       midCal,
       midPro,
       trimmed,
-      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      finalItems,
       fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
       fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
     );
@@ -472,10 +472,10 @@ class NutritionPipeline {
       sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
       saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
       sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,
-      mealQualityScore: score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, trimmed),
-      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
+      mealQualityScore: quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
       estimationAudit: audit,
     );
   }
@@ -1114,11 +1114,11 @@ class NutritionPipeline {
 
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       midCal,
       midPro,
       trimmed,
-      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      finalItems,
       fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
       fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
     );
@@ -1138,10 +1138,10 @@ class NutritionPipeline {
       sugar: sugMin != null ? NutrientRange(min: sugMin, max: sugMax!) : null,
       saturatedFat: satMin != null ? NutrientRange(min: satMin, max: satMax!) : null,
       sodium: sodMin != null ? NutrientRange(min: sodMin, max: sodMax!) : null,
-      mealQualityScore: score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, trimmed),
-      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
+      mealQualityScore: quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
     );
   }
 

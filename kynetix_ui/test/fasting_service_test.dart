@@ -325,6 +325,52 @@ void main() {
       dayLogStore.clear();
     });
 
+    testWidgets('a clearly salty week shows one watch-out line in the summary', (tester) async {
+      NutritionItem salty(String name, double kcal) => NutritionItem(
+            name: name,
+            quantity: 1,
+            unit: 'serving',
+            estimated: false,
+            mode: EstimationMode.directQuantity,
+            calories: NutrientRange(min: kcal, max: kcal),
+            protein: const NutrientRange(min: 7, max: 7),
+            micros: MicronutrientLibrary.instance.estimate(name, kcal),
+          );
+      dayLogStore.clear();
+      for (var i = 1; i <= 4; i++) {
+        final at = t0.subtract(Duration(days: i));
+        final items = [salty('maggi', 620), salty('mango pickle', 40)];
+        dayLogStore.putIfAbsent(dateKey(at), DayLog.new).add(
+              MealSection.lunch,
+              MealEntry(
+                rawInput: '2 maggi and pickle',
+                finalSavedInput: '2 maggi and pickle',
+                section: MealSection.lunch,
+                addedAt: at,
+                dayOfWeek: at.weekday,
+                parsedFoods: const ['maggi', 'mango pickle'],
+                result: NutritionResult(
+                  canonicalMeal: '2 maggi and pickle',
+                  items: items,
+                  calories: const NutrientRange(min: 660, max: 660),
+                  protein: const NutrientRange(min: 14, max: 14),
+                  confidence: 0.9,
+                  warnings: const [],
+                  source: 'test',
+                  createdAt: at,
+                ),
+              ),
+            );
+      }
+      for (final dark in [false, true]) {
+        await pump(tester, NutrientsSummaryCard(now: t0), dark: dark);
+        expect(find.textContaining('Salt ran high this week, about 2,650 mg a day'), findsOneWidget);
+        expect(find.textContaining('Maggi and mango pickle carried the most'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+      dayLogStore.clear();
+    });
+
     testWidgets('nutrients summary and screen render with no data', (tester) async {
       dayLogStore.clear();
       await pump(tester, NutrientsSummaryCard(now: t0));

@@ -321,14 +321,15 @@ class AiNutritionService {
     final int? aiScore = rawScore is num
         ? rawScore.round()
         : rawScore is String ? num.tryParse(rawScore.trim())?.round() : null;
-    final localScore = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       useCal.mid,
       usePro.mid,
       canonicalMeal,
-      carbs: carbsTotal?.mid,
+      items,
       fat: fatTotal?.mid,
       fiber: fiberTotal?.mid,
     );
+    final localScore = quality.score;
 
     if (aiScore != null) {
       final divergence = (aiScore - localScore).abs();
@@ -361,9 +362,9 @@ class AiNutritionService {
       saturatedFat:   satFatTotal,
       sodium:         sodiumTotal,
       mealQualityScore: localScore,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(localScore, canonicalMeal),
-      mealQualityPositive: NutritionResult.getLocalQualityPositive(localScore, canonicalMeal),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(localScore, canonicalMeal),
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
     ).normalizedUncertainty();
   }
 

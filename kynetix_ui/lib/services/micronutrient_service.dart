@@ -117,6 +117,20 @@ class MicroSummary {
   bool get hasHistory => statuses.any((s) => s.avg7 != null);
 }
 
+/// A week where salt clearly ran high, and the foods that carried most of it.
+class SodiumWatch {
+  const SodiumWatch({required this.avg, required this.limit, required this.days, required this.sources});
+
+  /// Average daily sodium (mg) over [days] tracked days of the past week.
+  final double avg;
+  final double limit;
+  final int days;
+
+  /// Up to two foods, as logged, that each carried at least a sixth of the
+  /// week's tracked sodium. Empty when no single food stands out.
+  final List<String> sources;
+}
+
 /// A food rich in one nutrient.
 class MicroFoodPick {
   const MicroFoodPick({
@@ -228,6 +242,54 @@ class MicronutrientService {
       mealsToday: entries.length,
       trackedMealsToday: entries.where(entryHasMicros).length,
       diets: KynoFuelPlanner.inferDiets(history.map((f) => f.name)),
+    );
+  }
+
+  // ── Sodium watch ───────────────────────────────────────────────────────────
+
+  /// Share of the limit the week's average must reach before it is worth a
+  /// line: clearly high, not a borderline 105%.
+  static const double sodiumWatchRatio = 1.25;
+
+  /// Tracked days needed before a week counts as a pattern.
+  static const int sodiumWatchDays = 3;
+
+  /// The past week's salt when it clearly ran high (see [sodiumWatchRatio]
+  /// and [sodiumWatchDays]), with the foods behind it; null otherwise, so a
+  /// single salty day or a thin week never raises it.
+  SodiumWatch? sodiumWatch(MicroSummary summary, {required Map<String, DayLog> store, required DateTime today}) {
+    final na = summary.of(Micro.sodium);
+    final avg = na.avg7;
+    final limit = na.target.amount;
+    if (avg == null || limit <= 0 || na.avgDays < sodiumWatchDays || avg < limit * sodiumWatchRatio) return null;
+
+    // Same days as the average: the 7 before today that were tracked.
+    final d0 = DateTime(today.year, today.month, today.day);
+    final byFood = <String, (String, double)>{};
+    var total = 0.0;
+    for (var i = 1; i <= 7; i++) {
+      final log = store[dateKey(d0.subtract(Duration(days: i)))];
+      if (!ofDay(log, Micro.sodium).isTracked) continue;
+      for (final e in log!.allEntries) {
+        for (final it in e.result.items) {
+          final v = it.micros?[Micro.sodium];
+          if (v == null || v <= 0) continue;
+          final name = it.name.trim();
+          if (name.isEmpty) continue;
+          total += v;
+          final key = _norm(name);
+          final prev = byFood[key];
+          byFood[key] = (prev?.$1 ?? name.toLowerCase(), (prev?.$2 ?? 0) + v);
+        }
+      }
+    }
+    final ranked = byFood.values.where((f) => total > 0 && f.$2 / total >= 1 / 6).toList()
+      ..sort((a, b) => b.$2.compareTo(a.$2));
+    return SodiumWatch(
+      avg: avg,
+      limit: limit,
+      days: na.avgDays,
+      sources: [for (final f in ranked.take(2)) f.$1],
     );
   }
 

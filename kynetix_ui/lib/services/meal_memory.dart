@@ -651,7 +651,6 @@ NutritionResult _knownSingleItem({
     calMid,
     proMid,
     canonicalMeal,
-    carbs: carbs.mid,
     fat: fat.mid,
     fiber: fiber.mid,
   );

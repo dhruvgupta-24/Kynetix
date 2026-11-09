@@ -332,7 +332,6 @@ void main() {
         700.0,
         15.0,
         'Plain burger + fries + cola',
-        carbs: 90.0,
         fat: 35.0,
         fiber: 1.0,
       );
@@ -344,7 +343,6 @@ void main() {
         800.0,
         20.0,
         'Pizza meal',
-        carbs: 100.0,
         fat: 40.0,
         fiber: 2.0,
       );
@@ -356,7 +354,6 @@ void main() {
         400.0,
         13.0,
         'Roti + dal + sabzi',
-        carbs: 65.0,
         fat: 10.0,
         fiber: 6.0,
       );
@@ -369,7 +366,6 @@ void main() {
         450.0,
         16.0,
         'Paneer + roti meal',
-        carbs: 55.0,
         fat: 18.0,
         fiber: 4.0,
       );
@@ -381,7 +377,6 @@ void main() {
         500.0,
         40.0,
         'Chicken breast + rice + vegetables',
-        carbs: 50.0,
         fat: 8.0,
         fiber: 4.0,
       );
@@ -393,7 +388,6 @@ void main() {
         350.0,
         30.0,
         'Salad with lean protein',
-        carbs: 15.0,
         fat: 12.0,
         fiber: 6.0,
       );
@@ -405,7 +399,6 @@ void main() {
         130.0,
         25.0,
         'Protein shake only',
-        carbs: 3.0,
         fat: 1.5,
         fiber: 0.0,
       );

@@ -356,7 +356,6 @@ class PersonalNutritionMemory {
       kcal,
       protein,
       label,
-      carbs: carbs.mid,
       fat: f.mid,
       fiber: fib.mid,
     );

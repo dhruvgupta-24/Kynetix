@@ -532,11 +532,11 @@ class NutritionResult {
 
     final midCal = (sumCalMin + sumCalMax) / 2;
     final midPro = (sumProMin + sumProMax) / 2;
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       midCal,
       midPro,
       canonicalMeal,
-      carbs: carbMin != null && carbMax != null ? (carbMin + carbMax) / 2 : null,
+      updatedItems,
       fat: fatMin != null && fatMax != null ? (fatMin + fatMax) / 2 : null,
       fiber: fibMin != null && fibMax != null ? (fibMin + fibMax) / 2 : null,
     );
@@ -557,10 +557,10 @@ class NutritionResult {
       sugar: sugar,
       saturatedFat: saturatedFat,
       sodium: sodium,
-      mealQualityScore: score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
-      mealQualityPositive: NutritionResult.getLocalQualityPositive(score, canonicalMeal),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
+      mealQualityScore: quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
       macrosLockedByUser: true,
       userCorrected: true,
       estimationAudit: estimationAudit,
@@ -735,6 +735,30 @@ class NutritionResult {
     'moong', 'millet', 'ragi', 'bajra', 'jowar', 'quinoa', 'brown rice',
   ]);
 
+  /// Foods whose salt the words alone give away. In Indian diets most of a
+  /// day's sodium hides in these more than in home cooking.
+  static final RegExp _qualitySalty = _wordsRe(const [
+    'pickle', 'achar', 'achaar', 'papad', 'papadum', 'poppadom', 'maggi', 'instant noodle',
+    'cup noodle', 'ramen', 'chips', 'crisps', 'kurkure', 'namkeen', 'bhujia', 'sev',
+    'chakna', 'nachos', 'soy sauce', 'salted',
+  ]);
+
+  /// Sugar here is the food's own (fruit, milk, curd), not added sugar.
+  static final RegExp _qualityNaturalSugar = _wordsRe(const [
+    'fruit', 'banana', 'kela', 'apple', 'seb', 'mango', 'aam', 'papaya', 'papita', 'orange',
+    'santra', 'mosambi', 'guava', 'amrood', 'grape', 'watermelon', 'melon', 'muskmelon',
+    'pomegranate', 'anar', 'pear', 'kiwi', 'berry', 'berries', 'strawberry', 'pineapple',
+    'chikoo', 'chiku', 'sapota', 'date', 'khajur', 'raisin', 'kishmish', 'fig', 'anjeer',
+    'milk', 'doodh', 'curd', 'dahi', 'yogurt', 'yoghurt', 'chaas', 'buttermilk',
+  ]);
+
+  /// Fat here is from whole nuts and seeds, never nudged on fat alone.
+  static final RegExp _qualityWholeFat = _wordsRe(const [
+    'nut', 'almond', 'badam', 'walnut', 'akhrot', 'cashew', 'kaju', 'pista', 'pistachio',
+    'peanut', 'moongphali', 'groundnut', 'seed', 'chia', 'flax', 'avocado', 'makhana',
+    'dry fruit', 'trail mix',
+  ]);
+
   /// The meal text as the keyword matchers see it: lower case, words only,
   /// with cancelling phrases removed.
   static String _qualityText(String text) {
@@ -743,22 +767,46 @@ class NutritionResult {
     return t.replaceAll(_qualityNeutral, ' ');
   }
 
-  static bool _isFriedText(String t) =>
-      _qualityFried.hasMatch(t) || _qualityPizza.hasMatch(t) || _qualityBurger.hasMatch(t);
   static bool _isSweetText(String t) => _qualitySweet.hasMatch(t) || _qualitySoda.hasMatch(t);
 
   /// 20 to 100. A pure function of the numbers and the words, so the same
   /// meal logged the same way always gets the same score (an AI-suggested
-  /// score is never used: it drifts between calls).
+  /// score is never used: it drifts between calls). See [assessQuality].
   static int calculateLocalQualityScore(
     double cal,
     double pro,
     String text, {
-    double? carbs,
     double? fat,
     double? fiber,
+    double? sugar,
+    double? saturatedFat,
+    double? sodium,
+  }) =>
+      assessQuality(cal, pro, text,
+              fat: fat, fiber: fiber, sugar: sugar, saturatedFat: saturatedFat, sodium: sodium)
+          .score;
+
+  /// One meal's quality: the score and the three lines shown with it, built
+  /// from one set of inputs so the words never disagree with the number.
+  ///
+  /// Fat, sugar and salt each count once, as the larger of what the words
+  /// give away ("fried", "jalebi", "pickle") and what the numbers show.
+  /// [sugar], [saturatedFat] (g) and [sodium] (mg) come from pack labels,
+  /// Kyno and the food library, summed by [qualityNutrients]. A meal without
+  /// them is judged on its words and macros alone.
+  static MealQuality assessQuality(
+    double cal,
+    double pro,
+    String text, {
+    double? fat,
+    double? fiber,
+    double? sugar,
+    double? saturatedFat,
+    double? sodium,
   }) {
     final t = _qualityText(text);
+    final f = _QualityFactors.of(cal, pro, t,
+        fat: fat, sugar: sugar, saturatedFat: saturatedFat, sodium: sodium);
     double score = 55.0; // base score
 
     if (cal > 0) {
@@ -783,37 +831,66 @@ class NutritionResult {
     if (_qualityVeg.hasMatch(t)) score += 10.0;
     if (_qualityProtein.hasMatch(t)) score += 5.0;
 
-    double penalties = 0.0;
-    if (_qualityPizza.hasMatch(t)) penalties += 30.0;
-    if (_qualityBurger.hasMatch(t)) penalties += 25.0;
-    if (_qualityFried.hasMatch(t)) penalties += 20.0;
-    if (_qualitySoda.hasMatch(t)) penalties += 15.0;
-    if (_qualitySweet.hasMatch(t)) penalties += 15.0;
-    if (penalties > 35.0) penalties = 35.0;
-    score -= penalties;
+    score -= f.penalty;
 
-    return score.clamp(20.0, 100.0).round();
+    final s = score.clamp(20.0, 100.0).round();
+    return MealQuality(
+      score: s,
+      explanation: _explain(s, f),
+      positive: getLocalQualityPositive(s, text),
+      improvement: _improve(s, t, f, sodium),
+    );
+  }
+
+  /// Sugar, saturated fat and sodium the items carry, for [assessQuality].
+  /// Each is the sum over the items that list it, so with gaps it is a floor
+  /// and a nudge built on it can only under-count, never over-count. Null
+  /// when no item lists it. Sugar in plain fruit, milk and curd is natural
+  /// and left out; sodium prefers the cited library value over a model's.
+  static ({double? sugar, double? saturatedFat, double? sodium}) qualityNutrients(
+      Iterable<NutritionItem> items) {
+    double? sugar, sat, sodium;
+    for (final i in items) {
+      final s = i.sugar?.mid;
+      if (s != null && s > 0) {
+        final t = _qualityText(i.name);
+        final natural = _qualityNaturalSugar.hasMatch(t) && !_isSweetText(t);
+        if (!natural) sugar = (sugar ?? 0) + s;
+      }
+      final sf = i.saturatedFat?.mid;
+      if (sf != null && sf > 0) sat = (sat ?? 0) + sf;
+      final na = i.micros?[Micro.sodium] ?? i.sodium?.mid;
+      if (na != null && na > 0) sodium = (sodium ?? 0) + na;
+    }
+    return (sugar: sugar, saturatedFat: sat, sodium: sodium);
+  }
+
+  /// [assessQuality] over a meal's items: macros as given, sugar, saturated
+  /// fat and sodium from the items.
+  static MealQuality assessItems(
+    double cal,
+    double pro,
+    String text,
+    Iterable<NutritionItem> items, {
+    double? fat,
+    double? fiber,
+  }) {
+    final n = qualityNutrients(items);
+    return assessQuality(cal, pro, text,
+        fat: fat, fiber: fiber, sugar: n.sugar, saturatedFat: n.saturatedFat, sodium: n.sodium);
   }
 
   // Copy follows docs/VOICE.md: encourage without guilt, no exclamation
   // marks, no emoji, no dashes. Teens read these too, so food is never
-  // "bad" or "junk"; a fried or sweet meal gets a calm nudge, not a verdict.
-  // The bands match the day-detail colours: 80+ good, 60 to 79 neutral,
-  // under 60 a nudge.
+  // "bad" or "junk"; a fried, sweet or salty meal gets a calm nudge, not a
+  // verdict. The bands match the day-detail colours: 80+ good, 60 to 79
+  // neutral, under 60 a nudge.
 
-  static String getLocalQualityExplanation(int score, String text) {
-    final t = _qualityText(text);
-    if (score >= 90) return 'Top-tier plate. Plenty of protein and real food in there.';
-    if (score >= 80) return 'Strong meal. Good protein and a solid mix.';
-    if (score >= 60) return 'Decent meal. A little more protein or veg would round it out.';
-    if (_isFriedText(t)) {
-      return 'Fried and filling. Fine now and then; some protein alongside next time keeps the day balanced.';
-    }
-    if (_isSweetText(t)) {
-      return 'A sweet treat. Enjoy it; protein-rich meals around it keep the day on track.';
-    }
-    return 'Mostly quick energy. Add dal, curd, paneer or eggs alongside to balance it.';
-  }
+  /// The explanation for a stored [score], judged on the words alone (the
+  /// numbers behind an old score are not kept). New meals get theirs from
+  /// [assessQuality].
+  static String getLocalQualityExplanation(int score, String text) =>
+      _explain(score, _QualityFactors.of(0, 0, _qualityText(text)));
 
   static String getLocalQualityPositive(int score, String text) {
     final t = _qualityText(text);
@@ -824,21 +901,109 @@ class NutritionResult {
     return 'Quick energy for the day.';
   }
 
+  /// The improvement line for a stored [score], from the words alone. New
+  /// meals get theirs from [assessQuality].
   static String getLocalQualityImprovement(int score, String text) {
     final t = _qualityText(text);
-    if (_isFriedText(t)) return 'Next time, try it grilled, roasted or air fried.';
-    if (_isSweetText(t)) return 'Keep sweets as a side, not the main event.';
-    if (score < 80 && !_qualityProtein.hasMatch(t)) {
+    return _improve(score, t, _QualityFactors.of(0, 0, t), null);
+  }
+
+  static String _explain(int score, _QualityFactors f) {
+    if (score >= 90) return 'Top-tier plate. Plenty of protein and real food in there.';
+    if (score >= 80) return 'Strong meal. Good protein and a solid mix.';
+    if (score >= 60) return 'Decent meal. One small change would round it out.';
+    return switch (f.top) {
+      _Concern.fat => f.friedWords > 0
+          ? 'Fried and filling. Fine now and then; some protein alongside next time keeps the day balanced.'
+          : 'Rich and filling. Fine now and then; something lighter alongside next time keeps the day balanced.',
+      _Concern.sweet => f.sweetWords > 0
+          ? 'A sweet treat. Enjoy it; protein-rich meals around it keep the day on track.'
+          : 'Sweeter than it looks. Fine now and then; protein-rich meals around it keep the day on track.',
+      _Concern.salt =>
+        'On the salty side. Fine now and then; a simple home-cooked meal next keeps the day balanced.',
+      null => 'Mostly quick energy. Add dal, curd, paneer or eggs alongside to balance it.',
+    };
+  }
+
+  static String _improve(int score, String t, _QualityFactors f, double? sodium) {
+    switch (f.top) {
+      case _Concern.fat:
+        return f.friedWords > 0
+            ? 'Next time, try it grilled, roasted or air fried.'
+            : 'Next time, go lighter on cream, butter and oil.';
+      case _Concern.sweet:
+        return f.sweetWords > 0
+            ? 'Keep sweets as a side, not the main event.'
+            : 'Pick an unsweetened version next time, or keep it to a small side.';
+      case _Concern.salt:
+        if (f.saltNumbers > f.saltWords && sodium != null) {
+          return 'About ${_mgLabel(sodium)} mg sodium here, over half the day\'s limit. Go lighter on salt in the next meal.';
+        }
+        return 'Pickle, papad, namkeen and instant noodles carry a lot of salt. Keep them to a small side.';
+      case null:
+        break;
+    }
+    // A protein tip only when the plate is short on it: by the numbers when
+    // known (a 33 g protein paratha plate is not), by the words otherwise.
+    final lowProtein = f.proteinRatio != null ? f.proteinRatio! < 0.2 : !_qualityProtein.hasMatch(t);
+    if (score < 80 && lowProtein) {
       return 'Add some protein: dal, curd, paneer, eggs or chicken.';
     }
     if (!_qualityVeg.hasMatch(t)) return 'Add a side of sabzi or salad for fiber.';
     return 'Nicely put together. Keep portions in line with your targets.';
   }
 
+  /// The improvement line for a stored [score], from the meal's own numbers
+  /// and items where it has them (a saved meal keeps its score, but its tip
+  /// follows the current rules).
+  static String improvementFor(
+    int score,
+    String text, {
+    double cal = 0,
+    double pro = 0,
+    Iterable<NutritionItem> items = const [],
+    double? fat,
+  }) {
+    final t = _qualityText(text);
+    final n = qualityNutrients(items);
+    final f = _QualityFactors.of(cal, pro, t,
+        fat: fat, sugar: n.sugar, saturatedFat: n.saturatedFat, sodium: n.sodium);
+    return _improve(score, t, f, n.sodium);
+  }
+
+  /// Lines this app writes as improvement tips, now or before. A stored tip
+  /// that is one of these is rebuilt on load; anything else is kept.
+  static const Set<String> _builtInImprovements = {
+    'Next time, try it grilled, roasted or air fried.',
+    'Next time, go lighter on cream, butter and oil.',
+    'Keep sweets as a side, not the main event.',
+    'Pick an unsweetened version next time, or keep it to a small side.',
+    'Pickle, papad, namkeen and instant noodles carry a lot of salt. Keep them to a small side.',
+    'Add some protein: dal, curd, paneer, eggs or chicken.',
+    'Add a side of sabzi or salad for fiber.',
+    'Nicely put together. Keep portions in line with your targets.',
+  };
+
+  static bool _isBuiltInImprovement(Object? stored) {
+    final s = stored is String ? stored.trim() : '';
+    return s.isEmpty ||
+        _legacyQualityCopy.contains(s) ||
+        _builtInImprovements.contains(s) ||
+        (s.startsWith('About ') && s.contains(' mg sodium here'));
+  }
+
+  /// "1,250": a sodium estimate rounded to 50 mg, with a thousands comma.
+  static String _mgLabel(double mg) {
+    final v = ((mg / 50).round() * 50).toString();
+    return v.length > 3 ? '${v.substring(0, v.length - 3)},${v.substring(v.length - 3)}' : v;
+  }
+
   /// Copy older app versions stored with a meal. A stored explanation that
   /// is one of these is replaced with the current copy on load; anything
   /// else (an edit, an AI line) is kept.
   static const Set<String> _legacyQualityCopy = {
+    // The 60 to 79 line before the improvement tip was shown beside it.
+    'Decent meal. A little more protein or veg would round it out.',
     'Exceptional choice! Highly nutritious, protein-dense, and rich in whole foods.',
     'Balanced meal with a solid macronutrient profile and good nutritional value.',
     'Moderate nutrition score. Consider adding more lean protein or vegetables to improve balance.',
@@ -874,7 +1039,6 @@ class NutritionResult {
       calVal,
       proVal,
       rawInput,
-      carbs: carbs.mid,
       fat: fat.mid,
       fiber: fiber.mid,
     );
@@ -955,11 +1119,11 @@ class NutritionResult {
         ? NutrientRange(min: effectiveFib, max: effectiveFib)
         : estimateFiberLocally(effectiveCal, canonicalMeal);
 
-    final score = calculateLocalQualityScore(
+    final quality = assessItems(
       effectiveCal,
       effectivePro,
       canonicalMeal,
-      carbs: carbsRange.mid,
+      items ?? const <NutritionItem>[],
       fat: fatRange.mid,
       fiber: fiberRange.mid,
     );
@@ -989,10 +1153,10 @@ class NutritionResult {
       carbohydrates: carbsRange,
       fat:            fatRange,
       fiber:          fiberRange,
-      mealQualityScore: score,
-      mealQualityExplanation: getLocalQualityExplanation(score, canonicalMeal),
-      mealQualityPositive: getLocalQualityPositive(score, canonicalMeal),
-      mealQualityImprovement: getLocalQualityImprovement(score, canonicalMeal),
+      mealQualityScore: quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive: quality.positive,
+      mealQualityImprovement: quality.improvement,
       macrosLockedByUser: userCorrected,
       userCorrected: userCorrected,
     );
@@ -1085,17 +1249,11 @@ class NutritionResult {
     final proMid = (protein.min + protein.max) / 2;
     // Tolerant: a score stored as 72.0 (JSON from another writer) still loads.
     final storedScore = j['mealQualityScore'];
-    final score = (storedScore is num && storedScore.isFinite
-            ? storedScore.round().clamp(0, 100)
-            : null) ??
-        NutritionResult.calculateLocalQualityScore(
-          calMid,
-          proMid,
-          canonicalMeal,
-          carbs: carbsRange?.mid,
-          fat: fatRange?.mid,
-          fiber: fiberRange?.mid,
-        );
+    final computed = storedScore is num && storedScore.isFinite
+        ? null
+        : NutritionResult.assessItems(calMid, proMid, canonicalMeal, items,
+            fat: fatRange?.mid, fiber: fiberRange?.mid);
+    final score = computed?.score ?? (storedScore as num).round().clamp(0, 100);
 
     return NutritionResult(
       canonicalMeal:  canonicalMeal,
@@ -1120,9 +1278,15 @@ class NutritionResult {
       saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : NutrientRange(min: satMin, max: satMax),
       sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : NutrientRange(min: sodMin, max: sodMax),
       mealQualityScore: score,
-      mealQualityExplanation: _storedOr(j['mealQualityExplanation'], () => NutritionResult.getLocalQualityExplanation(score, canonicalMeal)),
-      mealQualityPositive: _storedOr(j['mealQualityPositive'], () => NutritionResult.getLocalQualityPositive(score, canonicalMeal)),
-      mealQualityImprovement: _storedOr(j['mealQualityImprovement'], () => NutritionResult.getLocalQualityImprovement(score, canonicalMeal)),
+      mealQualityExplanation: _storedOr(j['mealQualityExplanation'],
+          () => computed?.explanation ?? NutritionResult.getLocalQualityExplanation(score, canonicalMeal)),
+      mealQualityPositive: _storedOr(j['mealQualityPositive'],
+          () => computed?.positive ?? NutritionResult.getLocalQualityPositive(score, canonicalMeal)),
+      mealQualityImprovement: _isBuiltInImprovement(j['mealQualityImprovement'])
+          ? (computed?.improvement ??
+              NutritionResult.improvementFor(score, canonicalMeal,
+                  cal: calMid, pro: proMid, items: items, fat: fatRange?.mid))
+          : (j['mealQualityImprovement'] as String).trim(),
       macrosLockedByUser: locked,
       userCorrected: userCorr,
       estimationAudit: j['estimationAudit'] != null ? EstimationAudit.fromJson(j['estimationAudit'] as Map<String, dynamic>) : null,
@@ -1132,4 +1296,128 @@ class NutritionResult {
   String toJsonString() => jsonEncode(toJson());
   factory NutritionResult.fromJsonString(String s) =>
       NutritionResult.fromJson(jsonDecode(s) as Map<String, dynamic>);
+}
+
+/// A meal's quality score and the three lines shown with it.
+class MealQuality {
+  const MealQuality({
+    required this.score,
+    required this.explanation,
+    required this.positive,
+    required this.improvement,
+  });
+
+  final int score;
+  final String explanation;
+  final String positive;
+  final String improvement;
+}
+
+enum _Concern { fat, sweet, salt }
+
+/// The three things the quality score nudges on, each from the words and from
+/// the numbers. A concern counts once, at the larger of its two, so "fried
+/// chips" with a high fat number is not nudged twice for the same fat.
+class _QualityFactors {
+  const _QualityFactors({
+    required this.friedWords,
+    required this.richNumbers,
+    required this.sweetWords,
+    required this.sugarNumbers,
+    required this.saltWords,
+    required this.saltNumbers,
+    this.proteinRatio,
+  });
+
+  /// [t] is the meal text as [NutritionResult._qualityText] returns it.
+  factory _QualityFactors.of(
+    double cal,
+    double pro,
+    String t, {
+    double? fat,
+    double? sugar,
+    double? saturatedFat,
+    double? sodium,
+  }) {
+    var fried = 0.0;
+    if (NutritionResult._qualityPizza.hasMatch(t)) fried += 30;
+    if (NutritionResult._qualityBurger.hasMatch(t)) fried += 25;
+    if (NutritionResult._qualityFried.hasMatch(t)) fried += 20;
+    var sweet = 0.0;
+    if (NutritionResult._qualitySoda.hasMatch(t)) sweet += 15;
+    if (NutritionResult._qualitySweet.hasMatch(t)) sweet += 15;
+    final saltWords = NutritionResult._qualitySalty.hasMatch(t) ? 5.0 : 0.0;
+
+    var rich = 0.0, sugary = 0.0;
+    if (cal >= 100) {
+      // Saturated fat when a label or Kyno gives it (WHO: under 10% of
+      // energy). Otherwise total fat, only for a plate that is mostly fat
+      // with little protein (cream, butter, malai), never nuts and seeds.
+      if (saturatedFat != null && saturatedFat > 0) {
+        final share = saturatedFat * 9 / cal;
+        if (share >= 0.15 && saturatedFat >= 8) {
+          rich = 10;
+        } else if (share >= 0.10 && saturatedFat >= 5) {
+          rich = 5;
+        }
+      } else if (fat != null && fat >= 15 && !NutritionResult._qualityWholeFat.hasMatch(t)) {
+        if (fat * 9 / cal >= 0.55 && pro * 4 / cal < 0.15) rich = 10;
+      }
+      // Added sugar: a cup of chai (8 to 10 g) stays clear; a cola, a sweet
+      // lassi or a frosted cereal bowl does not.
+      if (sugar != null) {
+        final share = sugar * 4 / cal;
+        if (sugar >= 25 && share >= 0.20) {
+          sugary = 15;
+        } else if (sugar >= 15 && share >= 0.15) {
+          sugary = 8;
+        }
+      }
+    }
+    // Against the 2,000 mg daily limit (ICMR-NIN 2020): half the day in one
+    // meal is a nudge, most of it a firmer one.
+    var salty = 0.0;
+    if (sodium != null) {
+      if (sodium >= 1800) {
+        salty = 10;
+      } else if (sodium >= 1000) {
+        salty = 5;
+      }
+    }
+
+    return _QualityFactors(
+      friedWords: fried,
+      richNumbers: rich,
+      sweetWords: sweet,
+      sugarNumbers: sugary,
+      saltWords: saltWords,
+      saltNumbers: salty,
+      proteinRatio: cal > 0 ? pro * 4 / cal : null,
+    );
+  }
+
+  final double friedWords, richNumbers;
+  final double sweetWords, sugarNumbers;
+  final double saltWords, saltNumbers;
+
+  /// Share of calories from protein; null when the numbers are unknown.
+  final double? proteinRatio;
+
+  double get fat => friedWords > richNumbers ? friedWords : richNumbers;
+  double get sweet => sweetWords > sugarNumbers ? sweetWords : sugarNumbers;
+  double get salt => saltWords > saltNumbers ? saltWords : saltNumbers;
+
+  /// Taken off the score; capped so a mixed plate still lands above the floor.
+  double get penalty {
+    final p = fat + sweet + salt;
+    return p > 35 ? 35 : p;
+  }
+
+  /// The biggest concern, fat first on a tie, then sweet; null when none.
+  _Concern? get top {
+    if (fat <= 0 && sweet <= 0 && salt <= 0) return null;
+    if (fat >= sweet && fat >= salt) return _Concern.fat;
+    if (sweet >= salt) return _Concern.sweet;
+    return _Concern.salt;
+  }
 }

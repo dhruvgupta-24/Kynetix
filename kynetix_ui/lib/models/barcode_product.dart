@@ -326,11 +326,11 @@ class BarcodeProduct {
       micros:        n.micros,
     );
 
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       n.calories,
       n.proteinG,
       text,
-      carbs: n.carbsG,
+      [item],
       fat:   n.fatG,
       fiber: n.fiberG,
     );
@@ -348,10 +348,10 @@ class BarcodeProduct {
       warnings:      const [],
       source:        'barcode',
       createdAt:     now ?? DateTime.now(),
-      mealQualityScore:       score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, text),
-      mealQualityPositive:    NutritionResult.getLocalQualityPositive(score, text),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, text),
+      mealQualityScore:       quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive:    quality.positive,
+      mealQualityImprovement: quality.improvement,
       estimationAudit: EstimationAudit(
         memoryMatchUsed:       'barcode: $barcode',
         portionAssumption:     '${amountLabel(g)} (${source.auditLabel})',
@@ -443,11 +443,11 @@ class BarcodeProduct {
       micros:        per100g.micros?.scaled(grams / 100.0),
     );
 
-    final score = NutritionResult.calculateLocalQualityScore(
+    final quality = NutritionResult.assessItems(
       cal,
       pro,
       label,
-      carbs: carb,
+      [item],
       fat:   fat,
       fiber: fib,
     );
@@ -467,10 +467,10 @@ class BarcodeProduct {
       warnings:      const [],
       source:        'barcode',
       createdAt:     DateTime.now(),
-      mealQualityScore:       score,
-      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(score, label),
-      mealQualityPositive:    NutritionResult.getLocalQualityPositive(score, label),
-      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, label),
+      mealQualityScore:       quality.score,
+      mealQualityExplanation: quality.explanation,
+      mealQualityPositive:    quality.positive,
+      mealQualityImprovement: quality.improvement,
       estimationAudit: EstimationAudit(
         memoryMatchUsed:       'barcode: $barcode',
         portionAssumption:     '${servings[servingIdx.clamp(0, servings.length - 1)].label} × $quantity = ${grams.toStringAsFixed(0)} g',

@@ -18,6 +18,7 @@ import 'package:kynetix/services/micronutrient_targets.dart';
 import 'package:kynetix/services/mock_estimation_service.dart' show NutrientRange;
 import 'package:kynetix/services/profile_service.dart';
 import 'package:kynetix/services/workout_service.dart';
+import 'package:kynetix/widgets/nutrients_summary_card.dart' show sodiumWatchLine;
 
 NutrientRange _r(double v) => NutrientRange(min: v, max: v);
 
@@ -187,6 +188,40 @@ void main() {
       expect(lib.enrich('protein bar', 220, null), isNull);
     });
 
+    test('common plates, street food and salty sides are known foods', () {
+      List<String> names(String s) => lib.matches(s).map((f) => f.name).toList();
+      expect(names('chole bhature'), ['chole bhature']);
+      expect(names('chicken shawarma'), ['shawarma']);
+      expect(names('pav bhaji'), ['pav bhaji']);
+      expect(names('aloo paratha'), ['aloo paratha']);
+      expect(names('masala dosa'), ['masala dosa']);
+      expect(names('sambar vada'), ['sambar', 'medu vada']);
+      expect(names('mango pickle'), ['pickle']);
+      expect(names('2 papad'), ['papad']);
+      expect(names('kaju katli'), ['barfi']);
+      expect(names('sweet potato'), ['sweet potato']);
+      expect(names('chickpeas'), ['chole']);
+      expect(names('dark chocolate'), ['dark chocolate']);
+      expect(names('dal khichdi'), ['khichdi']);
+      // A pickle's salt is most of its story.
+      expect(lib.estimate('mango pickle', 40)![Micro.sodium], 450);
+    });
+
+    test('every food has calories and stays inside the per-food caps', () {
+      final seen = <String>{};
+      for (final f in microFoodLibrary) {
+        expect(f.kcal, greaterThan(0), reason: f.name);
+        for (final e in f.micros.values.entries) {
+          expect(e.value, inInclusiveRange(0, e.key.perFoodCap), reason: '${f.name} ${e.key.label}');
+        }
+        for (final a in f.aliases) {
+          expect(a, a.toLowerCase().trim(), reason: 'aliases are lower case');
+          expect(seen.add(a), isTrue, reason: '"$a" is listed twice');
+        }
+      }
+      expect(microFoodLibrary.length, greaterThanOrEqualTo(200));
+    });
+
     test('every catalog food used by the oracle gets values from the library', () {
       final missing = [
         for (final c in kynoFoodCatalog)
@@ -239,6 +274,55 @@ void main() {
       final (avg, n) = MicronutrientService.average(store, Micro.iron, today);
       expect(n, 3);
       expect(avg, closeTo(3.6, 0.01));
+    });
+
+    group('sodium watch', () {
+      MicroSummary sum(Map<String, DayLog> store) =>
+          MicronutrientService.instance.summarize(store: store, today: today);
+      SodiumWatch? watch(Map<String, DayLog> store) =>
+          MicronutrientService.instance.sodiumWatch(sum(store), store: store, today: today);
+      Map<String, DayLog> week(int days, List<NutritionItem> Function() meal) => {
+            for (var i = 1; i <= days; i++)
+              dateKey(today.subtract(Duration(days: i))): DayLog()..add(MealSection.lunch, entry(meal(), at(i))),
+          };
+
+      test('a clearly salty week names the foods behind it', () {
+        // Maggi x2 (2,200 mg) + pickle (450 mg) + dal (350 mg): 3,000 mg a day.
+        final store = week(4, () => [logged('maggi', 620), logged('mango pickle', 40), logged('dal', 120)]);
+        final w = watch(store)!;
+        expect(w.avg, closeTo(3000, 1));
+        expect(w.days, 4);
+        expect(w.limit, 2000);
+        expect(w.sources, ['maggi']);
+        expect(sodiumWatchLine(w),
+            'Salt ran high this week, about 3,000 mg a day against a 2,000 mg limit. Maggi carried the most.');
+      });
+
+      test('two foods that each carry a big share are both named', () {
+        final store = week(3, () => [logged('maggi', 310), logged('papad', 40), logged('papad', 40), logged('pickle', 40)]);
+        // 1,100 + 900 + 450 = 2,450 mg, under 125% of the limit: no line.
+        expect(watch(store), isNull);
+        final salty = week(3, () => [logged('maggi', 310), logged('papad', 80), logged('pickle', 80)]);
+        // 1,100 + 900 + 900 = 2,900 mg.
+        expect(watch(salty)!.sources, ['maggi', 'papad']);
+      });
+
+      test('a borderline week, a thin week or one salty day raise nothing', () {
+        expect(watch(week(5, () => [logged('maggi', 620)])), isNull, reason: '2,200 mg is only 110%');
+        expect(watch(week(2, () => [logged('maggi', 930)])), isNull, reason: 'two days are not a pattern');
+        final store = week(5, () => [logged('roti', 300), logged('dal', 120)]);
+        store[dateKey(today)] = DayLog()..add(MealSection.lunch, entry([logged('maggi', 1240)], at(0)));
+        expect(watch(store), isNull, reason: "today's salt is not the week");
+      });
+
+      test('with no standout food the line points at the usual suspects', () {
+        final w = SodiumWatch(avg: 2630, limit: 2000, days: 5, sources: const []);
+        expect(sodiumWatchLine(w), contains('about 2,650 mg a day'));
+        expect(sodiumWatchLine(w), contains('Packaged snacks, pickles and outside food'));
+        for (final t in [sodiumWatchLine(w), sodiumWatchLine(SodiumWatch(avg: 3000, limit: 2000, days: 4, sources: const ['maggi', 'papad']))]) {
+          expect(t.contains('—') || t.contains('–') || t.contains('!'), isFalse, reason: t);
+        }
+      });
     });
 
     test('summary names the lowest nutrient and the oracle stays vegetarian', () {

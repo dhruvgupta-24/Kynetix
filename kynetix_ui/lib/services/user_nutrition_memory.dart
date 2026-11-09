@@ -548,7 +548,6 @@ class UserNutritionMemory {
         bestMatch.caloriesPerUnit,
         bestMatch.proteinPerUnit,
         bestMatch.canonicalMeal,
-        carbs: bestMatch.carbohydratesPerUnit,
         fat: bestMatch.fatPerUnit,
         fiber: bestMatch.fiberPerUnit,
       );

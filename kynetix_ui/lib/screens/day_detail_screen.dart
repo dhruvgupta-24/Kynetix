@@ -717,7 +717,10 @@ class _DayDetailContentState extends State<_DayDetailContent> {
 
     final profile = currentUserProfile;
     final todayWorkout = WorkoutService.instance.sessionFor(widget.date);
-    final insights = target != null
+    // Coach notes look ahead ("aim for 104 g today", "per meal from here"),
+    // so they belong to today only; a finished day has nothing left to plan.
+    final isToday = dateKey(widget.date) == dateKey(DateTime.now());
+    final insights = target != null && isToday
         ? CoachService.instance.insightsForDay(
             _log,
             target,
@@ -1535,6 +1538,17 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
                                   Text(
                                     entry.result.mealQualityExplanation!,
                                     style: KText.caption.copyWith(fontSize: 13, height: 1.45),
+                                  ),
+                                ],
+                                // The one specific thing to try next time (fried,
+                                // sweet, salt, protein or veg). A 90+ plate needs none.
+                                if (score < 90 &&
+                                    entry.result.mealQualityImprovement != null &&
+                                    entry.result.mealQualityImprovement!.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    entry.result.mealQualityImprovement!,
+                                    style: KText.caption.copyWith(fontSize: 13, height: 1.45, color: KColor.textPrimary),
                                   ),
                                 ],
                               ],
