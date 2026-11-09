@@ -1,24 +1,24 @@
 {
-  "versionCode": 8,
-  "versionName": "1.0.0-beta.8",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.8/kynetix-1.0.0-beta.8-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.8/kynetix-1.0.0-beta.8-armeabi-v7a.apk",
+  "versionCode": 10,
+  "versionName": "1.0.0-beta.10",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.10/kynetix-1.0.0-beta.10-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.10/kynetix-1.0.0-beta.10-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Kyno is on for teens: teen mode now includes the AI coach and AI food estimates.",
-    "Teen requests use only AI services that allow teens, with extra safety rules: no dieting, fasting or supplement advice.",
-    "Kynetix is open to everyone 13 and up; under 18, a parent says yes through a link first.",
+    "Snap a meal: point at your plate and Kyno names each food and sizes it. One tap to log.",
+    "Your logging streak and three weekly challenges, set from your own last week.",
+    "A calmer home: the day's detail opens from the rings.",
     "Install right over your current app. No need to uninstall; your data stays put."
   ],
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "3bcbd4523403341a38617f926ca720a2257f9d65dac2aeba7b94b20b6dccacc7",
-    "armv7": "b39289894eb052ce850836d2a205219501963c22d15abf18f39b067cbe5370f6"
+    "arm64": "19d1b618e1681cd45908cdce2429884742674395987d273f8581e40d3e881a70",
+    "armv7": "77270e28ea63fa3c56609bd3da0389319ea65b60a1dff1b7edf38c270d6ae5e1"
   },
   "size": {
-    "arm64": "40.4 MB",
-    "armv7": "37.5 MB"
+    "arm64": "41.2 MB",
+    "armv7": "38.4 MB"
   },
-  "released": "2026-11-07"
+  "released": "2026-11-09"
 }
