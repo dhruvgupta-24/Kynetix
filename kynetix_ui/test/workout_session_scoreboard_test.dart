@@ -81,4 +81,30 @@ void main() {
     expect(find.text('Muscles trained'), findsNothing);
     expect(find.textContaining('Solid session'), findsNothing);
   });
+
+  testWidgets('the score explains itself, live and on the scoreboard', (tester) async {
+    await pumpSession(tester);
+    await tester.tap(find.text('Log set 1'));
+    await tester.pumpAndSettle();
+
+    // Live: tap the score beside the progress percentage.
+    await tester.tap(find.byKey(const Key('workout_live_score')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('session_score_sheet')), findsOneWidget);
+    expect(find.text('Plan done'), findsOneWidget);
+    expect(find.text('Effort'), findsOneWidget);
+    expect(find.text('New bests'), findsOneWidget);
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('session_score_sheet')), findsNothing);
+
+    await tester.tap(find.text('Finish'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Finish workout'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('scoreboard_score_cell')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('session_score_sheet')), findsOneWidget);
+  });
 }

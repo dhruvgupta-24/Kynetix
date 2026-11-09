@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../config/app_theme.dart';
 import '../models/workout_split.dart';
 import '../services/rest_timer_prefs.dart';
+import '../services/session_score.dart';
 import '../services/warmup_calculator.dart';
 
 // ─── Rest picker ─────────────────────────────────────────────────────────────
@@ -232,6 +233,145 @@ class _WarmUpSheetState extends State<_WarmUpSheet> {
                       KHaptics.commit();
                       Navigator.of(context).pop((workingWeight: w!, steps: steps));
                     },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Score breakdown ─────────────────────────────────────────────────────────
+
+/// What the workout score is made of: four parts, each with its points, its
+/// maximum and one plain line on what it measures.
+Future<void> showSessionScoreSheet(BuildContext context, SessionScoreBreakdown score) {
+  return showKSheet<void>(
+    context: context,
+    builder: (_) => _ScoreSheet(score: score),
+  );
+}
+
+class _ScoreSheet extends StatelessWidget {
+  final SessionScoreBreakdown score;
+  const _ScoreSheet({required this.score});
+
+  String get _effortLine => switch (score.effortBasis) {
+        EffortBasis.volume => 'Kilos moved against last time. Match it for full points.',
+        EffortBasis.reps => 'Reps against last time. Match them for full points.',
+        EffortBasis.plan => 'Nothing to compare with yet, so this follows the plan.',
+      };
+
+  String get _recordsLine => score.recordExercises == 0
+      ? '5 for each exercise with a new best, up to 3.'
+      : '${score.recordExercises} ${score.recordExercises == 1 ? 'exercise' : 'exercises'} with a new best, 5 each, up to 3.';
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          key: const Key('session_score_sheet'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KSheetHeader('Score ${score.total}', subtitle: 'Out of 100. Here is what went into it.'),
+            const SizedBox(height: 8),
+            _ScorePart(
+              label: 'Plan done',
+              line: 'Sets done and reps reached on every exercise you did.',
+              points: score.plan,
+              max: SessionScoreBreakdown.planMax,
+            ),
+            _ScorePart(label: 'Effort', line: _effortLine, points: score.effort, max: SessionScoreBreakdown.effortMax),
+            _ScorePart(
+              label: 'Sets',
+              line: 'Working sets logged against the target. Warm-ups don\'t count.',
+              points: score.sets,
+              max: SessionScoreBreakdown.setsMax,
+            ),
+            _ScorePart(
+              label: 'New bests',
+              line: _recordsLine,
+              points: score.records,
+              max: SessionScoreBreakdown.recordsMax,
+              last: true,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Finish the plan and match last time for 85. New bests take it to 100. Skipped exercises earn nothing.',
+              style: KText.caption.copyWith(color: KColor.textMuted, height: 1.35),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScorePart extends StatelessWidget {
+  final String label;
+  final String line;
+  final int points;
+  final int max;
+  final bool last;
+  const _ScorePart({required this.label, required this.line, required this.points, required this.max, this.last = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final f = max == 0 ? 0.0 : (points / max).clamp(0.0, 1.0);
+    return Semantics(
+      label: '$label, $points of $max. $line',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: last ? null : Border(bottom: BorderSide(color: KColor.fg.withValues(alpha: 0.08))),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Expanded(
+                  child: Text(label, style: KText.bodyMedium.copyWith(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+                Text(
+                  '$points',
+                  style: KText.numSmall.copyWith(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: KColor.textPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  ' / $max',
+                  style: KText.numSmall.copyWith(
+                    fontSize: 13,
+                    color: KColor.textMuted,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(line, style: KText.caption.copyWith(color: KColor.textSecondary, height: 1.35)),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: KRadius.pill,
+              child: SizedBox(
+                height: 4,
+                child: LinearProgressIndicator(
+                  value: f,
+                  minHeight: 4,
+                  backgroundColor: KColor.fg.withValues(alpha: KColor.isDark ? 0.08 : 0.07),
+                  valueColor: AlwaysStoppedAnimation<Color>(KColor.ink),
+                ),
+              ),
             ),
           ],
         ),

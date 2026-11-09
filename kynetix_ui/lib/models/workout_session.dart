@@ -75,17 +75,26 @@ class SetEntry {
 
   bool get countsAsVolume => setType != SetType.warmUp;
 
+  /// A timed hold or a cardio set: measured in seconds or metres, never in
+  /// kilos. Older builds stored the weight dial's value (e.g. 40 kg x 10) on
+  /// these, so their weight and reps are ignored for volume and 1RM.
+  bool get isTimeOrDistance => durationSeconds != null || distanceMeters != null;
+
   /// Epley one-rep max estimate: weight × (1 + reps / 30)
   /// For bodyweight with external load, external load drives progression delta.
-  double get estimatedOneRepMax => externalLoadKg != null
-      ? externalLoadKg! * (1 + reps / 30.0)
-      : weight * (1 + reps / 30.0);
+  double get estimatedOneRepMax => isTimeOrDistance
+      ? 0.0
+      : externalLoadKg != null
+          ? externalLoadKg! * (1 + reps / 30.0)
+          : weight * (1 + reps / 30.0);
 
   /// Volume for this set.
   /// For bodyweight sets, externalLoadKg represents the loadable volume (or 0 if unweighted).
-  double get volume => externalLoadKg != null
-      ? (externalLoadKg! > 0 ? externalLoadKg! : 0.0) * reps
-      : weight * reps;
+  double get volume => isTimeOrDistance
+      ? 0.0
+      : externalLoadKg != null
+          ? (externalLoadKg! > 0 ? externalLoadKg! : 0.0) * reps
+          : weight * reps;
 
   /// What was lifted, for display: "BW + 10 kg" or "BW" for a bodyweight
   /// set, "62.5 kg" otherwise.

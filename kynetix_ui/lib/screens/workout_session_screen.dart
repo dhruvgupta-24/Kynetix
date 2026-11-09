@@ -37,6 +37,7 @@ import '../widgets/k_ticking_text.dart';
 import '../ui/k_rolling.dart';
 import 'package:flutter/services.dart' show HapticFeedback, SystemSound, SystemSoundType;
 import '../services/analytics_service.dart';
+import '../services/session_score.dart';
 
 // ─── WorkoutSessionScreen ─────────────────────────────────────────────────────
 //
@@ -240,7 +241,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // pill rebuilds only the overlay, not the session tree.
   final ValueNotifier<List<_FloatingTextData>> _floatingTexts =
       ValueNotifier<List<_FloatingTextData>>(const []);
-  final ValueNotifier<int> _scoreNotifier = ValueNotifier<int>(0);
+  final ValueNotifier<SessionScoreBreakdown> _scoreNotifier = ValueNotifier(SessionScoreBreakdown.zero);
 
   // Rest Timer State
   // The per-second countdown lives in a ValueNotifier: a tick rebuilds only the
@@ -1005,6 +1006,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _temporaryAdditions[picked.id] = true;
       _selectedIndex = insertIdx;
     });
+    _updateLiveScore();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients) {
@@ -1120,7 +1122,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _setTypeSelections.remove(original.id);
 
       _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
-    });
+    });    _updateLiveScore();
+
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
@@ -1158,7 +1161,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _skipReasons.remove(exercise.id);
 
       _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
-    });
+    });    _updateLiveScore();
+
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
@@ -1210,29 +1214,15 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   // ── Getters & Stats ──────────────────────────────────────────────────────
 
   Exercise get _currentExercise => _sessionExercises[_selectedIndex];
-  int get _totalSets => _sets.values.fold(0, (sum, sets) => sum + sets.length);
+  /// Sets logged so far, counted the way the finished session counts them
+  /// (a drop set belongs to its working set; warm-ups are sets).
+  int get _totalSets =>
+      _sessionExercises.fold(0, (sum, ex) => sum + buildEntry(ex).totalSetsCount);
 
-  double get _totalVolume {
-    double vol = 0.0;
-    _sets.forEach((_, list) {
-      for (final s in list) {
-        vol += s.volume;
-      }
-    });
-    return vol;
-  }
-
-  double get _primaryWorkingVolume {
-    double vol = 0.0;
-    _sets.forEach((_, list) {
-      for (final s in list) {
-        if (s.isMainWorkingSet) {
-          vol += s.volume;
-        }
-      }
-    });
-    return vol;
-  }
+  /// Kilos moved so far, the same number the scoreboard shows at the end:
+  /// working and drop sets, never warm-ups, holds or cardio.
+  double get _totalVolume =>
+      _sessionExercises.fold(0.0, (sum, ex) => sum + buildEntry(ex).totalVolume);
 
   ExerciseEntry buildEntry(Exercise ex) {
     return ExerciseEntry(
@@ -1247,80 +1237,23 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
     );
   }
 
-  double get _completionProgress {
-    if (_sessionExercises.isEmpty) return 0.0;
-    double totalRatio = 0.0;
-    for (final ex in _sessionExercises) {
-      final entry = buildEntry(ex);
-      if (entry.isSkipped) {
-        totalRatio += 1.0;
-        continue;
-      }
-      final targetSets = entry.exercise.targetSets;
-      final targetRepMin = entry.exercise.targetRepMin;
-      final workingSets = entry.sets.where((s) => s.isMainWorkingSet).toList();
+  /// Progress bar value, 0 to 1 (see [SessionScore.progress]): timed holds
+  /// and cardio count by sets, skipped exercises count as done.
+  double get _completionProgress =>
+      SessionScore.progress([for (final ex in _sessionExercises) buildEntry(ex)]);
 
-      final setRatio = targetSets > 0 ? entry.completedWorkingSetsCount / targetSets : 1.0;
-
-      double totalSetRepScore = 0.0;
-      for (final s in workingSets) {
-        if (targetRepMin > 0) {
-          totalSetRepScore += (s.reps / targetRepMin).clamp(0.0, 1.0);
-        } else {
-          totalSetRepScore += 1.0;
-        }
-      }
-      final repRatio = targetSets > 0 ? totalSetRepScore / targetSets : 1.0;
-
-      final ratioEx = (setRatio < repRatio ? setRatio : repRatio).clamp(0.0, 1.0);
-      totalRatio += ratioEx;
-    }
-    return totalRatio / _sessionExercises.length;
-  }
-
+  /// Recomputes the live score. Called after every change to the logged
+  /// sets or the exercise list (log, delete, skip, add, remove, swap).
   void _updateLiveScore() {
-    if (_sessionExercises.isEmpty) {
-      _scoreNotifier.value = 0;
-      return;
-    }
-
-    // 1. Completion of exercises (up to 30 points) using rep midpoint ratio
-    final avgCompletionRatio = _completionProgress;
-    final completionScore = avgCompletionRatio * 30.0;
-
-    // 2. Volume score (up to 30 points) based on primary working volume only
-    final currentVolume = _primaryWorkingVolume;
-    final lastVolume = widget.previousSession?.primaryWorkingVolume ?? 2000.0;
-    final volumeScore = lastVolume > 0 ? (currentVolume / lastVolume * 30.0).clamp(0.0, 30.0) : 15.0;
-
-    // 3. Set completion score (up to 25 points) based on primary working sets vs target
-    double loggedSetsScore = 0.0;
-    int activeExercises = 0;
-    for (final ex in _sessionExercises) {
-      final entry = buildEntry(ex);
-      if (entry.isSkipped) continue;
-      activeExercises++;
-      final logged = entry.completedWorkingSetsCount;
-      final target = entry.exercise.targetSets > 0 ? entry.exercise.targetSets : 3;
-      loggedSetsScore += (logged / target).clamp(0.0, 1.0);
-    }
-    final setsScore = activeExercises > 0 ? (loggedSetsScore / activeExercises) * 25.0 : 25.0;
-
-    // 4. PRs score (up to 15 points) based on e1RM PRs from primary working sets
-    int prCount = 0;
-    _sets.forEach((exId, list) {
-      for (final s in list) {
-        if (s.isMainWorkingSet) {
-          final previousBest = _service.bestSetBefore(exId, widget.date);
-          if (WorkoutService.beatsPreviousBest(s, previousBest)) {
-            prCount++;
-          }
-        }
-      }
-    });
-    final prScore = (prCount * 5.0).clamp(0.0, 15.0);
-
-    _scoreNotifier.value = (completionScore + volumeScore + setsScore + prScore).round().clamp(0, 100);
+    final bests = <String, SetEntry?>{};
+    _scoreNotifier.value = SessionScore.compute(
+      entries: [for (final ex in _sessionExercises) buildEntry(ex)],
+      previous: widget.previousSession,
+      isRecord: (exId, set) => WorkoutService.beatsPreviousBest(
+        set,
+        bests.putIfAbsent(exId, () => _service.bestSetBefore(exId, widget.date)),
+      ),
+    );
   }
 
   // ── Logging Operations ───────────────────────────────────────────────────
@@ -1328,13 +1261,17 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
   Future<void> _logSet() async {
     final ex = _currentExercise;
     final mode = ex.effectiveExecutionMode;
-    final w = _weightSelections[ex.id] ?? (mode == ExerciseExecutionMode.bodyweightReps ? 0.0 : 40.0);
-    final r = _repsSelections[ex.id] ?? (mode == ExerciseExecutionMode.timed ? 1 : 10);
+    // Holds and cardio have no weight or reps dial: their sets carry no
+    // kilos (the hidden weight dial must not leak in as "40 kg x 10").
+    final timeBased = mode == ExerciseExecutionMode.timed || mode == ExerciseExecutionMode.cardio;
+    final w = timeBased ? 0.0 : _weightSelections[ex.id] ?? (mode == ExerciseExecutionMode.bodyweightReps ? 0.0 : 40.0);
+    final r = timeBased ? 1 : _repsSelections[ex.id] ?? 10;
     final rpe = _rpeSelections[ex.id];
     final type = _setTypeSelections[ex.id] ?? SetType.normal;
-    final externalLoad = _externalLoadSelections[ex.id];
-    final duration = _durationSelections[ex.id] ?? (mode == ExerciseExecutionMode.timed ? 60 : null);
-    final distance = _distanceSelections[ex.id] ?? (mode == ExerciseExecutionMode.cardio ? 1000.0 : null);
+    final externalLoad = timeBased ? null : _externalLoadSelections[ex.id];
+    // Untouched consoles log what they show (see ExecutionDefaults).
+    final duration = _durationSelections[ex.id] ?? ExecutionDefaults.durationFor(mode);
+    final distance = _distanceSelections[ex.id] ?? ExecutionDefaults.distanceFor(mode);
 
     // Explicit validation for timed, bodyweight, cardio and weight sets
     final validationError = ExecutionModeValidator.validate(
@@ -1925,7 +1862,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _weightSelections[picked.id] = 40.0;
       _repsSelections[picked.id] = 10;
       _selectedIndex = _sessionExercises.length - 1;
-    });
+    });    _updateLiveScore();
+
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients) {
@@ -1975,7 +1913,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
       _rpeSelections.remove(ex.id);
       _setTypeSelections.remove(ex.id);
       _selectedIndex = _sessionExercises.isEmpty ? 0 : _selectedIndex.clamp(0, _sessionExercises.length - 1);
-    });
+    });    _updateLiveScore();
+
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_pageController.hasClients && _sessionExercises.isNotEmpty) {
@@ -2520,15 +2459,31 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen> with Widget
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // Live score rides quietly beside the percentage.
-                  ValueListenableBuilder<int>(
+                  // Tap it to see what the score is made of.
+                  ValueListenableBuilder<SessionScoreBreakdown>(
                     valueListenable: _scoreNotifier,
                     builder: (context, score, _) => Semantics(
-                      label: 'Workout score $score',
+                      button: true,
+                      label: 'Workout score ${score.total}. Shows how it is worked out',
                       excludeSemantics: true,
-                      child: _RollingMeta(
-                        prefix: 'Score ',
-                        value: '$score',
-                        style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: KColor.textMuted),
+                      child: GestureDetector(
+                        key: const Key('workout_live_score'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          KHaptics.select();
+                          showSessionScoreSheet(context, _scoreNotifier.value);
+                        },
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 32),
+                          child: Center(
+                            widthFactor: 1,
+                            child: _RollingMeta(
+                              prefix: 'Score ',
+                              value: '${score.total}',
+                              style: _WsText.num.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: KColor.textMuted),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -5999,7 +5954,7 @@ String _liftLabel(SetEntry s) {
 class _WorkoutCompletionOverlay extends StatefulWidget {
   final WorkoutSession session;
   final WorkoutSession? previousSession;
-  final int score;
+  final SessionScoreBreakdown score;
   final Duration duration;
   final VoidCallback onDone;
 
@@ -6068,10 +6023,33 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
     super.dispose();
   }
 
+  /// Last time's session for this day, if there is one to compare with.
+  /// A bodyweight-only last session still counts: it is compared by reps.
   WorkoutSession? get _prev {
     final p = widget.previousSession;
-    if (p == null || p.id == widget.session.id || p.totalVolume <= 0) return null;
+    if (p == null || p.id == widget.session.id) return null;
     return p;
+  }
+
+  /// Reps of every set that did work (warm-ups, holds and cardio aside).
+  static int _repsOf(WorkoutSession s) {
+    var n = 0;
+    for (final e in s.entries) {
+      if (e.isSkipped) continue;
+      for (final set in e.sets) {
+        if (set.countsAsVolume && !set.isTimeOrDistance) n += set.reps;
+      }
+    }
+    return n;
+  }
+
+  /// Last time's headline number in today's unit (kg, or reps when today
+  /// moved no plates); null when last time has nothing in that unit.
+  double? _before(bool byReps) {
+    final prev = _prev;
+    if (prev == null) return null;
+    final v = byReps ? _repsOf(prev).toDouble() : prev.totalVolume;
+    return v > 0 ? v : null;
   }
 
   static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -6083,24 +6061,28 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
   }
 
   /// The headline, said like a training partner would say it.
-  String _verdict(double volume) {
+  String _verdict(double today, bool byReps) {
     final day = widget.session.splitDayName.trim();
     if (_bests.length == 1) return 'New best on ${_bests.first.name}.';
     if (_bests.length > 1) return '${_bests.length} new bests. Big day.';
-    final prev = _prev;
-    if (prev == null) return day.isEmpty ? 'First one on the books.' : 'First $day on the books.';
-    final diff = volume - prev.totalVolume;
-    if (diff > prev.totalVolume * 0.02) return 'More than last time. Keep stacking.';
-    if (diff < -prev.totalVolume * 0.02) return 'Lighter than last time. You still showed up.';
-    return 'Matched last time, kilo for kilo.';
+    if (_prev == null) return day.isEmpty ? 'First one on the books.' : 'First $day on the books.';
+    final before = _before(byReps);
+    if (before == null) return day.isEmpty ? 'Another one on the books.' : 'Another $day on the books.';
+    final diff = today - before;
+    if (diff > before * 0.02) return 'More than last time. Keep stacking.';
+    if (diff < -before * 0.02) return 'Lighter than last time. You still showed up.';
+    return byReps ? 'Matched last time, rep for rep.' : 'Matched last time, kilo for kilo.';
   }
 
-  String? _volumeDelta(double volume) {
-    final prev = _prev;
-    if (prev == null) return null;
-    final diff = (volume - prev.totalVolume).round();
-    if (diff > 0) return '+${thousands(diff)} kg on last time';
-    if (diff < 0) return '${thousands(-diff)} kg under last time';
+  /// "+120 kg on last time" / "6 reps under last time", or null with
+  /// nothing to compare.
+  String? _delta(double today, bool byReps) {
+    final before = _before(byReps);
+    if (before == null) return null;
+    final diff = (today - before).round();
+    final unit = byReps ? (diff.abs() == 1 ? ' rep' : ' reps') : ' kg';
+    if (diff > 0) return '+${thousands(diff)}$unit on last time';
+    if (diff < 0) return '${thousands(-diff)}$unit under last time';
     return 'Same as last time';
   }
 
@@ -6116,9 +6098,13 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
     final prev = _prev;
     final worked = session.entries.where((e) => !e.isSkipped && e.sets.isNotEmpty).toList();
     // A bodyweight-only session moved no plates: count reps instead of "0 kg".
+    // Holds and cardio alone have neither, so the sets lead.
     final byReps = volume <= 0;
-    final reps = worked.fold<int>(0, (n, e) => n + e.sets.fold<int>(0, (m, s) => m + s.reps));
-    final heroValue = byReps ? reps.toDouble() : volume;
+    final reps = _repsOf(session);
+    final bySets = byReps && reps == 0;
+    final heroValue = bySets ? sets.toDouble() : byReps ? reps.toDouble() : volume;
+    final heroUnit = bySets ? (sets == 1 ? 'set' : 'sets') : byReps ? 'reps' : 'kg';
+    final today = byReps ? reps.toDouble() : volume;
     final muscles = worked.map((e) => e.exercise.muscleGroup).toSet().toList();
     final mappable = muscles.where(MuscleThumb.canShow).toSet();
 
@@ -6175,12 +6161,16 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                _verdict(volume),
+                                _verdict(today, byReps),
                                 style: KText.display.copyWith(color: KHeroInk.primary, fontSize: 26, height: 1.12),
                               ),
                               const SizedBox(height: 22),
                               Semantics(
-                                label: '${thousands(volume)} kilograms moved',
+                                label: bySets
+                                    ? '$sets $heroUnit'
+                                    : byReps
+                                        ? '${thousands(reps)} reps'
+                                        : '${thousands(volume)} kilograms moved',
                                 excludeSemantics: true,
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -6206,7 +6196,7 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                                       ),
                                     ),
                                     const SizedBox(width: 6),
-                                    Text(byReps ? 'reps' : 'kg', style: KText.display.copyWith(color: KHeroInk.secondary, fontSize: 22)),
+                                    Text(heroUnit, style: KText.display.copyWith(color: KHeroInk.secondary, fontSize: 22)),
                                   ],
                                 ),
                               ),
@@ -6224,7 +6214,8 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                                   const SizedBox(width: 8),
                                   Flexible(
                                     child: Text(
-                                      byReps ? 'Bodyweight, all of it' : (_volumeDelta(volume) ?? 'Moved today'),
+                                      _delta(today, byReps) ??
+                                          (bySets ? 'Holds and cardio today' : byReps ? 'Bodyweight, all of it' : 'Moved today'),
                                       style: KText.bodyMedium.copyWith(color: KHeroInk.secondary),
                                     ),
                                   ),
@@ -6246,7 +6237,8 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                                     const SizedBox(width: _cellGap),
                                     _scoreCell(2, '${_bests.length}', _bests.length == 1 ? 'PR' : 'PRs', null),
                                     const SizedBox(width: _cellGap),
-                                    _scoreCell(3, '${widget.score}', 'score', null),
+                                    _scoreCell(3, '${widget.score.total}', 'score', null,
+                                        onTap: () => showSessionScoreSheet(context, widget.score)),
                                   ],
                                 ),
                               ),
@@ -6379,17 +6371,9 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
 
   /// One scoreboard cell: a big number, its unit, and last time's number
   /// when there is one. Cells rise in one after another.
-  Widget _scoreCell(int i, String value, String unit, String? was) {
+  Widget _scoreCell(int i, String value, String unit, String? was, {VoidCallback? onTap}) {
     final a = _phase(0.3 + i * 0.1, 0.7 + i * 0.075);
-    return Expanded(
-      child: FadeTransition(
-        opacity: a,
-        child: SlideTransition(
-          position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(a),
-          child: Semantics(
-          label: '$value $unit${was == null ? '' : ', $was'}',
-          excludeSemantics: true,
-          child: Column(
+    Widget cell = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               FittedBox(
@@ -6407,12 +6391,42 @@ class _WorkoutCompletionOverlayState extends State<_WorkoutCompletionOverlay>
                 ),
               ),
               const SizedBox(height: 4),
-              Text(unit, style: KText.caption.copyWith(color: KHeroInk.secondary)),
+              Text(
+                unit,
+                style: KText.caption.copyWith(
+                  color: KHeroInk.secondary,
+                  // A tappable cell says so with a dotted-style underline.
+                  decoration: onTap == null ? null : TextDecoration.underline,
+                  decorationStyle: TextDecorationStyle.dotted,
+                  decorationColor: KHeroInk.secondary,
+                ),
+              ),
               if (was != null)
                 Text(was, style: KText.caption.copyWith(color: KHeroInk.muted, fontSize: 11)),
             ],
-          ),
-        ),
+          );
+    cell = Semantics(
+      button: onTap != null,
+      label: '$value $unit${was == null ? '' : ', $was'}${onTap == null ? '' : '. Shows how it is worked out'}',
+      excludeSemantics: true,
+      child: onTap == null
+          ? cell
+          : GestureDetector(
+              key: const Key('scoreboard_score_cell'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                KHaptics.select();
+                onTap();
+              },
+              child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: cell),
+            ),
+    );
+    return Expanded(
+      child: FadeTransition(
+        opacity: a,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(a),
+          child: cell,
         ),
       ),
     );
@@ -6499,16 +6513,26 @@ class _ReceiptRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final working = entry.sets.where((s) => s.isMainWorkingSet).toList();
+    // The top set: heaviest lift; for holds and cardio, the longest (or
+    // farthest) one, since they carry no kilos.
+    double rank(SetEntry s) => s.isTimeOrDistance
+        ? (s.durationSeconds ?? 0) * 1000.0 + (s.distanceMeters ?? 0)
+        : s.estimatedOneRepMax;
     SetEntry? top;
     for (final s in working) {
-      if (top == null || s.estimatedOneRepMax > top.estimatedOneRepMax) top = s;
+      if (top == null || rank(s) > rank(top)) top = s;
     }
-    final timed = top?.durationSeconds != null;
-    final value = top == null
-        ? plural(entry.sets.length, 'set')
-        : timed
-            ? '${top.durationSeconds! ~/ 60}:${(top.durationSeconds! % 60).toString().padLeft(2, '0')}'
-            : _liftLabel(top);
+    final String value;
+    if (top == null) {
+      value = plural(entry.sets.length, 'set');
+    } else if (top.durationSeconds != null) {
+      value = '${top.durationSeconds! ~/ 60}:${(top.durationSeconds! % 60).toString().padLeft(2, '0')}';
+    } else if (top.distanceMeters != null) {
+      final m = top.distanceMeters!;
+      value = m >= 1000 ? '${(m / 1000).toStringAsFixed(2)} km' : '${m.round()} m';
+    } else {
+      value = _liftLabel(top);
+    }
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Column(

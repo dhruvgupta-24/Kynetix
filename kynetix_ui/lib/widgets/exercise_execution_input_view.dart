@@ -6,6 +6,24 @@ import '../ui/k_rolling.dart';
 import 'barbell_plate_calculator.dart';
 import 'k_ticking_text.dart';
 
+/// What a timed or cardio console shows before the person touches it. The
+/// session logs exactly these when "Log set" is tapped straight away, so
+/// the numbers on screen and the numbers saved never differ.
+abstract final class ExecutionDefaults {
+  static const int timedSeconds = 60;
+  static const int cardioSeconds = 900;
+  static const double cardioMeters = 2000.0;
+
+  static int? durationFor(ExerciseExecutionMode mode) => switch (mode) {
+        ExerciseExecutionMode.timed => timedSeconds,
+        ExerciseExecutionMode.cardio => cardioSeconds,
+        _ => null,
+      };
+
+  static double? distanceFor(ExerciseExecutionMode mode) =>
+      mode == ExerciseExecutionMode.cardio ? cardioMeters : null;
+}
+
 /// Validation logic for exercise execution modes.
 class ExecutionModeValidator {
   static String? validate({
@@ -416,7 +434,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   // 3. TIMED EXECUTION (Hold Duration in seconds/minutes + Stopwatch)
   // ───────────────────────────────────────────────────────────────────────────
   Widget _buildTimedInput() {
-    final curDuration = widget.durationSeconds ?? 60;
+    final curDuration = widget.durationSeconds ?? ExecutionDefaults.timedSeconds;
     final mins = curDuration ~/ 60;
     final secs = curDuration % 60;
     final durStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
@@ -540,8 +558,8 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   // 4. CARDIO EXECUTION (Duration min/sec + Distance km/m)
   // ───────────────────────────────────────────────────────────────────────────
   Widget _buildCardioInput() {
-    final curDuration = widget.durationSeconds ?? 900; // 15 mins default
-    final curMeters = widget.distanceMeters ?? 2000.0; // 2.0 km default
+    final curDuration = widget.durationSeconds ?? ExecutionDefaults.cardioSeconds;
+    final curMeters = widget.distanceMeters ?? ExecutionDefaults.cardioMeters;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -706,7 +724,10 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   }
 
   void _adjustDuration(int deltaSeconds) {
-    final cur = widget.durationSeconds ?? 60;
+    // Step from the value on screen (15 min on cardio, not 1 min).
+    final cur = widget.durationSeconds ??
+        ExecutionDefaults.durationFor(widget.exercise.effectiveExecutionMode) ??
+        ExecutionDefaults.timedSeconds;
     final next = (cur + deltaSeconds).clamp(5, 7200);
     if (next == cur && widget.durationSeconds != null) return;
     widget.onDurationChanged(next);
@@ -714,7 +735,7 @@ class _ExerciseExecutionInputViewState extends State<ExerciseExecutionInputView>
   }
 
   void _adjustDistance(double deltaMeters) {
-    final cur = widget.distanceMeters ?? 2000.0;
+    final cur = widget.distanceMeters ?? ExecutionDefaults.cardioMeters;
     final next = (cur + deltaMeters).clamp(50.0, 50000.0);
     if (next == cur && widget.distanceMeters != null) return;
     widget.onDistanceChanged(next);
