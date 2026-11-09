@@ -13,8 +13,8 @@
   "minVersionCode": 1,
   "playUrl": null,
   "sha256": {
-    "arm64": "52d76cc5f73e4c2e6e7142ab1949b2a0289b2698fe1e301a0eae0df3ff1fbf73",
-    "armv7": "dfd5451d5b6788932f36284b14b77765b0f2e6f3ab299bc3ef1b8b67dc881a7e"
+    "arm64": "08efbb29e516d6d28bebd56ef9c48034e168bd02f3836b31b9c23fdb8914ef88",
+    "armv7": "df9bfe95ad1a6677ed6143669b7733233220d8c18df3025a3f8e9eaf11a58fda"
   },
   "size": {
     "arm64": "41.2 MB",
