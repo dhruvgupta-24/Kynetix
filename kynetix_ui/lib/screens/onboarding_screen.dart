@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'app_shell.dart';
 import 'connect_chatgpt_screen.dart';
 import 'onboarding/consent_panel.dart';
+import 'onboarding/plan_builder_moment.dart';
 import 'onboarding/prologue.dart';
 import 'onboarding/scene_backdrop.dart';
 import 'onboarding/welcome_moment.dart';
@@ -16,7 +17,6 @@ import '../services/profile_service.dart';
 import '../services/nutrition_target_engine.dart';
 import '../services/nutrition_hydration_guard.dart';
 import '../services/eating_pattern_service.dart';
-import '../ui/k_rolling.dart';
 import '../ui/k_shake.dart';
 import '../ui/k_toast.dart';
 import '../widgets/kyno_avatar.dart';
@@ -289,10 +289,15 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 KynoMood.happy,
               );
       case 4:
-        return (
-          "Here's where you start$hi. I adjust it as I learn how you eat and train.",
-          KynoMood.celebrate,
-        );
+        return _planSettled
+            ? (
+                "Here's where you start$hi. I adjust it as I learn how you eat and train.",
+                KynoMood.celebrate,
+              )
+            : (
+                'Running your numbers$hi. Tap the sheet to skip ahead.',
+                KynoMood.thinking,
+              );
       default:
         return (
           'Optional: bring your own ChatGPT and I run on it. Skip if you like.',
@@ -358,6 +363,26 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     return NutritionTargetEngine().weeklyPlan(tempProfile);
   }
 
+  /// What the "Your targets" sheet is built from: these answers and the plan.
+  PlanBuildInputs _planInputs(WeeklyTargetPlan plan) => PlanBuildInputs(
+        plan: plan,
+        heightCm: _resolvedHeightCm(),
+        weightKg: double.tryParse(_weightCtrl.text.trim()) ?? 70.0,
+        age: _age,
+        trainingDaysLabel: _workoutOptions[_workoutIdx].label,
+        goal: _goal,
+        teen: _teen,
+        portionAnchor: _portionAnchor,
+      );
+
+  /// The answers whose plan was last written out on the sheet. Coming back
+  /// to "Your targets" with the same answers shows it settled; changed
+  /// answers play the build again.
+  String? _builtSignature;
+
+  bool get _planSettled =>
+      _builtSignature == _planInputs(_calculateTargets()).signature;
+
   @override
   void dispose() {
     _navLock.dispose();
@@ -416,10 +441,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     }
 
     if (_currentStep < _questionSteps - 1) {
+      // Arriving on "Your targets" plays the plan being built; its success
+      // haptic fires when the sheet settles (PlanBuilderMoment).
       _goTo(_currentStep + 1);
-      // The plan reveal is the payoff of the questions.
-      if (_currentStep == _questionSteps - 1) KHaptics.success();
     } else if (_currentStep == _questionSteps - 1) {
+      // Nothing to save until the sheet has been written out.
+      if (!_planSettled) return;
       _submit();
     }
   }
@@ -554,7 +581,20 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         _nextStep();
       },
     ),
-    4 => _StepSummary(plan: plan),
+    4 => () {
+      final inputs = _planInputs(plan);
+      final sig = inputs.signature;
+      return PlanBuilderMoment(
+        key: ValueKey(sig),
+        inputs: inputs,
+        play: _builtSignature != sig,
+        onSettled: () {
+          if (mounted && _builtSignature != sig) {
+            setState(() => _builtSignature = sig);
+          }
+        },
+      );
+    }(),
     _ => _StepConnectAi(onFinished: _finishAiChapter),
   };
 
@@ -711,6 +751,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         _Footer(
                           currentStep: _currentStep,
                           saving: _saving,
+                          building: _currentStep == _questionSteps - 1 &&
+                              _builtSignature != _planInputs(plan).signature,
                           onNext: _nextStep,
                           onBack: _prevStep,
                         ),
@@ -942,12 +984,16 @@ class _Header extends StatelessWidget {
 class _Footer extends StatelessWidget {
   final int currentStep;
   final bool saving;
+
+  /// "Your targets" is still being written out: nothing to save yet.
+  final bool building;
   final VoidCallback onNext;
   final VoidCallback onBack;
 
   const _Footer({
     required this.currentStep,
     required this.saving,
+    this.building = false,
     required this.onNext,
     required this.onBack,
   });
@@ -977,7 +1023,7 @@ class _Footer extends StatelessWidget {
             label: isSave ? 'Save my targets' : 'Continue',
             icon: isSave ? Icons.check_rounded : null,
             loading: saving,
-            onTap: onNext,
+            onTap: building ? null : onNext,
           ),
         ),
       ],
@@ -1742,232 +1788,6 @@ class _StepEatingStyle extends StatelessWidget {
           const SizedBox(height: KSpacing.lg),
         ],
       ),
-    );
-  }
-}
-
-// ─── Step 5: Summary — the plan reveal ───────────────────────────────────────
-// Moment: success / payoff. Trigger: arriving on the last step (success haptic
-// fires in _nextStep on the commit frame). The cards rise in a single stagger
-// and the numbers count up. Reduced motion: everything is already in place.
-
-class _StepSummary extends StatelessWidget {
-  final WeeklyTargetPlan plan;
-
-  const _StepSummary({required this.plan});
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-        KSpacing.xxl,
-        0,
-        KSpacing.xxl,
-        KSpacing.xxl,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: kStagger(
-          [
-            Text(
-              'Built from your body, training and goal.',
-              style: KText.body.copyWith(color: KColor.textSecondary),
-            ),
-            const SizedBox(height: KSpacing.lg),
-            _HeroTarget(
-              icon: Icons.local_fire_department_rounded,
-              label: 'Daily calories',
-              value: plan.avgDailyCalories,
-              suffix: ' kcal',
-              colors: KGradient.fuel,
-            ),
-            const SizedBox(height: KSpacing.md),
-            _HeroTarget(
-              icon: Icons.egg_outlined,
-              label: 'Daily protein',
-              value: plan.avgDailyProtein,
-              suffix: ' g',
-              colors: KGradient.protein,
-            ),
-            const SizedBox(height: KSpacing.lg),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: KSpacing.md),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: KColor.isDark
-                        ? KColor.fg.withValues(alpha: 0.1)
-                        : KColor.divider,
-                  ),
-                  bottom: BorderSide(
-                    color: KColor.isDark
-                        ? KColor.fg.withValues(alpha: 0.1)
-                        : KColor.divider,
-                  ),
-                ),
-              ),
-              child: Column(
-                children: [
-                  _TargetRow(
-                    icon: Icons.fitness_center_rounded,
-                    label: 'Training days',
-                    value: '${whole(plan.trainingDayCalories)} kcal',
-                  ),
-                  Divider(
-                    color: KColor.isDark
-                        ? KColor.fg.withValues(alpha: 0.07)
-                        : KColor.divider,
-                    height: KSpacing.xl,
-                  ),
-                  _TargetRow(
-                    icon: Icons.bedtime_outlined,
-                    label: 'Rest days',
-                    value: '${whole(plan.restDayCalories)} kcal',
-                  ),
-                  Divider(
-                    color: KColor.isDark
-                        ? KColor.fg.withValues(alpha: 0.07)
-                        : KColor.divider,
-                    height: KSpacing.xl,
-                  ),
-                  _TargetRow(
-                    icon: Icons.balance_rounded,
-                    label: 'Maintenance',
-                    value: '${whole(plan.maintenanceCalories)} kcal',
-                    isLast: true,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: KSpacing.md),
-            Text(
-              'These are estimates, not medical advice. Tweak them anytime '
-              'in your profile.',
-              style: KText.caption.copyWith(color: KColor.textMuted),
-            ),
-          ],
-          delay: const Duration(milliseconds: 120),
-          stagger: const Duration(milliseconds: 70),
-          fromScale: 0.97,
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroTarget extends StatelessWidget {
-  const _HeroTarget({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.suffix,
-    required this.colors,
-  });
-
-  final IconData icon;
-  final String label;
-  final double value;
-  final String suffix;
-  final List<Color> colors;
-
-  @override
-  Widget build(BuildContext context) {
-    // The payoff, set as a statement: a heavy rule, the label with its meaning
-    // dot, and the number large. No tinted card, no gradient tile.
-    final c = colors.first;
-    return Semantics(
-      container: true,
-      label: '$label: ${whole(value)}$suffix',
-      excludeSemantics: true,
-      child: Container(
-        padding: const EdgeInsets.only(top: KSpacing.md, bottom: KSpacing.sm),
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: KColor.textPrimary, width: 1.5),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                KDot(color: c, size: 7),
-                const SizedBox(width: KSpacing.sm),
-                Text(
-                  label,
-                  style: KText.bodyMedium.copyWith(
-                    color: KColor.textSecondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: KSpacing.xs),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  KRollingNumber.int(
-                    value.round(),
-                    fromZero: true,
-                    duration: KMotion.slow,
-                    style: KText.numDisplay.copyWith(
-                      fontSize: 52,
-                      height: 1.05,
-                    ),
-                  ),
-                  Text(
-                    suffix,
-                    style: KText.numDisplay.copyWith(
-                      fontSize: 52,
-                      height: 1.05,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TargetRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool isLast;
-
-  const _TargetRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.isLast = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: KColor.textMuted),
-        const SizedBox(width: KSpacing.md),
-        Expanded(
-          child: Text(
-            label,
-            style: KText.bodyMedium.copyWith(
-              color: KColor.textSecondary,
-              fontSize: 13,
-            ),
-          ),
-        ),
-        const SizedBox(width: KSpacing.sm),
-        Text(value, style: KText.numSmall.copyWith(fontSize: 14)),
-      ],
     );
   }
 }
