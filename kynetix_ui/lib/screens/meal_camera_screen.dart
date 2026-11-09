@@ -722,12 +722,9 @@ class _MealCameraScreenState extends State<MealCameraScreen>
     if (_photo == null || _settle.value == 0) return surface;
     final from = _PlateGeometry.of(size, pad, 0);
     final to = _PlateGeometry.of(size, pad, _settle.value);
-    final s = to.radius / from.radius;
-    final m = Matrix4.identity()
-      ..translateByDouble(to.center.dx, to.center.dy, 0, 1)
-      ..scaleByDouble(s, s, 1, 1)
-      ..translateByDouble(-from.center.dx, -from.center.dy, 0, 1);
-    return Transform(transform: m, child: surface);
+    // A pure lift (no shrink), so the photo still fills the screen: the
+    // plate's centre stays in the circle, seen a little closer.
+    return Transform.translate(offset: to.center - from.center, child: surface);
   }
 
   /// The camera feed, or the frozen photo once one is taken.
