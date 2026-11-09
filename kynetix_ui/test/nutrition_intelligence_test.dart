@@ -360,7 +360,8 @@ void main() {
         fat: 10.0,
         fiber: 6.0,
       );
-      expect(score, 75);
+      // Dal counts as the plate's protein food (+5) since the dal fix.
+      expect(score, 80);
     });
 
     test('Verify paneer + roti meal', () {

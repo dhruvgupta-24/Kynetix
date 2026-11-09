@@ -241,6 +241,9 @@ class _MealCameraScreenState extends State<MealCameraScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!MealCameraScreen.debugCameraEnabled) return;
+    // The permission dialog makes the app "inactive" while the camera is
+    // starting; tearing down then would fail the very start it is asking for.
+    if (_initializing) return;
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       // Release the camera while away; the plugin can't hold it in the
       // background anyway.
@@ -252,15 +255,25 @@ class _MealCameraScreenState extends State<MealCameraScreen>
         if (mounted) setState(() {});
       }
     } else if (state == AppLifecycleState.resumed) {
-      // Only the live viewfinder needs it back; a frozen photo doesn't.
-      if (_camera == null && (_stage == _Stage.live || _stage == _Stage.starting)) {
+      // Only the live viewfinder needs it back; a frozen photo doesn't. Back
+      // from Settings with the camera now allowed, the no-camera state
+      // retries too.
+      if (_camera == null &&
+          (_stage == _Stage.live || _stage == _Stage.starting || _stage == _Stage.noCamera)) {
         unawaited(_startCamera());
       }
     }
   }
 
+  /// True while a camera start is in flight: one at a time.
+  bool _initializing = false;
+
   Future<void> _startCamera() async {
-    if (mounted && _stage != _Stage.starting) setState(() => _stage = _Stage.starting);
+    if (_initializing) return;
+    _initializing = true;
+    if (mounted && (_stage == _Stage.live || _stage == _Stage.noCamera) && _camera == null) {
+      setState(() => _stage = _Stage.starting);
+    }
     try {
       final cams = await availableCameras();
       if (cams.isEmpty) throw CameraException('NoCamera', 'No camera on this device');
@@ -285,7 +298,7 @@ class _MealCameraScreenState extends State<MealCameraScreen>
       setState(() {
         _camera = c;
         _cameraDenied = false;
-        if (_stage == _Stage.starting) _stage = _Stage.live;
+        if (_stage == _Stage.starting || _stage == _Stage.noCamera) _stage = _Stage.live;
       });
     } on CameraException catch (e) {
       debugPrint('[MealCamera] camera failed: ${e.code}');
@@ -300,6 +313,8 @@ class _MealCameraScreenState extends State<MealCameraScreen>
       setState(() {
         if (_stage == _Stage.starting) _stage = _Stage.noCamera;
       });
+    } finally {
+      _initializing = false;
     }
   }
 
@@ -600,7 +615,7 @@ class _MealCameraScreenState extends State<MealCameraScreen>
                   return Stack(
                     fit: StackFit.expand,
                     children: [
-                      _surface(size),
+                      _placedSurface(size, pad),
                       if (_stage != _Stage.noCamera)
                         IgnorePointer(
                           child: _PlateGuide(
@@ -685,6 +700,8 @@ class _MealCameraScreenState extends State<MealCameraScreen>
                           }
                         },
                         closeIsBack: _photo != null,
+                        // The result panel carries the meal pill; no second label.
+                        showSection: _stage != _Stage.result,
                       ),
                     ],
                   );
@@ -695,6 +712,22 @@ class _MealCameraScreenState extends State<MealCameraScreen>
         ),
       ),
     );
+  }
+
+  /// The surface, with a frozen photo riding along with the plate circle as
+  /// it lifts and shrinks for the result: what was inside the circle stays
+  /// inside it.
+  Widget _placedSurface(Size size, EdgeInsets pad) {
+    final surface = _surface(size);
+    if (_photo == null || _settle.value == 0) return surface;
+    final from = _PlateGeometry.of(size, pad, 0);
+    final to = _PlateGeometry.of(size, pad, _settle.value);
+    final s = to.radius / from.radius;
+    final m = Matrix4.identity()
+      ..translateByDouble(to.center.dx, to.center.dy, 0, 1)
+      ..scaleByDouble(s, s, 1, 1)
+      ..translateByDouble(-from.center.dx, -from.center.dy, 0, 1);
+    return Transform(transform: m, child: surface);
   }
 
   /// The camera feed, or the frozen photo once one is taken.
@@ -789,7 +822,7 @@ class _PlateGuide extends StatelessWidget {
           painter: _PlatePainter(
             center: plate.center,
             radius: plate.radius,
-            scrim: p.bg.withValues(alpha: stage == _Stage.result ? 0.72 : (reading ? 0.62 : 0.5)),
+            scrim: p.bg.withValues(alpha: stage == _Stage.result ? 0.74 : (reading ? 0.66 : 0.62)),
             tick: p.fg.withValues(alpha: 0.42),
             rim: p.fg.withValues(alpha: 0.26),
             arc: p.ember,
@@ -908,7 +941,10 @@ class _TopBar extends StatelessWidget {
     required this.onTorch,
     required this.onClose,
     required this.closeIsBack,
+    this.showSection = true,
   });
+
+  final bool showSection;
 
   final MealSection section;
   final bool fill;
@@ -945,6 +981,7 @@ class _TopBar extends StatelessWidget {
                       header: true,
                       child: Text('Snap a meal', style: KText.h2.copyWith(color: p.textPrimary)),
                     ),
+                    if (showSection)
                     Text(
                       fill ? 'Adds to the meal you\'re editing' : 'For ${section.displayName}',
                       style: KText.caption.copyWith(fontSize: 13.5, color: p.textSecondary),
@@ -1004,7 +1041,12 @@ class _Hint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = _Cam.p;
-    return Column(
+    // On its own soft backing, so a bright scene never washes it out.
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(color: p.bg.withValues(alpha: 0.55), borderRadius: KRadius.md),
+        child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -1014,11 +1056,13 @@ class _Hint extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          'From above, in good light. Katoris and spoons help with size.',
+          'From above, in good light.',
           style: KText.caption.copyWith(fontSize: 13, color: p.textSecondary),
           textAlign: TextAlign.center,
         ),
       ],
+        ),
+      ),
     );
   }
 }

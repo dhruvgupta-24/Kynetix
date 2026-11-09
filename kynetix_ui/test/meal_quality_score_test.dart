@@ -166,4 +166,12 @@ void main() {
       expect(NutritionResult.fromJson(j).mealQualityExplanation, 'Solid fuel.');
     });
   });
+
+  test('a home thali with one sweet on the side is decent, not a junk score', () {
+    // Read from a real photo: rice, roti, sambar, rasam, dal fry, pickle and
+    // one gulab jamun. The sweet counts once; dal and sambar count for it.
+    const text = '250 g white rice, 1 chapati, 120 g sambar, 100 g rasam, 100 g dal fry, 20 g mango pickle, 1 gulab jamun';
+    final s = NutritionResult.calculateLocalQualityScore(854, 20, text, carbs: 137, fat: 23, fiber: 12);
+    expect(s, inInclusiveRange(60, 79));
+  });
 }

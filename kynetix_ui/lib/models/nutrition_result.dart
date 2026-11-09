@@ -699,13 +699,15 @@ class NutritionResult {
     'salad', 'vegetable', 'veggie', 'mix veg', 'mixed veg', 'sabzi', 'sabji', 'subzi',
     'broccoli', 'spinach', 'palak', 'greens', 'bhindi', 'okra', 'gobi', 'cauliflower',
     'cabbage', 'lauki', 'tinda', 'karela', 'methi', 'baingan', 'brinjal', 'eggplant',
-    'capsicum', 'mushroom', 'cucumber', 'carrot', 'beans',
+    'capsicum', 'mushroom', 'cucumber', 'carrot', 'beans', 'sambar', 'avial', 'poriyal', 'thoran',
   ]);
 
   static final RegExp _qualityProtein = _wordsRe(const [
     'chicken', 'fish', 'tofu', 'paneer', 'egg', 'egg white', 'oats', 'whey', 'protein',
     'sprouts', 'soya', 'soy', 'soyabean', 'curd', 'dahi', 'yogurt', 'yoghurt',
     'mutton', 'prawn', 'salmon', 'tuna',
+    // Dal and pulses are the protein in most Indian vegetarian plates.
+    'dal', 'daal', 'rajma', 'chana', 'chole', 'moong', 'lentil', 'lentils', 'sambar',
   ]);
 
   static final RegExp _qualityPizza = _wordsRe(const ['pizza']);
@@ -713,8 +715,8 @@ class NutritionResult {
   static final RegExp _qualityFried = _wordsRe(const [
     'fried', 'fries', 'french fries', 'fritter', 'nugget', 'chips', 'samosa', 'pakora',
     'pakoda', 'pakode', 'bhaji', 'bhajji', 'bhajiya', 'kachori', 'puri', 'poori',
-    'bhatura', 'bhature', 'vada', 'wada', 'namkeen', 'bhujia', 'mathri', 'jalebi',
-    'imarti', 'gulab jamun', 'malpua',
+    // Fried sweets (jalebi, gulab jamun) count once, as sweets.
+    'bhatura', 'bhature', 'vada', 'wada', 'namkeen', 'bhujia', 'mathri',
   ]);
   static final RegExp _qualitySoda = _wordsRe(const [
     'soda', 'coke', 'cola', 'pepsi', 'sprite', 'fanta', 'thums up', 'limca',

@@ -242,12 +242,6 @@ class _ProfileTabState extends State<ProfileTab> {
                         label: 'Run Kyno on ChatGPT',
                         onTap: () => _push(const ConnectChatGptScreen()),
                       ),
-                      const KHairline(indent: 56),
-                      _MenuRow(
-                        icon: Icons.settings_outlined,
-                        label: 'Settings',
-                        onTap: () => _push(const ProfileScreen()),
-                      ),
                     ],
                   );
                 },

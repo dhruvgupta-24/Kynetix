@@ -305,7 +305,7 @@ class MealPhotoService {
               body: body,
               headers: {'Authorization': 'Bearer ${session.accessToken}'},
             )
-            .timeout(const Duration(seconds: 40));
+            .timeout(const Duration(seconds: 60));
         data = res.data;
       }
     } on MealPhotoException {

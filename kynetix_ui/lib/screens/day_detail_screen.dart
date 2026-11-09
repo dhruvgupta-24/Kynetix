@@ -397,8 +397,8 @@ class _DayDetailContentState extends State<_DayDetailContent> {
                       KOptionRow(
                         icon: KIcons.kyno,
                         leading: const KynoMark(size: 24, outlined: true),
-                        title: 'Describe it to Kyno',
-                        subtitle: 'Type it like you\'d say it, e.g. 2 roti and dal.',
+                        title: 'Describe it',
+                        subtitle: 'Type it like you\'d say it. Kyno does the maths.',
                         onTap: () => Navigator.pop(ctx, 'ai'),
                       ),
                       const KHairline(indent: 40),

@@ -1022,12 +1022,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ...common, _logTick, _workoutTick, _bodyTick, selectedKey, _profile, _syncResult,
         _hcAvailable, _syncing, _weightHistory,
       ], _buildBento), true),
-      (_section(4, [...common, _logTick, _workoutTick, selectedKey, _profile, _syncResult],
-          _buildNutritionDetails), false),
-      (_section(10, [...common, _logTick, selectedKey], () => Padding(
-        padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.md, KSpacing.p, 0),
-        child: NutrientsSummaryCard(onLogFood: _logFoodText),
-      )), false),
     ];
     _enteredDays.add(selectedKey);
     _firstEntranceDone = true;
@@ -1185,17 +1179,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AnimatedSwitcher(
-                  duration: KMotion.of(context, KMotion.quick),
-                  layoutBuilder: (current, previous) => Stack(
-                    alignment: AlignmentDirectional.centerStart,
-                    children: [...previous, ?current],
-                  ),
-                  child: Text(
-                    isToday ? 'Today, $dateLine' : 'Looking back, $dateLine',
-                    key: ValueKey(dateLine),
-                    style: KText.caption.copyWith(fontSize: 13.5, color: KColor.textSecondary),
-                  ),
+                // The date and the streak share a line, so the greeting keeps
+                // the full width.
+                Row(
+                  children: [
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: KMotion.of(context, KMotion.quick),
+                        layoutBuilder: (current, previous) => Stack(
+                          alignment: AlignmentDirectional.centerStart,
+                          children: [...previous, ?current],
+                        ),
+                        child: Text(
+                          isToday ? 'Today, $dateLine' : 'Looking back, $dateLine',
+                          key: ValueKey(dateLine),
+                          style: KText.caption.copyWith(fontSize: 13.5, color: KColor.textSecondary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: KSpacing.sm),
+                    StreakChip(
+                      streak: _momentum.streak,
+                      onTap: () {
+                        KHaptics.select();
+                        showStreakSheet(
+                          context,
+                          streak: _momentum.streak,
+                          onLogMeal: AppShell.addMealAction.value,
+                        );
+                      },
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Semantics(
@@ -1207,18 +1221,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ],
             ),
-          ),
-          const SizedBox(width: KSpacing.sm),
-          StreakChip(
-            streak: _momentum.streak,
-            onTap: () {
-              KHaptics.select();
-              showStreakSheet(
-                context,
-                streak: _momentum.streak,
-                onLogMeal: AppShell.addMealAction.value,
-              );
-            },
           ),
         ],
       ),
@@ -1425,7 +1427,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(width: KSpacing.md),
                           Expanded(
                             child: Text(
-                              'Nothing logged yet. Tap here and type what you ate.',
+                              'Nothing logged yet. Your first meal sets the tone.',
                               style: KText.body.copyWith(color: KColor.textSecondary),
                             ),
                           ),
@@ -1461,8 +1463,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const _FastingTile(),
       _stepsTile(),
       _weightTile(wc),
-      _streakTile(),
-      _targetsTile(),
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.lg, KSpacing.p, 0),
@@ -1632,45 +1632,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _streakTile() {
-    return ListenableBuilder(
-      listenable: InsightsReportService.instance,
-      builder: (context, _) {
-        // The logging streak sits beside the greeting; this tile carries the
-        // protein run, counted the same way (today joins once it's hit).
-        final streak = _momentum.streak.proteinDays;
-        final newCount = InsightsReportService.instance.newAchievementCount;
-        return _BentoTile(
-          icon: KIcons.protein,
-          accent: KColor.protein,
-          label: 'Protein streak',
-          value: '$streak',
-          unit: streak == 1 ? 'day' : 'days',
-          sub: newCount > 0 ? '${plural(newCount, 'new badge')} in insights' : 'Weekly insights',
-          onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InsightsScreen()));
-          },
-        );
-      },
-    );
-  }
-
-  Widget _targetsTile() {
-    final plan = _weeklyPlan;
-    return _BentoTile(
-      icon: Icons.track_changes_rounded,
-      accent: KColor.ink,
-      label: 'Targets',
-      value: thousands(plan.avgDailyCalories),
-      unit: 'kcal',
-      sub: '${plan.avgDailyProtein.round()} g protein a day',
-      onTap: () => showKSheet<void>(
-        context: context,
-        builder: (_) => _BentoSheet(title: 'Your targets', child: _buildTargets(inset: false)),
-      ),
-    );
-  }
-
   // ── Carry-forward card ─────────────────────────────────────────────────────
   //
   // The midnight "Balance out yesterday?" prompt fires before late meals for
@@ -1831,20 +1792,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
           title: isToday
               ? 'Today\'s fuel'
               : 'Fuel on ${_kMonthShort[_selectedDate.month - 1]} ${_selectedDate.day}',
-          trailing: Text(
-            _targetCalories > 0
-                ? '${(_consumedCalories / _targetCalories * 100).round()}% eaten'
-                : '',
-            style: KText.caption.copyWith(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
+          // The numbers under the rings already say how much is eaten; the
+          // rest of the day's detail (carbs, fat, fiber, food quality,
+          // micronutrients, targets) waits one tap away instead of
+          // stacking up the home screen.
+          trailing: KTextAction('Details', onTap: _openDayDetailSheet),
           consumedCal: _consumedCalories,
           targetCal:   _targetCalories,
           consumedPro: _consumedProtein,
           targetPro:   _targetProtein,
+        ),
+      ),
+    );
+  }
+
+  /// Everything past calories and protein for the selected day, in one sheet.
+  void _openDayDetailSheet() {
+    KHaptics.select();
+    final isToday = dateKey(_selectedDate) == dateKey(DateTime.now());
+    showKSheet<void>(
+      context: context,
+      builder: (ctx) => ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.86),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: KSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                KSheetHeader(isToday
+                    ? 'Today in detail'
+                    : '${_kMonthShort[_selectedDate.month - 1]} ${_selectedDate.day} in detail'),
+                const SizedBox(height: KSpacing.sm),
+                _buildNutritionDetails(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.md, KSpacing.p, 0),
+                  child: NutrientsSummaryCard(onLogFood: (t) {
+                    Navigator.of(ctx).pop();
+                    _logFoodText(t);
+                  }),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.xl, KSpacing.p, KSpacing.xs),
+                  child: Text('Your targets', style: KText.h3),
+                ),
+                _buildTargets(),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -3416,7 +3412,7 @@ class DailyNutritionQualityCard extends StatelessWidget {
             ? (KColor.ink, 'Good')
             : score >= 60
                 ? (KColor.textSecondary, 'Fair')
-                : (KColor.ember, 'Could be cleaner');
+                : (KColor.ember, 'Room to round out');
 
     return Padding(
       padding: const EdgeInsets.only(top: KSpacing.xl),

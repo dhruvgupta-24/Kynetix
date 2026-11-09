@@ -199,6 +199,12 @@ class _AddMealScreenState extends State<AddMealScreen>
     if (widget.initialText != null && widget.initialEntry == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _calculate());
     }
+    // A fresh, empty meal: the keyboard is already up, one tap saved.
+    if (widget.initialText == null && widget.initialEntry == null && widget.initialResult == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
   }
 
   void _onComposerFocusChanged() {

@@ -103,15 +103,22 @@ class StreakChip extends StatelessWidget {
             children: [
               _DayDots(days: streak.last7, size: 5, gap: 2.5),
               const SizedBox(width: 10),
-              KRollingNumber.int(
-                n,
-                style: KText.numSmall.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(width: 3),
-              Text(
-                n == 1 ? 'day' : 'days',
-                style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary),
-              ),
+              if (n == 0)
+                Text(
+                  'Start a streak',
+                  style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary, fontWeight: FontWeight.w600),
+                )
+              else ...[
+                KRollingNumber.int(
+                  n,
+                  style: KText.numSmall.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  n == 1 ? 'day' : 'days',
+                  style: KText.caption.copyWith(fontSize: 12.5, color: KColor.textSecondary),
+                ),
+              ],
             ],
           ),
         ),

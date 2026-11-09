@@ -11,7 +11,6 @@ import '../ui/k_brand_intro.dart' show KShearWordmark;
 import '../ui/k_segmented.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/connect_chatgpt_screen.dart';
-import '../screens/nutrition_intelligence_screen.dart';
 import '../screens/auth_gate.dart';
 import '../services/chatgpt_link_service.dart';
 import '../services/health_service.dart';
@@ -20,7 +19,6 @@ import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import '../services/widget_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/insights_report_service.dart';
 import '../services/feedback_service.dart';
 import '../widgets/feedback_sheet.dart';
 import '../widgets/adaptive_targets_card.dart';
@@ -34,7 +32,6 @@ import 'analytics_screen.dart';
 import '../config/distribution.dart';
 import '../services/update_check_service.dart';
 import '../widgets/update_sheet.dart';
-import 'insights_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'account_deletion_screen.dart';
 import '../ui/k_rolling.dart';
@@ -706,7 +703,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _buildHealthCard(),
       if (TeenMode.isMinor(_profile)) _buildTeenCard(),
       _buildAiCard(),
-      _buildLibraryAndInsightsCard(),
+      // Food library and Insights live on the Profile tab, one tap from here.
       _buildFeedbackCard(),
       _buildAboutCard(),
       _buildPrivacyCard(),
@@ -1746,42 +1743,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // ── Food Library + Insights & Progress ─────────────────────────────────────
-
-  Widget _buildLibraryAndInsightsCard() {
-    return _Group(
-      title: 'Food library & insights',
-      children: [
-        _SettingRow(
-          icon: Icons.psychology_rounded,
-          tint: KColor.textSecondary,
-          label: 'Food library',
-          value: 'Portion history & custom foods',
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const NutritionIntelligenceScreen(),
-            ),
-          ),
-        ),
-        ListenableBuilder(
-          listenable: InsightsReportService.instance,
-          builder: (context, _) {
-            final newCount = InsightsReportService.instance.newAchievementCount;
-            return _SettingRow(
-              icon: Icons.insights_rounded,
-              tint: KColor.textSecondary,
-              label: 'Insights & reports',
-              value: newCount > 0 ? '$newCount new' : 'History and badges',
-              valueColor: newCount > 0 ? KColor.green : null,
-              onTap: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const InsightsScreen())),
-            );
-          },
-        ),
-      ],
-    );
-  }
 
   // ── Feedback ───────────────────────────────────────────────────────────────
 
