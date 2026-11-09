@@ -227,18 +227,13 @@ enum MealSection {
   String get displayName => switch (this) {
         MealSection.breakfast    => 'Breakfast',
         MealSection.lunch        => 'Lunch',
-        MealSection.eveningSnack => 'Evening Snack',
+        MealSection.eveningSnack => 'Evening snack',
         MealSection.dinner       => 'Dinner',
-        MealSection.lateNight    => 'Late Night',
+        MealSection.lateNight    => 'Late night',
       };
 
-  String get emoji => switch (this) {
-        MealSection.breakfast    => '🌅',
-        MealSection.lunch        => '☀️',
-        MealSection.eveningSnack => '🍵',
-        MealSection.dinner       => '🌙',
-        MealSection.lateNight    => '🌛',
-      };
+  // The section's picture is drawn, not typed: KMealMark (lib/ui/k_meal_mark.dart)
+  // puts the sun where the meal sits on the day's arc.
 }
 
 // ─── MealEntry ────────────────────────────────────────────────────────────────
@@ -485,7 +480,11 @@ class DayLog {
   double get totalSodiumMid => (totalSodiumMin + totalSodiumMax) / 2;
 
   int? get dailyNutritionScore {
-    final entriesWithScore = _all.where((e) => e.result.mealQualityScore != null).toList();
+    // Water, black coffee and diet soda carry no meal score (the meal rows
+    // hide it under 50 kcal), so they must not pull the day toward 55.
+    final entriesWithScore = _all
+        .where((e) => e.result.mealQualityScore != null && e.calMid >= 50)
+        .toList();
     if (entriesWithScore.isEmpty) return null;
 
     double weightedSum = 0;
@@ -545,9 +544,9 @@ class DayLog {
     final dailyScore = dailyNutritionScore;
     if (dailyScore != null) {
       if (dailyScore >= 80) {
-        insights.add('Great food quality ($dailyScore/100)! You are nourishing your body with high-grade fuel.');
+        insights.add('Food quality is strong today, $dailyScore out of 100. Mostly whole, filling food.');
       } else if (dailyScore < 60) {
-        insights.add('Food quality score is moderate ($dailyScore/100). Focus on more whole foods.');
+        insights.add('Food quality is $dailyScore out of 100 today. Dal, sabzi, curd or fruit with the next meal lifts it.');
       }
     }
 

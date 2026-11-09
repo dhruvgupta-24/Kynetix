@@ -25,6 +25,7 @@ import '../ui/k_rolling.dart';
 import '../widgets/k_progress_line.dart';
 import '../widgets/k_success_check.dart';
 import 'barcode_scanner_screen.dart';
+import 'meal_camera_screen.dart';
 import '../services/analytics_service.dart';
 
 /// Sentinel returned by AddMealScreen when the user explicitly deletes an entry.
@@ -42,6 +43,10 @@ class AddMealScreen extends StatefulWidget {
   /// Loaded as-is (never re-estimated); saving adds a new entry.
   final NutritionResult? initialResult;
 
+  /// The plate photo [initialResult] was read from, shown above the composer
+  /// so the person can check the rows against it.
+  final Uint8List? photo;
+
   const AddMealScreen({
     super.key,
     required this.section,
@@ -49,6 +54,7 @@ class AddMealScreen extends StatefulWidget {
     this.initialEntry,
     this.initialText,
     this.initialResult,
+    this.photo,
   });
 
   static bool hasParsedMealStructureChanged(String oldText, String newText) {
@@ -142,10 +148,16 @@ class _AddMealScreenState extends State<AddMealScreen>
   Completer<void>? _loggedMoment;
 
   final List<_IngredientRow> _rows = [];
-  bool _rememberEdits = true;
+  late bool _rememberEdits = widget.photo == null;
 
   /// The estimate came from a scanned barcode (analytics method only).
   bool _usedBarcode = false;
+
+  /// The estimate came from a plate photo (analytics method only).
+  late bool _usedPhoto = widget.photo != null;
+
+  /// The photo the rows were read from, if any.
+  late Uint8List? _photo = widget.photo;
   double _totalCal = 0;
   double _totalPro = 0;
   double _totalCarb = 0;
@@ -702,9 +714,41 @@ class _AddMealScreenState extends State<AddMealScreen>
     );
     if (outcome == null || !mounted) return;
     _usedBarcode = true;
-    final scanned = outcome.result;
-    final scannedText = scanned.canonicalMeal;
+    _mergeIn(outcome.result, outcome.result.canonicalMeal);
+  }
 
+  /// Snap the plate into this meal. Kyno's foods land in the editable rows,
+  /// priced by the same pipeline as typed text; an existing meal gets them
+  /// as more rows (a second plate, a side).
+  Future<void> _snapPhoto() async {
+    if (_loading || _saving) return;
+    _focusNode.unfocus();
+    final outcome = await openMealPhotoFlow(
+      context,
+      date: widget.date,
+      section: widget.section,
+      mode: MealPhotoMode.fill,
+    );
+    final result = outcome?.result;
+    if (result == null || !mounted) return;
+    final fromPhoto = outcome!.photo != null;
+    setState(() {
+      if (fromPhoto) {
+        _usedPhoto = true;
+        _photo = outcome.photo;
+        // Kyno's photo numbers are not the person's own: don't pin them as
+        // their saved values unless they choose to.
+        _rememberEdits = false;
+      } else {
+        _usedBarcode = true;
+      }
+    });
+    _mergeIn(result, outcome.text ?? result.canonicalMeal);
+  }
+
+  /// Takes [scanned] (a scanned pack or a photo's foods) as the meal when the
+  /// editor is empty, or adds its rows to the meal already here.
+  void _mergeIn(NutritionResult scanned, String scannedText) {
     if (_result == null || _rows.isEmpty) {
       setState(() {
         _finishingEstimate = false;
@@ -982,7 +1026,7 @@ class _AddMealScreenState extends State<AddMealScreen>
       AnalyticsService.instance.track('meal_edited', {'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     } else {
       logFor(widget.date).add(widget.section, entry);
-      AnalyticsService.instance.track('meal_logged', {'method': _usedBarcode ? 'barcode' : 'text', 'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
+      AnalyticsService.instance.track('meal_logged', {'method': _usedPhoto ? 'photo' : (_usedBarcode ? 'barcode' : 'text'), 'kcal_bucket': AnalyticsService.kcalBucket(entry.calMid)});
     }
     
     // The in-memory log above is the source of truth, so the screen closes
@@ -2105,22 +2149,39 @@ class _AddMealScreenState extends State<AddMealScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Wraps under the label when large text leaves no room.
-                    // Label and scan pill share a line; under large text the
-                    // pill drops below, left-aligned.
-                    Row(
+                    if (_photo != null) ...[
+                      _PhotoHeader(photo: _photo!),
+                      const SizedBox(height: KSpacing.lg),
+                    ],
+                    // Label and the two other ways in share a line; under
+                    // large text the pills wrap below, left-aligned, at full
+                    // size (never shrunk).
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: KSpacing.sm,
+                      runSpacing: KSpacing.xs,
                       children: [
-                        Expanded(
-                          child: Text('What did you eat?', style: KText.h3.copyWith(color: KColor.textSecondary)),
-                        ),
-                        const SizedBox(width: KSpacing.sm),
-                        // Large text shrinks the pill instead of overflowing.
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: _ScanPill(onTap: _scanBarcode),
-                          ),
+                        Text('What did you eat?', style: KText.h3.copyWith(color: KColor.textSecondary)),
+                        Wrap(
+                          spacing: KSpacing.sm,
+                          runSpacing: KSpacing.xs,
+                          children: [
+                            _ComposerPill(
+                              icon: KIcons.camera,
+                              label: 'Photo',
+                              tooltip: 'Snap a photo',
+                              semanticLabel: 'Snap a photo of the meal',
+                              onTap: _snapPhoto,
+                            ),
+                            _ComposerPill(
+                              icon: KIcons.scan,
+                              label: 'Barcode',
+                              tooltip: 'Scan barcode',
+                              semanticLabel: 'Scan a barcode',
+                              onTap: _scanBarcode,
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -2247,23 +2308,84 @@ class _AddMealScreenState extends State<AddMealScreen>
 // ─── Private presentational widgets ───────────────────────────────────────────
 
 /// Small rounded tag used for ingredient role / source.
-/// Inline "Scan a barcode" affordance beside the composer label: a quiet
-/// outlined pill, 48dp tall, that reads as a second way in, not chrome.
-class _ScanPill extends StatelessWidget {
-  const _ScanPill({required this.onTap});
+/// The photo the rows were read from: a rounded thumbnail with a plain note,
+/// so the rows can be checked against the plate.
+class _PhotoHeader extends StatelessWidget {
+  const _PhotoHeader({required this.photo});
+  final Uint8List photo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: 'Read from your photo. Check the amounts against your plate.',
+      excludeSemantics: true,
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: KRadius.md,
+            child: Container(
+              width: 64,
+              height: 64,
+              foregroundDecoration: BoxDecoration(
+                borderRadius: KRadius.md,
+                border: Border.all(color: KColor.fg.withValues(alpha: 0.1)),
+              ),
+              child: Image.memory(
+                photo,
+                fit: BoxFit.cover,
+                cacheWidth: 192,
+                gaplessPlayback: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: KSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Read from your photo', style: KText.h3),
+                const SizedBox(height: 2),
+                Text(
+                  'Kyno named the foods and sized them. Fix any amount that looks off.',
+                  style: KText.caption.copyWith(color: KColor.textSecondary),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Inline "Photo" / "Barcode" affordances beside the composer label: quiet
+/// outlined pills, 48dp tall, that read as other ways in, not chrome.
+class _ComposerPill extends StatelessWidget {
+  const _ComposerPill({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.semanticLabel,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final String semanticLabel;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Scan barcode',
+      message: tooltip,
       excludeFromSemantics: true,
       child: Pressable(
         onTap: () {
           KHaptics.select();
           onTap();
         },
-        semanticLabel: 'Scan a barcode',
+        semanticLabel: semanticLabel,
         borderRadius: KRadius.pill,
         scale: 0.96,
         child: Container(
@@ -2281,11 +2403,11 @@ class _ScanPill extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                KIcon(KIcons.scan, size: 16, color: KColor.textPrimary),
+                KIcon(icon, size: 16, color: KColor.textPrimary),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    'Scan a barcode',
+                    label,
                     style: KText.caption.copyWith(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,

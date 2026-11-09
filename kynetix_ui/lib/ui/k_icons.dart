@@ -63,6 +63,7 @@ abstract final class KIcons {
   static const IconData water = Icons.local_drink_outlined;
   static const IconData plate = Icons.restaurant_outlined;
   static const IconData scan = Icons.qr_code_scanner_outlined;
+  static const IconData camera = Icons.photo_camera_outlined;
   static const IconData quickAdd = Icons.bolt_outlined;
   static const IconData library = Icons.menu_book_outlined;
   static const IconData target = Icons.track_changes_outlined;

@@ -15,6 +15,11 @@ import {
   LabelUnreadableError,
   normalizeLabelReadOutput,
 } from './label_read_prompt.ts';
+import {
+  MEAL_PHOTO_SYSTEM_PROMPT,
+  MealPhotoUnreadableError,
+  normalizeMealPhotoOutput,
+} from './meal_photo_prompt.ts';
 
 declare const Deno: any;
 
@@ -37,22 +42,22 @@ export class AiGuardError extends Error {
 
 // ── Purposes ─────────────────────────────────────────────────────────────────
 
-export type AiPurpose = 'meal_estimate' | 'weekly_summary' | 'label_read' | 'coach';
-export type ClientPurpose = 'meal_estimate' | 'weekly_summary' | 'label_read';
+export type AiPurpose = 'meal_estimate' | 'weekly_summary' | 'label_read' | 'meal_photo' | 'coach';
+export type ClientPurpose = 'meal_estimate' | 'weekly_summary' | 'label_read' | 'meal_photo';
 
-export const CLIENT_PURPOSES: readonly AiPurpose[] = ['meal_estimate', 'weekly_summary', 'label_read'];
+export const CLIENT_PURPOSES: readonly AiPurpose[] = ['meal_estimate', 'weekly_summary', 'label_read', 'meal_photo'];
 
 /** Purposes whose answer must be one JSON object, validated server-side
  *  before it is returned. These are never streamed (a stream:true request
  *  gets the normal JSON response; current app builds never stream these). */
-export const JSON_ONLY_PURPOSES: readonly AiPurpose[] = ['label_read', 'meal_estimate'];
+export const JSON_ONLY_PURPOSES: readonly AiPurpose[] = ['label_read', 'meal_estimate', 'meal_photo'];
 
 /** Client purposes that take exactly one user message and nothing else: no
  *  client assistant turns (which would let the app endpoint be used as a
  *  general chatbot with a forged history). Current and legacy app builds
  *  send one user message (legacy builds also send a system message, which
  *  is dropped). */
-export const SINGLE_TURN_PURPOSES: readonly AiPurpose[] = ['meal_estimate', 'weekly_summary'];
+export const SINGLE_TURN_PURPOSES: readonly AiPurpose[] = ['meal_estimate', 'weekly_summary', 'meal_photo'];
 export const INTERNAL_PURPOSES: readonly AiPurpose[] = ['coach'];
 
 export const WEEKLY_SUMMARY_SYSTEM_PROMPT =
@@ -80,6 +85,8 @@ export const CLIENT_LIMITS: Record<ClientPurpose, Limits> = {
   weekly_summary: { maxMessages: 1, maxTextChars: 6_000,  maxImages: 0, maxImageChars: 0, maxTotalImageChars: 0, maxOutputTokens: 400 },
   // One photo of a nutrition table (~2 MB binary max) and a short fixed text.
   label_read:     { maxMessages: 1, maxTextChars: 500,    maxImages: 1, maxImageChars: 2_800_000, maxTotalImageChars: 2_800_000, maxOutputTokens: 500 },
+  // One photo of a plate plus a fixed instruction and an optional short note.
+  meal_photo:     { maxMessages: 1, maxTextChars: 600,    maxImages: 1, maxImageChars: 2_800_000, maxTotalImageChars: 2_800_000, maxOutputTokens: 1200 },
 };
 
 // ai-meal-coach builds the system prompt (targets, today's meals, memory,
@@ -257,7 +264,7 @@ export function guardRequest(body: any, trustedInternal: boolean): GuardedReques
     return { purpose, messages: s.messages, textChars: s.textChars, imageCount: s.imageCount, limits: COACH_LIMITS, legacy };
   }
 
-  if (purpose === 'meal_estimate' || purpose === 'weekly_summary' || purpose === 'label_read') {
+  if (purpose === 'meal_estimate' || purpose === 'weekly_summary' || purpose === 'label_read' || purpose === 'meal_photo') {
     const limits = CLIENT_LIMITS[purpose];
     const singleTurn = SINGLE_TURN_PURPOSES.includes(purpose);
     const s = sanitizeMessages(raw, limits, false, singleTurn);
@@ -267,11 +274,16 @@ export function guardRequest(body: any, trustedInternal: boolean): GuardedReques
     if (purpose === 'label_read' && s.imageCount !== 1) {
       throw new AiGuardError(400, 'invalid_request', 'Send one photo of the nutrition label.');
     }
+    if (purpose === 'meal_photo' && s.imageCount !== 1) {
+      throw new AiGuardError(400, 'invalid_request', 'Send one photo of the meal.');
+    }
     const system = purpose === 'meal_estimate'
       ? mealEstimateSystemPrompt(anchor)
       : purpose === 'label_read'
         ? LABEL_READ_SYSTEM_PROMPT
-        : WEEKLY_SUMMARY_SYSTEM_PROMPT;
+        : purpose === 'meal_photo'
+          ? MEAL_PHOTO_SYSTEM_PROMPT
+          : WEEKLY_SUMMARY_SYSTEM_PROMPT;
     return {
       purpose,
       messages: [{ role: 'system', content: system }, ...s.messages],
@@ -347,6 +359,18 @@ export function validateMealEstimateOutput(text: string): string {
  *  to its local estimate). Other purposes pass through. */
 export function finalizeResponseText(purpose: AiPurpose, text: string): string {
   if (purpose === 'meal_estimate') return validateMealEstimateOutput(text);
+  if (purpose === 'meal_photo') {
+    try {
+      return JSON.stringify(normalizeMealPhotoOutput(text));
+    } catch (e) {
+      if (e instanceof MealPhotoUnreadableError) {
+        throw e.notFood
+          ? new AiGuardError(422, 'not_food', "That doesn't look like food. Try a photo of the plate.")
+          : new AiGuardError(422, 'photo_unreadable', "Couldn't make out that meal. Try a clearer photo from above, or describe it.");
+      }
+      throw e;
+    }
+  }
   if (purpose !== 'label_read') return text;
   try {
     return JSON.stringify(normalizeLabelReadOutput(text));

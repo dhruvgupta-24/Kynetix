@@ -141,12 +141,12 @@ void main() {
       await tester.tap(find.byTooltip('More'));
       await tester.pump();
       expect(find.text('1.5 × 15 g'), findsOneWidget);
-      expect(find.text('Log 22.5 g to Evening Snack'), findsOneWidget);
+      expect(find.text('Log 22.5 g to Evening snack'), findsOneWidget);
 
       await tester.tap(find.text('100 g'));
       await tester.pump();
-      await tester.ensureVisible(find.text('Log 100 g to Evening Snack'));
-      await tester.tap(find.text('Log 100 g to Evening Snack'));
+      await tester.ensureVisible(find.text('Log 100 g to Evening snack'));
+      await tester.tap(find.text('Log 100 g to Evening snack'));
       await settle(tester);
 
       final entry = logFor(date).entriesFor(MealSection.eveningSnack).single;
@@ -324,8 +324,8 @@ void main() {
       await settle(tester);
 
       expect(find.text('From your label photo · per 100 g'), findsOneWidget);
-      await tester.ensureVisible(find.text('Log 50 g to Evening Snack'));
-      await tester.tap(find.text('Log 50 g to Evening Snack'));
+      await tester.ensureVisible(find.text('Log 50 g to Evening snack'));
+      await tester.tap(find.text('Log 50 g to Evening snack'));
       await settle(tester);
 
       final entry = logFor(date).entriesFor(MealSection.eveningSnack).single;

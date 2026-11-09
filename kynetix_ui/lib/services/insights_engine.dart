@@ -12,92 +12,92 @@ import '../services/nutrition_target_engine.dart';
 class AchievementRegistry {
   static final Map<String, ({String title, String description, String emoji, AchievementCategory category})> _metadata = {
     'logged_first_day': (
-      title: 'First Step',
-      description: 'Logged your first meal! The journey begins.',
+      title: 'First step',
+      description: 'Logged your first meal. Every streak starts here.',
       emoji: '🌱',
       category: AchievementCategory.consistency,
     ),
     'logged_7_days': (
-      title: 'Consistency Champion',
-      description: 'Logged meals 7 days running. The habit is sticking.',
+      title: 'A week of logs',
+      description: 'Logged meals on 7 days. The habit is sticking.',
       emoji: '📅',
       category: AchievementCategory.consistency,
     ),
     'logged_30_days': (
-      title: 'Habit Master',
-      description: 'Tracked your meals for 30 days. You\'re building a real habit.',
+      title: '30 days logged',
+      description: 'Tracked your meals on 30 days. That is a real habit now.',
       emoji: '📊',
       category: AchievementCategory.consistency,
     ),
     'logged_100_days': (
-      title: 'Lifestyle Legend',
-      description: '100 days of tracking! A lifestyle legend in the making.',
+      title: '100 days logged',
+      description: '100 days of tracking. Most people never get here.',
       emoji: '💯',
       category: AchievementCategory.consistency,
     ),
     'protein_target_3_row': (
-      title: 'Fuel Streak',
-      description: 'Hit your protein goal 3 days in a row.',
+      title: 'Protein, 3 in a row',
+      description: 'Hit your protein target 3 days in a row.',
       emoji: '⚡',
       category: AchievementCategory.nutrition,
     ),
     'protein_target_7_row': (
-      title: 'Protein Powerhouse',
-      description: 'Hit your protein target 7 days in a row.',
+      title: 'Protein, 7 in a row',
+      description: 'Hit your protein target 7 days in a row. Muscle loves this.',
       emoji: '🔋',
       category: AchievementCategory.nutrition,
     ),
     'cal_adherence_week': (
-      title: 'Perfect Calorie Week',
+      title: 'Calories, on point',
       description: 'Kept calories within targets at least 90% of the week.',
       emoji: '🎯',
       category: AchievementCategory.nutrition,
     ),
     'perfect_week': (
-      title: 'Perfect Week',
+      title: 'Perfect week',
       description: 'Hit calories and protein every day, Monday to Sunday.',
       emoji: '✨',
       category: AchievementCategory.nutrition,
     ),
     'gym_3_row': (
-      title: 'Workout Streak',
+      title: 'Trained 3 in a row',
       description: 'Trained 3 days in a row. Solid run.',
       emoji: '💪',
       category: AchievementCategory.training,
     ),
     'gym_30_total': (
-      title: 'Gym Habit',
+      title: '30 workouts',
       description: 'Logged 30 workouts. Building strength, day by day.',
       emoji: '🏋️',
       category: AchievementCategory.training,
     ),
     'gym_100_total': (
-      title: 'Iron Dedicated',
-      description: 'Logged 100 workouts. Elite dedication to your training.',
+      title: '100 workouts',
+      description: 'Logged 100 workouts. That is years of showing up.',
       emoji: '🏆',
       category: AchievementCategory.training,
     ),
     'quality_score_80_week': (
-      title: 'Mindful Eater',
-      description: 'Averaged a high meal quality score of 80+ for a week.',
+      title: 'Good plates',
+      description: 'Averaged a meal quality of 80 or more for a week.',
       emoji: '🥗',
       category: AchievementCategory.nutrition,
     ),
     'first_monthly_report': (
-      title: 'Milestone Review',
+      title: 'First monthly review',
       description: 'Your first monthly review is ready.',
       emoji: '📈',
       category: AchievementCategory.milestone,
     ),
     'improvement_month': (
-      title: 'Steady Progress',
+      title: 'Steady progress',
       description: 'Your calories trended the right way this month.',
       emoji: '🚀',
       category: AchievementCategory.milestone,
     ),
     'pb_protein_day': (
-      title: 'Protein Peak',
-      description: 'Your highest protein day so far.',
+      title: 'Protein on the board',
+      description: 'Your first day with protein logged.',
       emoji: '🥩',
       category: AchievementCategory.milestone,
     ),
@@ -118,6 +118,14 @@ class AchievementRegistry {
   }
 
   static List<String> get allIds => _metadata.keys.toList();
+
+  /// [a] with today's wording. Earned badges store the text they were
+  /// earned with; the id is what matters, so the copy can be improved later.
+  static Achievement refresh(Achievement a) {
+    final meta = _metadata[a.id];
+    if (meta == null) return a;
+    return a.copyWith(title: meta.title, description: meta.description, emoji: meta.emoji);
+  }
 }
 
 // ─── InsightsEngine ───────────────────────────────────────────────────────────
@@ -1479,10 +1487,20 @@ class InsightsEngine {
     final sortedKeys = logs.keys.toList()..sort();
     final sessionsByDate = {for (final s in sessions) dateKeyOf(s.date): s};
 
+    DateTime? prevDay;
     for (final dateStr in sortedKeys) {
       final log = logs[dateStr]!;
       final session = sessionsByDate[dateStr];
       final parsedDate = DateTime.tryParse(dateStr) ?? DateTime.now();
+
+      // "In a row" means calendar days: a day with no log at all breaks a
+      // run just like an empty one (the store only has keys for touched days).
+      final day = DateTime(parsedDate.year, parsedDate.month, parsedDate.day);
+      if (prevDay != null && day.difference(prevDay).inDays > 1) {
+        consecutiveProteinHits = 0;
+        consecutiveGymDays = 0;
+      }
+      prevDay = day;
 
       // Count gym day BEFORE the meal-log guard so gym-only days are counted.
       final isGymDay = InsightsEngine.isGymDay(
@@ -1652,9 +1670,15 @@ class InsightsEngine {
     final sortedKeys = logs.keys.toList()..sort();
     final sessionsByDate = {for (final s in sessions) dateKeyOf(s.date): s};
 
+    DateTime? prevDay;
     for (final dateStr in sortedKeys) {
       final log = logs[dateStr]!;
       final session = sessionsByDate[dateStr];
+
+      final parsed = DateTime.parse(dateStr);
+      final day = DateTime(parsed.year, parsed.month, parsed.day);
+      if (prevDay != null && day.difference(prevDay).inDays > 1) currentProStreak = 0;
+      prevDay = day;
 
       // Count gym day BEFORE the meal-log guard so gym-only days are counted.
       final isGymDayProg = isGymDay(

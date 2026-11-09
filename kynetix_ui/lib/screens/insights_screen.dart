@@ -1,6 +1,7 @@
 import 'dart:async' show Timer;
 import 'package:flutter/material.dart';
 import '../config/app_theme.dart';
+import '../widgets/k_badge_medal.dart';
 import '../ui/k_segmented.dart';
 import '../models/insights_models.dart';
 import '../models/day_log.dart';
@@ -1855,7 +1856,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _Medallion(id: achievement.id, size: 76, state: _MedalState.earned),
+                    KBadgeMedal(id: achievement.id, size: 76, state: KMedalState.earned),
                     const SizedBox(height: KSpacing.lg),
                     Text(achievement.title, style: KText.h1, textAlign: TextAlign.center),
                     const SizedBox(height: KSpacing.sm),
@@ -1949,7 +1950,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Medallion(id: progress.id, size: 36, state: _MedalState.progress),
+                    KBadgeMedal(id: progress.id, size: 36, state: KMedalState.progress),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -2005,7 +2006,7 @@ class _InsightsScreenState extends State<InsightsScreen>
                 ),
                 child: Row(
                   children: [
-                    _Medallion(id: id, size: 36, state: _MedalState.locked),
+                    KBadgeMedal(id: id, size: 36, state: KMedalState.locked),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -2492,63 +2493,6 @@ class _ScoreColumn extends StatelessWidget {
   }
 }
 
-enum _MedalState { earned, progress, locked }
-
-/// Achievement medallion: one outlined glyph in a ring, from the shared icon
-/// language (never emoji). Earned is a solid ink disc, in progress a hairline
-/// ring, locked a faint ring with a muted glyph.
-IconData _badgeIcon(String id) => switch (id) {
-      'logged_first_day' => KIcons.baseline,
-      'logged_7_days' || 'logged_30_days' || 'logged_100_days' => KIcons.calendar,
-      'protein_target_3_row' || 'protein_target_7_row' || 'pb_protein_day' => KIcons.protein,
-      'cal_adherence_week' => KIcons.target,
-      'perfect_week' => Icons.check_circle_outline,
-      'gym_3_row' || 'gym_30_total' => KIcons.train,
-      'gym_100_total' => KIcons.record,
-      'quality_score_80_week' => KIcons.plate,
-      'first_monthly_report' => Icons.insert_chart_outlined,
-      'improvement_month' => Icons.trending_up,
-      _ => KIcons.record,
-    };
-
-class _Medallion extends StatelessWidget {
-  const _Medallion({required this.id, required this.size, required this.state});
-  final String id;
-  final double size;
-  final _MedalState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final earned = state == _MedalState.earned;
-    final locked = state == _MedalState.locked;
-    return ExcludeSemantics(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: earned ? KShade.convex(KColor.ink) : null,
-          boxShadow: earned ? KShadow.lifted : null,
-          border: earned
-              ? null
-              : Border.all(
-                  color: KColor.fg.withValues(alpha: locked ? 0.12 : 0.28),
-                  width: 1.2,
-                ),
-        ),
-        alignment: Alignment.center,
-        child: Icon(
-          _badgeIcon(id),
-          size: size * 0.46,
-          color: earned
-              ? KColor.onInk
-              : (locked ? KColor.textMuted : KColor.textPrimary),
-        ),
-      ),
-    );
-  }
-}
-
 class _EarnedBadge extends StatelessWidget {
   const _EarnedBadge({
     required this.achievement,
@@ -2577,7 +2521,7 @@ class _EarnedBadge extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Medallion(id: achievement.id, size: 44, state: _MedalState.earned),
+                KBadgeMedal(id: achievement.id, size: 44, state: KMedalState.earned),
                 const Spacer(),
                 if (isNew) _NewPill(label: 'New', color: KColor.ember),
               ],

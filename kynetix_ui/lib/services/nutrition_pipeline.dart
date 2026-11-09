@@ -66,7 +66,21 @@ class NutritionPipeline {
   static const _minCoverageConfidence = 0.90;
   static const _minMatchConfidence = 0.88;
 
-  Future<NutritionResult> estimateMeal(String rawInput) async {
+  /// Estimates a typed meal.
+  ///
+  /// A photo log passes the foods Kyno saw as [preParsed] (so the parser
+  /// never re-splits a name like "bread and butter") and Kyno's own numbers
+  /// for each as [photoEstimates], keyed by lowercase food name. Every food
+  /// still goes through the same lookups as a typed meal first (the
+  /// person's saved numbers, the curry table, the food library), so a photo
+  /// and a typed "2 roti, 1 katori dal" log the same numbers. Kyno's photo
+  /// numbers are used only for foods the app does not know, in place of a
+  /// second AI call.
+  Future<NutritionResult> estimateMeal(
+    String rawInput, {
+    List<ParsedFoodItem>? preParsed,
+    Map<String, NutritionItem>? photoEstimates,
+  }) async {
     final trimmed = rawInput.trim();
     final classification = MealClassifier.instance.classify(trimmed);
 
@@ -75,19 +89,19 @@ class NutritionPipeline {
     _debugLog('[Pipeline] classification: ${classification.category.name} '
                '(${classification.reason})');
 
-    if (trimmed.isEmpty) return _empty();
+    if (trimmed.isEmpty && (preParsed == null || preParsed.isEmpty)) return _empty();
 
     // ── 0. LINKED SCANNED FOOD ───────────────────────────────────────────────
     // A name the person linked to a scanned pack (its own name or an older
     // one) logs the pack's label numbers, exactly like the scanner does.
-    final linked = FoodLinkService.instance.resolveMeal(trimmed);
+    final linked = preParsed == null ? FoodLinkService.instance.resolveMeal(trimmed) : null;
     if (linked != null) {
       _debugLog('[Pipeline] ✅ Linked scanned food: ${linked.canonicalMeal}');
       return linked;
     }
 
     // ── 1. SPLIT & PARSE INTO ATOMIC ITEMS ─────────────────────────────────
-    final parsedItems = ItemParser.parse(trimmed);
+    final parsedItems = preParsed ?? ItemParser.parse(trimmed);
     _debugLog('[Pipeline] Extracted ${parsedItems.length} items:');
     for (final p in parsedItems) {
       _debugLog('  -> ${p.normalizedName} (qty: ${p.quantity}, unit: ${p.unit})');
@@ -274,7 +288,18 @@ class NutritionPipeline {
       final complexity = _assessComplexity(itemStr, localAnalysis);
       final localGate = _buildGate(localAnalysis, complexity);
 
-      if (localGate.shouldFinalizeLocal) {
+      final fromPhoto = localGate.shouldFinalizeLocal
+          ? null
+          : _photoEstimateFor(parsed, photoEstimates);
+      if (fromPhoto != null) {
+        // Kyno already saw this food on the plate: no second AI call.
+        _debugLog('[Pipeline] 📷 Photo estimate for "$itemStr"');
+        finalItems.add(fromPhoto);
+        aiUsed = true;
+        matchesUsed.add('photo_estimate: $itemStr');
+        priorityLevels.add('AI Estimate');
+        uncertaintyFactors.add('estimated from a photo');
+      } else if (localGate.shouldFinalizeLocal) {
         _debugLog('[Pipeline] ✅ LOCAL FINALIZED for "$itemStr"');
         final localResult = _finalizeLocal(itemStr, localAnalysis, classification: classification, fallbackReason: 'Local passed');
         final item = _pullBestItem(localResult, parsed);
@@ -452,6 +477,39 @@ class NutritionPipeline {
       mealQualityPositive: NutritionResult.getLocalQualityPositive(score, trimmed),
       mealQualityImprovement: NutritionResult.getLocalQualityImprovement(score, trimmed),
       estimationAudit: audit,
+    );
+  }
+
+  /// Kyno's photo numbers for [parsed], sized to the amount in [parsed]
+  /// when it differs (same unit only), or null when the photo had no entry
+  /// for this food. Marked as already portion-adjusted: the plate showed
+  /// what was eaten, so the eating-style pass must not shrink it again.
+  NutritionItem? _photoEstimateFor(ParsedFoodItem parsed, Map<String, NutritionItem>? estimates) {
+    if (estimates == null || estimates.isEmpty) return null;
+    final hit = estimates[parsed.normalizedName.toLowerCase().trim()];
+    if (hit == null) return null;
+    double scale = 1.0;
+    if (hit.unit == parsed.unit && hit.quantity > 0 && parsed.quantity > 0 &&
+        (hit.quantity - parsed.quantity).abs() > 1e-6) {
+      scale = parsed.quantity / hit.quantity;
+    }
+    final sized = hit.withScalar(scale);
+    return NutritionItem(
+      name: parsed.normalizedName,
+      quantity: parsed.quantity,
+      unit: parsed.unit,
+      estimated: true,
+      mode: EstimationMode.directQuantity,
+      calories: sized.calories,
+      protein: sized.protein,
+      carbohydrates: sized.carbohydrates,
+      fat: sized.fat,
+      fiber: sized.fiber,
+      sugar: sized.sugar,
+      saturatedFat: sized.saturatedFat,
+      sodium: sized.sodium,
+      eatingPatternScalarApplied: true,
+      micros: sized.micros,
     );
   }
 

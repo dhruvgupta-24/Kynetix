@@ -4,6 +4,7 @@ import 'dart:async' show Timer;
 import 'dart:convert';
 import 'dart:math' as math;
 import 'app_shell.dart';
+import '../ui/k_meal_mark.dart';
 import '../config/app_theme.dart';
 import '../ui/k_toast.dart';
 import 'barcode_scanner_screen.dart';
@@ -29,9 +30,13 @@ import '../services/workout_service.dart';
 import '../services/user_session_coordinator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/insights_report_service.dart';
+import '../services/nutrition_momentum.dart';
+import '../widgets/nutrition_momentum_widgets.dart';
+import '../models/insights_models.dart';
 import 'insights_screen.dart';
 import 'workout_screen.dart';
 import 'add_meal_screen.dart';
+import 'meal_camera_screen.dart';
 import '../ui/k_rolling.dart';
 import '../ui/k_text_morph.dart';
 import '../services/day_fuel.dart';
@@ -561,6 +566,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _targetMemoValid = false;
   bool _inBuild = false;
 
+  /// Streak and this week's challenges, once per build.
+  NutritionMomentum? _momentumMemo;
+  NutritionMomentum get _momentum {
+    NutritionMomentum compute() => NutritionMomentum.compute(
+          logs: dayLogStore,
+          profile: _profile,
+          now: DateTime.now(),
+          fiberTargetG: _weeklyPlan.fiberTargetG,
+        );
+    if (_inBuild) return _momentumMemo ??= compute();
+    return compute();
+  }
+
+  /// A finished challenge gets its moment once: checked after a build that
+  /// may have finished one.
+  String _celebrationCheckedFor = '';
+  void _maybeCelebrate(NutritionMomentum m) {
+    final key = m.challenges.map((c) => '${c.id}:${c.done}').join('|');
+    if (key == _celebrationCheckedFor) return;
+    _celebrationCheckedFor = key;
+    if (m.doneCount == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final toaster = KToaster.of(context);
+      final fresh = await ChallengeCelebrations.instance.takeNewlyDone(m.challenges);
+      if (fresh.isEmpty || !mounted) return;
+      KHaptics.milestone();
+      final all = m.doneCount == m.challenges.length;
+      toaster.show(
+        all
+            ? 'All three done this week. That is how habits get built.'
+            : 'Challenge done: ${fresh.first.title.toLowerCase()}.',
+        kind: KToastKind.success,
+      );
+    });
+  }
+
+  /// The badge closest to earned among the nutrition ones.
+  AchievementProgress? get _nextNutritionBadge {
+    const ids = {
+      'logged_7_days', 'logged_30_days', 'logged_100_days',
+      'protein_target_3_row', 'protein_target_7_row',
+    };
+    for (final p in InsightsReportService.instance.progress) {
+      if (ids.contains(p.id) && p.current < p.target) return p;
+    }
+    return null;
+  }
+
   WeeklyTargetPlan get _weeklyPlan {
     if (_inBuild) {
       return _planMemo ??=
@@ -680,6 +733,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _scanBarcode() async {
     final outcome = await openBarcodeFlow(context, date: _selectedDate);
     if (outcome?.entry != null) _refresh();
+  }
+
+  /// Snap the plate and log it to the selected day.
+  Future<void> _snapMeal() async {
+    await openMealPhotoFlow(context, date: _selectedDate, onChanged: _refresh);
   }
 
   /// Describe a meal to Kyno for the section that fits the time of day.
@@ -805,6 +863,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       KOptionRow(
+                        icon: KIcons.camera,
+                        title: 'Snap a meal',
+                        subtitle: 'Point at your plate. Kyno names each food and sizes it.',
+                        onTap: () => go(_snapMeal),
+                      ),
+                      const KHairline(indent: 40),
+                      KOptionRow(
                         icon: KIcons.kyno,
                         leading: const KynoMark(size: 24, outlined: true),
                         title: 'Describe it',
@@ -905,6 +970,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     _inBuild = true;
     _planMemo = null;
+    _momentumMemo = null;
     _targetMemo = null;
     _targetMemoValid = false;
     try {
@@ -940,7 +1006,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // (section, reveals its own items) in screen order.
     final sections = <(Widget, bool)>[
-      (_section(0, [...common, selectedKey, _profile, hour < 12 ? 0 : hour < 17 ? 1 : 2],
+      (_section(0, [...common, _logTick, selectedKey, _profile, hour < 12 ? 0 : hour < 17 ? 1 : 2],
           _buildHeader), false),
       (_section(1, [
         ...common, _logTick, _focusedMonth, selectedKey, _calendarExpanded,
@@ -951,6 +1017,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       (_section(12, [...common, _logTick, selectedKey, _profile, _syncResult, _carryTick],
           _buildCarryForwardCard), false),
       (_section(13, [...common, _logTick, selectedKey], _buildMeals), true),
+      (_section(14, [...common, _logTick, _profile], _buildThisWeek), false),
       (_section(3, [
         ...common, _logTick, _workoutTick, _bodyTick, selectedKey, _profile, _syncResult,
         _hcAvailable, _syncing, _weightHistory,
@@ -1141,7 +1208,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
+          const SizedBox(width: KSpacing.sm),
+          StreakChip(
+            streak: _momentum.streak,
+            onTap: () {
+              KHaptics.select();
+              showStreakSheet(
+                context,
+                streak: _momentum.streak,
+                onLogMeal: AppShell.addMealAction.value,
+              );
+            },
+          ),
         ],
+      ),
+    );
+  }
+
+  // ── This week ───────────────────────────────────────────────────────────────
+  //
+  // Three challenges sized from last week, and the next nutrition badge.
+
+  Widget _buildThisWeek() {
+    final m = _momentum;
+    _maybeCelebrate(m);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(KSpacing.p, KSpacing.xl, KSpacing.p, 0),
+      child: ThisWeekCard(
+        momentum: m,
+        nextBadge: _nextNutritionBadge,
+        onOpenBadges: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const InsightsScreen()),
+        ),
       ),
     );
   }
@@ -1538,15 +1636,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return ListenableBuilder(
       listenable: InsightsReportService.instance,
       builder: (context, _) {
-        final streak = _computeStreak();
+        // The logging streak sits beside the greeting; this tile carries the
+        // protein run, counted the same way (today joins once it's hit).
+        final streak = _momentum.streak.proteinDays;
         final newCount = InsightsReportService.instance.newAchievementCount;
         return _BentoTile(
-          icon: KIcons.calories,
-          accent: KColor.ember,
-          label: 'Logging streak',
+          icon: KIcons.protein,
+          accent: KColor.protein,
+          label: 'Protein streak',
           value: '$streak',
           unit: streak == 1 ? 'day' : 'days',
-          sub: newCount > 0 ? '$newCount new in insights' : 'Weekly insights',
+          sub: newCount > 0 ? '${plural(newCount, 'new badge')} in insights' : 'Weekly insights',
           onTap: () {
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InsightsScreen()));
           },
@@ -1830,25 +1930,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ── Streak ────────────────────────────────────────────────────────────────────
-
-  /// Counts consecutive logged days going backwards from today.
-  /// Grace-period rule: if today has no entries yet (user hasn't logged)
-  /// we start from yesterday — the streak is "continuing" until midnight.
-  int _computeStreak() {
-    final today = DateTime.now();
-    final todayLog = dayLogStore[dateKey(today)];
-    final todayEmpty = todayLog == null || todayLog.isEmpty;
-
-    int streak = 0;
-    for (int i = (todayEmpty ? 1 : 0); i < 365; i++) {
-      final day = today.subtract(Duration(days: i));
-      final log = dayLogStore[dateKey(day)];
-      if (log == null || log.isEmpty) break;
-      streak++;
-    }
-    return streak;
-  }
-
   // ── Section title ─────────────────────────────────────────────────────────────
 
 }
@@ -3920,11 +4001,17 @@ class _MealGroupRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Where in the day this meal sat, drawn on the day's arc.
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: KMealMark(section, size: 20),
+          ),
+          const SizedBox(width: KSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_sentenceCaseSection(section), style: KText.h3),
+                Text(section.displayName, style: KText.h3),
                 const SizedBox(height: 2),
                 Text(
                   what,
@@ -3958,9 +4045,3 @@ class _MealGroupRow extends StatelessWidget {
   }
 }
 
-/// "Evening Snack" reads as "Evening snack" in a list.
-String _sentenceCaseSection(MealSection s) {
-  final n = s.displayName;
-  if (n.isEmpty) return n;
-  return n[0] + n.substring(1).toLowerCase();
-}

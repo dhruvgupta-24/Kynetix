@@ -599,7 +599,7 @@ void main() {
     test('AchievementRegistry retrieves metadata correctly from id', () {
       final achievement = AchievementRegistry.fromId('gym_100_total');
       expect(achievement, isNotNull);
-      expect(achievement!.title, equals('Iron Dedicated'));
+      expect(achievement!.title, equals('100 workouts'));
       expect(achievement.emoji, equals('🏆'));
       expect(achievement.category, equals(AchievementCategory.training));
     });

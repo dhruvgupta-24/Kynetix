@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import '../services/mock_estimation_service.dart'
     show NutrientRange, FoodItem, EstimationResult;
 import '../services/user_nutrition_memory.dart';
@@ -676,6 +675,79 @@ class NutritionResult {
     return NutrientRange(min: _safe(fiberGrams * 0.8), max: _safe(fiberGrams * 1.2));
   }
 
+  // ── Meal quality keywords ────────────────────────────────────────────────
+  // Matched as whole words (plural s/es allowed) on a normalised copy of the
+  // meal text, so "chocolate" is not "cola", "pancake" is not "cake" and
+  // "eggplant" is not "egg". Phrases that cancel a keyword ("sugar free",
+  // "sweet potato", "air fried", "diet coke") are removed first.
+
+  static RegExp _wordsRe(List<String> words) => RegExp(
+        r'\b(?:' + words.map(RegExp.escape).join('|') + r')(?:s|es)?\b',
+      );
+
+  /// Phrases that look like a penalty keyword but are not one.
+  static final RegExp _qualityNeutral = RegExp(
+    r'\b(?:no added sugar|no sugar|without sugar|zero sugar|sugar ?free|sugarless|unsweetened'
+    r'|diet (?:coke|pepsi|soda|cola)|(?:coke|pepsi|sprite|thums up) zero'
+    r'|air ?fried|air ?fryer|stir ?fried|stir ?fry|rice cakes?|bhel puri)\b',
+  );
+
+  /// "sweet potato" is a potato, "sweet corn" is corn.
+  static final RegExp _sweetVeg = RegExp(r'\bsweet (?=potato|corn|lime)');
+
+  static final RegExp _qualityVeg = _wordsRe(const [
+    'salad', 'vegetable', 'veggie', 'mix veg', 'mixed veg', 'sabzi', 'sabji', 'subzi',
+    'broccoli', 'spinach', 'palak', 'greens', 'bhindi', 'okra', 'gobi', 'cauliflower',
+    'cabbage', 'lauki', 'tinda', 'karela', 'methi', 'baingan', 'brinjal', 'eggplant',
+    'capsicum', 'mushroom', 'cucumber', 'carrot', 'beans',
+  ]);
+
+  static final RegExp _qualityProtein = _wordsRe(const [
+    'chicken', 'fish', 'tofu', 'paneer', 'egg', 'egg white', 'oats', 'whey', 'protein',
+    'sprouts', 'soya', 'soy', 'soyabean', 'curd', 'dahi', 'yogurt', 'yoghurt',
+    'mutton', 'prawn', 'salmon', 'tuna',
+  ]);
+
+  static final RegExp _qualityPizza = _wordsRe(const ['pizza']);
+  static final RegExp _qualityBurger = _wordsRe(const ['burger']);
+  static final RegExp _qualityFried = _wordsRe(const [
+    'fried', 'fries', 'french fries', 'fritter', 'nugget', 'chips', 'samosa', 'pakora',
+    'pakoda', 'pakode', 'bhaji', 'bhajji', 'bhajiya', 'kachori', 'puri', 'poori',
+    'bhatura', 'bhature', 'vada', 'wada', 'namkeen', 'bhujia', 'mathri', 'jalebi',
+    'imarti', 'gulab jamun', 'malpua',
+  ]);
+  static final RegExp _qualitySoda = _wordsRe(const [
+    'soda', 'coke', 'cola', 'pepsi', 'sprite', 'fanta', 'thums up', 'limca',
+    'mountain dew', 'cold drink', 'soft drink', 'energy drink', 'red bull', 'frooti', 'maaza',
+  ]);
+  static final RegExp _qualitySweet = _wordsRe(const [
+    'sugar', 'cookie', 'biscuit', 'chocolate', 'cake', 'cupcake', 'cheesecake', 'pastry',
+    'pastries', 'brownie', 'donut', 'doughnut', 'candy', 'candies', 'sweet', 'ice cream',
+    'dessert', 'mithai', 'gulab jamun', 'jalebi', 'imarti', 'ladoo', 'laddu', 'laddoo',
+    'barfi', 'burfi', 'halwa', 'kheer', 'rasgulla', 'rasmalai', 'ras malai', 'peda',
+    'katli', 'soan papdi', 'payasam', 'shrikhand', 'kulfi', 'falooda', 'rabri',
+    'malpua', 'sandesh',
+  ]);
+  static final RegExp _qualityComplexCarb = _wordsRe(const [
+    'oats', 'apple', 'beans', 'rajma', 'chana', 'chole', 'dal', 'daal', 'lentil',
+    'moong', 'millet', 'ragi', 'bajra', 'jowar', 'quinoa', 'brown rice',
+  ]);
+
+  /// The meal text as the keyword matchers see it: lower case, words only,
+  /// with cancelling phrases removed.
+  static String _qualityText(String text) {
+    var t = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ');
+    t = t.replaceAll(_sweetVeg, '');
+    return t.replaceAll(_qualityNeutral, ' ');
+  }
+
+  static bool _isFriedText(String t) =>
+      _qualityFried.hasMatch(t) || _qualityPizza.hasMatch(t) || _qualityBurger.hasMatch(t);
+  static bool _isSweetText(String t) => _qualitySweet.hasMatch(t) || _qualitySoda.hasMatch(t);
+
+  /// 20 to 100. A pure function of the numbers and the words, so the same
+  /// meal logged the same way always gets the same score (an AI-suggested
+  /// score is never used: it drifts between calls).
   static int calculateLocalQualityScore(
     double cal,
     double pro,
@@ -684,10 +756,7 @@ class NutritionResult {
     double? fat,
     double? fiber,
   }) {
-    if (cal <= 0) {
-      debugPrint('[calculateLocalQualityScore] Warning: Quality score calculated for zero/low calorie entry (text: "$text").');
-    }
-    final lowerText = text.toLowerCase();
+    final t = _qualityText(text);
     double score = 55.0; // base score
 
     if (cal > 0) {
@@ -709,111 +778,85 @@ class NutritionResult {
       }
     }
 
-    if (lowerText.contains('salad') ||
-        lowerText.contains('vegetable') ||
-        lowerText.contains('veg') || // handles veggies, vegetables, etc.
-        lowerText.contains('sabzi') ||
-        lowerText.contains('broccoli') ||
-        lowerText.contains('spinach') ||
-        lowerText.contains('greens')) {
-      score += 10.0;
-    }
-
-    if (lowerText.contains('chicken') ||
-        lowerText.contains('fish') ||
-        lowerText.contains('tofu') ||
-        lowerText.contains('paneer') ||
-        lowerText.contains('egg') ||
-        lowerText.contains('oats') ||
-        lowerText.contains('whey') ||
-        lowerText.contains('protein') ||
-        lowerText.contains('sprouts')) {
-      score += 5.0;
-    }
+    if (_qualityVeg.hasMatch(t)) score += 10.0;
+    if (_qualityProtein.hasMatch(t)) score += 5.0;
 
     double penalties = 0.0;
-    if (lowerText.contains('pizza')) {
-      penalties += 30.0;
-    }
-    if (lowerText.contains('burger')) {
-      penalties += 25.0;
-    }
-    if (lowerText.contains('fries') || lowerText.contains('fried')) {
-      penalties += 20.0;
-    }
-    if (lowerText.contains('soda') ||
-        lowerText.contains('coke') ||
-        lowerText.contains('cola') ||
-        lowerText.contains('pepsi')) {
-      penalties += 15.0;
-    }
-    if (lowerText.contains('sugar') ||
-        lowerText.contains('cookie') ||
-        lowerText.contains('chocolate') ||
-        lowerText.contains('cake') ||
-        lowerText.contains('donut') ||
-        lowerText.contains('candy') ||
-        lowerText.contains('sweet') ||
-        lowerText.contains('ice cream')) {
-      penalties += 15.0;
-    }
-
-    if (penalties > 35.0) {
-      penalties = 35.0;
-    }
+    if (_qualityPizza.hasMatch(t)) penalties += 30.0;
+    if (_qualityBurger.hasMatch(t)) penalties += 25.0;
+    if (_qualityFried.hasMatch(t)) penalties += 20.0;
+    if (_qualitySoda.hasMatch(t)) penalties += 15.0;
+    if (_qualitySweet.hasMatch(t)) penalties += 15.0;
+    if (penalties > 35.0) penalties = 35.0;
     score -= penalties;
 
     return score.clamp(20.0, 100.0).round();
   }
 
+  // Copy follows docs/VOICE.md: encourage without guilt, no exclamation
+  // marks, no emoji, no dashes. Teens read these too, so food is never
+  // "bad" or "junk"; a fried or sweet meal gets a calm nudge, not a verdict.
+  // The bands match the day-detail colours: 80+ good, 60 to 79 neutral,
+  // under 60 a nudge.
+
   static String getLocalQualityExplanation(int score, String text) {
-    final lowerText = text.toLowerCase();
-    if (score >= 90) {
-      return 'Exceptional choice! Highly nutritious, protein-dense, and rich in whole foods.';
-    } else if (score >= 75) {
-      return 'Balanced meal with a solid macronutrient profile and good nutritional value.';
-    } else if (score >= 50) {
-      return 'Moderate nutrition score. Consider adding more lean protein or vegetables to improve balance.';
-    } else {
-      if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries')) {
-        return 'High in saturated fats and fast-digesting carbohydrates. Pair with a high-protein source next time.';
-      }
-      return 'Lower nutritional quality. High in processed ingredients, simple sugars, or refined fats. Try to replace with whole grains or lean protein options.';
+    final t = _qualityText(text);
+    if (score >= 90) return 'Top-tier plate. Plenty of protein and real food in there.';
+    if (score >= 80) return 'Strong meal. Good protein and a solid mix.';
+    if (score >= 60) return 'Decent meal. A little more protein or veg would round it out.';
+    if (_isFriedText(t)) {
+      return 'Fried and filling. Fine now and then; some protein alongside next time keeps the day balanced.';
     }
+    if (_isSweetText(t)) {
+      return 'A sweet treat. Enjoy it; protein-rich meals around it keep the day on track.';
+    }
+    return 'Mostly quick energy. Add dal, curd, paneer or eggs alongside to balance it.';
   }
 
   static String getLocalQualityPositive(int score, String text) {
-    final lowerText = text.toLowerCase();
-    if (lowerText.contains('salad') || lowerText.contains('vegetable') || lowerText.contains('broccoli')) {
-      return 'Contains micronutrient-rich vegetables.';
-    }
-    if (lowerText.contains('egg') || lowerText.contains('chicken') || lowerText.contains('fish') || lowerText.contains('protein')) {
-      return 'High in high-quality protein to support muscle synthesis.';
-    }
-    if (lowerText.contains('oats') || lowerText.contains('apple') || lowerText.contains('beans')) {
-      return 'Includes complex carbohydrates and healthy dietary fiber.';
-    }
-    if (score >= 75) {
-      return 'Good macronutrient balance with clean fuel.';
-    }
-    return 'Quick energy source to fuel your immediate activities.';
+    final t = _qualityText(text);
+    if (_qualityVeg.hasMatch(t)) return 'Brings vegetables and fiber.';
+    if (_qualityProtein.hasMatch(t)) return 'Good protein to help your muscles recover.';
+    if (_qualityComplexCarb.hasMatch(t)) return 'Complex carbs and fiber for steady energy.';
+    if (score >= 75) return 'Well balanced fuel.';
+    return 'Quick energy for the day.';
   }
 
   static String getLocalQualityImprovement(int score, String text) {
-    final lowerText = text.toLowerCase();
-    if (lowerText.contains('pizza') || lowerText.contains('burger') || lowerText.contains('fries') || lowerText.contains('fried')) {
-      return 'Reduce intake of deep-fried items to lower saturated fat consumption.';
+    final t = _qualityText(text);
+    if (_isFriedText(t)) return 'Next time, try it grilled, roasted or air fried.';
+    if (_isSweetText(t)) return 'Keep sweets as a side, not the main event.';
+    if (score < 80 && !_qualityProtein.hasMatch(t)) {
+      return 'Add some protein: dal, curd, paneer, eggs or chicken.';
     }
-    if (lowerText.contains('sugar') || lowerText.contains('soda') || lowerText.contains('cookie') || lowerText.contains('chocolate')) {
-      return 'Limit added sugars to prevent glycemic spikes and crashes.';
-    }
-    if (!lowerText.contains('chicken') && !lowerText.contains('egg') && !lowerText.contains('fish') && !lowerText.contains('paneer') && !lowerText.contains('whey') && !lowerText.contains('tofu')) {
-      return 'Add a lean protein source (e.g. egg whites, chicken, tofu) to boost protein density.';
-    }
-    if (!lowerText.contains('salad') && !lowerText.contains('vegetable') && !lowerText.contains('broccoli')) {
-      return 'Incorporate some leafy green vegetables for crucial fiber and micronutrients.';
-    }
-    return 'Control portion size to align perfectly with your daily targets.';
+    if (!_qualityVeg.hasMatch(t)) return 'Add a side of sabzi or salad for fiber.';
+    return 'Nicely put together. Keep portions in line with your targets.';
+  }
+
+  /// Copy older app versions stored with a meal. A stored explanation that
+  /// is one of these is replaced with the current copy on load; anything
+  /// else (an edit, an AI line) is kept.
+  static const Set<String> _legacyQualityCopy = {
+    'Exceptional choice! Highly nutritious, protein-dense, and rich in whole foods.',
+    'Balanced meal with a solid macronutrient profile and good nutritional value.',
+    'Moderate nutrition score. Consider adding more lean protein or vegetables to improve balance.',
+    'High in saturated fats and fast-digesting carbohydrates. Pair with a high-protein source next time.',
+    'Lower nutritional quality. High in processed ingredients, simple sugars, or refined fats. Try to replace with whole grains or lean protein options.',
+    'Contains micronutrient-rich vegetables.',
+    'High in high-quality protein to support muscle synthesis.',
+    'Includes complex carbohydrates and healthy dietary fiber.',
+    'Good macronutrient balance with clean fuel.',
+    'Quick energy source to fuel your immediate activities.',
+    'Reduce intake of deep-fried items to lower saturated fat consumption.',
+    'Limit added sugars to prevent glycemic spikes and crashes.',
+    'Add a lean protein source (e.g. egg whites, chicken, tofu) to boost protein density.',
+    'Incorporate some leafy green vegetables for crucial fiber and micronutrients.',
+    'Control portion size to align perfectly with your daily targets.',
+  };
+
+  static String _storedOr(Object? stored, String Function() current) {
+    final s = stored is String ? stored.trim() : '';
+    return s.isEmpty || _legacyQualityCopy.contains(s) ? current() : s;
   }
 
   factory NutritionResult.fromEstimationResult(
@@ -1038,7 +1081,11 @@ class NutritionResult {
     final canonicalMeal = j['canonicalMeal'] as String? ?? '';
     final calMid = (calories.min + calories.max) / 2;
     final proMid = (protein.min + protein.max) / 2;
-    final score = j['mealQualityScore'] as int? ??
+    // Tolerant: a score stored as 72.0 (JSON from another writer) still loads.
+    final storedScore = j['mealQualityScore'];
+    final score = (storedScore is num && storedScore.isFinite
+            ? storedScore.round().clamp(0, 100)
+            : null) ??
         NutritionResult.calculateLocalQualityScore(
           calMid,
           proMid,
@@ -1071,9 +1118,9 @@ class NutritionResult {
       saturatedFat:   j['saturatedFat'] != null ? NutritionItem._range(j['saturatedFat']) : NutrientRange(min: satMin, max: satMax),
       sodium:         j['sodium'] != null ? NutritionItem._range(j['sodium']) : NutrientRange(min: sodMin, max: sodMax),
       mealQualityScore: score,
-      mealQualityExplanation: j['mealQualityExplanation'] as String? ?? NutritionResult.getLocalQualityExplanation(score, canonicalMeal),
-      mealQualityPositive: j['mealQualityPositive'] as String? ?? NutritionResult.getLocalQualityPositive(score, canonicalMeal),
-      mealQualityImprovement: j['mealQualityImprovement'] as String? ?? NutritionResult.getLocalQualityImprovement(score, canonicalMeal),
+      mealQualityExplanation: _storedOr(j['mealQualityExplanation'], () => NutritionResult.getLocalQualityExplanation(score, canonicalMeal)),
+      mealQualityPositive: _storedOr(j['mealQualityPositive'], () => NutritionResult.getLocalQualityPositive(score, canonicalMeal)),
+      mealQualityImprovement: _storedOr(j['mealQualityImprovement'], () => NutritionResult.getLocalQualityImprovement(score, canonicalMeal)),
       macrosLockedByUser: locked,
       userCorrected: userCorr,
       estimationAudit: j['estimationAudit'] != null ? EstimationAudit.fromJson(j['estimationAudit'] as Map<String, dynamic>) : null,

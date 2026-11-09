@@ -24,9 +24,11 @@ import '../services/user_nutrition_memory.dart';
 import '../services/food_link_service.dart';
 import '../services/workout_service.dart';
 import 'add_meal_screen.dart';
+import 'meal_camera_screen.dart';
 import 'ai_coach_screen.dart';
 import 'dashboard_screen.dart';
 import '../ui/k_text_morph.dart';
+import '../ui/k_meal_mark.dart';
 
 class DayDetailScreen extends StatefulWidget {
   final DateTime date;
@@ -386,6 +388,13 @@ class _DayDetailContentState extends State<_DayDetailContent> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       KOptionRow(
+                        icon: KIcons.camera,
+                        title: 'Snap a meal',
+                        subtitle: 'Point at your plate. Kyno names each food and sizes it.',
+                        onTap: () => Navigator.pop(ctx, 'photo'),
+                      ),
+                      const KHairline(indent: 40),
+                      KOptionRow(
                         icon: KIcons.kyno,
                         leading: const KynoMark(size: 24, outlined: true),
                         title: 'Describe it to Kyno',
@@ -435,6 +444,14 @@ class _DayDetailContentState extends State<_DayDetailContent> {
         _refresh();
         if (entry is MealEntry) _showLoggedFeedback(section);
       }
+    } else if (option == 'photo') {
+      if (!mounted) return;
+      await openMealPhotoFlow(
+        context,
+        date: widget.date,
+        section: section,
+        onChanged: _refresh,
+      );
     } else if (option == 'scan') {
       if (!mounted) return;
       final outcome = await openBarcodeFlow(
@@ -1201,7 +1218,7 @@ class _MealSectionCard extends StatelessWidget {
           padding: const EdgeInsets.only(top: 4, bottom: 4),
           child: Row(
             children: [
-              KIcon(KIcons.meal(section), size: 18, color: hasEntries ? KColor.ember : KColor.textMuted),
+              KMealMark(section, size: 20, active: hasEntries),
               const SizedBox(width: 10),
               Expanded(
                 child: Semantics(
@@ -1439,7 +1456,9 @@ void _showMealDetailSheet(BuildContext context, MealEntry entry, VoidCallback? o
   final sugar = entry.result.sugar;
   final satFat = entry.result.saturatedFat;
   final sodium = entry.result.sodium;
-  final score = entry.result.mealQualityScore;
+  // Same rule as the row: water, black coffee or a diet soda has no meal
+  // quality to judge, so under 50 kcal there is no score ring.
+  final score = entry.result.calories.mid >= 50 ? entry.result.mealQualityScore : null;
   final userWarnings = entry.result.userFacingWarnings;
 
   showKSheet<void>(

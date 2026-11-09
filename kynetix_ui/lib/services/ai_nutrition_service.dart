@@ -335,9 +335,10 @@ class AiNutritionService {
       debugPrint('[Scoring] Meal: "$canonicalMeal" | AI Score: $aiScore | Local Score: $localScore | Divergence: $divergence');
     }
 
-    final aiExplanation = json['mealQualityExplanation'] as String?;
-    final aiPositive = json['mealQualityPositive'] as String?;
-    final aiImprovement = json['mealQualityImprovement'] as String?;
+    // The score is always the local one (deterministic: the same meal never
+    // scores differently on two days), so its words are the local ones too.
+    // An AI line next to a local number could contradict it ("Exceptional"
+    // beside a 45), and it skips the copy rules teens rely on.
 
     return NutritionResult(
       canonicalMeal: canonicalMeal,
@@ -360,9 +361,9 @@ class AiNutritionService {
       saturatedFat:   satFatTotal,
       sodium:         sodiumTotal,
       mealQualityScore: localScore,
-      mealQualityExplanation: aiExplanation != null && aiExplanation.isNotEmpty ? aiExplanation : NutritionResult.getLocalQualityExplanation(localScore, canonicalMeal),
-      mealQualityPositive: aiPositive != null && aiPositive.isNotEmpty ? aiPositive : NutritionResult.getLocalQualityPositive(localScore, canonicalMeal),
-      mealQualityImprovement: aiImprovement != null && aiImprovement.isNotEmpty ? aiImprovement : NutritionResult.getLocalQualityImprovement(localScore, canonicalMeal),
+      mealQualityExplanation: NutritionResult.getLocalQualityExplanation(localScore, canonicalMeal),
+      mealQualityPositive: NutritionResult.getLocalQualityPositive(localScore, canonicalMeal),
+      mealQualityImprovement: NutritionResult.getLocalQualityImprovement(localScore, canonicalMeal),
     ).normalizedUncertainty();
   }
 

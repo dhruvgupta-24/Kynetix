@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ── Health Connect permissions ─────────────────────────────────────── -->
     <!-- Exactly the types lib/services/health_service.dart requests (READ only).
@@ -15,9 +16,13 @@
          device or reinstall. usesCleartextTraffic=false: all traffic is
          HTTPS (the ChatGPT PKCE loopback is a server inside the app that the
          browser calls, which this setting does not affect). -->
-    <!-- Barcode scanning for packaged food -->
+    <!-- Barcode scanning and Snap a meal. Photos only: the camera plugin's
+         microphone permission is removed (we never record video or sound),
+         and no camera is required to install (the gallery path still works). -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" tools:replace="android:required" />
     <!-- Rest-timer notifications (countdown while resting, "rest over" when
          the app is in the background). Asked for at the first rest timer on
          Android 13+; the workout never depends on it being granted. -->

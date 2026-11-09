@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../ui/k_meal_mark.dart';
 import '../config/app_theme.dart';
 import '../models/barcode_product.dart';
 import '../models/day_log.dart';
@@ -329,22 +330,9 @@ class _BarcodeProductSheetState extends State<BarcodeProductSheet> {
                 // half-cut off the edge of the sheet.
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: KSpacing.p),
-                  child: Wrap(
-                    spacing: KSpacing.sm,
-                    runSpacing: KSpacing.sm,
-                    children: [
-                      for (final s in MealSection.values)
-                        _AmountChip(
-                          label: s.displayName,
-                          icon: KIcons.meal(s),
-                          selected: s == _section,
-                          onTap: () {
-                            if (s == _section) return;
-                            KHaptics.select();
-                            setState(() => _section = s);
-                          },
-                        ),
-                    ],
+                  child: KMealSectionPicker(
+                    value: _section,
+                    onChanged: (s) => setState(() => _section = s),
                   ),
                 ),
               ],

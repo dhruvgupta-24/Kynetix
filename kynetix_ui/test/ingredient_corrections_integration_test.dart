@@ -131,6 +131,11 @@ void main() {
   });
 
   testWidgets('2. Modifying ingredient values live updates the totals card in AddMealScreen', (WidgetTester tester) async {
+    // A phone-height surface: at 800x600 the rows sit below the fold, and an
+    // offstage field can't be found or typed into.
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
         home: AddMealScreen(

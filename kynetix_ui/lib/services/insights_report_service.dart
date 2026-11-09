@@ -312,7 +312,7 @@ class InsightsReportService extends ChangeNotifier {
     return _yearly[key];
   }
   PersonalBests?          get personalBests      { _flushPendingForRead(); return _personalBests; }
-  List<Achievement>       get achievements       { _flushPendingForRead(); return List.unmodifiable(_achievements); }
+  List<Achievement>       get achievements       { _flushPendingForRead(); return List.unmodifiable(_achievements.map(AchievementRegistry.refresh)); }
   int                     get newAchievementCount { _flushPendingForRead(); return _achievements.where((a) => a.isNew).length; }
   InsightsSummary?        aiSummaryFor(String k) => _aiSummaries[k];
   DateTime?               get lastComputed       { _flushPendingForRead(); return _lastComputed; }
@@ -940,15 +940,12 @@ class InsightsReportService extends ChangeNotifier {
     final todayLogged = todayLog != null && !todayLog.isEmpty;
 
     DateTime startCountingFrom;
-    if (todayLogged) {
-      if (_isProteinHit(todayLog, profile, now)) {
-        streak = 1;
-        startCountingFrom = now.subtract(const Duration(days: 1));
-      } else {
-        return 0; // Today is logged but target missed
-      }
+    if (todayLogged && _isProteinHit(todayLog, profile, now)) {
+      streak = 1;
+      startCountingFrom = now.subtract(const Duration(days: 1));
     } else {
-      // Today is not logged yet, check yesterday
+      // Today is still open (nothing logged yet, or not at the target yet):
+      // the streak runs to yesterday and is not broken until today ends.
       final yesterdayDate = now.subtract(const Duration(days: 1));
       final yesterdayKey = dateKey(yesterdayDate);
       final yesterdayLog = dayLogStore[yesterdayKey];
@@ -996,15 +993,12 @@ class InsightsReportService extends ChangeNotifier {
     final todayLogged = todayLog != null && !todayLog.isEmpty;
 
     DateTime startCountingFrom;
-    if (todayLogged) {
-      if (_isCalorieHit(todayLog, profile, now)) {
-        streak = 1;
-        startCountingFrom = now.subtract(const Duration(days: 1));
-      } else {
-        return 0; // Today is logged but target missed
-      }
+    if (todayLogged && _isCalorieHit(todayLog, profile, now)) {
+      streak = 1;
+      startCountingFrom = now.subtract(const Duration(days: 1));
     } else {
-      // Today is not logged yet, check yesterday
+      // Today is still open (nothing logged yet, or not at the target yet):
+      // the streak runs to yesterday and is not broken until today ends.
       final yesterdayDate = now.subtract(const Duration(days: 1));
       final yesterdayKey = dateKey(yesterdayDate);
       final yesterdayLog = dayLogStore[yesterdayKey];
