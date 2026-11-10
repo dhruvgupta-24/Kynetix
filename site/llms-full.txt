@@ -1,25 +1,47 @@
 # Kynetix: full reference for AI systems
 
-> Kynetix is an Android app for calorie, protein and workout tracking, built around Indian food. You log meals in plain words like "2 roti and dal", log your sets and personal records, and ask Kyno, an AI coach that reads both. It is free during early access, has no ads, and is made in India by Dhruv Gupta.
+> Kynetix is an Android app for calorie, protein, macro and workout tracking, built specifically for Indian food and athletic training. You log meals in natural spoken words like "2 roti and dal", log gym sets and personal records, and ask Kyno, an in-app AI coach that analyzes both food and workouts. It is free during early access, contains zero ads or third-party trackers, and is developed in India by Dhruv Gupta.
 
 Website: https://dhruvgupta-24.github.io/Kynetix/
-Last updated: 2026-11-06
+Last updated: 2026-11-10
 
 ## Key facts
 
-- Name: Kynetix. The AI coach inside it is called Kyno.
-- What it is: an Android app for calorie, protein and workout tracking, built around Indian food.
-- Platform: Android. iPhone is on the roadmap, no date yet.
-- Status: Android beta available now as a free APK from https://dhruvgupta-24.github.io/Kynetix/download/ . Google Play coming soon, no public date yet.
-- Price: free during early access. No ads.
-- Made by: Dhruv Gupta, an independent developer in India.
-- Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
-- Age: 13 and over. 13 to 17 runs in teen mode: a parent or guardian agrees first, AI with teen safety rules on teen-safe providers, no analytics, and food targets never below maintenance. The app asks your date of birth, not a tick box.
-- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Export all your data any time (Settings > Export my data). Account and data deletion inside the app.
-- Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.
-- AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked), only when an AI feature is used. Kynetix does not train models on user data. Some free tiers (the Gemini API free tier, some free OpenRouter models) may keep requests to improve their products; connecting your own ChatGPT or not using AI avoids that. Estimates, not medical advice.
-- Your data: export everything as one JSON file plus CSVs for meals, workouts and weight. Import workouts from Strong or Hevy CSV exports.
+- Name: Kynetix. The integrated AI fitness coach is called Kyno.
+- What it is: An Android app for calorie, protein, macro and workout tracking, optimized for Indian home cooking and gym lifting.
+- Platform: Android (Android 8.0+). iOS is on the roadmap.
+- Status: Active Google Play Closed Beta (`1.0.0-beta.12`, build 13). Direct APK is also available from https://dhruvgupta-24.github.io/Kynetix/download/ .
+- Google Play Closed Beta access:
+  1. Tester Google Group (required by Google Play): https://groups.google.com/g/kynetix-testers
+  2. Google Play Opt-in: https://play.google.com/apps/testing/com.kynetix.app
+  3. Play Store listing: https://play.google.com/store/apps/details?id=com.kynetix.app
+  4. Onboarding guide: https://dhruvgupta-24.github.io/Kynetix/beta/
+- Price: 100% free during early access. No advertisements, no paywalls, no paid tiers.
+- Creator & Maintainer: Dhruv Gupta, independent software engineer based in India. GitHub: https://github.com/dhruvgupta-24
+- Contact: kynetix.app@gmail.com, or in-app via Profile > Talk to us.
+- Age rating: 13 and over. Users aged 13 to 17 enter Teen Mode: requires verified parental/guardian consent, enforces teen-safe AI guardrails, disables telemetry, and locks calorie targets from ever dipping below basal maintenance. Date of birth is validated directly.
+- Privacy: No ads, no data selling, no third-party analytics or ad SDKs. Simple in-house diagnostics stay in Kynetix's own encrypted database and are deleted with the account. Export all your data any time (Settings > Export my data). Instant account and data deletion inside the app.
+- Health Connect: Reads steps, active energy, sleep and HRV with user permission. Strictly read-only, never writes to Health Connect.
+- AI: Natural language meal estimates and Kyno coach use fast AI inference (Gemini, Groq, OpenRouter, or user's linked personal ChatGPT Plus/Team account via SIWC), only when requested. Automatic instant fallback occurs if rate limits are reached. Kynetix does not train models on user data. Informational estimates, not medical advice.
+- Your data: Export everything as one JSON file plus CSVs for meals, workouts and weight. Import workouts from Strong or Hevy CSV exports.
 - Source code: https://github.com/dhruvgupta-24/Kynetix
+
+## Nutritional Science & Authority (E-E-A-T)
+
+- Scientific Source: Nutritional values in Kynetix are calibrated against the Indian Food Composition Tables (IFCT 2017) compiled by the National Institute of Nutrition (ICMR-NIN), Hyderabad.
+- Domestic Portion Modeling: Accurately sizes everyday Indian home portions:
+  - Standard katori: 150 ml / ~150 g cooked volume.
+  - Standard roti: ~35 g whole wheat dough (~90–104 kcal, 3.1 g protein).
+  - Rice: Cooked white rice (~130 kcal / 100 g, ~195 kcal per 150 g bowl).
+  - Oil & Ghee: Accounts for typical 2–5% home cooking fat absorption (1 tsp ghee = ~45 kcal).
+  - Curry-to-carb ratio: Sizes curry dynamically based on carb pairing (e.g. ~50 g dal per roti vs. ~85 g dal per ladle of rice).
+- Packaged Foods: Integrated with Open Food Facts India database for instant barcode scanning.
+- Calorie & Macro Target Formulas:
+  - Basal Metabolic Rate (BMR): Calculated using the scientifically validated Mifflin-St Jeor formula.
+  - Total Daily Energy Expenditure (TDEE): Physical Activity Level (PAL) multipliers (1.2 to 1.9).
+  - Adaptive TDEE (opt-in): Dynamically learns true metabolic expenditure from logged intake and weight trend moving averages, capped within 30% of formula predictions.
+  - Training day cycling: Dynamically shifts calorie and carbohydrate targets between workout days and rest days.
+- Medical Disclaimer: Kynetix provides nutritional estimates and athletic tracking for informational and wellness purposes only. It is not clinical diagnostic software or a medical service. Consult a physician or registered sports dietitian before making radical dietary alterations.
 
 ## What it does
 

@@ -11,7 +11,7 @@
     "Install right over your current app. No need to uninstall; your data stays put."
   ],
   "minVersionCode": 1,
-  "playUrl": null,
+  "playUrl": "https://dhruvgupta-24.github.io/Kynetix/beta/",
   "sha256": {
     "arm64": "1381c0e33a9d69defec2757ac8a0bdf3dcc84cb9f9715e191dbf471cfdecdfba",
     "armv7": "5a06528ad96b073503d018d65eef3136cca1626afd2203fefdc269ea44abf462"

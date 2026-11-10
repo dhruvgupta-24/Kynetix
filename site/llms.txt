@@ -1,43 +1,71 @@
 # Kynetix
 
-> Kynetix is an Android app for calorie, protein and workout tracking, built around Indian food. You log meals in plain words like "2 roti and dal", log your sets and personal records, and ask Kyno, an AI coach that reads both. It is free during early access, has no ads, and is made in India by Dhruv Gupta.
+> Kynetix is an Android app for calorie, protein, macro and workout tracking, built specifically for Indian food and athletic training. You log meals in natural spoken words like "2 roti and dal", log gym sets and personal records, and ask Kyno, an in-app AI coach that analyzes both food and workouts. It is free during early access, contains zero ads or third-party trackers, and is developed in India by Dhruv Gupta.
 
 ## Key facts
 
-- Name: Kynetix. The AI coach inside it is called Kyno.
-- What it is: an Android app for calorie, protein and workout tracking, built around Indian food.
-- Platform: Android. iPhone is on the roadmap, no date yet.
-- Status: Android beta available now as a free APK from https://dhruvgupta-24.github.io/Kynetix/download/ . Google Play coming soon, no public date yet.
-- Price: free during early access. No ads.
-- Made by: Dhruv Gupta, an independent developer in India.
-- Contact: kynetix.app@gmail.com, or in the app under Profile > Talk to us.
-- Age: 13 and over. 13 to 17 runs in teen mode: a parent or guardian agrees first, AI with teen safety rules on teen-safe providers, no analytics, and food targets never below maintenance. The app asks your date of birth, not a tick box.
-- Privacy: no ads, no data selling, no third-party analytics or ad SDKs. Simple in-house usage analytics (screen opens, meals logged, workouts finished) stay in Kynetix's own database and are deleted with the account. Export all your data any time (Settings > Export my data). Account and data deletion inside the app.
-- Health Connect: reads steps, weight, sleep and HRV with permission. Read only, never writes.
-- AI: meal estimates and Kyno use AI providers (Gemini, Groq, OpenRouter, or the user's own ChatGPT if linked), only when an AI feature is used. Kynetix does not train models on user data. Some free tiers (the Gemini API free tier, some free OpenRouter models) may keep requests to improve their products; connecting your own ChatGPT or not using AI avoids that. Estimates, not medical advice.
-- Your data: export everything as one JSON file plus CSVs for meals, workouts and weight. Import workouts from Strong or Hevy CSV exports.
-- Source code: https://github.com/dhruvgupta-24/Kynetix
+- Name: Kynetix. The integrated AI fitness coach is called Kyno.
+- What it is: An Android app for calorie, protein, macro and workout tracking, optimized for Indian home cooking and gym lifting.
+- Platform: Android (Android 8.0+). iOS is planned on the roadmap.
+- Status: Active Google Play Closed Beta (`1.0.0-beta.12`, build 13). Direct APK is also available from https://dhruvgupta-24.github.io/Kynetix/download/ .
+- Google Play Closed Beta access:
+  1. Tester Google Group (required by Google Play): https://groups.google.com/g/kynetix-testers
+  2. Google Play Opt-in: https://play.google.com/apps/testing/com.kynetix.app
+  3. Play Store listing: https://play.google.com/store/apps/details?id=com.kynetix.app
+  4. Onboarding guide: https://dhruvgupta-24.github.io/Kynetix/beta/
+- Price: 100% free during early access. No advertisements, no paywalls, no paid tiers.
+- Creator & Maintainer: Dhruv Gupta, independent software engineer based in India. GitHub: https://github.com/dhruvgupta-24
+- Contact: kynetix.app@gmail.com, or in-app via Profile > Talk to us.
+- Age rating: 13 and over. Users aged 13 to 17 enter Teen Mode: requires verified parental/guardian consent, enforces teen-safe AI guardrails, disables telemetry, and locks calorie targets from ever dipping below basal maintenance. Date of birth is validated directly.
 
-## Pages
+## Nutritional Science & Authority (E-E-A-T)
 
-- [Home](https://dhruvgupta-24.github.io/Kynetix/): What Kynetix does: food logging in plain words, training, Kyno, widgets, share cards, FAQ.
-- [About and press kit](https://dhruvgupta-24.github.io/Kynetix/about/): Key facts, founder, brand files, screenshots and contact.
-- [Privacy policy](https://dhruvgupta-24.github.io/Kynetix/privacy/): What is collected, why, AI providers, retention, deletion and rights under India's DPDP Act.
-- [Terms of use](https://dhruvgupta-24.github.io/Kynetix/terms/): Rules for using Kynetix: 13 and over (teen mode under 18), not medical advice, AI can be wrong.
-- [Delete your account](https://dhruvgupta-24.github.io/Kynetix/delete-account/): How to delete a Kynetix account and its data, in the app or by email.
+- Scientific Source: Nutritional values in Kynetix are calibrated against the Indian Food Composition Tables (IFCT 2017) compiled by the National Institute of Nutrition (ICMR-NIN), Hyderabad.
+- Domestic Portion Modeling: Accurately sizes everyday Indian home portions:
+  - Standard katori: 150 ml / ~150 g cooked volume.
+  - Standard roti: ~35 g whole wheat dough (~90–104 kcal, 3.1 g protein).
+  - Rice: Cooked white rice (~130 kcal / 100 g, ~195 kcal per 150 g bowl).
+  - Oil & Ghee: Accounts for typical 2–5% home cooking fat absorption (1 tsp ghee = ~45 kcal).
+  - Curry-to-carb ratio: Sizes curry dynamically based on carb pairing (e.g. ~50 g dal per roti vs. ~85 g dal per ladle of rice).
+- Packaged Foods: Integrated with Open Food Facts India database for instant barcode scanning.
+- Calorie & Macro Target Formulas:
+  - Basal Metabolic Rate (BMR): Calculated using the scientifically validated Mifflin-St Jeor formula.
+  - Total Daily Energy Expenditure (TDEE): Physical Activity Level (PAL) multipliers (1.2 to 1.9).
+  - Adaptive TDEE (opt-in): Dynamically learns true metabolic expenditure from logged intake and weight trend moving averages, capped within 30% of formula predictions.
+  - Training day cycling: Dynamically shifts calorie and carbohydrate targets between workout days and rest days.
+- Medical Disclaimer: Kynetix provides nutritional estimates and athletic tracking for informational and wellness purposes only. It is not clinical diagnostic software or a medical service. Consult a physician or registered sports dietitian before making radical dietary alterations.
 
-## Learn
+## Engineering Architecture & Privacy
 
-- [Foods](https://dhruvgupta-24.github.io/Kynetix/foods/): Calories, protein, carbs, fat and fiber for 133 Indian foods per katori, roti, plate or 100 g, from the app's food table.
-- [Exercises](https://dhruvgupta-24.github.io/Kynetix/exercises/): 154 gym and bodyweight exercises: muscles worked, equipment, sets and reps, one form cue, how to progress.
-- [Guides](https://dhruvgupta-24.github.io/Kynetix/guides/): Practical guides: counting calories in Indian food, vegetarian protein, beginner splits, progressive overload, cutting and bulking, fasting, Health Connect.
-- [Tools](https://dhruvgupta-24.github.io/Kynetix/tools/): Calorie (TDEE), protein, macro, one rep max and BMI calculators using the app's own formulas.
-- [Compare](https://dhruvgupta-24.github.io/Kynetix/compare/): Neutral comparisons with HealthifyMe, MyFitnessPal, Hevy and Strong.
-- [Download](https://dhruvgupta-24.github.io/Kynetix/download/): The free Android beta APK, install steps and SHA-256 checksums.
+- Offline-First Storage: Food queries and workout logs execute instantly against an on-device SQLite database (`sqflite`). Operates seamlessly in gyms with zero cellular connectivity, queuing cloud synchronization to Supabase PostgreSQL once network reconnects.
+- Health Connect Integration: Certified Android Health Connect client (`androidx.health.connect.client`) reading steps, active energy expenditure, resting heart rate, sleep duration, and HRV. Permissions are strictly read-only; Kynetix never writes to or alters Health Connect records.
+- Privacy & DPDP Compliance: Compliant with India's Digital Personal Data Protection (DPDP) Act 2023. Zero third-party ad networks, zero marketing analytics SDKs. In-house diagnostics stay in private encrypted databases and are purged upon account deletion.
+- Open Data Portability: Complete account export as JSON plus separate CSVs for meals, workouts (standard multi-column format compatible with Strong/Hevy), and body weight.
+- One-Tap Account Deletion: Users can permanently wipe their account and all associated data inside the app (Settings > Delete account) or via https://dhruvgupta-24.github.io/Kynetix/delete-account/ .
+- AI Architecture: Natural language parsing and Kyno coaching utilize high-speed inference (Google Gemini Flash, Groq, OpenRouter) or the user's linked personal ChatGPT Plus/Team account via Sign In With ChatGPT (SIWC), with automated zero-latency fallback if rate limits are encountered.
 
-Localized pages: [हिन्दी](https://dhruvgupta-24.github.io/Kynetix/hi/) [मराठी](https://dhruvgupta-24.github.io/Kynetix/mr/) [தமிழ்](https://dhruvgupta-24.github.io/Kynetix/ta/) [తెలుగు](https://dhruvgupta-24.github.io/Kynetix/te/) [বাংলা](https://dhruvgupta-24.github.io/Kynetix/bn/) [ગુજરાતી](https://dhruvgupta-24.github.io/Kynetix/gu/) [ಕನ್ನಡ](https://dhruvgupta-24.github.io/Kynetix/kn/) [മലയാളം](https://dhruvgupta-24.github.io/Kynetix/ml/) [ਪੰਜਾਬੀ](https://dhruvgupta-24.github.io/Kynetix/pa/). The app itself is in English.
+## Pages & Documentation
 
-## Optional
+- [Home](https://dhruvgupta-24.github.io/Kynetix/): Product features, interactive meal plate builder, workout logger demo, widgets, share cards, and comprehensive FAQ.
+- [Google Play Beta Guide](https://dhruvgupta-24.github.io/Kynetix/beta/): Step-by-step onboarding for the 14-day Google Play closed test.
+- [About & Press Kit](https://dhruvgupta-24.github.io/Kynetix/about/): Core facts, founder biography, brand assets (SVG/PNG), high-resolution screenshots, and press contact.
+- [Download](https://dhruvgupta-24.github.io/Kynetix/download/): Direct Android APK releases with SHA-256 integrity checksums.
+- [Privacy Policy](https://dhruvgupta-24.github.io/Kynetix/privacy/): Complete DPDP-compliant data governance disclosure, third-party AI processing rules, and user rights.
+- [Terms of Use](https://dhruvgupta-24.github.io/Kynetix/terms/): Conditions of service, teen safety rules, AI liability limitations, and medical disclaimers.
+- [Account Deletion](https://dhruvgupta-24.github.io/Kynetix/delete-account/): Self-service account and personal data wipe portal.
 
-- [Full text for AI systems](https://dhruvgupta-24.github.io/Kynetix/llms-full.txt): every fact, FAQ answer and hub in one file.
-- [Source code](https://github.com/dhruvgupta-24/Kynetix): the Flutter app, Supabase backend and this website.
+## Knowledge Hub (Learn)
+
+- [Foods Database](https://dhruvgupta-24.github.io/Kynetix/foods/): Calories, protein, carbs, fat, and fiber for 133+ Indian foods per katori, roti, plate, and 100g serving.
+- [Exercise Library](https://dhruvgupta-24.github.io/Kynetix/exercises/): 154+ gym and bodyweight exercises categorized by muscle group, equipment, and form cues.
+- [Nutrition & Training Guides](https://dhruvgupta-24.github.io/Kynetix/guides/): Deep-dive guides covering Indian food calorie counting, vegetarian protein optimization, beginner splits, progressive overload, cutting/bulking, and fasting.
+- [Fitness Tools & Calculators](https://dhruvgupta-24.github.io/Kynetix/tools/): TDEE, protein intake, macro distribution, 1-Rep Max (1RM), and BMI calculators using Kynetix algorithms.
+- [App Comparisons](https://dhruvgupta-24.github.io/Kynetix/compare/): Objective side-by-side technical breakdowns against HealthifyMe, MyFitnessPal, Hevy, and Strong.
+
+Multilingual landing pages available in 9 regional Indian languages:
+[हिन्दी](https://dhruvgupta-24.github.io/Kynetix/hi/) | [मराठी](https://dhruvgupta-24.github.io/Kynetix/mr/) | [தமிழ்](https://dhruvgupta-24.github.io/Kynetix/ta/) | [తెలుగు](https://dhruvgupta-24.github.io/Kynetix/te/) | [বাংলা](https://dhruvgupta-24.github.io/Kynetix/bn/) | [ગુજરાતી](https://dhruvgupta-24.github.io/Kynetix/gu/) | [ಕನ್ನಡ](https://dhruvgupta-24.github.io/Kynetix/kn/) | [മലയാളം](https://dhruvgupta-24.github.io/Kynetix/ml/) | [ਪੰਜਾਬੀ](https://dhruvgupta-24.github.io/Kynetix/pa/)
+
+## Additional Resources
+
+- [Full Text Reference for LLMs](https://dhruvgupta-24.github.io/Kynetix/llms-full.txt): Complete unstructured knowledge base and Q&A corpus in a single plaintext file.
+- [Source Code](https://github.com/dhruvgupta-24/Kynetix): Public open-source repository containing the Flutter app, Supabase edge functions, and documentation.
