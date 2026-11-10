@@ -1,24 +1,24 @@
 {
-  "versionCode": 12,
-  "versionName": "1.0.0-beta.11",
-  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.11/kynetix-1.0.0-beta.11-arm64-v8a.apk",
-  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.11/kynetix-1.0.0-beta.11-armeabi-v7a.apk",
+  "versionCode": 13,
+  "versionName": "1.0.0-beta.12",
+  "apk": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.12/kynetix-1.0.0-beta.12-arm64-v8a.apk",
+  "apkV7": "https://github.com/dhruvgupta-24/Kynetix/releases/download/v1.0.0-beta.12/kynetix-1.0.0-beta.12-armeabi-v7a.apk",
   "page": "https://dhruvgupta-24.github.io/Kynetix/download/",
   "notes": [
-    "Salt, fat and sugar now count in the meal score, each once, with one clear tip per meal.",
-    "Nutrients for 233 everyday foods, up from 89, and a salt watch when your week runs high.",
-    "A lighter week after a break reads Light, not Extreme.",
+    "Automatic AI fallback: seamlessly switches to secondary model if ChatGPT quota is reached.",
+    "Hardened account privacy: strict user-scoped data boundaries across sign-ins.",
+    "Responsive navigation dock optimized for compact screens and foldables.",
     "Install right over your current app. No need to uninstall; your data stays put."
   ],
   "minVersionCode": 1,
   "playUrl": "https://dhruvgupta-24.github.io/Kynetix/beta/",
   "sha256": {
-    "arm64": "1381c0e33a9d69defec2757ac8a0bdf3dcc84cb9f9715e191dbf471cfdecdfba",
-    "armv7": "5a06528ad96b073503d018d65eef3136cca1626afd2203fefdc269ea44abf462"
+    "arm64": "3062a258f67f2fd6a0c4c4972a8674693a65b7cb1bbdd4e36509217e9561c11f",
+    "armv7": "0af0d309764f2122d9fc68c65e4d2cd4e2ce952470570517f24c1792675ea868"
   },
   "size": {
-    "arm64": "41.3 MB",
-    "armv7": "38.4 MB"
+    "arm64": "39.2 MB",
+    "armv7": "36.0 MB"
   },
   "released": "2026-11-10"
 }
