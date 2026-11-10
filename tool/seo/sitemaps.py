@@ -2,6 +2,10 @@
 import pathlib
 import page
 from page import URL, TODAY, HREFLANG, LANGS, SITE
+import lastmod
+
+# Real per-page dates from git (see lastmod.py), filled in by write().
+_DATES = {}
 
 ROOT_SITE = pathlib.Path(r"C:/Users/Dhruv/Desktop/dhruvgupta-24.github.io")
 CORE = ["", "download/", "about/", "privacy/", "terms/", "delete-account/"]
@@ -16,7 +20,7 @@ def _url_entry(path):
             if l in alts:
                 links += f'<xhtml:link rel="alternate" hreflang="{HREFLANG[l]}" href="{URL}{alts[l]}"/>'
         links += f'<xhtml:link rel="alternate" hreflang="x-default" href="{URL}{alts.get("en", path)}"/>'
-    return f"  <url><loc>{URL}{path}</loc><lastmod>{TODAY}</lastmod>{links}</url>"
+    return f"  <url><loc>{URL}{path}</loc><lastmod>{lastmod.date_for_url(URL + path, _DATES, TODAY)}</lastmod>{links}</url>"
 
 
 def _write(name, paths):
@@ -33,6 +37,7 @@ def section_of(path, info):
 
 
 def write():
+    _DATES.update(lastmod.lastmod_map())
     by = {s: [] for s in SECTIONS}
     for path, info in sorted(page.REGISTRY.items()):
         if path in CORE:
@@ -45,7 +50,8 @@ def write():
             _write(f"sitemaps/{s}.xml", by[s])
             names.append(f"sitemaps/{s}.xml")
     idx = ['<?xml version="1.0" encoding="UTF-8"?>', '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    idx += [f"  <sitemap><loc>{URL}{n}</loc><lastmod>{TODAY}</lastmod></sitemap>" for n in names]
+    newest = {n: lastmod.newest((SITE / n).read_text(encoding="utf-8")) or TODAY for n in names}
+    idx += [f"  <sitemap><loc>{URL}{n}</loc><lastmod>{newest[n]}</lastmod></sitemap>" for n in names]
     idx.append("</sitemapindex>\n")
     if ROOT_SITE.exists():
         (ROOT_SITE / "sitemap.xml").write_text("\n".join(idx), encoding="utf-8", newline="\n")

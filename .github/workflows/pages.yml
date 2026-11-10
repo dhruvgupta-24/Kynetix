@@ -25,9 +25,15 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # IndexNow diffs this push against the last one
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Tell IndexNow engines what changed
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: python3 tool/seo/indexnow.py "${{ github.event.before }}" "${{ github.sha }}"
