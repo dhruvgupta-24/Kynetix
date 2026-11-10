@@ -302,10 +302,10 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       ),
       SiwcFailure.notEligible => const _ErrorInfo(
         method: m,
-        title: 'Your plan can\'t be used here yet',
+        title: 'Plan not eligible',
         message:
-            'ChatGPT says plan usage isn\'t available for this account, '
-            'workspace or region. Kyno keeps working on Kynetix servers.',
+            'Connecting requires an eligible ChatGPT Go, Plus, or Pro subscription. '
+            'Free accounts cannot connect. Kyno continues running on Kynetix servers.',
         showManageUsage: true,
       ),
       SiwcFailure.exchangeFailed => const _ErrorInfo(
@@ -643,11 +643,10 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       const SizedBox(height: KSpacing.sm),
       Text(
         'Connect ChatGPT and Kyno\'s coaching, meal estimates and insights '
-        'run on your own plan.',
+        'run on your own plan. Requires an active ChatGPT Go, Plus, or Pro subscription.',
         style: KText.body.copyWith(color: KColor.textSecondary, fontSize: 15, height: 1.5),
       ),
       const SizedBox(height: KSpacing.xl),
-      // Three plain facts between rules: no card.
       Container(
         decoration: BoxDecoration(
           border: Border(
@@ -657,6 +656,13 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
         ),
         child: Column(
           children: [
+            _infoRow(
+              Icons.stars_rounded,
+              'Go, Plus, or Pro required',
+              'Free accounts aren\'t eligible for external app access. '
+                  'If you have Go, Plus, or Pro, your ChatGPT usage covers Kyno.',
+            ),
+            const _Hairline(indent: 36),
             _infoRow(
               Icons.data_usage_rounded,
               'Your plan, your limits',
@@ -683,6 +689,12 @@ class _ConnectChatGptScreenState extends State<ConnectChatGptScreen>
       const Spacer(),
       const SizedBox(height: KSpacing.xxl),
       ContinueWithChatGptButton(onTap: _startBrowserFlow),
+      const SizedBox(height: KSpacing.xs),
+      Text(
+        'ChatGPT Go, Plus, or Pro only • Free accounts not supported',
+        textAlign: TextAlign.center,
+        style: KText.caption.copyWith(color: KColor.textMuted, fontSize: 12),
+      ),
       const SizedBox(height: KSpacing.sm),
       if (_allowDeviceCode) _quietButton('Use a code instead', _startCodeFlow),
       if (widget.embedded) ...[

@@ -213,6 +213,7 @@ void main() {
       ]);
 
       SharedPreferences.setMockInitialValues({
+        UserSessionCoordinator.legacyOwnerKey: testUserId,
         'day_logs_v1': originalDayLogsJson,
         'workout_data_v2': originalWorkoutJson,
         'user_meal_overrides_v1': originalOverridesList,
@@ -315,6 +316,59 @@ void main() {
 
       // Check hydration guard is open for this user
       expect(NutritionHydrationGuard.instance.isReadyForCurrentUser, isTrue);
+    });
+
+    test('A newly signing-in user never adopts unowned legacy data', () async {
+      await UserSessionCoordinator.instance.clearAllUserServices();
+      SharedPreferences.setMockInitialValues({
+        'day_logs_v1': jsonEncode({
+          '2026-03-01': DayLog().toJson(),
+        }),
+      });
+      final prefs = await SharedPreferences.getInstance();
+      const newUserId = 'new-tester-uuid-9999';
+      await UserSessionCoordinator.instance.initializeForUser(newUserId, prefsOverride: prefs);
+
+      final report = UserSessionCoordinator.instance.lastAuditReport;
+      expect(report, isNotNull);
+      expect(report!.historicalNutritionRecordsScanned, equals(0));
+      expect(dayLogStore.isEmpty, isTrue);
+      expect(prefs.getString(UserSessionCoordinator.legacyOwnerKey), equals(UserSessionCoordinator.legacyOwnerDeleted));
+    });
+
+    test('Rolls back invalid post-cutoff legacy adoption and seals device', () async {
+      await UserSessionCoordinator.instance.clearAllUserServices();
+      const victimUserId = 'victim-tester-uuid-8888';
+      final dummyDayLogJson = jsonEncode({'2026-03-01': DayLog().toJson()});
+      final postCutoffReport = jsonEncode({
+        'userId': victimUserId,
+        'timestamp': DateTime(2026, 11, 10).toIso8601String(),
+        'historicalNutritionRecordsScanned': 1,
+      });
+
+      SharedPreferences.setMockInitialValues({
+        'day_logs_v1': dummyDayLogJson,
+        UserSessionCoordinator.scopedKey('day_logs_v1', victimUserId): dummyDayLogJson,
+        UserSessionCoordinator.scopedKey('day_logs_dirty_v1', victimUserId): ['2026-03-01'],
+        UserSessionCoordinator.backupKey('day_logs_v1', victimUserId): dummyDayLogJson,
+        'migration_audit_report_v1_$victimUserId': postCutoffReport,
+        'migration_verified_v1_$victimUserId': true,
+        UserSessionCoordinator.legacyOwnerKey: victimUserId,
+      });
+      final prefs = await SharedPreferences.getInstance();
+
+      await UserSessionCoordinator.instance.initializeForUser(victimUserId, prefsOverride: prefs);
+
+      // Scoped data must be wiped
+      expect(prefs.containsKey(UserSessionCoordinator.scopedKey('day_logs_v1', victimUserId)), isFalse);
+      expect(prefs.containsKey(UserSessionCoordinator.scopedKey('day_logs_dirty_v1', victimUserId)), isFalse);
+      expect(prefs.containsKey(UserSessionCoordinator.backupKey('day_logs_v1', victimUserId)), isFalse);
+      // Unscoped device store must be wiped
+      expect(prefs.containsKey('day_logs_v1'), isFalse);
+      // Device ownership sealed
+      expect(prefs.getString(UserSessionCoordinator.legacyOwnerKey), equals(UserSessionCoordinator.legacyOwnerDeleted));
+      // In-memory store empty
+      expect(dayLogStore.isEmpty, isTrue);
     });
   });
 }

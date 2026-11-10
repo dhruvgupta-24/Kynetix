@@ -248,6 +248,11 @@ class UserSessionCoordinator {
     // 0. Land any queued day-log write so migration reads the latest data.
     await PersistenceService.flushPendingWrites();
 
+    // Self-healing: if an account on this device previously underwent an erroneous
+    // legacy migration of unowned pre-auth test data after the legacy era (October 1, 2026),
+    // detect and cleanly roll it back without any hardcoded user IDs.
+    await _rollbackInvalidLegacyAdoptionIfNeeded(userId, prefs);
+
     // 1. Perform safe, non-destructive migration if not yet done for this user
     await migrateUnscopedDataForUser(userId, prefs);
 
@@ -346,6 +351,79 @@ class UserSessionCoordinator {
     debugPrint('[UserSessionCoordinator] ✅ In-memory flush complete, zero cross-user leakage');
   }
 
+  /// Self-healing for any account that erroneously adopted pre-auth legacy stores
+  /// on a shared or test device after the pre-auth migration window closed (Oct 1, 2026).
+  ///
+  /// Detects whether this account's local store was populated by an invalid post-cutoff
+  /// adoption of orphaned device stores, rolls back the contaminated scoped keys,
+  /// wipes the unowned legacy stores from the device, and seals ownership so no other
+  /// account can ever adopt them.
+  static Future<void> _rollbackInvalidLegacyAdoptionIfNeeded(
+    String userId,
+    SharedPreferences prefs,
+  ) async {
+    final cleanupKey = 'legacy_adoption_reconciled_v1_$userId';
+    if (prefs.getBool(cleanupKey) == true) return;
+
+    // Only accounts that actually ran a local migration on this device have a backupKey:
+    final bKey = backupKey('day_logs_v1', userId);
+    final hasBackup = prefs.containsKey(bKey);
+    if (!hasBackup) {
+      await prefs.setBool(cleanupKey, true);
+      return;
+    }
+
+    // Check when this migration was performed on this device:
+    final reportRaw = prefs.getString('migration_audit_report_v1_$userId');
+    DateTime? migrationTime;
+    if (reportRaw != null) {
+      try {
+        final data = jsonDecode(reportRaw) as Map<String, dynamic>;
+        final ts = data['timestamp'];
+        if (ts is String) migrationTime = DateTime.tryParse(ts);
+      } catch (_) {}
+    }
+
+    // Pre-auth migration era closed on Oct 1, 2026. Any migration recorded after that
+    // date on a device running beta/closed testing is an unintended adoption of
+    // leftover test data.
+    final cutoff = DateTime(2026, 10, 1);
+    final isPostCutoffMigration = migrationTime != null && migrationTime.isAfter(cutoff);
+
+    if (isPostCutoffMigration) {
+      debugPrint('[UserSessionCoordinator] 🛡️ Rolling back invalid post-cutoff legacy adoption for user: $userId (migrated at: $migrationTime)');
+
+      // 1. Remove contaminated scoped day logs and dirty queues
+      await prefs.remove(scopedKey('day_logs_v1', userId));
+      await prefs.remove(scopedKey('day_logs_dirty_v1', userId));
+      await prefs.remove(scopedKey('day_logs_backup_v1', userId));
+      await prefs.remove(scopedKey('pending_day_logs_upload_v1', userId));
+
+      // 2. Remove contaminated scoped workout data and dirty queues
+      await prefs.remove(scopedKey('workout_data_v2', userId));
+      await prefs.remove(scopedKey('workout_data_dirty_v2', userId));
+
+      // 3. Clean up migration backups and audit markers for this user
+      for (final baseKey in unscopedKeys) {
+        await prefs.remove(backupKey(baseKey, userId));
+      }
+
+      // 4. Wipe unowned legacy unscoped keys from the physical device so they never leak again
+      for (final baseKey in unscopedKeys) {
+        await prefs.remove(baseKey);
+      }
+
+      // 5. Permanently seal legacy ownership on this device
+      await prefs.setString(legacyOwnerKey, legacyOwnerDeleted);
+
+      // 6. Clear any contaminated in-memory stores
+      dayLogStore.clear();
+      WorkoutService.instance.clearMemory();
+    }
+
+    await prefs.setBool(cleanupKey, true);
+  }
+
   /// Non-destructive migration:
   /// - Takes a pre-migration backup of all unscoped stores.
   /// - Copies raw data verbatim to user-scoped keys (zero recalculation, zero normalization).
@@ -377,9 +455,19 @@ class UserSessionCoordinator {
     // Legacy unscoped data is only ever copied into its owner's account. A new
     // account on a device that already has an owner starts clean (nothing is
     // deleted — the legacy keys stay put for their owner).
-    final owner = legacyOwner(prefs);
-    if (owner != null && owner != userId) {
-      debugPrint('[UserSessionCoordinator] Legacy local data belongs to another account, skipping copy for: $userId');
+    // Legacy unscoped data can only be migrated if the account is already
+    // recognized as the legacy owner on this device.
+    // If no owner is recorded, we seal the legacy stores so a newly signed-in
+    // account never adopts arbitrary unscoped local data.
+    var owner = legacyOwner(prefs);
+    if (owner == null) {
+      debugPrint('[UserSessionCoordinator] No prior legacy owner on device; sealing legacy stores to prevent cross-account adoption for: $userId');
+      await prefs.setString(legacyOwnerKey, legacyOwnerDeleted);
+      owner = legacyOwnerDeleted;
+    }
+
+    if (owner != userId) {
+      debugPrint('[UserSessionCoordinator] Legacy local data belongs to another account ($owner), skipping copy for: $userId');
       final report = MigrationAuditReport(
         userId: userId,
         historicalNutritionRecordsScanned: 0,
@@ -398,12 +486,8 @@ class UserSessionCoordinator {
         timestamp: DateTime.now(),
       );
       _lastAuditReport = report;
-      await prefs.setString(legacyOwnerKey, owner);
       await prefs.setBool(migrationMarkerKey, true);
       return report;
-    }
-    if (owner == null && unscopedKeys.any(prefs.containsKey)) {
-      await prefs.setString(legacyOwnerKey, userId);
     }
 
     debugPrint('[UserSessionCoordinator] 🛡️ Starting Non-Destructive Pre-Migration Audit for user: $userId');

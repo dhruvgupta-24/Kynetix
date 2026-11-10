@@ -805,6 +805,8 @@ class _KDock extends StatelessWidget {
     const curve = KMotion.emphasizedCurve;
     // Content dissolves into the page colour before it reaches the island,
     // so nothing reads through the gaps around the floating chrome.
+    final screenW = MediaQuery.sizeOf(context).width;
+    final hPad = screenW < 370 ? 12.0 : 20.0;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -815,7 +817,7 @@ class _KDock extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 16, 20, bottom + 12),
+        padding: EdgeInsets.fromLTRB(hPad, 16, hPad, bottom + 12),
         child: SizedBox(
           height: _height,
           child: LayoutBuilder(
@@ -855,7 +857,8 @@ class _KDock extends StatelessWidget {
   /// [shrink] (0 full, 1 compact) and [act] (0 no "+", 1 "+" shown).
   Widget _frame(double maxW, double sel, double shrink, double act) {
     final n = _items.length;
-    final full = maxW - act * (_height + _actionGap);
+    final actionGap = maxW < 320 ? 8.0 : _actionGap;
+    final full = maxW - act * (_height + actionGap);
     final capW = full + (_compactWidth - full) * shrink;
     final capLeft = (full - capW) / 2 * shrink;
     final inner = capW - _inset * 2;
@@ -864,10 +867,16 @@ class _KDock extends StatelessWidget {
     // How "open" each tab is right now: 1 for the tab the pill sits on,
     // shared between two neighbours while it slides.
     final f = [for (var i = 0; i < n; i++) (1 - (i - sel).abs()).clamp(0.0, 1.0)];
-    final selFull = inner - _iconSlot * (n - 1);
+
+    // Dynamically size inactive icon slots so the active tab's pill always has
+    // enough room (>=100dp) for its label on compact (360dp) screens without clipping.
+    final availForInactive = inner - 100.0;
+    final slotW = (availForInactive / (n - 1)).clamp(42.0, _iconSlot);
+    final selFull = inner - slotW * (n - 1);
+
     final widths = <double>[];
     for (var i = 0; i < n; i++) {
-      final expanded = _iconSlot + (selFull - _iconSlot) * f[i];
+      final expanded = slotW + (selFull - slotW) * f[i];
       final compactW = i == open ? inner : 0.0;
       widths.add(expanded + (compactW - expanded) * shrink);
     }

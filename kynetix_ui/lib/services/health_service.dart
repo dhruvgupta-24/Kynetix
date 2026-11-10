@@ -460,6 +460,12 @@ class HealthSyncResult {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
+enum HealthAvailability {
+  available,
+  needsInstallOrUpdate,
+  unsupported,
+}
+
 class HealthService {
   static final HealthService _instance = HealthService._();
   factory HealthService() => _instance;
@@ -497,13 +503,38 @@ class HealthService {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  Future<bool> isAvailable() async {
-    try {
-      final state = await (await _configured).getHealthConnectSdkStatus();
-      return state == HealthConnectSdkStatus.sdkAvailable;
-    } catch (_) {
-      return false;
+  /// Checks Health Connect status on Android (installed, needs install/update, or unsupported).
+  Future<HealthAvailability> checkAvailability() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final status = await (await _configured).getHealthConnectSdkStatus();
+        if (status == HealthConnectSdkStatus.sdkAvailable) {
+          return HealthAvailability.available;
+        } else if (status == HealthConnectSdkStatus.sdkUnavailableProviderUpdateRequired) {
+          return HealthAvailability.needsInstallOrUpdate;
+        } else {
+          return HealthAvailability.unsupported;
+        }
+      } catch (e) {
+        debugPrint('[HealthService] checkAvailability error: $e');
+        return HealthAvailability.needsInstallOrUpdate;
+      }
     }
+    return HealthAvailability.available;
+  }
+
+  /// Directs the user to Google Play to install or update Health Connect.
+  Future<void> installHealthConnect() async {
+    try {
+      await (await _configured).installHealthConnect();
+    } catch (e) {
+      debugPrint('[HealthService] installHealthConnect error: $e');
+    }
+  }
+
+  Future<bool> isAvailable() async {
+    final status = await checkAvailability();
+    return status == HealthAvailability.available;
   }
 
   Future<bool> hasPermission() async {
@@ -517,8 +548,18 @@ class HealthService {
 
   Future<bool> requestPermission() async {
     try {
-      return await (await _configured).requestAuthorization(_stepTypes, permissions: _stepPermissions);
-    } catch (_) {
+      final availability = await checkAvailability();
+      if (availability != HealthAvailability.available) {
+        if (availability == HealthAvailability.needsInstallOrUpdate) {
+          await installHealthConnect();
+        }
+        return false;
+      }
+      final granted = await (await _configured).requestAuthorization(_stepTypes, permissions: _stepPermissions);
+      if (granted) return true;
+      return await hasPermission();
+    } catch (e) {
+      debugPrint('[HealthService] requestPermission error: $e');
       return false;
     }
   }

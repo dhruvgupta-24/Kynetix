@@ -9,7 +9,7 @@ import 'package:kynetix/models/nutrition_result.dart';
 import 'package:kynetix/models/workout_session.dart';
 import 'package:kynetix/models/workout_split.dart';
 import 'package:kynetix/screens/add_meal_screen.dart';
-import 'package:kynetix/screens/kyno_assistant_screen.dart';
+import 'package:kynetix/screens/ai_coach_screen.dart';
 import 'package:kynetix/services/kyno_context_service.dart';
 import 'package:kynetix/services/meal_memory.dart';
 import 'package:kynetix/services/nutrition_hydration_guard.dart';
@@ -237,7 +237,7 @@ void main() {
         MaterialApp(
           key: UniqueKey(),
           theme: ThemeData.dark(),
-          home: const KynoAssistantScreen(),
+          home: AiCoachScreen.tab(),
         ),
       );
       await pumpStep(tester, 500);
@@ -289,7 +289,7 @@ void main() {
         MaterialApp(
           key: UniqueKey(),
           theme: ThemeData.dark(),
-          home: const KynoAssistantScreen(),
+          home: AiCoachScreen.tab(),
         ),
       );
       await pumpStep(tester, 500);

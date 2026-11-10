@@ -256,16 +256,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _syncOk = false;
     });
 
-    final hasPerm = await HealthService().hasPermission();
+    final health = HealthService();
+    final availability = await health.checkAvailability();
+    if (availability == HealthAvailability.needsInstallOrUpdate) {
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _syncMessage = 'Install Google Health Connect from Play Store to sync steps.';
+        });
+        _showToast('Google Health Connect is required to sync steps.');
+      }
+      await health.installHealthConnect();
+      return;
+    } else if (availability == HealthAvailability.unsupported) {
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _syncMessage = 'Health Connect is not supported on this device.';
+        });
+      }
+      return;
+    }
+
+    final hasPerm = await health.hasPermission();
     if (!hasPerm) {
-      final granted = await HealthService().requestPermission();
+      final granted = await health.requestPermission();
       if (granted) AnalyticsService.instance.track('health_connected');
       if (!granted) {
         if (mounted) {
           setState(() {
             _syncing = false;
             _syncMessage =
-                'Health Connect access is off. Allow it to sync your steps.';
+                'Health Connect permission wasn\'t granted. Tap Connect to allow step tracking.';
           });
         }
         return;

@@ -96,15 +96,18 @@ export async function refreshAccessTokenIfNeeded(
       // disconnect a link the user has since re-created.
       if (res.status === 400 || res.status === 401 || res.status === 403) {
         console.warn(`[OAUTH REFRESH] Permanent error from OpenAI. Disconnecting user=${userId} credentials.`);
-        await supabaseAdmin
+        const disconnectQuery = supabaseAdmin
           .from('user_openai_links')
           .update({
             is_connected: false,
             fallback_reason: 'refresh_failed',
             updated_at: new Date().toISOString(),
           })
-          .eq('user_id', userId)
-          .eq('refresh_token', link.refresh_token);
+          .eq('user_id', userId);
+        if (link.updated_at) {
+          disconnectQuery.eq('updated_at', link.updated_at);
+        }
+        await disconnectQuery;
       }
       return null;
     }
@@ -124,7 +127,7 @@ export async function refreshAccessTokenIfNeeded(
 
     // Update DB with new tokens — only if the row still holds the refresh
     // token we used (a re-link in the meantime must not be overwritten).
-    const { data: saved, error: updateErr } = await supabaseAdmin
+    const updateQuery = supabaseAdmin
       .from('user_openai_links')
       .update({
         access_token: newAccessToken,
@@ -134,9 +137,11 @@ export async function refreshAccessTokenIfNeeded(
         fallback_reason: null, // Clear any previous fallback reason
         updated_at: new Date().toISOString(),
       })
-      .eq('user_id', userId)
-      .eq('refresh_token', link.refresh_token)
-      .select('user_id');
+      .eq('user_id', userId);
+    if (link.updated_at) {
+      updateQuery.eq('updated_at', link.updated_at);
+    }
+    const { data: saved, error: updateErr } = await updateQuery.select('user_id');
 
     if (updateErr) {
       console.error(`[OAUTH REFRESH] Failed to save refreshed tokens in DB: ${updateErr.code ?? ''}`);
@@ -208,15 +213,18 @@ async function refreshSiwcIfNeeded(
     return null;
   }
 
-  // ── Take the lease (only if nobody rotated the token under us) ────────────
+  // ── Take the lease (guarded on lease expiry and updated_at, never refresh_token in URL) ──
   const nowIso = new Date().toISOString();
-  const { data: leased, error: leaseErr } = await supabaseAdmin
+  const leaseLockUntil = new Date(Date.now() + SIWC_LOCK_MS).toISOString();
+  const leaseQuery = supabaseAdmin
     .from('user_openai_links')
-    .update({ refresh_lock_until: new Date(Date.now() + SIWC_LOCK_MS).toISOString() })
+    .update({ refresh_lock_until: leaseLockUntil })
     .eq('user_id', userId)
-    .eq('refresh_token', link.refresh_token)
-    .or(`refresh_lock_until.is.null,refresh_lock_until.lt.${nowIso}`)
-    .select('user_id');
+    .or(`refresh_lock_until.is.null,refresh_lock_until.lt.${nowIso}`);
+  if (link.updated_at) {
+    leaseQuery.eq('updated_at', link.updated_at);
+  }
+  const { data: leased, error: leaseErr } = await leaseQuery.select('user_id');
 
   if (leaseErr) {
     console.error(`[OAUTH REFRESH][siwc] user=${userId} lease error: ${leaseErr.code ?? ''}`);
@@ -227,16 +235,16 @@ async function refreshSiwcIfNeeded(
     return await waitForSiwcRefresh(supabaseAdmin, userId);
   }
 
-  // Every write after the lease is guarded on the refresh token we used: if
-  // the user re-linked meanwhile (openai-link-siwc replaces the token and
-  // clears the lease), a stale refresh must not touch the new link.
+  // Every write after the lease is guarded on the lease lock we hold: if
+  // the user re-linked meanwhile (openai-link-siwc clears the lease), a stale
+  // refresh must not touch the new link.
   const usedRefreshToken = link.refresh_token;
   const release = (extra: Record<string, unknown> = {}) =>
     supabaseAdmin
       .from('user_openai_links')
       .update({ refresh_lock_until: null, updated_at: new Date().toISOString(), ...extra })
       .eq('user_id', userId)
-      .eq('refresh_token', usedRefreshToken);
+      .eq('refresh_lock_until', leaseLockUntil);
 
   try {
     const res = await timedFetch(SIWC_TOKEN_URL, {
@@ -295,7 +303,7 @@ async function refreshSiwcIfNeeded(
       .from('user_openai_links')
       .update(update)
       .eq('user_id', userId)
-      .eq('refresh_token', usedRefreshToken)
+      .eq('refresh_lock_until', leaseLockUntil)
       .select('user_id');
     if (saveErr) {
       console.error(`[OAUTH REFRESH][siwc] user=${userId} save failed: ${saveErr.code ?? ''}`);

@@ -108,8 +108,8 @@ Deno.test({ name: 'siwc refresh does not overwrite a re-link that happened mid-r
 Deno.test({ name: 'a stale terminal refresh error cannot wipe a newer link', sanitizeOps: false, sanitizeResources: false }, async () => {
   const db = fakeDb(siwcRow());
   await withFetch(async () => {
-    // Re-link lands while the (stale) refresh is in flight.
-    Object.assign(db.row, { refresh_token: 'rt-relinked', access_token: 'relinked-access' });
+    // Re-link lands while the (stale) refresh is in flight (openai-link-siwc clears lease).
+    Object.assign(db.row, { refresh_token: 'rt-relinked', access_token: 'relinked-access', refresh_lock_until: null });
     return new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'secret rt-old' }), { status: 400 });
   }, async () => {
     const r = await refreshAccessTokenIfNeeded(db, 'u1', siwcRow() as any);
