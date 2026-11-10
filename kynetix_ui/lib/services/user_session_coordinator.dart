@@ -145,6 +145,9 @@ class UserSessionCoordinator {
         earliest = at ?? earliest;
       }
     }
+    if (owner != null) {
+      prefs.setString(legacyOwnerKey, owner);
+    }
     return owner;
   }
 
@@ -461,9 +464,13 @@ class UserSessionCoordinator {
     // account never adopts arbitrary unscoped local data.
     var owner = legacyOwner(prefs);
     if (owner == null) {
-      debugPrint('[UserSessionCoordinator] No prior legacy owner on device; sealing legacy stores to prevent cross-account adoption for: $userId');
-      await prefs.setString(legacyOwnerKey, legacyOwnerDeleted);
-      owner = legacyOwnerDeleted;
+      if (unscopedKeys.any(prefs.containsKey)) {
+        await prefs.setString(legacyOwnerKey, userId);
+        owner = userId;
+      } else {
+        await prefs.setString(legacyOwnerKey, legacyOwnerDeleted);
+        owner = legacyOwnerDeleted;
+      }
     }
 
     if (owner != userId) {
