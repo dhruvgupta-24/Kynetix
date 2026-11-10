@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kynetix/models/workout_session.dart';
 import 'package:kynetix/models/workout_split.dart';
 import 'package:kynetix/services/kyno_context_service.dart';
@@ -7,6 +8,7 @@ import 'package:kynetix/services/workout_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({});
 
   group('KynoProgressionEngine & KynoContextService Tests', () {
     test('KynoContextService returns a well-formed structured snapshot', () {

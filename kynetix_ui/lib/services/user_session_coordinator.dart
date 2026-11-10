@@ -464,7 +464,10 @@ class UserSessionCoordinator {
     // account never adopts arbitrary unscoped local data.
     var owner = legacyOwner(prefs);
     if (owner == null) {
-      if (unscopedKeys.any(prefs.containsKey)) {
+      final hasLegacyProfile = (prefs.getBool('onboarding_done_v1') == true) ||
+          prefs.containsKey('user_profile_v2') ||
+          prefs.containsKey('user_profile_v1');
+      if (hasLegacyProfile && unscopedKeys.any(prefs.containsKey)) {
         await prefs.setString(legacyOwnerKey, userId);
         owner = userId;
       } else {
