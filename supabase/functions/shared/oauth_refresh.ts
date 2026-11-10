@@ -32,6 +32,7 @@ export async function refreshAccessTokenIfNeeded(
     // Present once migration 20261016000000_siwc_plan_usage.sql is applied.
     auth_method?: string | null;
     oauth_client_id?: string | null;
+    updated_at?: string | null;
   }
 ): Promise<{ accessToken: string; expiresAt: string } | null> {
   if (!link.is_connected || !link.access_token) {
@@ -197,6 +198,7 @@ async function refreshSiwcIfNeeded(
     refresh_token: string | null;
     expires_at: string | null;
     oauth_client_id?: string | null;
+    updated_at?: string | null;
   },
 ): Promise<{ accessToken: string; expiresAt: string } | null> {
   const expiresAtMs = link.expires_at ? new Date(link.expires_at).getTime() : 0;
