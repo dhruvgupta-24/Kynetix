@@ -45,6 +45,10 @@
 .beta-grid .mail h3 { margin: 0; }
 .beta-grid .mail p { margin: 0; }
 .beta-grid .mail .hint { color: var(--ash); }
+.beta-grid .mini { margin: 0; padding: 0; list-style: none; counter-reset: m; display: grid; gap: 12px; }
+.beta-grid .mini li { counter-increment: m; display: grid; grid-template-columns: 26px 1fr; gap: 10px; color: var(--ash); line-height: 1.5; }
+.beta-grid .mini li::before { content: counter(m); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: .8rem; font-weight: 600; color: var(--bone); background: rgba(242,241,236,.08); border: 1px solid var(--line-strong); margin-top: 1px; }
+.beta-grid .mini strong { color: var(--bone); font-weight: 600; }
 @media (max-width: 999px) { .beta-grid .toc { display: none; } .beta-grid { padding-top: 8px; } }
 @media (max-width: 640px) { .beta-grid .mail .btn { justify-self: stretch; justify-content: center; } .beta-grid .mail { padding: 18px; } }
 </style>
@@ -95,7 +99,12 @@
 <h3>Join the tester group first.</h3>
 <p>This is the one that matters. Google only lets members of this group into the test. Skip it and step 2 just says the app isn't available.</p>
 <a class="btn" href="https://groups.google.com/g/kynetix-testers" rel="noopener">Join the tester group</a>
-<p class="hint">On your Android phone, with the Gmail you use on the Play Store. Sign in if it asks, then tap <strong>Join group</strong>. You're in when it says you're a member.</p>
+<p class="hint">On your Android phone, with the Gmail you use on the Play Store. Here's what you'll see:</p>
+<ol class="mini">
+<li><span><strong>"You don't have permission to access this content."</strong> That's normal, the group is private. Tap <strong>Join group</strong> next to Kynetix testers.</span></li>
+<li><span>A small form opens. Leave <strong>Subscription</strong> on <strong>Each email</strong>, so the download link reaches you. Tap <strong>Join group</strong>.</span></li>
+<li><span>You see <strong>Kynetix testers</strong>, the member count and "No conversations yet". That's it, you're in.</span></li>
+</ol>
 </div>
 
 <div class="mail">
