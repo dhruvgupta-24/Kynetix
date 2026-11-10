@@ -258,7 +258,7 @@ Built and run by Dhruv Gupta.
 
 ## License and credits
 
-The source is public to read. There is no open source license yet, so all rights are reserved for now.
+Licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 - Fonts: [Inter](https://rsms.me/inter/), Inter Tight and [Bricolage Grotesque](https://github.com/ateliertriay/bricolage), under the SIL Open Font License. License files ship in `kynetix_ui/assets/fonts/`.
 - Barcode product data: [Open Food Facts](https://world.openfoodfacts.org/), available under the Open Database License (ODbL).
