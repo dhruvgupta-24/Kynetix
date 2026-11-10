@@ -346,11 +346,6 @@ async function callSiwc(
   return { text, usage: null };
 }
 
-// Plain, honest copy for a limit that lands mid-stream (VOICE.md).
-const SIWC_MIDSTREAM_LIMIT_TEXT =
-  `\n\nYou've hit your ChatGPT usage limit, so Kyno stopped here. ` +
-  `Manage usage: ${MANAGE_USAGE_URL}`;
-
 async function callSiwcStream(
   accessToken: string,
   model:       string,
@@ -359,8 +354,29 @@ async function callSiwcStream(
 ): Promise<Response> {
   console.log(`[AI ROUTER] siwc stream → ${SIWC_RESPONSES_URL} model=${model}`);
   // Admission errors (401/403/429/503) throw here, before any byte is sent,
-  // so the caller can still fall back to OpenRouter.
+  // so the caller can still fall back to the standard chain.
   const res = await postSiwcResponses(accessToken, buildSiwcResponsesBody(model, messages));
+
+  // Peek the first event from the SSE stream BEFORE opening the response stream to the client.
+  // If OpenAI reports failure (such as subscription_sharing_usage_limit_exceeded) at the beginning,
+  // we record the failure and throw so the router can immediately auto-fallback to the best model!
+  const stream = readSiwcStream(res);
+  const first = await stream.next();
+
+  if (first.done) {
+    throw new SiwcApiError(0, 'empty_stream', 'unknown');
+  }
+
+  const firstEvent = first.value;
+  if (firstEvent.kind === 'failed') {
+    const err = new SiwcApiError(0, firstEvent.code, firstEvent.errorKind);
+    await onFailure(err);
+    throw err;
+  }
+
+  if (firstEvent.kind === 'incomplete') {
+    throw new SiwcApiError(0, 'response_incomplete', 'unknown');
+  }
 
   const { readable, writable } = new TransformStream();
   const writer  = writable.getWriter();
@@ -379,16 +395,16 @@ async function callSiwcStream(
   (async () => {
     let finish = 'stop';
     try {
-      for await (const ev of readSiwcStream(res)) {
+      if (firstEvent.kind === 'delta') {
+        await emit({ content: firstEvent.text }, null);
+      }
+      for await (const ev of stream) {
         if (ev.kind === 'delta') {
           await emit({ content: ev.text }, null);
         } else if (ev.kind === 'failed') {
           finish = 'error';
           const err = new SiwcApiError(0, ev.code, ev.errorKind);
           await onFailure(err);
-          if (ev.errorKind === 'usage_limit') {
-            await emit({ content: SIWC_MIDSTREAM_LIMIT_TEXT }, null);
-          }
         } else if (ev.kind === 'incomplete') {
           finish = 'length';
         }
